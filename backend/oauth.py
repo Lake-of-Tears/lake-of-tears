@@ -6,7 +6,7 @@ from urllib.parse import urlencode
 
 import httpx
 import jwt
-from auth import COOKIE_NAME, SECRET_KEY, TOKEN_MAX_AGE, create_token
+from auth import COOKIE_NAME, SECRET_KEY, create_token, get_session_expires_delta
 from fastapi import HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from models import OAuthAccount, User, Workspace, WorkspaceMember
@@ -220,16 +220,24 @@ def handle_oauth_callback(provider: str, request: Request, response: Response, d
         resp.delete_cookie(_STATE_COOKIE)
         return resp
 
+    expires_delta = get_session_expires_delta(db)
     token = create_token(
         {
             "sub": str(user.id),
             "email": user.email,
             "role": user.role,
             "display_name": user.display_name or "",
-        }
+        },
+        expires_delta=expires_delta,
     )
     next_url = state_data.get("next", "/")
     resp = RedirectResponse(url=next_url)
     resp.delete_cookie(_STATE_COOKIE)
-    resp.set_cookie(COOKIE_NAME, token, max_age=TOKEN_MAX_AGE, httponly=True, samesite="lax")
+    resp.set_cookie(
+        COOKIE_NAME,
+        token,
+        max_age=int(expires_delta.total_seconds()),
+        httponly=True,
+        samesite="lax",
+    )
     return resp

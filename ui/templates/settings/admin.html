@@ -178,7 +178,69 @@
         </div>
       </form>
     </div>
+
+    <div class="border-t border-white/[0.06] pt-6">
+      <h2 class="text-sm font-semibold text-gray-300 mb-1">Session Security</h2>
+      <p class="text-xs text-gray-500 mb-5">Control how long users stay signed in and when idle sessions are terminated.</p>
+      <form action="/settings/admin/session-settings" method="post" class="space-y-5">
+        <div>
+          <label class="block text-xs text-gray-400 font-medium mb-1">Inactivity Timeout</label>
+          <p class="text-[11px] text-gray-600 mb-2">
+            Sign out users who have been idle for this long. Set to <code class="text-gray-500">0</code> to disable — sessions will only expire after the max session length. Must be 0 or between 15 and 480 minutes.
+          </p>
+          <div class="flex items-center gap-3">
+            <input type="number" name="session_inactivity_timeout_minutes" min="0" max="480" required
+                   value="{{ admin_settings.session_inactivity_timeout_minutes | default(0) }}"
+                   class="w-24 input-dark text-sm" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);"
+                   oninput="updateInactivityHint(this.value)" />
+            <span class="text-xs text-gray-500">minutes (0 = disabled, 15–480)</span>
+          </div>
+          <p id="inactivity-hint" class="text-xs text-gray-500 mt-2 hidden"></p>
+          {% if admin_settings.session_inactivity_timeout_minutes == 0 %}
+          <p class="text-xs text-gray-600 mt-2">Inactivity timeout is disabled.</p>
+          {% else %}
+          <p class="text-xs text-blue-500 mt-2">
+            Users idle for more than {{ admin_settings.session_inactivity_timeout_minutes }} minute{{ 's' if admin_settings.session_inactivity_timeout_minutes != 1 else '' }} will be warned, then signed out.
+          </p>
+          {% endif %}
+        </div>
+        <div>
+          <label class="block text-xs text-gray-400 font-medium mb-1">Max Session Length</label>
+          <p class="text-[11px] text-gray-600 mb-2">
+            Force re-authentication after this many hours, even for continuously active users. Must be 1–168 hours (7 days).
+          </p>
+          <div class="flex items-center gap-3">
+            <input type="number" name="session_max_hours" min="1" max="168" required
+                   value="{{ admin_settings.session_max_hours | default(24) }}"
+                   class="w-24 input-dark text-sm" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+            <span class="text-xs text-gray-500">hours (1–168)</span>
+          </div>
+          <p class="text-[11px] text-gray-600 mt-2">Changes take effect for new sessions — existing sessions are not immediately terminated.</p>
+        </div>
+        <div class="flex justify-end">
+          <button type="submit" class="btn-primary">Save session settings</button>
+        </div>
+      </form>
+    </div>
   </div>
+
+  <script>
+  function updateInactivityHint(val) {
+    const hint = document.getElementById('inactivity-hint');
+    const n = parseInt(val, 10);
+    if (isNaN(n) || n === 0) { hint.classList.add('hidden'); return; }
+    hint.classList.remove('hidden');
+    if (n < 15 || n > 480) {
+      hint.textContent = 'Must be 0 (disabled) or between 15 and 480 minutes.';
+      hint.className = 'text-xs text-red-400 mt-2';
+    } else {
+      const h = Math.floor(n / 60), m = n % 60;
+      const label = h > 0 ? (h + 'h' + (m > 0 ? ' ' + m + 'm' : '')) : m + 'm';
+      hint.textContent = 'Warning shown 5 minutes before sign-out. Idle users signed out after ' + label + '.';
+      hint.className = 'text-xs text-blue-500 mt-2';
+    }
+  }
+  </script>
 </div>
 
 <!-- Hard-delete confirmation modal -->

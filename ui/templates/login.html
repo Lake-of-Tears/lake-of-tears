@@ -99,10 +99,14 @@
   <script>
     const NEXT = new URLSearchParams(window.location.search).get('next') || '/';
     const ERROR = new URLSearchParams(window.location.search).get('error');
+    const REASON = new URLSearchParams(window.location.search).get('reason');
 
     if (ERROR) {
       const msgs = { expired: 'Session expired — please sign in again.', invalid: 'Invalid session.', disabled: 'Your account has been disabled.' };
       showBanner(msgs[ERROR] || 'Authentication error.', 'error');
+    } else if (REASON) {
+      const msgs = { inactivity: 'You were signed out due to inactivity.', session_expired: 'Your session has expired — please sign in again.' };
+      showBanner(msgs[REASON] || 'You have been signed out.', 'error');
     }
 
     function showBanner(msg, type) {

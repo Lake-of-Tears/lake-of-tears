@@ -6,15 +6,16 @@ from datetime import UTC, datetime, timedelta
 import jwt
 from database import get_db
 from fastapi import Cookie, Depends, Header, HTTPException
-from models import User, WorkspaceMember
+from models import SystemSetting, User, WorkspaceMember
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
 SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "dev-secret-please-change-in-production")
 ALGORITHM = "HS256"
-TOKEN_EXPIRE_DAYS = 7
 COOKIE_NAME = "lake_token"
-TOKEN_MAX_AGE = TOKEN_EXPIRE_DAYS * 24 * 3600
+
+# Fallback TTL used when the DB is unavailable (e.g. during first startup).
+_FALLBACK_TTL = timedelta(hours=24)
 
 _pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -27,8 +28,34 @@ def verify_password(plain: str, hashed: str) -> bool:
     return _pwd.verify(plain, hashed)
 
 
-def create_token(data: dict) -> str:
-    payload = {**data, "exp": datetime.now(UTC) + timedelta(days=TOKEN_EXPIRE_DAYS)}
+def get_session_expires_delta(db: Session) -> timedelta:
+    """Return the token TTL based on current system settings."""
+    timeout_row = db.query(SystemSetting).filter(
+        SystemSetting.key == "session_inactivity_timeout_minutes"
+    ).first()
+    max_row = db.query(SystemSetting).filter(
+        SystemSetting.key == "session_max_hours"
+    ).first()
+    timeout_minutes = timeout_row.value if timeout_row and timeout_row.value else 0
+    max_hours = max_row.value if max_row and max_row.value else 24
+    if timeout_minutes > 0:
+        return timedelta(minutes=timeout_minutes)
+    return timedelta(hours=max_hours)
+
+
+def create_token(
+    data: dict,
+    expires_delta: timedelta | None = None,
+    session_start_ts: float | None = None,
+) -> str:
+    now = datetime.now(UTC)
+    if expires_delta is None:
+        expires_delta = _FALLBACK_TTL
+    payload = {
+        **data,
+        "ss": session_start_ts if session_start_ts is not None else now.timestamp(),
+        "exp": now + expires_delta,
+    }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
