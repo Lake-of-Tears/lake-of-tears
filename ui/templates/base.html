@@ -343,5 +343,113 @@
       if (userMenu && userWrap && !userWrap.contains(e.target)) userMenu.classList.add('hidden');
     });
   </script>
+
+  {% if request.state.user %}
+  <!-- Session inactivity timeout -->
+  <div id="inactivity-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-black/70">
+    <div class="bg-[#1a1a1a] border border-white/10 rounded-xl shadow-2xl w-full max-w-sm p-6 text-center">
+      <div class="w-10 h-10 rounded-full bg-amber-900/40 border border-amber-700/40 flex items-center justify-center mx-auto mb-4">
+        <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+      </div>
+      <h2 class="text-base font-semibold text-gray-200 mb-1">You've been inactive</h2>
+      <p class="text-sm text-gray-400 mb-1">You'll be signed out in</p>
+      <p class="text-3xl font-bold text-amber-400 mb-5" id="inactivity-countdown">5:00</p>
+      <div class="flex gap-3 justify-center">
+        <button onclick="stayLoggedIn()"
+          class="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-md transition-colors">
+          Stay signed in
+        </button>
+        <button onclick="signOutNow()"
+          class="px-5 py-2 border border-gray-700 text-gray-400 hover:text-gray-200 text-sm rounded-md transition-colors">
+          Sign out now
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const _TIMEOUT_MS  = {{ request.state.session_config.session_inactivity_timeout_minutes }} * 60 * 1000;
+    const _MAX_SESS_MS = {{ request.state.session_config.session_max_hours }} * 3600 * 1000;
+    const _WARN_MS = 5 * 60 * 1000;
+
+    if (_TIMEOUT_MS > 0) {
+      let _lastActivity = Date.now();
+      let _warningActive = false;
+      let _countdownInterval = null;
+
+      ['mousemove', 'keydown', 'mousedown', 'touchstart', 'scroll', 'click'].forEach(evt =>
+        document.addEventListener(evt, () => { _lastActivity = Date.now(); }, { passive: true })
+      );
+
+      function _fmtCountdown(ms) {
+        const s = Math.max(0, Math.ceil(ms / 1000));
+        return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+      }
+
+      function _showWarning(remainingMs) {
+        document.getElementById('inactivity-modal').classList.remove('hidden');
+        document.getElementById('inactivity-countdown').textContent = _fmtCountdown(remainingMs);
+        _warningActive = true;
+
+        if (_countdownInterval) clearInterval(_countdownInterval);
+        const deadline = Date.now() + remainingMs;
+        _countdownInterval = setInterval(() => {
+          const left = deadline - Date.now();
+          document.getElementById('inactivity-countdown').textContent = _fmtCountdown(left);
+          if (left <= 0) {
+            clearInterval(_countdownInterval);
+            signOutNow();
+          }
+        }, 1000);
+      }
+
+      function _hideWarning() {
+        document.getElementById('inactivity-modal').classList.add('hidden');
+        _warningActive = false;
+        if (_countdownInterval) { clearInterval(_countdownInterval); _countdownInterval = null; }
+      }
+
+      async function stayLoggedIn() {
+        _lastActivity = Date.now();
+        _hideWarning();
+        try {
+          const res = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
+          if (res.status === 401) window.location.href = '/login?reason=session_expired';
+        } catch (_) {}
+      }
+
+      async function signOutNow() {
+        await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+        window.location.href = '/login?reason=inactivity';
+      }
+
+      async function _refreshTick() {
+        const idleMs = Date.now() - _lastActivity;
+
+        if (idleMs >= _TIMEOUT_MS) {
+          if (!_warningActive) _showWarning(0);
+          return;
+        }
+
+        if (idleMs >= _TIMEOUT_MS - _WARN_MS) {
+          if (!_warningActive) _showWarning(_TIMEOUT_MS - idleMs);
+          return;
+        }
+
+        if (_warningActive) _hideWarning();
+
+        try {
+          const res = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
+          if (res.status === 401) window.location.href = '/login?reason=session_expired';
+        } catch (_) {}
+      }
+
+      const _pollInterval = Math.floor(_TIMEOUT_MS / 2);
+      setInterval(_refreshTick, _pollInterval);
+    }
+  </script>
+  {% endif %}
 </body>
 </html>

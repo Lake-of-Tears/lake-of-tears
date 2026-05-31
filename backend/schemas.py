@@ -328,11 +328,29 @@ class InboundAccessRequest(BaseModel):
 class SystemSettingResponse(BaseModel):
     catalog_soft_delete_days: int
     workspace_inactive_grace_period_days: int
+    session_inactivity_timeout_minutes: int
+    session_max_hours: int
 
 
 class UpdateSystemSettingsRequest(BaseModel):
     catalog_soft_delete_days: int | None = None
     workspace_inactive_grace_period_days: int | None = None
+    session_inactivity_timeout_minutes: int | None = None
+    session_max_hours: int | None = None
+
+    @field_validator("session_inactivity_timeout_minutes")
+    @classmethod
+    def valid_session_timeout(cls, v: int | None) -> int | None:
+        if v is not None and v != 0 and (v < 15 or v > 480):
+            raise ValueError("Inactivity timeout must be 0 (disabled) or 15–480 minutes")
+        return v
+
+    @field_validator("session_max_hours")
+    @classmethod
+    def valid_session_max(cls, v: int | None) -> int | None:
+        if v is not None and (v < 1 or v > 168):
+            raise ValueError("Max session length must be 1–168 hours")
+        return v
 
     @field_validator("catalog_soft_delete_days")
     @classmethod

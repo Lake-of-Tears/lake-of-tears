@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import os
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -51,6 +52,27 @@ app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), na
 _PUBLIC_PREFIXES = ("/login", "/logout", "/api/", "/health")
 _WORKSPACE_COOKIE = "lake_workspace_id"
 
+_SESSION_CONFIG_CACHE: dict | None = None
+_SESSION_CONFIG_FETCHED_AT: float = 0.0
+_SESSION_CONFIG_TTL = 60.0  # seconds
+
+
+def _get_session_config() -> dict:
+    global _SESSION_CONFIG_CACHE, _SESSION_CONFIG_FETCHED_AT
+    now = time.monotonic()
+    if _SESSION_CONFIG_CACHE is not None and now - _SESSION_CONFIG_FETCHED_AT < _SESSION_CONFIG_TTL:
+        return _SESSION_CONFIG_CACHE
+    try:
+        with httpx.Client(timeout=3) as client:
+            resp = client.get(f"{BACKEND_URL}/api/admin/settings/public")
+        if resp.status_code == 200:
+            _SESSION_CONFIG_CACHE = resp.json()
+            _SESSION_CONFIG_FETCHED_AT = now
+            return _SESSION_CONFIG_CACHE
+    except Exception:
+        pass
+    return {"session_inactivity_timeout_minutes": 0, "session_max_hours": 24}
+
 
 def _fetch_workspaces(token: str) -> list[dict]:
     try:
@@ -72,6 +94,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
         request.state.user = None
         request.state.workspace = None
         request.state.workspaces = []
+        request.state.session_config = {
+            "session_inactivity_timeout_minutes": 0,
+            "session_max_hours": 24,
+        }
 
         if not AUTH_ENABLED:
             return await call_next(request)
@@ -92,10 +118,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
         except jwt.InvalidTokenError:
             return RedirectResponse(url="/login?error=invalid", status_code=302)
 
-        # Fetch workspace context
+        # Inject session config for the idle-timeout JS in base.html
         import asyncio
 
-        workspaces = await asyncio.get_event_loop().run_in_executor(None, _fetch_workspaces, token)
+        loop = asyncio.get_event_loop()
+        session_cfg = await loop.run_in_executor(None, _get_session_config)
+        workspaces = await loop.run_in_executor(None, _fetch_workspaces, token)
+        request.state.session_config = session_cfg
         request.state.workspaces = workspaces
 
         active_id = request.cookies.get(_WORKSPACE_COOKIE, "")
@@ -802,6 +831,8 @@ async def settings_admin_get(request: Request):
     admin_settings = _backend_get("/api/admin/settings", token) or {
         "catalog_soft_delete_days": 30,
         "workspace_inactive_grace_period_days": 30,
+        "session_inactivity_timeout_minutes": 0,
+        "session_max_hours": 24,
     }
     return templates.TemplateResponse(
         "settings/admin.html",
@@ -886,6 +917,27 @@ async def settings_admin_workspace_settings(
         "/api/admin/settings",
         token,
         {"workspace_inactive_grace_period_days": workspace_inactive_grace_period_days},
+    )
+    return RedirectResponse(url="/settings/admin?saved=1", status_code=302)
+
+
+@app.post("/settings/admin/session-settings")
+async def settings_admin_session_settings(
+    request: Request,
+    session_inactivity_timeout_minutes: int = Form(...),
+    session_max_hours: int = Form(...),
+):
+    user = request.state.user
+    if not user or user.get("role") != "superadmin":
+        return RedirectResponse(url="/", status_code=302)
+    token = request.cookies.get("lake_token")
+    _backend_patch(
+        "/api/admin/settings",
+        token,
+        {
+            "session_inactivity_timeout_minutes": session_inactivity_timeout_minutes,
+            "session_max_hours": session_max_hours,
+        },
     )
     return RedirectResponse(url="/settings/admin?saved=1", status_code=302)
 

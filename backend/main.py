@@ -5,18 +5,20 @@ import re
 import threading
 from datetime import UTC, datetime, timedelta
 
+import jwt as _jwt
 from auth import (
     COOKIE_NAME,
-    TOKEN_MAX_AGE,
     create_token,
+    decode_token,
     get_current_user,
+    get_session_expires_delta,
     hash_password,
     require_superadmin,
     verify_password,
 )
 from database import get_db
 from email_service import send_access_removed, send_access_requested, send_access_reviewed
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from models import (
     Catalog,
@@ -68,6 +70,8 @@ from sqlalchemy.orm import Session
 
 _DEFAULT_SOFT_DELETE_DAYS = 30
 _DEFAULT_WORKSPACE_INACTIVE_DAYS = 30
+_DEFAULT_SESSION_INACTIVITY_TIMEOUT_MINUTES = 0
+_DEFAULT_SESSION_MAX_HOURS = 24
 
 app = FastAPI(title="Lake of Tears Auth API", docs_url=None, redoc_url=None)
 
@@ -162,16 +166,25 @@ def _backfill_default_catalogs(db: Session) -> None:
     db.commit()
 
 
-def _set_auth_cookie(response: Response, user: User) -> None:
+def _set_auth_cookie(
+    response: Response,
+    user: User,
+    db: Session,
+    session_start_ts: float | None = None,
+) -> None:
+    expires_delta = get_session_expires_delta(db)
     token = create_token(
         {
             "sub": str(user.id),
             "email": user.email,
             "role": user.role,
             "display_name": user.display_name or "",
-        }
+        },
+        expires_delta=expires_delta,
+        session_start_ts=session_start_ts,
     )
-    response.set_cookie(COOKIE_NAME, token, max_age=TOKEN_MAX_AGE, httponly=True, samesite="lax")
+    max_age = int(expires_delta.total_seconds())
+    response.set_cookie(COOKIE_NAME, token, max_age=max_age, httponly=True, samesite="lax")
 
 
 def _workspace_response(ws: Workspace, user: User) -> WorkspaceResponse:
@@ -247,7 +260,7 @@ def register(req: RegisterRequest, response: Response, db: Session = Depends(get
 
     db.commit()
     db.refresh(user)
-    _set_auth_cookie(response, user)
+    _set_auth_cookie(response, user, db)
     return {"ok": True, "role": user.role}
 
 
@@ -262,7 +275,7 @@ def login(req: LoginRequest, response: Response, db: Session = Depends(get_db)):
         raise HTTPException(401, "Invalid email or password")
     if not user.is_active:
         raise HTTPException(403, "Account disabled — contact your superadmin")
-    _set_auth_cookie(response, user)
+    _set_auth_cookie(response, user, db)
     return {"ok": True, "role": user.role}
 
 
@@ -270,6 +283,37 @@ def login(req: LoginRequest, response: Response, db: Session = Depends(get_db)):
 def logout(response: Response):
     response.delete_cookie(COOKIE_NAME)
     response.delete_cookie("lake_workspace_id")
+    return {"ok": True}
+
+
+@app.post("/api/auth/refresh")
+def refresh_token(
+    response: Response,
+    db: Session = Depends(get_db),
+    lake_token: str | None = Cookie(default=None),
+):
+    """Slide the session window. Preserves the original session_start for the absolute cap."""
+    if not lake_token:
+        raise HTTPException(401, "Not authenticated")
+    try:
+        payload = decode_token(lake_token)
+    except _jwt.ExpiredSignatureError:
+        raise HTTPException(401, "Token expired")
+    except _jwt.InvalidTokenError:
+        raise HTTPException(401, "Invalid token")
+
+    user = db.query(User).filter(User.id == payload["sub"]).first()
+    if not user or not user.is_active:
+        raise HTTPException(401, "User not found or disabled")
+
+    max_hours = _get_session_max_hours(db)
+    session_start_ts = payload.get("ss")
+    if session_start_ts:
+        session_start = datetime.fromtimestamp(session_start_ts, tz=UTC)
+        if datetime.now(UTC) - session_start >= timedelta(hours=max_hours):
+            raise HTTPException(401, "Maximum session length reached — please sign in again")
+
+    _set_auth_cookie(response, user, db, session_start_ts=payload.get("ss"))
     return {"ok": True}
 
 
@@ -291,7 +335,7 @@ def update_me(
             current_user.display_name = name
     db.commit()
     db.refresh(current_user)
-    _set_auth_cookie(response, current_user)
+    _set_auth_cookie(response, current_user, db)
     return UserResponse.model_validate(current_user)
 
 
@@ -668,20 +712,34 @@ def _get_workspace_inactive_days(db: Session) -> int:
     return _DEFAULT_WORKSPACE_INACTIVE_DAYS
 
 
-def _ensure_system_settings(db: Session) -> None:
-    if not db.query(SystemSetting).filter(SystemSetting.key == "catalog_soft_delete_days").first():
-        db.add(SystemSetting(key="catalog_soft_delete_days", value=_DEFAULT_SOFT_DELETE_DAYS))
-    if (
-        not db.query(SystemSetting)
-        .filter(SystemSetting.key == "workspace_inactive_grace_period_days")
+def _get_session_inactivity_minutes(db: Session) -> int:
+    setting = (
+        db.query(SystemSetting)
+        .filter(SystemSetting.key == "session_inactivity_timeout_minutes")
         .first()
-    ):
-        db.add(
-            SystemSetting(
-                key="workspace_inactive_grace_period_days",
-                value=_DEFAULT_WORKSPACE_INACTIVE_DAYS,
-            )
-        )
+    )
+    if setting is not None and setting.value is not None:
+        return setting.value
+    return _DEFAULT_SESSION_INACTIVITY_TIMEOUT_MINUTES
+
+
+def _get_session_max_hours(db: Session) -> int:
+    setting = db.query(SystemSetting).filter(SystemSetting.key == "session_max_hours").first()
+    if setting is not None and setting.value is not None:
+        return setting.value
+    return _DEFAULT_SESSION_MAX_HOURS
+
+
+def _ensure_system_settings(db: Session) -> None:
+    defaults = {
+        "catalog_soft_delete_days": _DEFAULT_SOFT_DELETE_DAYS,
+        "workspace_inactive_grace_period_days": _DEFAULT_WORKSPACE_INACTIVE_DAYS,
+        "session_inactivity_timeout_minutes": _DEFAULT_SESSION_INACTIVITY_TIMEOUT_MINUTES,
+        "session_max_hours": _DEFAULT_SESSION_MAX_HOURS,
+    }
+    for key, value in defaults.items():
+        if not db.query(SystemSetting).filter(SystemSetting.key == key).first():
+            db.add(SystemSetting(key=key, value=value))
     db.commit()
 
 
@@ -1633,6 +1691,15 @@ def restore_workspace(
 # ── Admin: System Settings ────────────────────────────────────────────────────
 
 
+@app.get("/api/admin/settings/public")
+def get_public_settings(db: Session = Depends(get_db)):
+    """Unauthenticated endpoint — returns only session config for the UI middleware."""
+    return {
+        "session_inactivity_timeout_minutes": _get_session_inactivity_minutes(db),
+        "session_max_hours": _get_session_max_hours(db),
+    }
+
+
 @app.get("/api/admin/settings", response_model=SystemSettingResponse)
 def get_admin_settings(
     db: Session = Depends(get_db),
@@ -1641,6 +1708,8 @@ def get_admin_settings(
     return SystemSettingResponse(
         catalog_soft_delete_days=_get_soft_delete_days(db),
         workspace_inactive_grace_period_days=_get_workspace_inactive_days(db),
+        session_inactivity_timeout_minutes=_get_session_inactivity_minutes(db),
+        session_max_hours=_get_session_max_hours(db),
     )
 
 
@@ -1671,8 +1740,19 @@ def update_admin_settings(
             req.workspace_inactive_grace_period_days,
             current_user.id,
         )
+    if req.session_inactivity_timeout_minutes is not None:
+        _upsert_setting(
+            db,
+            "session_inactivity_timeout_minutes",
+            req.session_inactivity_timeout_minutes,
+            current_user.id,
+        )
+    if req.session_max_hours is not None:
+        _upsert_setting(db, "session_max_hours", req.session_max_hours, current_user.id)
     db.commit()
     return SystemSettingResponse(
         catalog_soft_delete_days=_get_soft_delete_days(db),
         workspace_inactive_grace_period_days=_get_workspace_inactive_days(db),
+        session_inactivity_timeout_minutes=_get_session_inactivity_minutes(db),
+        session_max_hours=_get_session_max_hours(db),
     )
