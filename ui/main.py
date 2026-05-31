@@ -94,7 +94,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
         request.state.user = None
         request.state.workspace = None
         request.state.workspaces = []
-        request.state.session_config = {"session_inactivity_timeout_minutes": 0, "session_max_hours": 24}
+        request.state.session_config = {
+            "session_inactivity_timeout_minutes": 0,
+            "session_max_hours": 24,
+        }
 
         if not AUTH_ENABLED:
             return await call_next(request)

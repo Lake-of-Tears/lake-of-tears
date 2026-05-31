@@ -30,12 +30,12 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 def get_session_expires_delta(db: Session) -> timedelta:
     """Return the token TTL based on current system settings."""
-    timeout_row = db.query(SystemSetting).filter(
-        SystemSetting.key == "session_inactivity_timeout_minutes"
-    ).first()
-    max_row = db.query(SystemSetting).filter(
-        SystemSetting.key == "session_max_hours"
-    ).first()
+    timeout_row = (
+        db.query(SystemSetting)
+        .filter(SystemSetting.key == "session_inactivity_timeout_minutes")
+        .first()
+    )
+    max_row = db.query(SystemSetting).filter(SystemSetting.key == "session_max_hours").first()
     timeout_minutes = timeout_row.value if timeout_row and timeout_row.value else 0
     max_hours = max_row.value if max_row and max_row.value else 24
     if timeout_minutes > 0:

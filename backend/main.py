@@ -724,11 +724,7 @@ def _get_session_inactivity_minutes(db: Session) -> int:
 
 
 def _get_session_max_hours(db: Session) -> int:
-    setting = (
-        db.query(SystemSetting)
-        .filter(SystemSetting.key == "session_max_hours")
-        .first()
-    )
+    setting = db.query(SystemSetting).filter(SystemSetting.key == "session_max_hours").first()
     if setting is not None and setting.value is not None:
         return setting.value
     return _DEFAULT_SESSION_MAX_HOURS
