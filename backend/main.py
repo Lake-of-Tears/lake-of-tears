@@ -5,6 +5,7 @@ import re
 import threading
 from datetime import UTC, datetime, timedelta
 
+import jwt as _jwt
 from auth import (
     COOKIE_NAME,
     create_token,
@@ -15,10 +16,9 @@ from auth import (
     require_superadmin,
     verify_password,
 )
-import jwt as _jwt  # noqa: F401 — used for exception types in refresh_token
 from database import get_db
 from email_service import send_access_removed, send_access_requested, send_access_reviewed
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from models import (
     Catalog,
