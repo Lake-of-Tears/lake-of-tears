@@ -4,7 +4,7 @@ jinja2==3.1.4
 python-multipart==0.0.9
 boto3==1.43.16
 duckdb==1.5.3
-google-genai==0.8.0
+google-genai==2.8.0
 python-dotenv==1.2.2
 httpx==0.27.2
 PyJWT==2.10.1
