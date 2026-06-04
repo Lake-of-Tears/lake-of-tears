@@ -1,7 +1,7 @@
 fastapi==0.115.0
 uvicorn[standard]==0.48.0
 jinja2==3.1.4
-python-multipart==0.0.9
+python-multipart==0.0.30
 boto3==1.43.16
 duckdb==1.5.3
 google-genai==0.8.0
