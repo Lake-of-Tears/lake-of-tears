@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Have an idea? We'd love to hear it. Check the [existing issues](https://github.com/hubbertj/lake-of-tears/issues) first to avoid duplicates.
+        Have an idea? We'd love to hear it. Check the [existing issues](https://github.com/Lake-of-Tears/lake-of-tears/issues) first to avoid duplicates.
 
   - type: dropdown
     id: area

@@ -1,23 +1,43 @@
 # Contributing to Lake of Tears
 
-Thank you for your interest in contributing. Lake of Tears is an open source self-hosted datalakehouse — community contributions make it better for everyone.
+Thank you for your interest in contributing to **Lake of Tears**!
 
-## Community
-
-- **Website:** [lakeoftears.ai](https://lakeoftears.ai)
-- **Discord:** Join the community via [lakeoftears.ai](https://lakeoftears.ai) (link on the homepage)
-- **Issues & PRs:** [github.com/hubbertj/lake-of-tears](https://github.com/hubbertj/lake-of-tears)
+Lake of Tears is the open-source, self-hosted Databricks alternative — a unified datalakehouse for Kubernetes and Docker. Community contributions make the platform faster, more reliable, and accessible for everyone.
 
 ---
 
-## Ways to Contribute
+## Community & Resources
 
-- **Bug reports** — open an issue using the bug report template
-- **Feature requests** — open an issue using the feature request template
-- **New data source connectors** — add a new ingest pipeline (see below)
-- **UI improvements** — FastAPI + Tailwind dashboard (`ui/`)
-- **Infrastructure** — Helm chart, Terraform modules, Docker Compose
-- **Documentation** — README, architecture docs, example queries
+- **GitHub Organization:** [github.com/Lake-of-Tears](https://github.com/Lake-of-Tears)
+- **Main Repository:** [github.com/Lake-of-Tears/lake-of-tears](https://github.com/Lake-of-Tears/lake-of-tears)
+- **Official Website:** [thelakeoftears.com](https://thelakeoftears.com)
+- **Issues & Bug Reports:** [github.com/Lake-of-Tears/lake-of-tears/issues](https://github.com/Lake-of-Tears/lake-of-tears/issues)
+- **Pull Requests:** [github.com/Lake-of-Tears/lake-of-tears/pulls](https://github.com/Lake-of-Tears/lake-of-tears/pulls)
+- **Support & Security Inquiries:** [support@thelakeoftears.com](mailto:support@thelakeoftears.com)
+
+---
+
+## Ecosystem & Areas to Contribute
+
+Lake of Tears brings analytical compute, storage, vector search, orchestration, and business intelligence together behind a single entry point. Contributions are welcome across all pillars:
+
+1. 💧 **Lake UI Shell & Authentication** (`ui/`, `backend/`):
+   - Databricks-inspired unified sidebar shell and responsive design.
+   - FastAPI endpoints, session handling, and enterprise SSO (Google, GitHub, Microsoft Azure, generic OIDC).
+2. 🦆 **DuckDB Analytical SQL Engine** (`pipeline/`, `ui/`):
+   - Serverless in-process SQL execution against Hive-partitioned Parquet files (`year=/month=/day=`) on MinIO S3 without Spark cluster overhead.
+3. 🤖 **AI & Vector Intelligence** (`pipeline/embed/`, `pipeline/query/`):
+   - 768-dimensional embeddings generated with Google Gemini and stored natively in Parquet.
+   - DuckDB VSS vector indexing (HNSW), RAG-grounded search, and Isolation Forest anomaly detection.
+4. 🔄 **Airflow Pipelines & Data Connectors** (`pipeline/ingest/`, `pipeline/dags/`):
+   - Turnkey data source connectors (e.g., Stripe, Shopify, HubSpot, PostgreSQL, Open-Meteo, system telemetry) with scheduled DAGs.
+5. 📊 **Dashboards & Notebooks**:
+   - Deep integration and iframe embedding for Apache Superset (BI dashboards) and JupyterLab (data science).
+6. ☸️ **Cloud & Infrastructure** (`deploy/helm/`, `deploy/terraform/`, `docker/`):
+   - Production Helm chart (`deploy/helm/lake-of-tears`) with Ingress routing and PVC storage backends (NFS, Longhorn, Ceph, local-path).
+   - Docker Compose optimizations and Terraform infrastructure modules.
+7. 📚 **Documentation & Guides** (`docs/`, `README.md`):
+   - Architecture guides, deployment walkthroughs, example SQL analytics, and connector tutorials.
 
 ---
 
@@ -25,91 +45,126 @@ Thank you for your interest in contributing. Lake of Tears is an open source sel
 
 ### Prerequisites
 
-- Docker and Docker Compose
-- Python 3.12
-- Helm 3.x (for chart changes)
-- Terraform 1.9+ (for infrastructure changes)
+- **Docker & Docker Compose** (v26+ recommended)
+- **Python 3.12**
+- **Helm 3.x** (if testing Kubernetes chart changes)
+- **Terraform 1.9+** (if testing infrastructure changes)
+- `git`
 
 ### Local Development Setup
 
-```bash
-git clone https://github.com/hubbertj/lake-of-tears
-cd lake-of-tears
-cp .env.example .env
-# Fill in required credentials (MINIO_ROOT_USER, MINIO_ROOT_PASSWORD, GEMINI_API_KEY)
-docker compose up -d
-```
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/Lake-of-Tears/lake-of-tears.git
+   cd lake-of-tears
+   ```
 
-Services: Lake UI at http://localhost:3000 · Airflow at http://localhost:8080 · MinIO at http://localhost:9001
+2. **Configure environment variables:**
+   ```bash
+   cp .env.example .env
+   ```
+   Edit `.env` to configure your credentials (at minimum: `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `AUTH_SECRET_KEY`, and `GEMINI_API_KEY`).
 
-### Install dev tools
+3. **Start the stack:**
+   ```bash
+   docker compose up -d
+   ```
+
+4. **Access the services:**
+   - **Unified Lake UI Shell:** [http://localhost](http://localhost) (or direct port at `http://localhost:3000`)
+   - **Auth Backend:** `http://localhost/api/` (or direct port at `http://localhost:8000`)
+   - **Apache Airflow:** `http://localhost/airflow/` (or direct port at `http://localhost:8080`)
+   - **MinIO Console:** `http://localhost:9001`
+   - **JupyterLab:** `http://localhost/jupyter/` (or direct port at `http://localhost:8888`)
+   - **Apache Superset:** `http://localhost/superset/` (or direct port at `http://localhost:8088`)
+
+### Install Development & Linting Tools
 
 ```bash
 pip install ruff bandit[toml] pre-commit
 pre-commit install
 ```
 
-`pre-commit install` wires the linter and formatter to run automatically before every commit.
+`pre-commit install` sets up git hooks to ensure all files are linted and formatted before commits are recorded.
 
 ---
 
-## Code Style
+## Code Quality & Standards
 
-This project uses [ruff](https://docs.astral.sh/ruff/) for linting and formatting. Configuration is in `pyproject.toml`.
+This project uses [Ruff](https://docs.astral.sh/ruff/) for linting and code formatting, configured in `pyproject.toml`.
 
 ```bash
 # Check linting
 ruff check .
 
-# Auto-fix safe issues
+# Auto-fix safe lint errors
 ruff check --fix .
 
-# Format
+# Check formatting
+ruff format --check .
+
+# Auto-format
 ruff format .
 ```
 
-All CI checks must pass before a PR can be merged. Run them locally first:
+All CI checks must pass before a Pull Request is approved and merged. Validate them locally before pushing:
 
-| Check | Command |
-|-------|---------|
-| Lint | `ruff check .` |
-| Format | `ruff format --check .` |
-| Security | `bandit -r pipeline/ ui/ -ll -c pyproject.toml` |
-| Docker build | `docker build ui/` |
-| Helm lint | `helm lint deploy/helm/lake-of-tears` |
-| Terraform validate | `terraform -chdir=deploy/terraform/foundation validate` |
+| Check | Scope | Command |
+|-------|-------|---------|
+| **Lint** | Python codebase | `ruff check .` |
+| **Format** | Code style | `ruff format --check .` |
+| **Security Scan** | Pipeline & UI | `bandit -r pipeline/ ui/ -ll -c pyproject.toml` |
+| **UI Container** | UI Docker build | `docker build ui/` |
+| **Helm Chart** | Kubernetes chart | `helm lint deploy/helm/lake-of-tears` |
+| **Terraform** | IaC validation | `terraform -chdir=deploy/terraform/foundation validate` |
+
+---
+
+## Adding a New Data Source Connector
+
+To contribute a new data source connector:
+
+1. **Ingestion Script:** Create `pipeline/ingest/my_source.py` to fetch raw data, normalize into a pandas DataFrame, and write partitioned Parquet files via `StorageWriter`.
+2. **Airflow DAG:** Create `pipeline/dags/ingest_my_source_dag.py` with an appropriate schedule and error handling.
+3. **Embeddings:** Add the source identifier to `SOURCES` in `pipeline/embed/embed_sources.py`.
+4. **Text Representation:** Implement `_text_my_source(row)` in `embed_sources.py` to format records for Gemini vector embeddings.
+5. **Configuration:** Add required environment variables to `.env.example` and document them in `README.md`.
 
 ---
 
 ## Submitting a Pull Request
 
-1. **Fork** the repository and create a branch from `main`.
-2. **Keep PRs focused** — one feature or fix per PR. Stacked changes are hard to review.
-3. **Fill out the PR template** — describe what changed and why.
-4. **All CI checks must pass** before review.
-5. **Open an issue first** for significant new features so we can align before you invest time writing code.
-
-Branch naming convention:
-```
-feat/stripe-connector
-fix/duckdb-vss-cast
-docs/helm-values
-```
+1. **Fork** the repository to your own GitHub account: [github.com/Lake-of-Tears/lake-of-tears](https://github.com/Lake-of-Tears/lake-of-tears).
+2. **Branch** off from `main`:
+   ```bash
+   git checkout -b feat/my-new-connector
+   ```
+3. **Follow branch naming conventions:**
+   - `feat/feature-name` — new features or connectors
+   - `fix/bug-description` — bug fixes
+   - `docs/topic-name` — documentation improvements
+   - `infra/topic-name` — Docker, Helm, or Terraform changes
+   - `refactor/area-name` — code cleanups and refactoring
+4. **Keep PRs focused:** Submit atomic pull requests addressing one feature, bug fix, or enhancement.
+5. **Test thoroughly:** Ensure all local checks and CI steps pass.
+6. **Fill out the Pull Request template:** Describe what changes were made, why, and link any related issues.
+7. **Open an issue first:** For substantial architecture changes or new major integrations, please open an issue first to align on approach.
 
 ---
 
-## Adding a New Data Source
+## Code of Conduct
 
-The full walkthrough is in the [README](README.md#adding-a-new-data-source). Summary:
-
-1. `pipeline/ingest/my_source.py` — fetch, normalize to DataFrame, write Parquet via `StorageWriter`
-2. `pipeline/dags/ingest_my_source_dag.py` — Airflow DAG with schedule
-3. Add source name to `SOURCES` in `pipeline/embed/embed_sources.py`
-4. Add `_text_my_source(row)` for the embedding text representation
-5. Add the source's env vars to `.env.example` and the Configuration table in `README.md`
+We are committed to providing a welcoming, diverse, and inclusive environment. Please treat all contributors and maintainers with respect. See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for full details.
 
 ---
 
 ## Reporting Security Issues
 
-Please **do not** open a public issue for security vulnerabilities. See [SECURITY.md](SECURITY.md) for the responsible disclosure process.
+Please **do not** open public GitHub issues for security vulnerabilities.
+
+If you discover a vulnerability or security flaw, please report it privately to:
+- **Email:** [support@thelakeoftears.com](mailto:support@thelakeoftears.com)
+- **Subject:** `[Security] Lake of Tears Vulnerability Report`
+
+Include details on reproducing the issue and the potential impact. We will respond promptly and coordinate a fix and responsible disclosure. See [SECURITY.md](SECURITY.md) for more details.
+

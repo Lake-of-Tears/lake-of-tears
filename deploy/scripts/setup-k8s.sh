@@ -3,7 +3,7 @@
 #
 # Usage:
 #   ssh openclaw@10.0.0.60
-#   curl -fsSL https://raw.githubusercontent.com/hubbertj/lake-of-tears/main/deploy/scripts/setup-k8s.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Lake-of-Tears/lake-of-tears/main/deploy/scripts/setup-k8s.sh | bash
 #   # OR copy this file and run: bash setup-k8s.sh
 #
 # After this script finishes:

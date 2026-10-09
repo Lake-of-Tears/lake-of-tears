@@ -6,8 +6,8 @@
 ![Docker Compose: ready](https://img.shields.io/badge/Docker%20Compose-ready-2496ED?logo=docker&logoColor=white)
 ![Helm: ready](https://img.shields.io/badge/Helm-ready-0F1689?logo=helm&logoColor=white)
 ![Python: 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
-[![Discord](https://img.shields.io/badge/Discord-community-5865F2?logo=discord&logoColor=white)](https://lakeoftears.ai)
-[![Website](https://img.shields.io/badge/Website-lakeoftears.ai-00B4D8)](https://lakeoftears.ai)
+[![Discord](https://img.shields.io/badge/Discord-community-5865F2?logo=discord&logoColor=white)](https://thelakeoftears.com)
+[![Website](https://img.shields.io/badge/Website-thelakeoftears.com-00B4D8)](https://thelakeoftears.com)
 
 > Screenshot: Lake of Tears unified shell
 
@@ -82,7 +82,7 @@ Lake of Tears is a self-hosted data platform inspired by Databricks — one URL,
 ## Quick Start (Docker Compose)
 
 ```bash
-git clone https://github.com/hubbertj/lake-of-tears
+git clone https://github.com/Lake-of-Tears/lake-of-tears.git
 cd lake-of-tears
 cp .env.example .env
 # Edit .env — at minimum set MINIO_ROOT_PASSWORD, AUTH_SECRET_KEY,
@@ -733,8 +733,8 @@ We welcome contributions of all kinds — new data source connectors, UI improve
 
 Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request, and review our [Code of Conduct](CODE_OF_CONDUCT.md).
 
-- **Community:** [lakeoftears.ai](https://lakeoftears.ai) · Discord (link on the website)
-- **Issues:** [github.com/hubbertj/lake-of-tears/issues](https://github.com/hubbertj/lake-of-tears/issues)
+- **Community:** [thelakeoftears.com](https://thelakeoftears.com) · Discord (link on the website)
+- **Issues:** [github.com/Lake-of-Tears/lake-of-tears/issues](https://github.com/Lake-of-Tears/lake-of-tears/issues)
 - **Security:** See [SECURITY.md](SECURITY.md) for responsible disclosure.
 
 ---

@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to report a bug. Before filing, please check the [existing issues](https://github.com/hubbertj/lake-of-tears/issues) and the [docs at lakeoftears.ai](https://lakeoftears.ai).
+        Thanks for taking the time to report a bug. Before filing, please check the [existing issues](https://github.com/Lake-of-Tears/lake-of-tears/issues) and the [docs at thelakeoftears.com](https://thelakeoftears.com).
 
   - type: dropdown
     id: component
