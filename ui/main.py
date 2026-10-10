@@ -300,16 +300,18 @@ def _get_catalog_data() -> dict[str, Any]:
         return {"ok": False, "error": str(exc)}
 
 
-def _duckdb_connection():
-    con = duckdb.connect()
-    con.execute(f"""
-        INSTALL httpfs; LOAD httpfs;
-        SET s3_endpoint='{MINIO_ENDPOINT}';
-        SET s3_access_key_id='{MINIO_ACCESS_KEY}';
-        SET s3_secret_access_key='{MINIO_SECRET_KEY}';
-        SET s3_use_ssl=false;
-        SET s3_url_style='path';
-    """)
+def _duckdb_connection(load_vss: bool = False):
+    config = {
+        "s3_endpoint": MINIO_ENDPOINT,
+        "s3_access_key_id": MINIO_ACCESS_KEY,
+        "s3_secret_access_key": MINIO_SECRET_KEY,
+        "s3_use_ssl": False,
+        "s3_url_style": "path",
+    }
+    con = duckdb.connect(config=config)
+    con.execute("INSTALL httpfs; LOAD httpfs;")
+    if load_vss:
+        con.execute("INSTALL vss; LOAD vss;")
     return con
 
 
@@ -325,6 +327,21 @@ def _run_query(sql: str) -> dict[str, Any]:
         return {"ok": False, "error": str(exc)}
 
 
+AI_VECTOR_SQL = """
+    SELECT
+        source,
+        ingested_at,
+        summary,
+        array_cosine_similarity(
+            embedding::DOUBLE[768],
+            ?::DOUBLE[768]
+        ) AS score
+    FROM read_parquet(?)
+    ORDER BY score DESC
+    LIMIT 5
+"""
+
+
 def _ai_query(question: str) -> dict[str, Any]:
     if not GEMINI_API_KEY:
         return {"ok": False, "error": "GEMINI_API_KEY is not set."}
@@ -336,30 +353,10 @@ def _ai_query(question: str) -> dict[str, Any]:
             contents=question,
         )
         q_vec = embed_resp.embeddings[0].values
-        dim = len(q_vec)
-        vec_literal = "[" + ", ".join(str(v) for v in q_vec) + "]"
 
-        sql = f"""
-            INSTALL httpfs; LOAD httpfs; INSTALL vss; LOAD vss;
-            SET s3_endpoint='{MINIO_ENDPOINT}';
-            SET s3_access_key_id='{MINIO_ACCESS_KEY}';
-            SET s3_secret_access_key='{MINIO_SECRET_KEY}';
-            SET s3_use_ssl=false;
-            SET s3_url_style='path';
-            SELECT
-                source,
-                ingested_at,
-                summary,
-                array_cosine_similarity(
-                    embedding::DOUBLE[{dim}],
-                    {vec_literal}::DOUBLE[{dim}]
-                ) AS score
-            FROM read_parquet('s3://{MINIO_BUCKET}/embeddings/**/*.parquet')
-            ORDER BY score DESC
-            LIMIT 5
-        """
-        con = duckdb.connect()
-        rel = con.execute(sql)
+        s3_pattern = f"s3://{MINIO_BUCKET}/embeddings/**/*.parquet"
+        con = _duckdb_connection(load_vss=True)
+        rel = con.execute(AI_VECTOR_SQL, [q_vec, s3_pattern])
         rows = rel.fetchall()
         con.close()
 

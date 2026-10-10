@@ -113,6 +113,7 @@ All CI checks must pass before a Pull Request is approved and merged. Validate t
 |-------|-------|---------|
 | **Lint** | Python codebase | `ruff check .` |
 | **Format** | Code style | `ruff format --check .` |
+| **Unit Tests** | Python test suite | `pytest tests/` |
 | **Security Scan** | Pipeline & UI | `bandit -r pipeline/ ui/ -ll -c pyproject.toml` |
 | **UI Container** | UI Docker build | `docker build ui/` |
 | **Helm Chart** | Kubernetes chart | `helm lint deploy/helm/lake-of-tears --namespace lake-of-tears` |
