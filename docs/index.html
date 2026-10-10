@@ -68,43 +68,70 @@
 <body class="bg-dark-950 text-slate-200 antialiased selection:bg-brand-500/30 selection:text-brand-200">
 
   <!-- Header / Navigation -->
-  <header class="fixed top-0 left-0 right-0 z-50 bg-dark-950/80 backdrop-blur-md border-b border-slate-800/80">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-      <a href="#" class="flex items-center gap-3 group">
-        <img src="assets/logo.png" alt="Lake of Tears Logo" class="w-8 h-8 rounded-lg shadow-sm group-hover:scale-105 transition-transform">
-        <span class="text-lg font-bold text-white tracking-tight flex items-center gap-1.5">
-          Lake of Tears <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-brand-500/10 text-brand-400 border border-brand-500/20">Open Source</span>
+  <header class="fixed top-0 left-0 right-0 z-50 bg-dark-950/90 backdrop-blur-md border-b border-slate-800/80">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3 sm:gap-4">
+      
+      <!-- Brand Logo & Name -->
+      <a href="#" class="flex items-center gap-2.5 shrink-0 group">
+        <img src="assets/logo.png" alt="Lake of Tears Logo" class="w-8 h-8 rounded-lg shadow-sm group-hover:scale-105 transition-transform shrink-0">
+        <span class="text-base sm:text-lg font-bold text-white tracking-tight whitespace-nowrap">
+          Lake of Tears
+        </span>
+        <span class="hidden 2xl:inline-flex text-[10px] font-semibold px-2 py-0.5 rounded-full bg-brand-500/10 text-brand-400 border border-brand-500/20 whitespace-nowrap">
+          Open Source
         </span>
       </a>
 
-      <!-- Desktop Nav -->
-      <nav class="hidden md:flex items-center gap-7 text-sm font-medium text-slate-300">
-        <a href="#features" class="hover:text-brand-400 transition-colors">Features</a>
-        <a href="#architecture" class="hover:text-brand-400 transition-colors">Architecture</a>
-        <a href="#compare" class="hover:text-brand-400 transition-colors">vs Databricks</a>
-        <a href="#kubernetes" class="hover:text-brand-400 transition-colors">Kubernetes</a>
-        <a href="#connectors" class="hover:text-brand-400 transition-colors">Connectors</a>
-        <a href="#cloud-waitlist" class="hover:text-brand-400 transition-colors flex items-center gap-1.5 font-semibold text-white">
+      <!-- Desktop Nav Links (Visible on lg and above) -->
+      <nav class="hidden lg:flex items-center gap-5 xl:gap-7 text-sm font-medium text-slate-300 shrink-0">
+        <a href="#features" class="hover:text-brand-400 transition-colors whitespace-nowrap">Features</a>
+        <a href="#architecture" class="hover:text-brand-400 transition-colors whitespace-nowrap">Architecture</a>
+        <a href="#compare" class="hover:text-brand-400 transition-colors whitespace-nowrap">vs Databricks</a>
+        <a href="#kubernetes" class="hover:text-brand-400 transition-colors whitespace-nowrap">Kubernetes</a>
+        <a href="#connectors" class="hover:text-brand-400 transition-colors whitespace-nowrap">Connectors</a>
+        <a href="#cloud-waitlist" class="hover:text-brand-400 transition-colors flex items-center gap-1.5 font-semibold text-white whitespace-nowrap">
           Cloud <span class="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">Beta</span>
         </a>
       </nav>
 
       <!-- Action Buttons -->
-      <div class="flex items-center gap-3">
+      <div class="flex items-center gap-2 sm:gap-3 shrink-0">
         <a href="https://github.com/sponsors/hubbertj" target="_blank" rel="noopener noreferrer"
-           class="hidden lg:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-pink-500/10 hover:bg-pink-500/20 text-pink-300 border border-pink-500/30 transition">
-          <svg class="w-3.5 h-3.5 fill-current text-pink-400" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+           class="hidden xl:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-pink-500/10 hover:bg-pink-500/20 text-pink-300 border border-pink-500/30 transition whitespace-nowrap shrink-0">
+          <svg class="w-3.5 h-3.5 fill-current text-pink-400 shrink-0" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
           <span>Sponsor</span>
         </a>
         <a href="https://github.com/Lake-of-Tears/lake-of-tears" target="_blank" rel="noopener noreferrer"
-           class="inline-flex items-center gap-2 px-3.5 py-1.5 text-xs sm:text-sm font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 transition">
-          <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-          <span>Star on GitHub</span>
+           class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 transition whitespace-nowrap shrink-0">
+          <svg class="w-4 h-4 fill-current shrink-0" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          <span>GitHub</span>
         </a>
-        <a href="#cloud-waitlist" class="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs sm:text-sm font-semibold rounded-lg bg-brand-500 hover:bg-brand-400 text-slate-950 transition shadow-sm shadow-brand-500/20">
+        <a href="#cloud-waitlist" class="inline-flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-1.5 text-xs sm:text-sm font-semibold rounded-lg bg-brand-500 hover:bg-brand-400 text-slate-950 transition shadow-sm shadow-brand-500/20 whitespace-nowrap shrink-0">
           Cloud Waitlist
         </a>
+        
+        <!-- Mobile menu toggle button -->
+        <button id="mobile-menu-btn" onclick="toggleMobileMenu()" aria-label="Toggle navigation menu" class="lg:hidden p-2 text-slate-400 hover:text-white rounded-lg bg-slate-800/80 border border-slate-700">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+        </button>
       </div>
+    </div>
+
+    <!-- Mobile Dropdown Menu -->
+    <div id="mobile-menu" class="hidden lg:hidden border-t border-slate-800 bg-dark-950/95 backdrop-blur-xl px-4 py-4 space-y-3">
+      <a href="#features" onclick="toggleMobileMenu()" class="block py-2 text-sm font-medium text-slate-300 hover:text-brand-400">Features</a>
+      <a href="#architecture" onclick="toggleMobileMenu()" class="block py-2 text-sm font-medium text-slate-300 hover:text-brand-400">Architecture</a>
+      <a href="#compare" onclick="toggleMobileMenu()" class="block py-2 text-sm font-medium text-slate-300 hover:text-brand-400">vs Databricks</a>
+      <a href="#kubernetes" onclick="toggleMobileMenu()" class="block py-2 text-sm font-medium text-slate-300 hover:text-brand-400">Kubernetes</a>
+      <a href="#connectors" onclick="toggleMobileMenu()" class="block py-2 text-sm font-medium text-slate-300 hover:text-brand-400">Connectors</a>
+      <a href="#cloud-waitlist" onclick="toggleMobileMenu()" class="block py-2 text-sm font-semibold text-amber-300 flex items-center justify-between">
+        <span>Lake of Tears Cloud</span>
+        <span class="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">Beta</span>
+      </a>
+      <a href="https://github.com/sponsors/hubbertj" target="_blank" rel="noopener noreferrer" class="block py-2 text-sm font-medium text-pink-400 flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+        <span>Sponsor on GitHub</span>
+      </a>
     </div>
   </header>
 
@@ -558,9 +585,10 @@
               >
               <button 
                 type="submit" 
-                class="px-6 py-3 rounded-xl font-semibold text-slate-950 bg-gradient-to-r from-brand-400 to-cyan-300 hover:from-brand-300 hover:to-cyan-200 transition text-sm shadow-lg shadow-brand-500/20 whitespace-nowrap cursor-pointer"
+                id="waitlist-submit-btn"
+                class="px-6 py-3 rounded-xl font-semibold text-slate-950 bg-gradient-to-r from-brand-400 to-cyan-300 hover:from-brand-300 hover:to-cyan-200 transition text-sm shadow-lg shadow-brand-500/20 whitespace-nowrap cursor-pointer flex items-center justify-center gap-2"
               >
-                Join Cloud Waitlist
+                <span>Join Cloud Waitlist</span>
               </button>
             </div>
             <p class="text-xs text-slate-500 mt-2.5">Free tier will always be available. No credit card required.</p>
@@ -709,11 +737,24 @@ cp .env.example .env
       }
     }
 
-    function handleWaitlistSubmit(event) {
+    function toggleMobileMenu() {
+      const menu = document.getElementById('mobile-menu');
+      if (menu) {
+        menu.classList.toggle('hidden');
+      }
+    }
+
+    async function handleWaitlistSubmit(event) {
       event.preventDefault();
       const emailInput = document.getElementById('waitlist-email');
+      const submitBtn = document.getElementById('waitlist-submit-btn');
       const email = emailInput ? emailInput.value.trim() : '';
       if (!email) return;
+
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span>Joining...</span>';
+      }
 
       try {
         const stored = JSON.parse(localStorage.getItem('lake_of_tears_waitlist') || '[]');
@@ -723,6 +764,24 @@ cp .env.example .env
         }
       } catch (e) {
         console.error('Storage error', e);
+      }
+
+      try {
+        await fetch('https://formsubmit.co/ajax/hubbertj@gmail.com', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({
+            email: email,
+            _subject: 'New Lake of Tears Cloud Waitlist Signup: ' + email,
+            _template: 'table',
+            source: 'thelakeoftears.com'
+          })
+        });
+      } catch (err) {
+        console.warn('Network send error, saved locally:', err);
       }
 
       const inputGroup = document.getElementById('waitlist-input-group');
