@@ -1,0 +1,133 @@
+# deploy/helm/values-local.example.yaml
+# Template for local development overrides on local Kubernetes (OrbStack / Docker Desktop / kind / k3s).
+#
+# Usage:
+#   cp deploy/helm/values-local.example.yaml deploy/helm/values-local.yaml
+#   # (values-local.yaml is gitignored so you can safely customize it with your own credentials)
+#   helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears -f deploy/helm/values-local.yaml
+#
+# Access endpoints (via Ingress):
+#   - Lake UI / Shell:     http://localhost
+#   - JupyterLab:          http://localhost/jupyter/
+#   - Airflow:             http://localhost/airflow/
+#   - Auth API:            http://localhost/api/
+#   - MinIO Console:       http://minio.localhost
+#   - Superset:            http://superset.localhost
+#   - MinIO S3 API:        http://s3.localhost
+
+global:
+  storageClass: "local-path"
+
+ingress:
+  enabled: true
+  className: "nginx"
+  host: "localhost"
+  minioConsoleHost: "minio.localhost"
+  minioApiHost: "s3.localhost"
+  supersetHost: "superset.localhost"
+
+lakeui:
+  minioConsoleUrl: "http://minio.localhost"
+  supersetUrl: "http://superset.localhost"
+  image:
+    repository: lake-of-tears-ui
+    tag: latest
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+minio:
+  rootUser: "minioadmin"
+  rootPassword: "minioadminpassword"
+  persistence:
+    size: 10Gi
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+
+jupyter:
+  token: "jupytertoken123"
+  persistence:
+    size: 2Gi
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "2Gi"
+
+superset:
+  secretKey: "superset-secret-key-32-chars-long-local-env"
+  adminPassword: "supersetadminpassword"
+  persistence:
+    size: 2Gi
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "512Mi"
+    limits:
+      cpu: "1"
+      memory: "2Gi"
+
+airflow:
+  secretKey: "airflow-secret-key-32-chars-long-local-env"
+  adminPassword: "airflowadminpassword"
+  persistence:
+    size: 2Gi
+  image:
+    repository: lake-of-tears-airflow
+    tag: latest
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "512Mi"
+    limits:
+      cpu: "1"
+      memory: "2Gi"
+
+backend:
+  enabled: true
+  image:
+    repository: lake-of-tears-backend
+    tag: latest
+    pullPolicy: IfNotPresent
+  auth:
+    secretKey: "backend-secret-key-32-chars-long-local-env"
+    baseUrl: "http://localhost"
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+postgres:
+  enabled: true
+  auth:
+    database: "lake_auth"
+    username: "lake_auth"
+    password: "postgresauthpass"
+  airflow:
+    username: "airflow"
+    password: "airflowpass"
+  persistence:
+    size: 2Gi
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"

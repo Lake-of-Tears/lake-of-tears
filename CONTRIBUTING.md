@@ -134,21 +134,30 @@ To contribute a new data source connector:
 
 ## Submitting a Pull Request
 
-1. **Fork** the repository to your own GitHub account: [github.com/Lake-of-Tears/lake-of-tears](https://github.com/Lake-of-Tears/lake-of-tears).
-2. **Branch** off from `main`:
+> [!IMPORTANT]
+> **Mandatory Ticket Tracking Rule:** Every commit, branch, and Pull Request must be linked to an open GitHub issue/ticket. Do not start work or submit PRs without an existing ticket number to ensure complete history tracking and auditability.
+
+For our complete branching model, release lifecycle, and commit guidelines, please review our [Branching Strategy & Release Workflow](docs/branching-strategy.md).
+
+1. **Open or locate an issue:** Verify an open issue exists for your task, or open a new one first.
+2. **Fork** the repository to your own GitHub account: [github.com/Lake-of-Tears/lake-of-tears](https://github.com/Lake-of-Tears/lake-of-tears).
+3. **Branch** off from `main`:
    ```bash
-   git checkout -b feat/my-new-connector
+   git checkout main && git pull origin main
+   git checkout -b feat/123-my-new-connector
    ```
-3. **Follow branch naming conventions:**
-   - `feat/feature-name` — new features or connectors
-   - `fix/bug-description` — bug fixes
-   - `docs/topic-name` — documentation improvements
-   - `infra/topic-name` — Docker, Helm, or Terraform changes
-   - `refactor/area-name` — code cleanups and refactoring
-4. **Keep PRs focused:** Submit atomic pull requests addressing one feature, bug fix, or enhancement.
-5. **Test thoroughly:** Ensure all local checks and CI steps pass.
-6. **Fill out the Pull Request template:** Describe what changes were made, why, and link any related issues.
-7. **Open an issue first:** For substantial architecture changes or new major integrations, please open an issue first to align on approach.
+3. **Follow branch naming conventions** (include the GitHub issue number):
+   - `feat/<issue#>-<description>` — new features or connectors
+   - `fix/<issue#>-<description>` — bug fixes
+   - `sec/<issue#>-<description>` — security fixes & CVE updates
+   - `infra/<issue#>-<description>` — Docker, Helm, CI/CD, or Terraform changes
+   - `docs/<description>` — documentation improvements
+   - `refactor/<description>` — code cleanups and refactoring
+4. **Follow Conventional Commits:** Use standard commit prefixes (`feat:`, `fix:`, `sec:`, `docs:`, `infra:`, `refactor:`).
+5. **Keep PRs focused:** Submit atomic pull requests addressing one feature, bug fix, or task.
+6. **Link related issues:** Include `Closes #<issue>` or `Fixes #<issue>` in your PR description.
+7. **Test thoroughly:** Ensure all local checks and CI steps pass.
+8. **Fill out the Pull Request template:** Describe what changes were made, why, and test verification details.
 
 ---
 
