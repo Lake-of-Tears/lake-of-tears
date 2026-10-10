@@ -156,7 +156,7 @@
         </div>
         <div class="p-6 font-mono text-xs sm:text-sm text-slate-300 overflow-x-auto space-y-2">
           <div class="text-slate-500"># Deploy production datalakehouse on Kubernetes with Helm:</div>
-          <div class="text-emerald-400"><span class="text-brand-400">$</span> helm install lake-of-tears ./deploy/helm/lake-of-tears -f values-prod.yaml -f values-secret.yaml</div>
+          <div class="text-emerald-400"><span class="text-brand-400">$</span> helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears --namespace lake-of-tears --create-namespace -f values-prod.yaml -f values-secret.yaml</div>
           <div class="text-slate-500 mt-3"># Or deploy on Docker Compose with one command:</div>
           <div class="text-emerald-400"><span class="text-brand-400">$</span> cp .env.example .env &amp;&amp; docker compose up -d</div>
           <div class="text-cyan-200/80 pt-2 font-sans text-xs">
@@ -534,13 +534,13 @@ gemini:
 
             <h3 class="text-lg font-bold text-white mt-6 mb-2">3. Install with Helm</h3>
             <div class="bg-dark-950 rounded-xl p-4 font-mono text-xs sm:text-sm text-slate-300 border border-slate-800 relative group">
-              <pre class="overflow-x-auto"><code>helm install lake-of-tears ./deploy/helm/lake-of-tears \
+              <pre class="overflow-x-auto"><code>helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
   --namespace lake-of-tears \
   --create-namespace \
   --values deploy/helm/values-prod.yaml \
   --values /path/to/values-secret.yaml \
   --wait --timeout 10m</code></pre>
-              <button onclick="navigator.clipboard.writeText('helm install lake-of-tears ./deploy/helm/lake-of-tears --namespace lake-of-tears --create-namespace --values deploy/helm/values-prod.yaml --values /path/to/values-secret.yaml --wait --timeout 10m')" class="absolute right-3 top-3 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded transition">Copy</button>
+              <button onclick="navigator.clipboard.writeText('helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears --namespace lake-of-tears --create-namespace --values deploy/helm/values-prod.yaml --values /path/to/values-secret.yaml --wait --timeout 10m')" class="absolute right-3 top-3 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded transition">Copy</button>
             </div>
           </div>
         </div>

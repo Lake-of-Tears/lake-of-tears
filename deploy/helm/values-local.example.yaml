@@ -4,7 +4,10 @@
 # Usage:
 #   cp deploy/helm/values-local.example.yaml deploy/helm/values-local.yaml
 #   # (values-local.yaml is gitignored so you can safely customize it with your own credentials)
-#   helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears -f deploy/helm/values-local.yaml
+#   helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
+#     --namespace lake-of-tears \
+#     --create-namespace \
+#     -f deploy/helm/values-local.yaml
 #
 # Access endpoints (via Ingress):
 #   - Lake UI / Shell:     http://localhost

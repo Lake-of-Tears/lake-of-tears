@@ -3,7 +3,9 @@
 # =============================================================================
 # Copy this file and override values as needed:
 #
-#   helm install lake-of-tears ./deploy/helm/lake-of-tears \
+#   helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
+#     --namespace lake-of-tears \
+#     --create-namespace \
 #     --set minio.rootPassword=changeme \
 #     --set gemini.apiKey=your-key \
 #     -f my-values.yaml
@@ -20,6 +22,9 @@ global:
   # Leave empty to use the cluster default StorageClass.
   # For NFS-backed storage (e.g. TrueNAS), set to your NFS StorageClass name.
   storageClass: ""
+
+  # Set to true to bypass the namespace guard if deploying into 'default'
+  allowDefaultNamespace: false
 
 # ---------------------------------------------------------------------------
 # MinIO CE — S3-compatible object storage

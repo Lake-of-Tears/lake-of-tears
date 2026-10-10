@@ -1,6 +1,14 @@
 # deploy/helm/values-prod.yaml
 # Production overrides for a single-VM k3s deployment at 10.0.0.60.
 #
+# Deploy command:
+#   helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
+#     --namespace lake-of-tears \
+#     --create-namespace \
+#     --values deploy/helm/values-prod.yaml \
+#     --values /etc/lake-of-tears/values-secret.yaml \
+#     --wait --timeout 10m
+#
 # Secrets are NOT here — they live in /etc/lake-of-tears/values-secret.yaml on the VM.
 # The Jenkinsfile passes both files to helm with two --values flags.
 #

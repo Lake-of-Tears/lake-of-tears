@@ -223,7 +223,7 @@ lakeui:
 ### Step 3 — Install
 
 ```bash
-helm install lake-of-tears ./deploy/helm/lake-of-tears \
+helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
   --namespace lake-of-tears \
   --create-namespace \
   --values deploy/helm/values-prod.yaml \
@@ -236,6 +236,7 @@ To upgrade after a code or config change:
 ```bash
 helm upgrade lake-of-tears ./deploy/helm/lake-of-tears \
   --namespace lake-of-tears \
+  --create-namespace \
   --values deploy/helm/values-prod.yaml \
   --values /etc/lake-of-tears/values-secret.yaml \
   --wait --timeout 10m
@@ -278,6 +279,22 @@ Every value marked **required** must be present in your secrets file or the Helm
 | `ingress.minioConsoleHost` | yes | Hostname for the MinIO Console |
 
 See `deploy/helm/lake-of-tears/values.yaml` for the full list of optional values (resource limits, image tags, SSO provider IDs, data source credentials, etc.).
+
+### Operational & Troubleshooting Commands
+
+```bash
+# Check status of workloads
+kubectl get pods,svc,ingress -n lake-of-tears
+
+# Scale down all workloads (maintenance / cost saving)
+kubectl scale deployment -n lake-of-tears --all --replicas=0
+
+# Scale up all workloads
+kubectl scale deployment -n lake-of-tears --all --replicas=1
+
+# Uninstall Lake of Tears release
+helm uninstall lake-of-tears -n lake-of-tears
+```
 
 ---
 

@@ -56,6 +56,10 @@ echo "==> Waiting for ingress-nginx controller to be ready..."
 sudo k3s kubectl rollout status deployment ingress-nginx-controller \
     -n ingress-nginx --timeout=120s
 
+# ── Lake of Tears Namespace ──────────────────────────────────────────────────
+echo "==> Ensuring lake-of-tears namespace exists"
+sudo k3s kubectl create namespace lake-of-tears --dry-run=client -o yaml | sudo k3s kubectl apply -f -
+
 # ── Helm ─────────────────────────────────────────────────────────────────────
 echo "==> Installing Helm"
 curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
@@ -115,4 +119,6 @@ echo "       Username: openclaw"
 echo "       Key:      (paste the private key that pairs with the public key above)"
 echo ""
 echo "  Once deployed, reach Lake of Tears at: http://lake.10.0.0.60.nip.io"
+echo "  Verify deployment status:"
+echo "       kubectl get pods -n lake-of-tears"
 echo ""

@@ -115,7 +115,7 @@ All CI checks must pass before a Pull Request is approved and merged. Validate t
 | **Format** | Code style | `ruff format --check .` |
 | **Security Scan** | Pipeline & UI | `bandit -r pipeline/ ui/ -ll -c pyproject.toml` |
 | **UI Container** | UI Docker build | `docker build ui/` |
-| **Helm Chart** | Kubernetes chart | `helm lint deploy/helm/lake-of-tears` |
+| **Helm Chart** | Kubernetes chart | `helm lint deploy/helm/lake-of-tears --namespace lake-of-tears` |
 | **Terraform** | IaC validation | `terraform -chdir=deploy/terraform/foundation validate` |
 
 ---

@@ -1,0 +1,4 @@
+{{/* Validation: Prevent accidental deployment into default namespace */}}
+{{- if and (eq .Release.Namespace "default") (not .Values.global.allowDefaultNamespace) }}
+{{- fail (printf "\n\n[FATAL ERROR] Lake of Tears cannot be deployed into the 'default' namespace.\nTargeted namespace: '%s'\n\nPlease reinstall using the required namespace flags:\n  helm upgrade --install %s ./deploy/helm/lake-of-tears --namespace lake-of-tears --create-namespace ...\n\n(To bypass this safeguard, specify '--set global.allowDefaultNamespace=true'.)\n" .Release.Namespace .Release.Name) }}
+{{- end }}

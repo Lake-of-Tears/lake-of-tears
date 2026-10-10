@@ -1,0 +1,47 @@
+===============================================================================
+  Lake of Tears — Datalakehouse deployed successfully!
+  Release:   {{ .Release.Name }}
+  Namespace: {{ .Release.Namespace }}
+===============================================================================
+
+{{- if eq .Release.Namespace "default" }}
+*******************************************************************************
+  WARNING: Lake of Tears was installed into the 'default' namespace!
+  It is strongly recommended to isolate workloads in their own namespace:
+    helm uninstall {{ .Release.Name }} -n default
+    helm upgrade --install {{ .Release.Name }} ./deploy/helm/lake-of-tears \
+      --namespace lake-of-tears --create-namespace ...
+*******************************************************************************
+{{- end }}
+
+Access Endpoints (via Ingress):
+-------------------------------------------------------------------------------
+  Lake UI / Shell:    http://{{ .Values.ingress.host }}/
+  Auth API:           http://{{ .Values.ingress.host }}/api/
+  JupyterLab:         http://{{ .Values.ingress.host }}/jupyter/
+  Apache Airflow:     http://{{ .Values.ingress.host }}/airflow/
+  Apache Superset:    http://{{ .Values.ingress.supersetHost }}/
+  MinIO Console:      http://{{ .Values.ingress.minioConsoleHost }}/
+  MinIO S3 API:       http://{{ .Values.ingress.minioApiHost }}/
+
+Verification Commands:
+-------------------------------------------------------------------------------
+  View running pods:
+    kubectl get pods -n {{ .Release.Namespace }}
+
+  View services and ingress:
+    kubectl get svc,ingress -n {{ .Release.Namespace }}
+
+  View persistent storage:
+    kubectl get pvc -n {{ .Release.Namespace }}
+
+Workload Management:
+-------------------------------------------------------------------------------
+  Scale down all deployments:
+    kubectl scale deployment -n {{ .Release.Namespace }} --all --replicas=0
+
+  Scale up all deployments:
+    kubectl scale deployment -n {{ .Release.Namespace }} --all --replicas=1
+
+  Uninstall Lake of Tears:
+    helm uninstall {{ .Release.Name }} -n {{ .Release.Namespace }}
