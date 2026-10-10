@@ -744,6 +744,23 @@ Given a natural-language question, embeds the query with `gemini-embedding-001`,
 
 ---
 
+## Lake of Tears Cloud (Private Beta)
+
+Don't want to manage Kubernetes or Docker infrastructure yourself? **Lake of Tears Cloud** is coming soon with:
+- 1-click managed lakehouse provisioning (zero YAML / Helm)
+- Automated daily backups, storage scaling, and zero-downtime upgrades
+- Unified multi-LLM AI gateway (Gemini, OpenAI, Claude) with semantic prompt caching
+
+👉 **[Join the Private Beta Waitlist at thelakeoftears.com](https://thelakeoftears.com#cloud-waitlist)**
+
+---
+
+## Sponsoring & Open-Source Sustainability
+
+Lake of Tears is 100% free and open-source under the MIT license. If you or your organization rely on Lake of Tears for your personal or enterprise analytical workloads, please consider **[sponsoring the project on GitHub](https://github.com/sponsors/hubbertj)** to support ongoing development, maintenance, and infrastructure.
+
+---
+
 ## Contributing
 
 We welcome contributions of all kinds — new data source connectors, UI improvements, pipeline enhancements, and documentation.
