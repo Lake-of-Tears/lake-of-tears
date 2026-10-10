@@ -76,3 +76,19 @@ jobs:
       - name: Lint Helm chart
         run: helm lint deploy/helm/lake-of-tears --namespace lake-of-tears
 
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pytest==8.3.3 -r ui/requirements.txt
+
+      - name: Run unit tests
+        run: pytest tests/ -v
+

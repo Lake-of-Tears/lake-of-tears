@@ -15,6 +15,7 @@
 
 - [ ] `ruff check .` passes locally
 - [ ] `ruff format .` applied
+- [ ] `pytest tests/` passes
 - [ ] Docker build passes (`docker build ui/`) — if UI changed
 - [ ] `helm lint deploy/helm/lake-of-tears --namespace lake-of-tears` passes — if chart changed
 - [ ] `terraform validate` passes — if Terraform changed
