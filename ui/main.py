@@ -58,7 +58,7 @@ app = FastAPI(title="Lake of Tears")
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
-_PUBLIC_PREFIXES = ("/login", "/logout", "/api/", "/health")
+_PUBLIC_PREFIXES = ("/login", "/logout", "/api/", "/health", "/workspace/search")
 _WORKSPACE_COOKIE = "lake_workspace_id"
 
 _SESSION_CONFIG_CACHE: dict | None = None
@@ -1289,6 +1289,7 @@ async def api_search_notebooks(request: Request, q: str = "", subpath: str = "")
     )
 
 
+@app.get("/workspace/search")
 @app.get("/api/workspace/search")
 async def api_workspace_search(request: Request, q: str = ""):
     auth_res = _get_notebook_auth_and_workspace(request, require_write=False)

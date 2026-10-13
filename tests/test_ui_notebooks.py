@@ -777,7 +777,29 @@ def test_workspace_search_empty_query():
         assert "page" in types
 
 
-def test_base_template_renders_quick_open_components():
+def test_workspace_search_alternate_path():
+    token, workspaces = _create_auth_cookie(role="member")
+    cookies = {"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"}
+
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_fetch_workspaces", return_value=workspaces),
+        patch.object(
+            notebook_proxy,
+            "search_workspace_items",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch.object(main, "_backend_get", return_value=[]),
+    ):
+        resp = client.get("/workspace/search?q=pipeline", cookies=cookies)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["query"] == "pipeline"
+        assert len(data["results"]) > 0
+
+
+def test_base_template_renders_search_dropdown_components():
     token = jwt.encode(
         {"sub": "user@lake.local", "email": "user@lake.local", "role": "user"},
         main.AUTH_SECRET_KEY,
@@ -791,8 +813,11 @@ def test_base_template_renders_quick_open_components():
             cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
         )
         assert response.status_code == 200
-        assert "quick-open-modal" in response.text
-        assert "quick-open-input" in response.text
-        assert "quick-open-results" in response.text
+        assert "workspace-search-wrap" in response.text
+        assert "workspace-search-input" in response.text
+        assert "workspace-search-dropdown" in response.text
+        assert "workspace-search-results" in response.text
         assert "⌘P" in response.text
-        assert "openQuickOpen" in response.text
+        assert "openSearchDropdown" in response.text
+        # Ensure modal is not rendered
+        assert "quick-open-modal" not in response.text
