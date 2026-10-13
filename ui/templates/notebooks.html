@@ -101,8 +101,8 @@
         <svg class="w-3.5 h-3.5 text-gray-500 absolute left-2.5 pointer-events-none" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
         </svg>
-        <input type="text" id="file-filter" placeholder="Search files & folders..." oninput="handleSearchInput()" onkeydown="if(event.key==='Escape')clearSearch()" class="w-full bg-[#1e1e1e] border border-white/[0.08] rounded pl-8 pr-7 py-1 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500" />
-        <button id="file-filter-clear" onclick="clearSearch()" class="hidden absolute right-2 text-gray-500 hover:text-white p-0.5 rounded transition-colors" title="Clear search">
+        <input type="text" id="file-filter" placeholder="Search files & folders..." oninput="handleNotebookFileFilterInput()" onkeydown="if(event.key==='Escape')clearNotebookFileFilter()" class="w-full bg-[#1e1e1e] border border-white/[0.08] rounded pl-8 pr-7 py-1 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500" />
+        <button id="file-filter-clear" onclick="clearNotebookFileFilter()" class="hidden absolute right-2 text-gray-500 hover:text-white p-0.5 rounded transition-colors" title="Clear search">
           <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
       </div>
@@ -558,11 +558,11 @@ function updateBreadcrumbs() {
   bar.innerHTML = html;
 }
 
-let searchDebounceTimer = null;
-let currentSearchQuery = '';
-let searchResults = [];
-let isSearching = false;
-let searchReqSeq = 0;
+let nbSearchDebounceTimer = null;
+let nbCurrentSearchQuery = '';
+let nbSearchResults = [];
+let nbIsSearching = false;
+let nbSearchReqSeq = 0;
 
 function escapeHtml(str) {
   if (!str) return '';
@@ -574,11 +574,11 @@ function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
-function isSearchActive() {
-  return currentSearchQuery.length > 0;
+function isNotebookSearchActive() {
+  return nbCurrentSearchQuery.length > 0;
 }
 
-function handleSearchInput() {
+function handleNotebookFileFilterInput() {
   const input = document.getElementById('file-filter');
   const clearBtn = document.getElementById('file-filter-clear');
   const val = (input ? input.value : '').trim();
@@ -589,37 +589,37 @@ function handleSearchInput() {
   }
 
   if (!val) {
-    clearTimeout(searchDebounceTimer);
-    currentSearchQuery = '';
-    searchResults = [];
-    isSearching = false;
+    clearTimeout(nbSearchDebounceTimer);
+    nbCurrentSearchQuery = '';
+    nbSearchResults = [];
+    nbIsSearching = false;
     renderFileList();
     return;
   }
 
-  currentSearchQuery = val;
-  clearTimeout(searchDebounceTimer);
-  searchDebounceTimer = setTimeout(() => {
-    executeSearch(val);
+  nbCurrentSearchQuery = val;
+  clearTimeout(nbSearchDebounceTimer);
+  nbSearchDebounceTimer = setTimeout(() => {
+    executeNotebookFileSearch(val);
   }, 180);
 }
 
-function clearSearch() {
+function clearNotebookFileFilter() {
   const input = document.getElementById('file-filter');
   if (input) input.value = '';
   const clearBtn = document.getElementById('file-filter-clear');
   if (clearBtn) clearBtn.classList.add('hidden');
-  clearTimeout(searchDebounceTimer);
-  currentSearchQuery = '';
-  searchResults = [];
-  isSearching = false;
+  clearTimeout(nbSearchDebounceTimer);
+  nbCurrentSearchQuery = '';
+  nbSearchResults = [];
+  nbIsSearching = false;
   renderFileList();
 }
 
-async function executeSearch(query) {
+async function executeNotebookFileSearch(query) {
   if (!query) return;
-  const seq = ++searchReqSeq;
-  isSearching = true;
+  const seq = ++nbSearchReqSeq;
+  nbIsSearching = true;
   const container = document.getElementById('file-list');
   container.innerHTML = `
     <div class="flex items-center justify-center gap-2 py-8 text-xs text-gray-400">
@@ -636,23 +636,23 @@ async function executeSearch(query) {
     const res = await fetch(url);
     if (!res.ok) throw new Error('Search request failed');
     const data = await res.json();
-    if (seq !== searchReqSeq || currentSearchQuery !== query) return;
-    searchResults = data.items || [];
-    isSearching = false;
-    renderSearchResults(query, searchResults);
+    if (seq !== nbSearchReqSeq || nbCurrentSearchQuery !== query) return;
+    nbSearchResults = data.items || [];
+    nbIsSearching = false;
+    renderNotebookSearchResults(query, nbSearchResults);
   } catch (err) {
-    if (seq !== searchReqSeq || currentSearchQuery !== query) return;
-    isSearching = false;
+    if (seq !== nbSearchReqSeq || nbCurrentSearchQuery !== query) return;
+    nbIsSearching = false;
     container.innerHTML = `<div class="text-xs text-red-400 p-3">${escapeHtml(err.message)}</div>`;
   }
 }
 
 function selectSearchResultFolder(path) {
-  clearSearch();
+  clearNotebookFileFilter();
   browseFolder(path);
 }
 
-function renderSearchResults(query, items) {
+function renderNotebookSearchResults(query, items) {
   const container = document.getElementById('file-list');
   const scopeLabel = currentFolder ? `/${currentFolder}` : 'all folders';
 
@@ -720,7 +720,7 @@ function renderSearchResults(query, items) {
 
 function browseFolder(path) {
   currentFolder = path || '';
-  clearSearch();
+  clearNotebookFileFilter();
   loadFiles(currentFolder);
 }
 
@@ -729,7 +729,7 @@ function browseParentFolder() {
   const parts = currentFolder.split('/');
   parts.pop();
   currentFolder = parts.join('/');
-  clearSearch();
+  clearNotebookFileFilter();
   loadFiles(currentFolder);
 }
 
@@ -742,8 +742,8 @@ async function loadFiles(folder = currentFolder) {
     if (!res.ok) throw new Error('Failed to load files');
     const data = await res.json();
     fileTreeItems = data.items || [];
-    if (isSearchActive()) {
-      await executeSearch(currentSearchQuery);
+    if (isNotebookSearchActive()) {
+      await executeNotebookFileSearch(nbCurrentSearchQuery);
     } else {
       renderFileList();
     }
@@ -754,8 +754,8 @@ async function loadFiles(folder = currentFolder) {
 }
 
 function renderFileList() {
-  if (isSearchActive()) {
-    renderSearchResults(currentSearchQuery, searchResults);
+  if (isNotebookSearchActive()) {
+    renderNotebookSearchResults(nbCurrentSearchQuery, nbSearchResults);
     return;
   }
   const container = document.getElementById('file-list');
@@ -819,7 +819,7 @@ function renderFileList() {
 }
 
 function filterFiles() {
-  handleSearchInput();
+  handleNotebookFileFilterInput();
 }
 
 // ── Item Actions: New Notebook, Folder, Rename, Move, Delete ─────────────

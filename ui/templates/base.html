@@ -209,9 +209,9 @@
   <div class="flex-1 flex flex-col min-w-0 overflow-hidden">
 
     <!-- Top bar -->
-    <header class="topbar-shell h-[48px] border-b flex items-center justify-between px-5 shrink-0 gap-4">
-      <!-- Workspace Search Input with Dropdown -->
-      <div class="relative flex items-center gap-2 flex-1 max-w-md" id="workspace-search-wrap">
+    <header class="topbar-shell h-[48px] border-b flex items-center justify-between px-5 shrink-0 gap-4 relative z-40">
+      <!-- Workspace Search Input with Dropdown (expands full distance of nav bar) -->
+      <div class="relative flex items-center gap-2 flex-1" id="workspace-search-wrap">
         <svg class="w-3.5 h-3.5 text-gray-500 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
         <input
           type="text"
@@ -220,18 +220,18 @@
           autocomplete="off"
           spellcheck="false"
           class="bg-transparent text-[13px] text-gray-200 placeholder-gray-500 focus:outline-none w-full"
-          onfocus="handleSearchFocus()"
-          oninput="handleSearchInput()"
-          onkeydown="handleSearchKeydown(event)"
+          onfocus="handleWorkspaceSearchFocus()"
+          oninput="handleWorkspaceSearchInput()"
+          onkeydown="handleWorkspaceSearchKeydown(event)"
         />
-        <kbd class="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono text-gray-500 bg-white/[0.04] border border-white/[0.08] rounded pointer-events-none select-none">⌘P</kbd>
+        <kbd class="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono text-gray-500 bg-white/[0.04] border border-white/[0.08] rounded pointer-events-none select-none shrink-0">⌘P</kbd>
 
         <!-- Dropdown list of objects found -->
         <div
           id="workspace-search-dropdown"
-          class="hidden absolute left-0 top-[calc(100%+8px)] w-full min-w-[420px] max-w-[540px] bg-[#161a23] border border-gray-700/80 rounded-xl shadow-2xl z-50 overflow-hidden flex flex-col"
+          class="hidden absolute left-0 right-0 top-[calc(100%+6px)] w-full bg-[#161a23] border border-gray-700/80 rounded-xl shadow-2xl z-50 overflow-hidden flex flex-col backdrop-blur-md"
         >
-          <div id="workspace-search-results" class="max-h-[360px] overflow-y-auto p-1.5 space-y-0.5 select-none text-left">
+          <div id="workspace-search-results" class="max-h-[380px] overflow-y-auto p-1.5 space-y-0.5 select-none text-left">
             <!-- Results will be injected here -->
           </div>
           <div class="px-3 py-1.5 border-t border-white/[0.06] bg-[#10131a] text-[11px] text-gray-500 flex items-center justify-between">
@@ -484,95 +484,100 @@
 
   <script>
     // ── Workspace Search Dropdown Controller ──────────────────────────────────
-    let searchResults = [];
-    let searchSelectedIndex = 0;
-    let searchDebounceTimer = null;
-    let searchSeq = 0;
+    let workspaceSearchResults = [];
+    let workspaceSearchSelectedIndex = 0;
+    let workspaceSearchDebounceTimer = null;
+    let workspaceSearchSeq = 0;
 
-    function openSearchDropdown() {
+    function openWorkspaceSearchDropdown() {
       const dropdown = document.getElementById('workspace-search-dropdown');
       if (dropdown) dropdown.classList.remove('hidden');
     }
 
-    function closeSearchDropdown() {
+    function closeWorkspaceSearchDropdown() {
       const dropdown = document.getElementById('workspace-search-dropdown');
       if (dropdown) dropdown.classList.add('hidden');
     }
 
-    function handleSearchFocus() {
-      openSearchDropdown();
+    function handleWorkspaceSearchFocus() {
       const input = document.getElementById('workspace-search-input');
       const query = (input ? input.value : '').trim();
-      fetchSearchResults(query);
+      // Only activate when there is input (no blank search on click)
+      if (query.length > 0) {
+        openWorkspaceSearchDropdown();
+        fetchWorkspaceSearchResults(query);
+      }
     }
 
-    function handleSearchInput() {
-      openSearchDropdown();
+    function handleWorkspaceSearchInput() {
       const input = document.getElementById('workspace-search-input');
       const query = (input ? input.value : '').trim();
-      clearTimeout(searchDebounceTimer);
-      searchDebounceTimer = setTimeout(() => {
-        fetchSearchResults(query);
+
+      // Deactivate immediately if input is cleared
+      if (query.length === 0) {
+        closeWorkspaceSearchDropdown();
+        workspaceSearchResults = [];
+        return;
+      }
+
+      openWorkspaceSearchDropdown();
+      clearTimeout(workspaceSearchDebounceTimer);
+      workspaceSearchDebounceTimer = setTimeout(() => {
+        fetchWorkspaceSearchResults(query);
       }, 120);
     }
 
-    function handleSearchKeydown(e) {
+    function handleWorkspaceSearchKeydown(e) {
       const dropdown = document.getElementById('workspace-search-dropdown');
       const isDropdownOpen = dropdown && !dropdown.classList.contains('hidden');
 
       if (e.key === 'Escape') {
         e.preventDefault();
-        closeSearchDropdown();
+        closeWorkspaceSearchDropdown();
         e.target.blur();
         return;
       }
 
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        if (!isDropdownOpen) {
-          openSearchDropdown();
-          return;
-        }
-        if (searchResults.length > 0) {
-          searchSelectedIndex = (searchSelectedIndex + 1) % searchResults.length;
-          updateSearchSelection();
+        if (!isDropdownOpen) return;
+        if (workspaceSearchResults.length > 0) {
+          workspaceSearchSelectedIndex = (workspaceSearchSelectedIndex + 1) % workspaceSearchResults.length;
+          updateWorkspaceSearchSelection();
         }
         return;
       }
 
       if (e.key === 'ArrowUp') {
         e.preventDefault();
-        if (!isDropdownOpen) {
-          openSearchDropdown();
-          return;
-        }
-        if (searchResults.length > 0) {
-          searchSelectedIndex = (searchSelectedIndex - 1 + searchResults.length) % searchResults.length;
-          updateSearchSelection();
+        if (!isDropdownOpen) return;
+        if (workspaceSearchResults.length > 0) {
+          workspaceSearchSelectedIndex = (workspaceSearchSelectedIndex - 1 + workspaceSearchResults.length) % workspaceSearchResults.length;
+          updateWorkspaceSearchSelection();
         }
         return;
       }
 
       if (e.key === 'Enter') {
         e.preventDefault();
-        if (searchResults[searchSelectedIndex]) {
-          selectSearchResult(searchSelectedIndex);
+        if (workspaceSearchResults[workspaceSearchSelectedIndex]) {
+          selectWorkspaceSearchResult(workspaceSearchSelectedIndex);
         }
         return;
       }
     }
 
-    function hoverSearchResult(index) {
-      searchSelectedIndex = index;
-      updateSearchSelection();
+    function hoverWorkspaceSearchResult(index) {
+      workspaceSearchSelectedIndex = index;
+      updateWorkspaceSearchSelection();
     }
 
-    function updateSearchSelection() {
+    function updateWorkspaceSearchSelection() {
       const container = document.getElementById('workspace-search-results');
       if (!container) return;
       const elements = container.querySelectorAll('.search-result-item');
       elements.forEach((el, idx) => {
-        if (idx === searchSelectedIndex) {
+        if (idx === workspaceSearchSelectedIndex) {
           el.className = 'search-result-item group flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer transition-colors bg-blue-600/25 text-white border border-blue-500/30';
           el.scrollIntoView({ block: 'nearest' });
         } else {
@@ -581,10 +586,25 @@
       });
     }
 
-    function selectSearchResult(index) {
-      const item = searchResults[index];
+    function selectWorkspaceSearchResult(index) {
+      const item = workspaceSearchResults[index];
       if (!item) return;
-      closeSearchDropdown();
+      closeWorkspaceSearchDropdown();
+
+      // If already on the notebooks page, seamlessly switch without full reload
+      if (window.location.pathname.startsWith('/notebooks')) {
+        if (item.type === 'notebook' && typeof openNotebook === 'function') {
+          openNotebook(item.path);
+          window.history.pushState({}, '', item.url);
+          return;
+        }
+        if (item.type === 'folder' && typeof browseFolder === 'function') {
+          browseFolder(item.path);
+          window.history.pushState({}, '', item.url);
+          return;
+        }
+      }
+
       window.location.href = item.url;
     }
 
@@ -598,8 +618,8 @@
         .replace(/'/g, '&#39;');
     }
 
-    async function fetchSearchResults(query) {
-      const seq = ++searchSeq;
+    async function fetchWorkspaceSearchResults(query) {
+      const seq = ++workspaceSearchSeq;
       const container = document.getElementById('workspace-search-results');
       const countEl = document.getElementById('workspace-search-count');
       if (!container) return;
@@ -609,26 +629,26 @@
           credentials: 'include'
         });
         if (!res.ok) {
-          if (seq !== searchSeq) return;
-          renderSearchEmpty(query ? `No objects matching "${query}"` : 'No objects found');
+          if (seq !== workspaceSearchSeq) return;
+          renderWorkspaceSearchEmpty(query ? `No objects matching "${query}"` : 'No objects found');
           return;
         }
         const data = await res.json();
-        if (seq !== searchSeq) return;
+        if (seq !== workspaceSearchSeq) return;
 
-        searchResults = data.results || [];
-        searchSelectedIndex = 0;
+        workspaceSearchResults = data.results || [];
+        workspaceSearchSelectedIndex = 0;
         if (countEl) {
-          countEl.textContent = `${searchResults.length} ${searchResults.length === 1 ? 'item' : 'items'}`;
+          countEl.textContent = `${workspaceSearchResults.length} ${workspaceSearchResults.length === 1 ? 'item' : 'items'}`;
         }
-        renderSearchList(query);
+        renderWorkspaceSearchList(query);
       } catch (err) {
-        if (seq !== searchSeq) return;
-        renderSearchEmpty('No items found');
+        if (seq !== workspaceSearchSeq) return;
+        renderWorkspaceSearchEmpty('No items found');
       }
     }
 
-    function renderSearchEmpty(message) {
+    function renderWorkspaceSearchEmpty(message) {
       const container = document.getElementById('workspace-search-results');
       const countEl = document.getElementById('workspace-search-count');
       if (countEl) countEl.textContent = '0 items';
@@ -640,15 +660,15 @@
       `;
     }
 
-    function renderSearchList(query) {
+    function renderWorkspaceSearchList(query) {
       const container = document.getElementById('workspace-search-results');
-      if (!searchResults.length) {
-        renderSearchEmpty(query ? `No workspace objects matching "${query}"` : 'No workspace objects found');
+      if (!workspaceSearchResults.length) {
+        renderWorkspaceSearchEmpty(query ? `No workspace objects matching "${query}"` : 'No workspace objects found');
         return;
       }
 
-      container.innerHTML = searchResults.map((item, idx) => {
-        const isSelected = idx === searchSelectedIndex;
+      container.innerHTML = workspaceSearchResults.map((item, idx) => {
+        const isSelected = idx === workspaceSearchSelectedIndex;
         let badgeColor = 'bg-blue-900/40 text-blue-300 border border-blue-800/40';
         let iconSvg = '';
 
@@ -675,8 +695,8 @@
         return `
           <div class="search-result-item group flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer transition-colors ${isSelected ? 'bg-blue-600/25 text-white border border-blue-500/30' : 'text-gray-300 hover:bg-white/[0.05] border border-transparent'}"
                data-index="${idx}"
-               onmouseenter="hoverSearchResult(${idx})"
-               onmousedown="selectSearchResult(${idx})">
+               onmouseenter="hoverWorkspaceSearchResult(${idx})"
+               onmousedown="selectWorkspaceSearchResult(${idx})">
             <div class="flex items-center gap-3 min-w-0 flex-1">
               ${iconSvg}
               <div class="min-w-0 flex-1">
@@ -697,7 +717,7 @@
     document.addEventListener('click', (e) => {
       const wrap = document.getElementById('workspace-search-wrap');
       if (wrap && !wrap.contains(e.target)) {
-        closeSearchDropdown();
+        closeWorkspaceSearchDropdown();
       }
     });
 
@@ -710,8 +730,11 @@
         if (input) {
           input.focus();
           input.select();
-          openSearchDropdown();
-          fetchSearchResults(input.value.trim());
+          const query = input.value.trim();
+          if (query.length > 0) {
+            openWorkspaceSearchDropdown();
+            fetchWorkspaceSearchResults(query);
+          }
         }
       }
     });

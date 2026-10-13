@@ -818,6 +818,7 @@ def test_base_template_renders_search_dropdown_components():
         assert "workspace-search-dropdown" in response.text
         assert "workspace-search-results" in response.text
         assert "⌘P" in response.text
-        assert "openSearchDropdown" in response.text
+        assert "openWorkspaceSearchDropdown" in response.text
+        assert "handleNotebookFileFilterInput" in response.text
         # Ensure modal is not rendered
         assert "quick-open-modal" not in response.text
