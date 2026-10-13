@@ -1,5 +1,5 @@
-from __future__ import annotations
-
+import asyncio
+import logging
 import math
 import os
 import time
@@ -12,13 +12,21 @@ import botocore.exceptions
 import duckdb
 import httpx
 import jwt
+import websockets
 from dotenv import load_dotenv
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, Form, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from google import genai
 from starlette.middleware.base import BaseHTTPMiddleware
+
+try:
+    from ui import notebook_proxy
+except ImportError:
+    import notebook_proxy
+
+logger = logging.getLogger("lake.ui")
 
 _env_path = Path(__file__).parent.parent / ".env"
 load_dotenv(_env_path)
@@ -572,18 +580,16 @@ async def pipelines(request: Request):
 @app.get("/notebooks", response_class=HTMLResponse)
 async def notebooks(request: Request):
     ws = request.state.workspace
-    token_param = f"?token={JUPYTER_TOKEN}" if JUPYTER_TOKEN else ""
-    embed_url = (
-        f"/jupyter/lab/tree/{ws['slug']}/{token_param}" if ws else f"/jupyter/lab{token_param}"
-    )
+    user = request.state.user
+    user_role = user.get("role") if user else "user"
+    my_role = (ws.get("my_role") if ws else None) or user_role
     return templates.TemplateResponse(
-        "embed.html",
+        "notebooks.html",
         {
             "request": request,
             "page": "notebooks",
-            "embed_url": embed_url,
-            "embed_title": "Notebooks",
-            "embed_service": "JupyterLab",
+            "workspace": ws,
+            "my_role": my_role,
         },
     )
 
@@ -1096,6 +1102,327 @@ async def api_catalog_access_request(request: Request, catalog_id: str):
         return JSONResponse({"ok": False, "error": detail}, status_code=resp.status_code)
     except Exception as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
+# ── Native Notebooks API & WebSocket Proxy ────────────────────────────────
+
+
+def _get_notebook_auth_and_workspace(
+    request: Request, require_write: bool = False
+) -> tuple[dict[str, Any], dict[str, Any]] | JSONResponse:
+    token = request.cookies.get("lake_token")
+    if not token and request.headers.get("Authorization", "").startswith("Bearer "):
+        token = request.headers.get("Authorization", "").split(" ", 1)[1]
+
+    if not token:
+        if not AUTH_ENABLED:
+            user = {"sub": "dev@lake.local", "role": "superadmin"}
+            ws = {"id": "default", "slug": "default", "name": "Default", "my_role": "admin"}
+            return user, ws
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+
+    try:
+        user = jwt.decode(token, AUTH_SECRET_KEY, algorithms=["HS256"])
+    except Exception:
+        return JSONResponse({"detail": "Invalid or expired token"}, status_code=401)
+
+    workspaces = _fetch_workspaces(token)
+    active_id = request.cookies.get(_WORKSPACE_COOKIE, "")
+    active = next((w for w in workspaces if str(w["id"]) == active_id), None)
+    if not active and workspaces:
+        active = workspaces[0]
+    if not active:
+        active = {
+            "id": "default",
+            "slug": "default",
+            "name": "Default",
+            "my_role": user.get("role", "member"),
+        }
+
+    user_role = user.get("role")
+    ws_role = active.get("my_role") or user_role
+
+    if require_write:
+        if user_role != "superadmin" and ws_role == "viewer":
+            return JSONResponse(
+                {
+                    "detail": "Workspace viewer role is read-only. Cannot modify or execute notebooks."
+                },
+                status_code=403,
+            )
+
+    return user, active
+
+
+@app.get("/api/notebooks")
+async def api_list_notebooks(request: Request, subpath: str = ""):
+    auth_res = _get_notebook_auth_and_workspace(request, require_write=False)
+    if isinstance(auth_res, JSONResponse):
+        return auth_res
+    _, ws = auth_res
+    res = await notebook_proxy.list_workspace_notebooks(ws["slug"], subpath)
+    return JSONResponse(res)
+
+
+@app.post("/api/notebooks")
+async def api_create_notebook(request: Request):
+    auth_res = _get_notebook_auth_and_workspace(request, require_write=True)
+    if isinstance(auth_res, JSONResponse):
+        return auth_res
+    _, ws = auth_res
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    item_type = body.get("type", "notebook")
+    name = body.get("name")
+    folder = body.get("folder", "")
+    if item_type == "directory":
+        target = f"{folder}/{name}" if folder and name else (name or "new_folder")
+        status_code, data = await notebook_proxy.create_folder(ws["slug"], target)
+    else:
+        status_code, data = await notebook_proxy.create_notebook(ws["slug"], folder, name)
+    return JSONResponse(data, status_code=status_code)
+
+
+@app.post("/api/notebooks/sessions")
+async def api_create_session(request: Request):
+    auth_res = _get_notebook_auth_and_workspace(request, require_write=True)
+    if isinstance(auth_res, JSONResponse):
+        return auth_res
+    _, ws = auth_res
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    path = body.get("path", "")
+    kernel_name = body.get("kernel_name", "python3")
+    status_code, data = await notebook_proxy.get_or_create_session(ws["slug"], path, kernel_name)
+    return JSONResponse(data, status_code=status_code)
+
+
+@app.post("/api/notebooks/kernels/{kernel_id}/interrupt")
+async def api_interrupt_kernel(request: Request, kernel_id: str):
+    auth_res = _get_notebook_auth_and_workspace(request, require_write=True)
+    if isinstance(auth_res, JSONResponse):
+        return auth_res
+    status_code, data = await notebook_proxy.interrupt_kernel(kernel_id)
+    return JSONResponse(data, status_code=status_code)
+
+
+@app.post("/api/notebooks/kernels/{kernel_id}/restart")
+async def api_restart_kernel(request: Request, kernel_id: str):
+    auth_res = _get_notebook_auth_and_workspace(request, require_write=True)
+    if isinstance(auth_res, JSONResponse):
+        return auth_res
+    status_code, data = await notebook_proxy.restart_kernel(kernel_id)
+    return JSONResponse(data, status_code=status_code)
+
+
+@app.post("/api/notebooks/run-pipeline")
+async def api_run_pipeline(request: Request):
+    auth_res = _get_notebook_auth_and_workspace(request, require_write=True)
+    if isinstance(auth_res, JSONResponse):
+        return auth_res
+    user, ws = auth_res
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    path = body.get("path", "")
+    params = body.get("parameters", {})
+    user_email = user.get("sub", user.get("email", "system"))
+    status_code, data = await notebook_proxy.trigger_airflow_notebook_run(
+        ws["slug"], path, params, user_email
+    )
+    return JSONResponse(data, status_code=status_code)
+
+
+@app.get("/api/notebooks/runs")
+async def api_notebook_runs(request: Request, path: str = ""):
+    auth_res = _get_notebook_auth_and_workspace(request, require_write=False)
+    if isinstance(auth_res, JSONResponse):
+        return auth_res
+    _, ws = auth_res
+    runs = notebook_proxy.list_archived_runs(ws["slug"], path)
+    return JSONResponse({"runs": runs, "workspace": ws["slug"], "notebook": path})
+
+
+@app.get("/api/notebooks/{path:path}")
+async def api_get_notebook(request: Request, path: str):
+    auth_res = _get_notebook_auth_and_workspace(request, require_write=False)
+    if isinstance(auth_res, JSONResponse):
+        return auth_res
+    _, ws = auth_res
+    try:
+        clean_path = notebook_proxy.sanitize_notebook_path(path)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    status_code, data = await notebook_proxy.get_notebook(ws["slug"], clean_path)
+    return JSONResponse(data, status_code=status_code)
+
+
+@app.put("/api/notebooks/{path:path}")
+async def api_save_notebook(request: Request, path: str):
+    auth_res = _get_notebook_auth_and_workspace(request, require_write=True)
+    if isinstance(auth_res, JSONResponse):
+        return auth_res
+    _, ws = auth_res
+    try:
+        clean_path = notebook_proxy.sanitize_notebook_path(path)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+    status_code, data = await notebook_proxy.save_notebook(ws["slug"], clean_path, body)
+    return JSONResponse(data, status_code=status_code)
+
+
+@app.delete("/api/notebooks/{path:path}")
+async def api_delete_notebook(request: Request, path: str):
+    auth_res = _get_notebook_auth_and_workspace(request, require_write=True)
+    if isinstance(auth_res, JSONResponse):
+        return auth_res
+    _, ws = auth_res
+    try:
+        clean_path = notebook_proxy.sanitize_notebook_path(path)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    status_code, data = await notebook_proxy.delete_item(ws["slug"], clean_path)
+    return JSONResponse(data, status_code=status_code)
+
+
+@app.patch("/api/notebooks/{path:path}")
+async def api_rename_notebook(request: Request, path: str):
+    auth_res = _get_notebook_auth_and_workspace(request, require_write=True)
+    if isinstance(auth_res, JSONResponse):
+        return auth_res
+    _, ws = auth_res
+    try:
+        clean_path = notebook_proxy.sanitize_notebook_path(path)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    new_path = body.get("new_path")
+    if not new_path:
+        return JSONResponse({"error": "new_path is required"}, status_code=400)
+    try:
+        clean_new_path = notebook_proxy.sanitize_notebook_path(new_path)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    status_code, data = await notebook_proxy.rename_item(ws["slug"], clean_path, clean_new_path)
+    return JSONResponse(data, status_code=status_code)
+
+
+@app.websocket("/api/notebooks/kernels/{kernel_id}/channels")
+async def websocket_kernel_proxy(websocket: WebSocket, kernel_id: str):
+    await websocket.accept()
+
+    token = websocket.cookies.get("lake_token") or websocket.query_params.get("token")
+    if not token and AUTH_ENABLED:
+        await websocket.send_json(
+            {
+                "msg_type": "error",
+                "content": {"ename": "AuthError", "evalue": "Authentication required"},
+            }
+        )
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    if AUTH_ENABLED and token:
+        try:
+            user = jwt.decode(token, AUTH_SECRET_KEY, algorithms=["HS256"])
+        except Exception:
+            await websocket.send_json(
+                {
+                    "msg_type": "error",
+                    "content": {"ename": "AuthError", "evalue": "Invalid or expired token"},
+                }
+            )
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+
+        workspaces = _fetch_workspaces(token)
+        active_id = websocket.cookies.get(_WORKSPACE_COOKIE, "")
+        active = next((w for w in workspaces if str(w["id"]) == active_id), None)
+        if not active and workspaces:
+            active = workspaces[0]
+
+        user_role = user.get("role")
+        ws_role = (active.get("my_role") if active else None) or user_role
+        if user_role != "superadmin" and ws_role == "viewer":
+            await websocket.send_json(
+                {
+                    "msg_type": "error",
+                    "content": {
+                        "ename": "PermissionError",
+                        "evalue": "Viewer role cannot execute cells",
+                    },
+                }
+            )
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+
+    # Forward to Jupyter Server WebSocket
+    api_base = notebook_proxy.get_jupyter_api_base()
+    ws_base = api_base.replace("http://", "ws://").replace("https://", "wss://")
+    upstream_url = f"{ws_base}/api/kernels/{kernel_id}/channels"
+    if notebook_proxy.JUPYTER_TOKEN:
+        upstream_url += f"?token={notebook_proxy.JUPYTER_TOKEN}"
+
+    try:
+        async with websockets.connect(upstream_url) as upstream:
+
+            async def client_to_upstream():
+                try:
+                    while True:
+                        msg = await websocket.receive_text()
+                        await upstream.send(msg)
+                except (WebSocketDisconnect, asyncio.CancelledError):
+                    pass
+                except Exception as exc:
+                    logger.debug("Client to upstream error: %s", exc)
+
+            async def upstream_to_client():
+                try:
+                    while True:
+                        msg = await upstream.recv()
+                        if isinstance(msg, bytes):
+                            await websocket.send_bytes(msg)
+                        else:
+                            await websocket.send_text(msg)
+                except (WebSocketDisconnect, asyncio.CancelledError):
+                    pass
+                except Exception as exc:
+                    logger.debug("Upstream to client error: %s", exc)
+
+            tasks = [
+                asyncio.create_task(client_to_upstream()),
+                asyncio.create_task(upstream_to_client()),
+            ]
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+    except Exception as exc:
+        logger.warning("Upstream WebSocket connection error: %s", exc)
+        try:
+            await websocket.send_json(
+                {
+                    "msg_type": "error",
+                    "content": {
+                        "ename": "ConnectionError",
+                        "evalue": f"Cannot connect to kernel: {exc}",
+                    },
+                }
+            )
+            await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+        except Exception:
+            pass
 
 
 @app.get("/health")

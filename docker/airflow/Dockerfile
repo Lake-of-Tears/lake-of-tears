@@ -4,4 +4,6 @@ RUN pip install --no-cache-dir \
     boto3 \
     pyarrow \
     google-genai \
-    scikit-learn
+    scikit-learn \
+    papermill \
+    ipykernel

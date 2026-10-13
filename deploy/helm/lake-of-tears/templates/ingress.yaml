@@ -49,6 +49,9 @@ metadata:
     {{- $labels | nindent 4 }}
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: "512m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "86400"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "86400"
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
     {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
@@ -70,8 +73,9 @@ spec:
                 port:
                   name: http
 
+{{- if and .Values.jupyter.ingress .Values.jupyter.ingress.enabled }}
 ---
-# JupyterLab — served at /jupyter/ (no rewrite; Jupyter handles its own base_url)
+# JupyterLab — legacy ingress (deprecated; native notebooks proxy via Lake UI)
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -103,6 +107,7 @@ spec:
                 name: {{ $fullName }}-jupyter
                 port:
                   name: http
+{{- end }}
 
 ---
 # Apache Superset — own subdomain (path-based proxying breaks static asset URLs).

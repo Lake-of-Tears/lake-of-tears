@@ -272,6 +272,7 @@ _session_config_cache: dict | None = None
 _session_config_fetched_at: float = 0.0
 SESSION_CONFIG_TTL = 60.0  # seconds
 
+
 def get_session_config(backend_url: str) -> dict:
     global _session_config_cache, _session_config_fetched_at
     now = time.monotonic()
