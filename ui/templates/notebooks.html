@@ -187,6 +187,14 @@
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
           History
         </button>
+        <button onclick="toggleAudioCues()" id="btn-audio-cue" title="Execution Audio Cues: On (Click to mute)" class="btn-ghost text-xs py-1 px-2 text-gray-400 hover:text-gray-200">
+          <svg id="icon-audio-on" class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M11 5L6 9H2v6h4l5 4V5z"/>
+          </svg>
+          <svg id="icon-audio-off" class="w-3.5 h-3.5 hidden text-gray-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M5.586 15H2V9h3.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z M17 14l4-4m0 4l-4-4"/>
+          </svg>
+        </button>
       </div>
     </header>
 
@@ -440,6 +448,7 @@ const ansiUp = new AnsiUp();
 document.addEventListener('DOMContentLoaded', () => {
   loadFiles('');
   setupKeyboardShortcuts();
+  updateAudioCueUI();
 });
 
 function setupKeyboardShortcuts() {
@@ -1419,19 +1428,162 @@ function updateKernelStatus(state, label) {
   }
 }
 
-let executingCellIndex = null;
+// ── Subtle Audio Cues (VS Code style Web Audio API) ───────────────────────
 
-function runSelectedCell() {
-  runCell(activeCellIndex);
+let audioCtx = null;
+
+function initAudioContext() {
+  try {
+    if (!audioCtx) {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (AudioContextClass) {
+        audioCtx = new AudioContextClass();
+      }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') {
+      audioCtx.resume().catch(() => {});
+    }
+  } catch (err) {
+    // Audio unsupported or restricted
+  }
 }
 
-function runCell(idx) {
+function isSoundEnabled() {
+  const val = localStorage.getItem('lake_notebook_sound_enabled');
+  return val === null ? true : val === 'true';
+}
+
+function updateAudioCueUI() {
+  const enabled = isSoundEnabled();
+  const onIcon = document.getElementById('icon-audio-on');
+  const offIcon = document.getElementById('icon-audio-off');
+  const btn = document.getElementById('btn-audio-cue');
+  if (onIcon && offIcon) {
+    if (enabled) {
+      onIcon.classList.remove('hidden');
+      offIcon.classList.add('hidden');
+      if (btn) btn.title = 'Execution Audio Cues: On (Click to mute)';
+    } else {
+      onIcon.classList.add('hidden');
+      offIcon.classList.remove('hidden');
+      if (btn) btn.title = 'Execution Audio Cues: Muted (Click to enable)';
+    }
+  }
+}
+
+function toggleAudioCues() {
+  const current = isSoundEnabled();
+  const next = !current;
+  localStorage.setItem('lake_notebook_sound_enabled', String(next));
+  updateAudioCueUI();
+  if (next) {
+    initAudioContext();
+    playSuccessSound();
+    showToast('Execution audio cues enabled', 'info');
+  } else {
+    showToast('Execution audio cues muted', 'info');
+  }
+}
+
+function playSuccessSound() {
+  if (!isSoundEnabled()) return;
+  try {
+    initAudioContext();
+    if (!audioCtx) return;
+    const now = audioCtx.currentTime;
+
+    // Subtle two-tone ascending chime (587.33 Hz [D5] -> 880.00 Hz [A5])
+    // Very gentle peak gain, smooth envelope, zero click/pop
+    const osc1 = audioCtx.createOscillator();
+    const gain1 = audioCtx.createGain();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(587.33, now);
+    gain1.gain.setValueAtTime(0.0001, now);
+    gain1.gain.linearRampToValueAtTime(0.035, now + 0.015);
+    gain1.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
+    osc1.connect(gain1);
+    gain1.connect(audioCtx.destination);
+    osc1.start(now);
+    osc1.stop(now + 0.10);
+
+    const osc2 = audioCtx.createOscillator();
+    const gain2 = audioCtx.createGain();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(880.00, now + 0.07);
+    gain2.gain.setValueAtTime(0.0001, now + 0.07);
+    gain2.gain.linearRampToValueAtTime(0.045, now + 0.085);
+    gain2.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+    osc2.connect(gain2);
+    gain2.connect(audioCtx.destination);
+    osc2.start(now + 0.07);
+    osc2.stop(now + 0.23);
+  } catch (err) {
+    // Ignore audio error
+  }
+}
+
+function playErrorSound() {
+  if (!isSoundEnabled()) return;
+  try {
+    initAudioContext();
+    if (!audioCtx) return;
+    const now = audioCtx.currentTime;
+
+    // Subtle warm low descending cue (261.63 Hz [C4] -> 196.00 Hz [G3])
+    // Warm triangle wave with soft low envelope
+    const osc1 = audioCtx.createOscillator();
+    const gain1 = audioCtx.createGain();
+    osc1.type = 'triangle';
+    osc1.frequency.setValueAtTime(261.63, now);
+    gain1.gain.setValueAtTime(0.0001, now);
+    gain1.gain.linearRampToValueAtTime(0.04, now + 0.02);
+    gain1.gain.exponentialRampToValueAtTime(0.0001, now + 0.11);
+    osc1.connect(gain1);
+    gain1.connect(audioCtx.destination);
+    osc1.start(now);
+    osc1.stop(now + 0.12);
+
+    const osc2 = audioCtx.createOscillator();
+    const gain2 = audioCtx.createGain();
+    osc2.type = 'triangle';
+    osc2.frequency.setValueAtTime(196.00, now + 0.08);
+    gain2.gain.setValueAtTime(0.0001, now + 0.08);
+    gain2.gain.linearRampToValueAtTime(0.045, now + 0.10);
+    gain2.gain.exponentialRampToValueAtTime(0.0001, now + 0.24);
+    osc2.connect(gain2);
+    gain2.connect(audioCtx.destination);
+    osc2.start(now + 0.08);
+    osc2.stop(now + 0.25);
+  } catch (err) {
+    // Ignore audio error
+  }
+}
+
+// ── Cell Execution & Kernel Queue ─────────────────────────────────────────
+
+let executingCellIndex = null;
+let activeExecutions = new Map();
+let batchExecutionQueue = [];
+let isBatchRunning = false;
+
+function runSelectedCell() {
+  initAudioContext();
+  runCell(activeCellIndex, false);
+}
+
+function runCell(idx, isBatch = false) {
   if (IS_VIEWER) return;
+  initAudioContext();
   const cell = notebookModel.cells[idx];
-  if (cell.cell_type !== 'code') return;
+  if (!cell || cell.cell_type !== 'code') return;
   if (!kernelSocket || kernelSocket.readyState !== WebSocket.OPEN) {
     showToast('Kernel is not connected. Reconnecting...', 'info');
     connectKernelSession(currentNotebookPath);
+    if (isBatch) {
+      batchExecutionQueue = [];
+      isBatchRunning = false;
+    }
+    playErrorSound();
     return;
   }
 
@@ -1443,20 +1595,29 @@ function runCell(idx) {
   // Clear previous outputs
   cell.outputs = [];
   const outputsDiv = document.getElementById(`outputs-${idx}`);
-  outputsDiv.innerHTML = '';
-  outputsDiv.classList.remove('hidden');
+  if (outputsDiv) {
+    outputsDiv.innerHTML = '';
+    outputsDiv.classList.remove('hidden');
+  }
 
   const counterEl = document.getElementById(`cell-counter-${idx}`);
-  counterEl.textContent = '[*]:';
+  if (counterEl) counterEl.textContent = '[*]:';
 
   executingCellIndex = idx;
   const msgId = crypto.randomUUID();
+
+  activeExecutions.set(msgId, {
+    cellIndex: idx,
+    hasError: false,
+    isBatch: isBatch,
+    finished: false
+  });
 
   const executeMsg = {
     header: {
       msg_id: msgId,
       username: 'lake_user',
-      session: kernelSession.id,
+      session: kernelSession ? kernelSession.id : '',
       msg_type: 'execute_request',
       version: '5.3'
     },
@@ -1479,16 +1640,65 @@ function runCell(idx) {
 
 function runAllCells() {
   if (IS_VIEWER) return;
+  initAudioContext();
+  batchExecutionQueue = [];
   notebookModel.cells.forEach((cell, idx) => {
     if (cell.cell_type === 'code') {
-      setTimeout(() => runCell(idx), idx * 200);
+      batchExecutionQueue.push(idx);
     }
   });
+
+  if (!batchExecutionQueue.length) return;
+  isBatchRunning = true;
+  runNextBatchCell();
+}
+
+function runNextBatchCell() {
+  if (!batchExecutionQueue.length) {
+    isBatchRunning = false;
+    return;
+  }
+  const nextIdx = batchExecutionQueue.shift();
+  runCell(nextIdx, true);
+}
+
+function finishExecution(msgId) {
+  const exec = activeExecutions.get(msgId);
+  if (!exec || exec.finished) return;
+  exec.finished = true;
+  activeExecutions.delete(msgId);
+
+  if (executingCellIndex === exec.cellIndex) {
+    executingCellIndex = null;
+  }
+
+  if (exec.isBatch) {
+    if (exec.hasError) {
+      batchExecutionQueue = [];
+      isBatchRunning = false;
+      playErrorSound();
+    } else {
+      if (batchExecutionQueue.length > 0) {
+        runNextBatchCell();
+      } else {
+        isBatchRunning = false;
+        playSuccessSound();
+      }
+    }
+  } else {
+    if (exec.hasError) {
+      playErrorSound();
+    } else {
+      playSuccessSound();
+    }
+  }
 }
 
 function handleKernelMessage(msg) {
   const msgType = msg.msg_type || (msg.header ? msg.header.msg_type : '');
   const content = msg.content || {};
+  const parentMsgId = msg.parent_header ? msg.parent_header.msg_id : null;
+  const execInfo = parentMsgId ? activeExecutions.get(parentMsgId) : null;
 
   if (msgType === 'status') {
     const state = content.execution_state;
@@ -1498,25 +1708,53 @@ function handleKernelMessage(msg) {
     } else if (state === 'idle') {
       isKernelBusy = false;
       updateKernelStatus('idle', 'Python 3 (Idle)');
+      if (parentMsgId && activeExecutions.has(parentMsgId)) {
+        finishExecution(parentMsgId);
+      } else if (!parentMsgId && activeExecutions.size > 0) {
+        const firstKey = activeExecutions.keys().next().value;
+        if (firstKey) finishExecution(firstKey);
+      }
     }
-  } else if (msgType === 'execute_input' && executingCellIndex !== null) {
-    const counterEl = document.getElementById(`cell-counter-${executingCellIndex}`);
-    if (counterEl) counterEl.textContent = `[${content.execution_count}]:`;
-    notebookModel.cells[executingCellIndex].execution_count = content.execution_count;
-  } else if (executingCellIndex !== null && ['stream', 'execute_result', 'display_data', 'error'].includes(msgType)) {
-    const cell = notebookModel.cells[executingCellIndex];
-    const outObj = { output_type: msgType, ...content };
-    cell.outputs.push(outObj);
-    const outputsDiv = document.getElementById(`outputs-${executingCellIndex}`);
-    outputsDiv.innerHTML = renderCellOutputs(cell.outputs);
-    outputsDiv.classList.remove('hidden');
-    markDirty();
+  } else if (msgType === 'execute_input') {
+    const targetCellIdx = execInfo ? execInfo.cellIndex : executingCellIndex;
+    if (targetCellIdx !== null && notebookModel.cells[targetCellIdx]) {
+      const counterEl = document.getElementById(`cell-counter-${targetCellIdx}`);
+      if (counterEl) counterEl.textContent = `[${content.execution_count}]:`;
+      notebookModel.cells[targetCellIdx].execution_count = content.execution_count;
+    }
+  } else if (['stream', 'execute_result', 'display_data', 'error'].includes(msgType)) {
+    const targetCellIdx = execInfo ? execInfo.cellIndex : executingCellIndex;
+    if (targetCellIdx !== null && notebookModel.cells[targetCellIdx]) {
+      const cell = notebookModel.cells[targetCellIdx];
+      const outObj = { output_type: msgType, ...content };
+      cell.outputs.push(outObj);
+      const outputsDiv = document.getElementById(`outputs-${targetCellIdx}`);
+      if (outputsDiv) {
+        outputsDiv.innerHTML = renderCellOutputs(cell.outputs);
+        outputsDiv.classList.remove('hidden');
+      }
+      if (msgType === 'error') {
+        if (execInfo) execInfo.hasError = true;
+      }
+      markDirty();
+    }
+  } else if (msgType === 'execute_reply') {
+    if (content.status === 'error' && execInfo) {
+      execInfo.hasError = true;
+    }
+    if (parentMsgId && activeExecutions.has(parentMsgId)) {
+      finishExecution(parentMsgId);
+    }
   }
 }
 
 async function restartKernel() {
   if (IS_VIEWER || !kernelSession) return;
   const kernelId = kernelSession.kernel ? kernelSession.kernel.id : kernelSession.id;
+  batchExecutionQueue = [];
+  isBatchRunning = false;
+  activeExecutions.clear();
+  executingCellIndex = null;
   updateKernelStatus('busy', 'Restarting...');
   await fetch(`${API_BASE}/kernels/${kernelId}/restart`, { method: 'POST' });
   setTimeout(() => connectKernelSession(currentNotebookPath), 500);
@@ -1525,6 +1763,10 @@ async function restartKernel() {
 async function interruptKernel() {
   if (IS_VIEWER || !kernelSession) return;
   const kernelId = kernelSession.kernel ? kernelSession.kernel.id : kernelSession.id;
+  batchExecutionQueue = [];
+  isBatchRunning = false;
+  activeExecutions.clear();
+  executingCellIndex = null;
   await fetch(`${API_BASE}/kernels/${kernelId}/interrupt`, { method: 'POST' });
 }
 
