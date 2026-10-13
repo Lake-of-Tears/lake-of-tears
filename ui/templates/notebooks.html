@@ -102,6 +102,9 @@
       </div>
     </div>
 
+    <!-- Folder Breadcrumbs -->
+    <div id="folder-breadcrumbs" class="px-3 py-1.5 bg-[#141414] border-b border-white/[0.07] text-[11px] text-gray-400 flex items-center gap-1.5 shrink-0 hidden overflow-x-auto whitespace-nowrap"></div>
+
     <!-- File list -->
     <div class="flex-1 overflow-y-auto p-2 space-y-0.5" id="file-list">
       <div class="text-xs text-gray-500 text-center py-4">Loading workspace files...</div>
@@ -262,6 +265,7 @@
 const API_BASE = '/notebooks/api';
 const CURRENT_ROLE = {{ my_role | tojson }};
 const IS_VIEWER = CURRENT_ROLE === 'viewer';
+let currentFolder = '';
 let currentNotebookPath = null;
 let notebookModel = null;
 let activeCellIndex = 0;
@@ -275,7 +279,7 @@ const ansiUp = new AnsiUp();
 
 // Initialization
 document.addEventListener('DOMContentLoaded', () => {
-  loadFiles();
+  loadFiles('');
   setupKeyboardShortcuts();
 });
 
@@ -294,9 +298,51 @@ function setupKeyboardShortcuts() {
 
 // ── File Explorer ─────────────────────────────────────────────────────────
 
-async function loadFiles() {
+function updateBreadcrumbs() {
+  const bar = document.getElementById('folder-breadcrumbs');
+  if (!bar) return;
+  if (!currentFolder) {
+    bar.classList.add('hidden');
+    bar.innerHTML = '';
+    return;
+  }
+  bar.classList.remove('hidden');
+  const parts = currentFolder.split('/');
+  let html = `<button onclick="browseFolder('')" class="hover:text-blue-400 text-gray-400 truncate">root</button>`;
+  let accumulated = '';
+  for (let i = 0; i < parts.length; i++) {
+    accumulated = accumulated ? `${accumulated}/${parts[i]}` : parts[i];
+    const isLast = (i === parts.length - 1);
+    html += ` <span class="text-gray-600">/</span> `;
+    if (isLast) {
+      html += `<span class="text-gray-200 font-medium truncate">${parts[i]}</span>`;
+    } else {
+      const target = accumulated;
+      html += `<button onclick="browseFolder('${target}')" class="hover:text-blue-400 text-gray-400 truncate">${parts[i]}</button>`;
+    }
+  }
+  bar.innerHTML = html;
+}
+
+function browseFolder(path) {
+  currentFolder = path || '';
+  loadFiles(currentFolder);
+}
+
+function browseParentFolder() {
+  if (!currentFolder) return;
+  const parts = currentFolder.split('/');
+  parts.pop();
+  currentFolder = parts.join('/');
+  loadFiles(currentFolder);
+}
+
+async function loadFiles(folder = currentFolder) {
+  currentFolder = folder || '';
+  updateBreadcrumbs();
   try {
-    const res = await fetch(API_BASE);
+    const url = currentFolder ? `${API_BASE}?subpath=${encodeURIComponent(currentFolder)}` : API_BASE;
+    const res = await fetch(url);
     if (!res.ok) throw new Error('Failed to load files');
     const data = await res.json();
     fileTreeItems = data.items || [];
@@ -312,12 +358,24 @@ function renderFileList() {
   const filter = (document.getElementById('file-filter').value || '').toLowerCase();
   const items = fileTreeItems.filter(item => item.name.toLowerCase().includes(filter));
 
+  let html = '';
+  if (currentFolder) {
+    html += `
+      <div class="flex items-center gap-2 px-2 py-1.5 rounded text-xs cursor-pointer text-gray-400 hover:text-white hover:bg-white/[0.04] transition-colors"
+           onclick="browseParentFolder()">
+        <svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 17l-5-5m0 0l5-5m-5 5h12"/></svg>
+        <span class="font-medium text-gray-300">.. (up to parent folder)</span>
+      </div>
+    `;
+  }
+
   if (!items.length) {
-    container.innerHTML = '<div class="text-xs text-gray-500 text-center py-4">No notebooks found</div>';
+    html += '<div class="text-xs text-gray-500 text-center py-4">No notebooks or folders found</div>';
+    container.innerHTML = html;
     return;
   }
 
-  container.innerHTML = items.map(item => {
+  html += items.map(item => {
     const isDir = item.type === 'directory';
     const isCurrent = item.path === currentNotebookPath;
     return `
@@ -333,6 +391,10 @@ function renderFileList() {
         </div>
         ${!IS_VIEWER ? `
         <div class="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity shrink-0" onclick="event.stopPropagation()">
+          ${isDir ? `
+          <button onclick="promptNewNotebook('${item.path}')" title="New notebook in this folder" class="p-0.5 text-gray-500 hover:text-blue-400">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+          </button>` : ''}
           <button onclick="promptRename('${item.path}')" title="Rename" class="p-0.5 text-gray-500 hover:text-white">
             <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
           </button>
@@ -343,39 +405,42 @@ function renderFileList() {
       </div>
     `;
   }).join('');
+  container.innerHTML = html;
 }
 
 function filterFiles() {
   renderFileList();
 }
 
-async function promptNewNotebook() {
-  const name = prompt('Notebook name:', 'analysis.ipynb');
+async function promptNewNotebook(targetFolder = currentFolder) {
+  const promptMsg = targetFolder ? `Notebook name in /${targetFolder}:` : 'Notebook name:';
+  const name = prompt(promptMsg, 'analysis.ipynb');
   if (!name) return;
   const res = await fetch(API_BASE, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: name, type: 'notebook' })
+    body: JSON.stringify({ name: name, folder: targetFolder, type: 'notebook' })
   });
   if (res.ok) {
     const data = await res.json();
-    await loadFiles();
-    openNotebook(data.rel_path || name);
+    await loadFiles(currentFolder);
+    openNotebook(data.rel_path || (targetFolder ? `${targetFolder}/${name}` : name));
   } else {
     alert('Failed to create notebook');
   }
 }
 
-async function promptNewFolder() {
-  const name = prompt('Folder name:');
+async function promptNewFolder(targetFolder = currentFolder) {
+  const promptMsg = targetFolder ? `Folder name in /${targetFolder}:` : 'Folder name:';
+  const name = prompt(promptMsg);
   if (!name) return;
   const res = await fetch(API_BASE, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: name, type: 'directory' })
+    body: JSON.stringify({ name: name, folder: targetFolder, type: 'directory' })
   });
   if (res.ok) {
-    await loadFiles();
+    await loadFiles(currentFolder);
   } else {
     alert('Failed to create directory');
   }
@@ -393,7 +458,7 @@ async function promptRename(path) {
   });
   if (res.ok) {
     if (currentNotebookPath === path) currentNotebookPath = newPath;
-    await loadFiles();
+    await loadFiles(currentFolder);
   } else {
     alert('Failed to rename item');
   }
@@ -406,7 +471,7 @@ async function promptDelete(path) {
   });
   if (res.ok) {
     if (currentNotebookPath === path) closeNotebook();
-    await loadFiles();
+    await loadFiles(currentFolder);
   } else {
     alert('Failed to delete item');
   }

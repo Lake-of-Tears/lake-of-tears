@@ -215,7 +215,10 @@ async def create_notebook(
 ) -> tuple[int, dict[str, Any]]:
     """Create a new notebook inside the workspace."""
     await ensure_workspace_dir(workspace_slug)
-    ws_dir = get_workspace_dir(workspace_slug, folder_path)
+    clean_folder = sanitize_notebook_path(folder_path) if folder_path else ""
+    if clean_folder and name and name.startswith(clean_folder + "/"):
+        name = name[len(clean_folder) + 1 :]
+    ws_dir = get_workspace_dir(workspace_slug, clean_folder)
     base_name = name or f"notebook_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}.ipynb"
     if not base_name.endswith(".ipynb"):
         base_name += ".ipynb"
