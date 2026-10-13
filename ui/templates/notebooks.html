@@ -446,9 +446,30 @@ const ansiUp = new AnsiUp();
 
 // Initialization
 document.addEventListener('DOMContentLoaded', () => {
-  loadFiles('');
   setupKeyboardShortcuts();
   updateAudioCueUI();
+
+  const urlParams = new URLSearchParams(window.location.search);
+  const targetPath = urlParams.get('path');
+  const targetFolder = urlParams.get('folder');
+
+  if (targetPath) {
+    const parts = targetPath.split('/');
+    if (parts.length > 1) {
+      parts.pop();
+      currentFolder = parts.join('/');
+    } else {
+      currentFolder = '';
+    }
+    loadFiles(currentFolder).then(() => {
+      openNotebook(targetPath);
+    });
+  } else if (targetFolder) {
+    currentFolder = targetFolder;
+    loadFiles(currentFolder);
+  } else {
+    loadFiles('');
+  }
 });
 
 function setupKeyboardShortcuts() {

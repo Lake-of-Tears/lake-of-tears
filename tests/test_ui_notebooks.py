@@ -677,3 +677,122 @@ def test_api_search_endpoint():
         resp_invalid = client.get("/notebooks/api/search?q=db&subpath=../secret", cookies=cookies)
         assert resp_invalid.status_code == 400
         assert "Invalid path traversal" in resp_invalid.json()["error"]
+
+
+def test_workspace_search_unauthenticated_blocked():
+    with patch.object(main, "AUTH_ENABLED", True):
+        res = client.get("/api/workspace/search?q=test")
+        assert res.status_code == 401
+        assert res.json()["detail"] == "Not authenticated"
+
+
+def test_workspace_search_aggregated_results():
+    token, workspaces = _create_auth_cookie(role="member")
+    cookies = {"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"}
+
+    mock_nb_items = [
+        {
+            "name": "aws_db_ingest.ipynb",
+            "path": "aws/aws_db_ingest.ipynb",
+            "type": "notebook",
+            "parent_dir": "aws",
+        },
+        {
+            "name": "db_backups",
+            "path": "db_backups",
+            "type": "directory",
+            "parent_dir": "",
+        },
+    ]
+
+    mock_catalogs = [
+        {"name": "ecommerce_db", "description": "Customer order data warehouse"},
+        {"name": "marketing_events", "description": "Clickstream events"},
+    ]
+
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_fetch_workspaces", return_value=workspaces),
+        patch.object(
+            notebook_proxy,
+            "search_workspace_items",
+            new_callable=AsyncMock,
+            return_value=mock_nb_items,
+        ) as mock_search,
+        patch.object(main, "_backend_get", return_value=mock_catalogs),
+    ):
+        resp = client.get("/api/workspace/search?q=db", cookies=cookies)
+        assert resp.status_code == 200
+        mock_search.assert_called_once_with("default", query="db", subpath="")
+        data = resp.json()
+        assert data["query"] == "db"
+        assert data["workspace"] == "default"
+        results = data["results"]
+
+        # Check notebook result
+        nb_matches = [r for r in results if r["type"] == "notebook"]
+        assert len(nb_matches) == 1
+        assert nb_matches[0]["title"] == "aws_db_ingest.ipynb"
+        assert nb_matches[0]["url"] == "/notebooks?path=aws/aws_db_ingest.ipynb"
+        assert "Notebook in /aws" in nb_matches[0]["subtitle"]
+
+        # Check folder result
+        folder_matches = [r for r in results if r["type"] == "folder"]
+        assert len(folder_matches) == 1
+        assert folder_matches[0]["title"] == "db_backups"
+        assert folder_matches[0]["url"] == "/notebooks?folder=db_backups"
+
+        # Check catalog result
+        cat_matches = [r for r in results if r["type"] == "catalog"]
+        assert any(c["title"] == "ecommerce_db" for c in cat_matches)
+
+        # Check page result (e.g. SQL Editor mentioning DuckDB)
+        page_matches = [r for r in results if r["type"] == "page"]
+        assert any("DuckDB" in p["subtitle"] or "SQL" in p["title"] for p in page_matches)
+
+
+def test_workspace_search_empty_query():
+    token, workspaces = _create_auth_cookie(role="member")
+    cookies = {"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"}
+
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_fetch_workspaces", return_value=workspaces),
+        patch.object(
+            notebook_proxy,
+            "search_workspace_items",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch.object(main, "_backend_get", return_value=[]),
+    ):
+        resp = client.get("/api/workspace/search", cookies=cookies)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["count"] > 0
+        # Should include pipelines, storage sources, and nav pages
+        types = {r["type"] for r in data["results"]}
+        assert "pipeline" in types
+        assert "storage" in types
+        assert "page" in types
+
+
+def test_base_template_renders_quick_open_components():
+    token = jwt.encode(
+        {"sub": "user@lake.local", "email": "user@lake.local", "role": "user"},
+        main.AUTH_SECRET_KEY,
+        algorithm="HS256",
+    )
+    mock_workspaces = [{"id": "ws-1", "name": "Default", "slug": "default", "my_role": "member"}]
+
+    with patch.object(main, "_fetch_workspaces", return_value=mock_workspaces):
+        response = client.get(
+            "/notebooks",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
+        )
+        assert response.status_code == 200
+        assert "quick-open-modal" in response.text
+        assert "quick-open-input" in response.text
+        assert "quick-open-results" in response.text
+        assert "⌘P" in response.text
+        assert "openQuickOpen" in response.text

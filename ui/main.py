@@ -3,6 +3,7 @@ import logging
 import math
 import os
 import time
+import urllib.parse
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -1284,6 +1285,158 @@ async def api_search_notebooks(request: Request, q: str = "", subpath: str = "")
             "query": q,
             "subpath": clean_subpath,
             "workspace": ws["slug"],
+        }
+    )
+
+
+@app.get("/api/workspace/search")
+async def api_workspace_search(request: Request, q: str = ""):
+    auth_res = _get_notebook_auth_and_workspace(request, require_write=False)
+    if isinstance(auth_res, JSONResponse):
+        return auth_res
+    user, ws = auth_res
+    token = request.cookies.get("lake_token") or ""
+    query = q.strip().lower()
+
+    results: list[dict[str, Any]] = []
+
+    # 1. Notebooks and Folders (from Jupyter workspace)
+    try:
+        nb_items = await notebook_proxy.search_workspace_items(ws["slug"], query=query, subpath="")
+        for item in nb_items:
+            is_dir = item.get("type") == "directory"
+            parent = item.get("parent_dir", "")
+            location_desc = f"/{parent}" if parent else "Workspace Root"
+            if is_dir:
+                results.append(
+                    {
+                        "category": "Folders",
+                        "title": item["name"],
+                        "subtitle": f"Folder in {location_desc}",
+                        "url": f"/notebooks?folder={urllib.parse.quote(item['path'])}",
+                        "type": "folder",
+                        "path": item["path"],
+                    }
+                )
+            else:
+                results.append(
+                    {
+                        "category": "Notebooks",
+                        "title": item["name"],
+                        "subtitle": f"Notebook in {location_desc}",
+                        "url": f"/notebooks?path={urllib.parse.quote(item['path'])}",
+                        "type": "notebook",
+                        "path": item["path"],
+                    }
+                )
+    except Exception as exc:
+        logger.warning("Error searching notebooks in workspace search: %s", exc)
+
+    # 2. Catalog Tables & Datasets
+    try:
+        catalogs = []
+        if token and ws.get("id") != "default":
+            catalogs = _backend_get(f"/api/workspaces/{ws['id']}/catalogs", token) or []
+        elif token:
+            catalogs = _backend_get("/api/catalogs", token) or []
+        for cat in catalogs:
+            cat_name = cat.get("name", "")
+            cat_desc = cat.get("description") or "Data Catalog"
+            if not query or query in cat_name.lower() or query in cat_desc.lower():
+                results.append(
+                    {
+                        "category": "Catalog",
+                        "title": cat_name,
+                        "subtitle": cat_desc,
+                        "url": "/catalog",
+                        "type": "catalog",
+                        "path": cat_name,
+                    }
+                )
+    except Exception as exc:
+        logger.warning("Error searching catalog in workspace search: %s", exc)
+
+    # 3. Pipelines (Airflow DAGs)
+    pipelines_list = [
+        {"name": "run_notebook", "desc": "On-demand execution of notebooks via Airflow"},
+        {"name": "daily_ingest", "desc": "Scheduled ingestion & normalization"},
+        {"name": "ecommerce_sync", "desc": "Shopify & Stripe sync"},
+    ]
+    for pipe in pipelines_list:
+        if not query or query in pipe["name"].lower() or query in pipe["desc"].lower():
+            results.append(
+                {
+                    "category": "Pipelines",
+                    "title": pipe["name"],
+                    "subtitle": pipe["desc"],
+                    "url": "/pipelines",
+                    "type": "pipeline",
+                    "path": pipe["name"],
+                }
+            )
+
+    # 4. Storage Sources (S3 / MinIO)
+    for src in SOURCES:
+        src_label = SOURCE_LABELS.get(src, src.title())
+        src_desc = f"MinIO S3 prefix: raw/{src}/"
+        if not query or query in src.lower() or query in src_label.lower():
+            results.append(
+                {
+                    "category": "Storage",
+                    "title": f"{src_label} Storage",
+                    "subtitle": src_desc,
+                    "url": "/storage",
+                    "type": "storage",
+                    "path": f"raw/{src}",
+                }
+            )
+
+    # 5. Application Pages
+    nav_pages = [
+        {"title": "Dashboard", "subtitle": "System overview & metrics", "url": "/"},
+        {"title": "Catalog", "subtitle": "Datasets & schemas", "url": "/catalog"},
+        {"title": "Storage", "subtitle": "MinIO S3 data lake buckets", "url": "/storage"},
+        {"title": "SQL Editor", "subtitle": "DuckDB SQL queries", "url": "/sql"},
+        {"title": "Visualizations", "subtitle": "Apache Superset dashboards", "url": "/dashboards"},
+        {"title": "Pipelines", "subtitle": "Apache Airflow DAGs", "url": "/pipelines"},
+        {"title": "Data Ingestion", "subtitle": "Connectors & ingestion status", "url": "/ingest"},
+        {"title": "AI Query", "subtitle": "Gemini natural language SQL", "url": "/ai"},
+        {
+            "title": "Anomaly Detection",
+            "subtitle": "Data drift & anomaly detection",
+            "url": "/anomalies",
+        },
+        {"title": "Notebooks", "subtitle": "Interactive Jupyter notebooks", "url": "/notebooks"},
+        {
+            "title": "Workspace Settings",
+            "subtitle": "Manage workspace members & catalogs",
+            "url": "/settings/workspace",
+        },
+        {
+            "title": "Account Settings",
+            "subtitle": "Profile & credentials",
+            "url": "/settings/account",
+        },
+    ]
+    for page in nav_pages:
+        if not query or query in page["title"].lower() or query in page["subtitle"].lower():
+            results.append(
+                {
+                    "category": "Navigation",
+                    "title": page["title"],
+                    "subtitle": page["subtitle"],
+                    "url": page["url"],
+                    "type": "page",
+                    "path": page["url"],
+                }
+            )
+
+    return JSONResponse(
+        {
+            "query": q,
+            "workspace": ws["slug"],
+            "count": len(results),
+            "results": results[:60],
         }
     )
 
