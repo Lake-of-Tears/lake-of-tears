@@ -1155,6 +1155,7 @@ def _get_notebook_auth_and_workspace(
 
 
 @app.get("/api/notebooks")
+@app.get("/notebooks/api")
 async def api_list_notebooks(request: Request, subpath: str = ""):
     auth_res = _get_notebook_auth_and_workspace(request, require_write=False)
     if isinstance(auth_res, JSONResponse):
@@ -1165,6 +1166,7 @@ async def api_list_notebooks(request: Request, subpath: str = ""):
 
 
 @app.post("/api/notebooks")
+@app.post("/notebooks/api")
 async def api_create_notebook(request: Request):
     auth_res = _get_notebook_auth_and_workspace(request, require_write=True)
     if isinstance(auth_res, JSONResponse):
@@ -1186,6 +1188,7 @@ async def api_create_notebook(request: Request):
 
 
 @app.post("/api/notebooks/sessions")
+@app.post("/notebooks/api/sessions")
 async def api_create_session(request: Request):
     auth_res = _get_notebook_auth_and_workspace(request, require_write=True)
     if isinstance(auth_res, JSONResponse):
@@ -1202,6 +1205,7 @@ async def api_create_session(request: Request):
 
 
 @app.post("/api/notebooks/kernels/{kernel_id}/interrupt")
+@app.post("/notebooks/api/kernels/{kernel_id}/interrupt")
 async def api_interrupt_kernel(request: Request, kernel_id: str):
     auth_res = _get_notebook_auth_and_workspace(request, require_write=True)
     if isinstance(auth_res, JSONResponse):
@@ -1211,6 +1215,7 @@ async def api_interrupt_kernel(request: Request, kernel_id: str):
 
 
 @app.post("/api/notebooks/kernels/{kernel_id}/restart")
+@app.post("/notebooks/api/kernels/{kernel_id}/restart")
 async def api_restart_kernel(request: Request, kernel_id: str):
     auth_res = _get_notebook_auth_and_workspace(request, require_write=True)
     if isinstance(auth_res, JSONResponse):
@@ -1220,6 +1225,7 @@ async def api_restart_kernel(request: Request, kernel_id: str):
 
 
 @app.post("/api/notebooks/run-pipeline")
+@app.post("/notebooks/api/run-pipeline")
 async def api_run_pipeline(request: Request):
     auth_res = _get_notebook_auth_and_workspace(request, require_write=True)
     if isinstance(auth_res, JSONResponse):
@@ -1239,6 +1245,7 @@ async def api_run_pipeline(request: Request):
 
 
 @app.get("/api/notebooks/runs")
+@app.get("/notebooks/api/runs")
 async def api_notebook_runs(request: Request, path: str = ""):
     auth_res = _get_notebook_auth_and_workspace(request, require_write=False)
     if isinstance(auth_res, JSONResponse):
@@ -1249,6 +1256,7 @@ async def api_notebook_runs(request: Request, path: str = ""):
 
 
 @app.get("/api/notebooks/{path:path}")
+@app.get("/notebooks/api/{path:path}")
 async def api_get_notebook(request: Request, path: str):
     auth_res = _get_notebook_auth_and_workspace(request, require_write=False)
     if isinstance(auth_res, JSONResponse):
@@ -1263,6 +1271,7 @@ async def api_get_notebook(request: Request, path: str):
 
 
 @app.put("/api/notebooks/{path:path}")
+@app.put("/notebooks/api/{path:path}")
 async def api_save_notebook(request: Request, path: str):
     auth_res = _get_notebook_auth_and_workspace(request, require_write=True)
     if isinstance(auth_res, JSONResponse):
@@ -1281,6 +1290,7 @@ async def api_save_notebook(request: Request, path: str):
 
 
 @app.delete("/api/notebooks/{path:path}")
+@app.delete("/notebooks/api/{path:path}")
 async def api_delete_notebook(request: Request, path: str):
     auth_res = _get_notebook_auth_and_workspace(request, require_write=True)
     if isinstance(auth_res, JSONResponse):
@@ -1295,6 +1305,7 @@ async def api_delete_notebook(request: Request, path: str):
 
 
 @app.patch("/api/notebooks/{path:path}")
+@app.patch("/notebooks/api/{path:path}")
 async def api_rename_notebook(request: Request, path: str):
     auth_res = _get_notebook_auth_and_workspace(request, require_write=True)
     if isinstance(auth_res, JSONResponse):
@@ -1320,6 +1331,7 @@ async def api_rename_notebook(request: Request, path: str):
 
 
 @app.websocket("/api/notebooks/kernels/{kernel_id}/channels")
+@app.websocket("/notebooks/api/kernels/{kernel_id}/channels")
 async def websocket_kernel_proxy(websocket: WebSocket, kernel_id: str):
     await websocket.accept()
 

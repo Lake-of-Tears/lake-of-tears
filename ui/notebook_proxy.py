@@ -139,9 +139,7 @@ async def ensure_workspace_dir(workspace_slug: str) -> None:
     """Ensure the workspaces/ and workspaces/{slug}/ directories exist in Jupyter."""
     try:
         # Ensure workspaces root
-        await jupyter_request(
-            "POST", "contents", json_data={"type": "directory", "name": "workspaces"}
-        )
+        await jupyter_request("PUT", "contents/workspaces", json_data={"type": "directory"})
     except Exception:
         pass
 
@@ -150,9 +148,9 @@ async def ensure_workspace_dir(workspace_slug: str) -> None:
     status, _ = await jupyter_request("GET", f"contents/{target_path}")
     if status != 200:
         await jupyter_request(
-            "POST",
-            "contents/workspaces",
-            json_data={"type": "directory", "name": clean_slug},
+            "PUT",
+            f"contents/{target_path}",
+            json_data={"type": "directory"},
         )
 
 
@@ -245,12 +243,9 @@ async def create_folder(workspace_slug: str, folder_path: str) -> tuple[int, dic
     clean_path = sanitize_notebook_path(folder_path)
     if not clean_path:
         return 400, {"error": "Invalid folder path"}
-    parts = clean_path.split("/")
-    parent = "/".join(parts[:-1]) if len(parts) > 1 else ""
-    name = parts[-1]
-    parent_ws = get_workspace_dir(workspace_slug, parent)
-    payload = {"type": "directory", "name": name}
-    status, data = await jupyter_request("POST", f"contents/{parent_ws}", json_data=payload)
+    target_ws = get_workspace_dir(workspace_slug, clean_path)
+    payload = {"type": "directory"}
+    status, data = await jupyter_request("PUT", f"contents/{target_ws}", json_data=payload)
     return status, data if isinstance(data, dict) else {"result": data}
 
 
