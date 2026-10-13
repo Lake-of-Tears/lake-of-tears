@@ -20,8 +20,16 @@ spec:
         app.kubernetes.io/name: {{ include "lake-of-tears.name" . }}
         app.kubernetes.io/component: minio
     spec:
+      {{- with .Values.minio.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: minio
+          {{- with .Values.minio.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           image: {{ .Values.minio.image.repository }}:{{ .Values.minio.image.tag }}
           args: ["server", "/data", "--console-address", ":9001"]
           env:
@@ -93,8 +101,16 @@ spec:
   template:
     spec:
       restartPolicy: OnFailure
+      {{- with .Values.minio.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       initContainers:
         - name: wait-for-minio
+          {{- with .Values.minio.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           image: busybox
           command:
             - sh
@@ -105,8 +121,14 @@ spec:
               done
       containers:
         - name: mc
+          {{- with .Values.minio.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           image: minio/mc:RELEASE.2023-01-28T20-29-38Z
           env:
+            - name: MC_CONFIG_DIR
+              value: /tmp/.mc
             - name: MINIO_ROOT_USER
               valueFrom:
                 secretKeyRef:
