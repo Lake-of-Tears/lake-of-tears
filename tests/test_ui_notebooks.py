@@ -488,3 +488,189 @@ def test_api_list_directories_and_move_item():
         )
         assert res_move.status_code == 200
         assert res_move.json()["path"] == "workspaces/default/analytics/models"
+
+
+@pytest.mark.anyio
+async def test_search_workspace_items_recursive_root():
+    with (
+        patch.object(notebook_proxy, "ensure_workspace_dir", new_callable=AsyncMock),
+        patch.object(notebook_proxy, "jupyter_request", new_callable=AsyncMock) as mock_req,
+    ):
+        mock_req.side_effect = [
+            # 1. Root listing
+            (
+                200,
+                {
+                    "content": [
+                        {"name": "aws", "type": "directory", "path": "workspaces/default/aws"},
+                        {"name": "azure", "type": "directory", "path": "workspaces/default/azure"},
+                        {
+                            "name": "db_root.ipynb",
+                            "type": "notebook",
+                            "path": "workspaces/default/db_root.ipynb",
+                        },
+                        {
+                            "name": "readme.md",
+                            "type": "file",
+                            "path": "workspaces/default/readme.md",
+                        },
+                    ]
+                },
+            ),
+            # 2. aws/ listing
+            (
+                200,
+                {
+                    "content": [
+                        {
+                            "name": "db_dump.ipynb",
+                            "type": "notebook",
+                            "path": "workspaces/default/aws/db_dump.ipynb",
+                        },
+                        {
+                            "name": "nested_db",
+                            "type": "directory",
+                            "path": "workspaces/default/aws/nested_db",
+                        },
+                    ]
+                },
+            ),
+            # 3. azure/ listing
+            (
+                200,
+                {
+                    "content": [
+                        {
+                            "name": "db_etl.ipynb",
+                            "type": "notebook",
+                            "path": "workspaces/default/azure/db_etl.ipynb",
+                        },
+                    ]
+                },
+            ),
+            # 4. aws/nested_db/ listing
+            (
+                200,
+                {
+                    "content": [
+                        {
+                            "name": "deep.ipynb",
+                            "type": "notebook",
+                            "path": "workspaces/default/aws/nested_db/deep.ipynb",
+                        },
+                    ]
+                },
+            ),
+        ]
+
+        # Search for "db" from root
+        results = await notebook_proxy.search_workspace_items("default", query="db", subpath="")
+        paths = [item["path"] for item in results]
+        names = [item["name"] for item in results]
+
+        # Should match nested_db directory, db_dump.ipynb, db_etl.ipynb, and db_root.ipynb
+        assert "aws/nested_db" in paths
+        assert "aws/db_dump.ipynb" in paths
+        assert "azure/db_etl.ipynb" in paths
+        assert "db_root.ipynb" in paths
+        assert "deep.ipynb" not in names
+        assert "readme.md" not in names
+
+        # Verify parent_dir attributes
+        nested_dir_item = next(i for i in results if i["name"] == "nested_db")
+        assert nested_dir_item["parent_dir"] == "aws"
+        assert nested_dir_item["type"] == "directory"
+
+        aws_item = next(i for i in results if i["name"] == "db_dump.ipynb")
+        assert aws_item["parent_dir"] == "aws"
+
+        azure_item = next(i for i in results if i["name"] == "db_etl.ipynb")
+        assert azure_item["parent_dir"] == "azure"
+
+        root_item = next(i for i in results if i["name"] == "db_root.ipynb")
+        assert root_item["parent_dir"] == ""
+
+
+@pytest.mark.anyio
+async def test_search_workspace_items_scoped_to_subfolder():
+    with (
+        patch.object(notebook_proxy, "ensure_workspace_dir", new_callable=AsyncMock),
+        patch.object(notebook_proxy, "jupyter_request", new_callable=AsyncMock) as mock_req,
+    ):
+        mock_req.side_effect = [
+            # Listing aws/
+            (
+                200,
+                {
+                    "content": [
+                        {
+                            "name": "db_aws.ipynb",
+                            "type": "notebook",
+                            "path": "workspaces/default/aws/db_aws.ipynb",
+                        },
+                        {
+                            "name": "pipelines",
+                            "type": "directory",
+                            "path": "workspaces/default/aws/pipelines",
+                        },
+                    ]
+                },
+            ),
+            # Listing aws/pipelines/
+            (
+                200,
+                {
+                    "content": [
+                        {
+                            "name": "db_pipe.ipynb",
+                            "type": "notebook",
+                            "path": "workspaces/default/aws/pipelines/db_pipe.ipynb",
+                        },
+                    ]
+                },
+            ),
+        ]
+
+        # Search for "db" scoped to "aws"
+        results = await notebook_proxy.search_workspace_items("default", query="db", subpath="aws")
+        paths = [item["path"] for item in results]
+        assert paths == ["aws/db_aws.ipynb", "aws/pipelines/db_pipe.ipynb"]
+
+
+def test_api_search_endpoint():
+    token, workspaces = _create_auth_cookie(role="member")
+    cookies = {"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"}
+
+    mock_search_results = [
+        {
+            "name": "db_sync.ipynb",
+            "path": "aws/db_sync.ipynb",
+            "type": "notebook",
+            "parent_dir": "aws",
+        }
+    ]
+
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_fetch_workspaces", return_value=workspaces),
+        patch.object(
+            notebook_proxy,
+            "search_workspace_items",
+            new_callable=AsyncMock,
+            return_value=mock_search_results,
+        ) as mock_search,
+    ):
+        # 1. Successful search via /notebooks/api/search
+        resp = client.get("/notebooks/api/search?q=db&subpath=aws", cookies=cookies)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["query"] == "db"
+        assert data["subpath"] == "aws"
+        assert len(data["items"]) == 1
+        assert data["items"][0]["name"] == "db_sync.ipynb"
+        mock_search.assert_called_once_with("default", query="db", subpath="aws")
+
+        # 2. Path traversal in subpath returns 400
+        resp_invalid = client.get("/notebooks/api/search?q=db&subpath=../secret", cookies=cookies)
+        assert resp_invalid.status_code == 400
+        assert "Invalid path traversal" in resp_invalid.json()["error"]

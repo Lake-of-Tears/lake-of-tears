@@ -1178,7 +1178,7 @@ async def api_create_notebook(request: Request):
         body = {}
     item_type = body.get("type", "notebook")
     name = body.get("name")
-    folder = body.get("folder", "")
+    folder = body.get("folder") or body.get("folder_path") or ""
     if item_type == "directory":
         target = f"{folder}/{name}" if folder and name else (name or "new_folder")
         status_code, data = await notebook_proxy.create_folder(ws["slug"], target)
@@ -1264,6 +1264,28 @@ async def api_list_directories(request: Request):
     _, ws = auth_res
     folders = await notebook_proxy.list_workspace_folders(ws["slug"])
     return JSONResponse({"directories": folders, "workspace": ws["slug"]})
+
+
+@app.get("/api/notebooks/search")
+@app.get("/notebooks/api/search")
+async def api_search_notebooks(request: Request, q: str = "", subpath: str = ""):
+    auth_res = _get_notebook_auth_and_workspace(request, require_write=False)
+    if isinstance(auth_res, JSONResponse):
+        return auth_res
+    _, ws = auth_res
+    try:
+        clean_subpath = notebook_proxy.sanitize_notebook_path(subpath) if subpath else ""
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    items = await notebook_proxy.search_workspace_items(ws["slug"], query=q, subpath=clean_subpath)
+    return JSONResponse(
+        {
+            "items": items,
+            "query": q,
+            "subpath": clean_subpath,
+            "workspace": ws["slug"],
+        }
+    )
 
 
 @app.get("/api/notebooks/{path:path}")

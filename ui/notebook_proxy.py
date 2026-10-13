@@ -280,6 +280,82 @@ async def list_workspace_folders(
     return sorted(folders)
 
 
+async def search_workspace_items(
+    workspace_slug: str,
+    query: str = "",
+    subpath: str = "",
+    max_depth: int = 10,
+    limit: int = 300,
+) -> list[dict[str, Any]]:
+    """Recursively search for notebooks, files, and directories matching query starting from subpath."""
+    await ensure_workspace_dir(workspace_slug)
+    clean_subpath = sanitize_notebook_path(subpath) if subpath else ""
+    q = query.strip().lower()
+
+    results: list[dict[str, Any]] = []
+    queue: list[tuple[str, int]] = [(clean_subpath, 0)]
+    visited: set[str] = set()
+
+    prefix = get_workspace_dir(workspace_slug) + "/"
+
+    while queue and len(results) < limit:
+        curr, depth = queue.pop(0)
+        if curr in visited:
+            continue
+        visited.add(curr)
+
+        if depth > max_depth:
+            continue
+
+        ws_path = get_workspace_dir(workspace_slug, curr)
+        status, data = await jupyter_request("GET", f"contents/{ws_path}")
+        if status != 200 or not isinstance(data, dict):
+            continue
+
+        content = data.get("content", [])
+        if not isinstance(content, list):
+            continue
+
+        for entry in content:
+            raw_path = entry.get("path", "")
+            rel_path = raw_path[len(prefix) :] if raw_path.startswith(prefix) else raw_path
+            if not rel_path:
+                continue
+
+            name = entry.get("name") or rel_path.split("/")[-1]
+            entry_type = entry.get("type", "file")
+            parent_dir = "/".join(rel_path.split("/")[:-1]) if "/" in rel_path else ""
+
+            matches = True
+            if q:
+                if "/" in q:
+                    matches = q in rel_path.lower()
+                else:
+                    matches = q in name.lower()
+
+            if matches:
+                results.append(
+                    {
+                        "name": name,
+                        "path": rel_path,
+                        "type": entry_type,
+                        "parent_dir": parent_dir,
+                        "last_modified": entry.get("last_modified"),
+                        "created": entry.get("created"),
+                        "size": entry.get("size"),
+                        "writable": entry.get("writable", True),
+                    }
+                )
+                if len(results) >= limit:
+                    break
+
+            if entry_type == "directory":
+                queue.append((rel_path, depth + 1))
+
+    results.sort(key=lambda x: (0 if x["type"] == "directory" else 1, x["name"].lower()))
+    return results
+
+
 async def delete_item(workspace_slug: str, path: str) -> tuple[int, dict[str, Any]]:
     """Delete a notebook or directory within the workspace."""
     ws_path = get_workspace_dir(workspace_slug, path)
