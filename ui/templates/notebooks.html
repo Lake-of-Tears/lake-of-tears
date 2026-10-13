@@ -259,6 +259,7 @@
 
 <script>
 // State
+const API_BASE = '/notebooks/api';
 const CURRENT_ROLE = {{ my_role | tojson }};
 const IS_VIEWER = CURRENT_ROLE === 'viewer';
 let currentNotebookPath = null;
@@ -295,7 +296,7 @@ function setupKeyboardShortcuts() {
 
 async function loadFiles() {
   try {
-    const res = await fetch('/api/notebooks');
+    const res = await fetch(API_BASE);
     if (!res.ok) throw new Error('Failed to load files');
     const data = await res.json();
     fileTreeItems = data.items || [];
@@ -351,7 +352,7 @@ function filterFiles() {
 async function promptNewNotebook() {
   const name = prompt('Notebook name:', 'analysis.ipynb');
   if (!name) return;
-  const res = await fetch('/api/notebooks', {
+  const res = await fetch(API_BASE, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: name, type: 'notebook' })
@@ -368,7 +369,7 @@ async function promptNewNotebook() {
 async function promptNewFolder() {
   const name = prompt('Folder name:');
   if (!name) return;
-  const res = await fetch('/api/notebooks', {
+  const res = await fetch(API_BASE, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: name, type: 'directory' })
@@ -385,7 +386,7 @@ async function promptRename(path) {
   if (!newName) return;
   const parent = path.includes('/') ? path.substring(0, path.lastIndexOf('/') + 1) : '';
   const newPath = parent + newName;
-  const res = await fetch(`/api/notebooks/${encodeURIComponent(path)}`, {
+  const res = await fetch(`${API_BASE}/${encodeURIComponent(path)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ new_path: newPath })
@@ -400,7 +401,7 @@ async function promptRename(path) {
 
 async function promptDelete(path) {
   if (!confirm(`Are you sure you want to delete ${path}?`)) return;
-  const res = await fetch(`/api/notebooks/${encodeURIComponent(path)}`, {
+  const res = await fetch(`${API_BASE}/${encodeURIComponent(path)}`, {
     method: 'DELETE'
   });
   if (res.ok) {
@@ -420,7 +421,7 @@ async function openNotebook(path) {
   document.getElementById('notebook-canvas').classList.remove('hidden');
 
   try {
-    const res = await fetch(`/api/notebooks/${encodeURIComponent(path)}`);
+    const res = await fetch(`${API_BASE}/${encodeURIComponent(path)}`);
     if (!res.ok) throw new Error('Could not open notebook');
     const data = await res.json();
     notebookModel = data.content || data;
@@ -623,7 +624,7 @@ async function saveNotebook() {
   btn.disabled = true;
 
   try {
-    const res = await fetch(`/api/notebooks/${encodeURIComponent(currentNotebookPath)}`, {
+    const res = await fetch(`${API_BASE}/${encodeURIComponent(currentNotebookPath)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: notebookModel })
@@ -675,7 +676,7 @@ async function connectKernelSession(path) {
   updateKernelStatus('connecting', 'Starting Kernel...');
 
   try {
-    const res = await fetch('/api/notebooks/sessions', {
+    const res = await fetch(`${API_BASE}/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: path, kernel_name: 'python3' })
@@ -686,7 +687,7 @@ async function connectKernelSession(path) {
 
     // Connect WebSocket
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/api/notebooks/kernels/${kernelId}/channels`;
+    const wsUrl = `${protocol}//${window.location.host}${API_BASE}/kernels/${kernelId}/channels`;
     kernelSocket = new WebSocket(wsUrl);
 
     kernelSocket.onopen = () => {
@@ -835,14 +836,14 @@ async function restartKernel() {
   if (IS_VIEWER || !kernelSession) return;
   const kernelId = kernelSession.kernel ? kernelSession.kernel.id : kernelSession.id;
   updateKernelStatus('busy', 'Restarting...');
-  await fetch(`/api/notebooks/kernels/${kernelId}/restart`, { method: 'POST' });
+  await fetch(`${API_BASE}/kernels/${kernelId}/restart`, { method: 'POST' });
   setTimeout(() => connectKernelSession(currentNotebookPath), 500);
 }
 
 async function interruptKernel() {
   if (IS_VIEWER || !kernelSession) return;
   const kernelId = kernelSession.kernel ? kernelSession.kernel.id : kernelSession.id;
-  await fetch(`/api/notebooks/kernels/${kernelId}/interrupt`, { method: 'POST' });
+  await fetch(`${API_BASE}/kernels/${kernelId}/interrupt`, { method: 'POST' });
 }
 
 // ── Airflow Integration ───────────────────────────────────────────────────
@@ -875,7 +876,7 @@ async function submitAirflowRun() {
   btn.textContent = 'Triggering...';
 
   try {
-    const res = await fetch('/api/notebooks/run-pipeline', {
+    const res = await fetch(`${API_BASE}/run-pipeline`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: path, parameters: params })
@@ -913,7 +914,7 @@ async function loadRunHistory() {
   container.innerHTML = '<div class="text-xs text-gray-500 text-center py-6">Loading archives...</div>';
 
   try {
-    const res = await fetch(`/api/notebooks/runs?path=${encodeURIComponent(currentNotebookPath)}`);
+    const res = await fetch(`${API_BASE}/runs?path=${encodeURIComponent(currentNotebookPath)}`);
     const data = await res.json();
     const runs = data.runs || [];
 

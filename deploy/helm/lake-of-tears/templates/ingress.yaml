@@ -65,6 +65,13 @@ spec:
     - host: {{ .Values.ingress.host }}
       http:
         paths:
+          - path: /api/notebooks
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullName }}-lakeui
+                port:
+                  name: http
           - path: /
             pathType: Prefix
             backend:

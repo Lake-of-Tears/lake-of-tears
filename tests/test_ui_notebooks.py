@@ -344,3 +344,73 @@ def test_list_archived_runs_s3_parsing():
         assert runs[0]["filename"] == "20261012_120000Z.ipynb"
         assert runs[0]["size"] == 15420
         assert runs[0]["key"] == "notebook_runs/default/churn/20261012_120000Z.ipynb"
+
+
+# ── Directory Creation & Dual Routing Tests ───────────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_ensure_workspace_dir_calls_put():
+    with patch.object(notebook_proxy, "jupyter_request", new_callable=AsyncMock) as mock_req:
+        mock_req.side_effect = [
+            (201, {}),
+            (404, {}),
+            (201, {}),
+        ]
+        await notebook_proxy.ensure_workspace_dir("analytics")
+        assert mock_req.call_count == 3
+        assert mock_req.call_args_list[0].args == ("PUT", "contents/workspaces")
+        assert mock_req.call_args_list[0].kwargs["json_data"] == {"type": "directory"}
+        assert mock_req.call_args_list[2].args == ("PUT", "contents/workspaces/analytics")
+        assert mock_req.call_args_list[2].kwargs["json_data"] == {"type": "directory"}
+
+
+@pytest.mark.anyio
+async def test_create_folder_calls_put():
+    with (
+        patch.object(notebook_proxy, "ensure_workspace_dir", new_callable=AsyncMock),
+        patch.object(notebook_proxy, "jupyter_request", new_callable=AsyncMock) as mock_req,
+    ):
+        mock_req.return_value = (201, {"name": "subfolder", "type": "directory"})
+        status, data = await notebook_proxy.create_folder("analytics", "subfolder")
+        assert status == 201
+        assert data["name"] == "subfolder"
+        mock_req.assert_called_once_with(
+            "PUT", "contents/workspaces/analytics/subfolder", json_data={"type": "directory"}
+        )
+
+
+def test_notebooks_dual_routing():
+    token, workspaces = _create_auth_cookie(role="member")
+    cookies = {"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"}
+
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_fetch_workspaces", return_value=workspaces),
+        patch.object(
+            notebook_proxy,
+            "list_workspace_notebooks",
+            new_callable=AsyncMock,
+            return_value={
+                "items": [{"name": "dual.ipynb", "type": "notebook"}],
+                "workspace": "default",
+            },
+        ),
+        patch.object(
+            notebook_proxy,
+            "create_folder",
+            new_callable=AsyncMock,
+            return_value=(201, {"name": "testdir", "type": "directory"}),
+        ),
+    ):
+        res_list = client.get("/notebooks/api", cookies=cookies)
+        assert res_list.status_code == 200
+        assert res_list.json()["items"][0]["name"] == "dual.ipynb"
+
+        res_dir = client.post(
+            "/notebooks/api",
+            json={"type": "directory", "name": "testdir"},
+            cookies=cookies,
+        )
+        assert res_dir.status_code == 201
+        assert res_dir.json()["name"] == "testdir"
