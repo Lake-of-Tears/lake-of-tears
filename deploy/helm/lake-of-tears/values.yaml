@@ -131,6 +131,10 @@ jupyter:
   service:
     port: 8888
 
+  # External Ingress exposure — disabled by default as Lake UI natively proxies notebooks
+  ingress:
+    enabled: false
+
   persistence:
     size: 10Gi
 

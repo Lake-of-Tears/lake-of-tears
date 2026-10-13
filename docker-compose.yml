@@ -164,6 +164,10 @@ services:
       AUTH_SECRET_KEY: ${AUTH_SECRET_KEY}
       AUTH_ENABLED: ${AUTH_ENABLED:-true}
       BACKEND_URL: http://backend:8000
+      JUPYTER_SERVER_URL: http://jupyter:8888
+      JUPYTER_BASE_URL: /jupyter
+      JUPYTER_TOKEN: ${JUPYTER_TOKEN}
+      AIRFLOW_URL: http://airflow:8080/airflow
     depends_on:
       minio:
         condition: service_healthy
@@ -178,8 +182,6 @@ services:
     image: jupyter/datascience-notebook:latest
     container_name: jupyter
     restart: unless-stopped
-    ports:
-      - "8888:8888"
     environment:
       JUPYTER_TOKEN: ${JUPYTER_TOKEN}
       MINIO_ENDPOINT: minio:9000

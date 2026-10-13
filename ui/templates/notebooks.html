@@ -1,0 +1,942 @@
+{% extends "base.html" %}
+{% block title %}Notebooks — Lake of Tears{% endblock %}
+{% block content_class %}p-0 h-full overflow-hidden{% endblock %}
+
+{% block head %}
+<!-- CodeMirror 5 -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/dracula.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/markdown/markdown.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
+
+<!-- Marked for Markdown rendering -->
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<!-- AnsiUp for colored terminal/traceback outputs -->
+<script src="https://cdn.jsdelivr.net/npm/ansi_up@5.1.0/ansi_up.min.js"></script>
+
+<style>
+  .CodeMirror {
+    height: auto;
+    background: #181818 !important;
+    color: #f3f4f6 !important;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 13px;
+    border-radius: 0.375rem;
+    padding: 6px 0;
+  }
+  .CodeMirror-gutters {
+    background: #181818 !important;
+    border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
+  }
+  .CodeMirror-linenumber {
+    color: #6b7280 !important;
+  }
+  .CodeMirror-cursor {
+    border-left: 2px solid #3b82f6 !important;
+  }
+  .CodeMirror-selected {
+    background: rgba(59, 130, 246, 0.3) !important;
+  }
+  .cell-focused {
+    border-color: #3b82f6 !important;
+    box-shadow: 0 0 0 1px #3b82f6;
+  }
+  /* Table output styling */
+  .dataframe-table table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .dataframe-table th, .dataframe-table td {
+    padding: 6px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    text-align: left;
+  }
+  .dataframe-table th {
+    background: #1f2937;
+    color: #9ca3af;
+    font-weight: 600;
+  }
+  .dataframe-table tr:hover {
+    background: rgba(255, 255, 255, 0.02);
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="h-full flex overflow-hidden select-none bg-[#111111]" id="notebook-app">
+
+  <!-- ── Left File Explorer Sidebar ──────────────────────────────────────── -->
+  <aside class="w-64 bg-[#161616] border-r border-white/[0.07] flex flex-col shrink-0 overflow-hidden">
+    <!-- Header -->
+    <div class="h-12 border-b border-white/[0.07] px-4 flex items-center justify-between shrink-0">
+      <div class="flex items-center gap-2">
+        <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+        </svg>
+        <span class="text-xs font-semibold uppercase tracking-wider text-gray-300">Workspace Notebooks</span>
+      </div>
+      {% if my_role != 'viewer' %}
+      <div class="flex items-center gap-1">
+        <button onclick="promptNewNotebook()" title="New Notebook" class="p-1 text-gray-400 hover:text-white hover:bg-white/[0.08] rounded transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+        </button>
+        <button onclick="promptNewFolder()" title="New Folder" class="p-1 text-gray-400 hover:text-white hover:bg-white/[0.08] rounded transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+        </button>
+        <button onclick="loadFiles()" title="Refresh" class="p-1 text-gray-400 hover:text-white hover:bg-white/[0.08] rounded transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        </button>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Search/filter -->
+    <div class="p-2 border-b border-white/[0.07] shrink-0">
+      <div class="relative">
+        <input type="text" id="file-filter" placeholder="Filter files..." oninput="filterFiles()" class="w-full bg-[#1e1e1e] border border-white/[0.08] rounded px-2.5 py-1 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500" />
+      </div>
+    </div>
+
+    <!-- File list -->
+    <div class="flex-1 overflow-y-auto p-2 space-y-0.5" id="file-list">
+      <div class="text-xs text-gray-500 text-center py-4">Loading workspace files...</div>
+    </div>
+
+    <!-- Sidebar footer -->
+    <div class="p-3 border-t border-white/[0.07] text-[11px] text-gray-400 bg-[#141414] flex items-center justify-between shrink-0">
+      <span class="truncate">ws: <span class="text-gray-200 font-medium">{{ workspace.slug if workspace else 'default' }}</span></span>
+      <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase {{ 'bg-amber-900/40 text-amber-400 border border-amber-800/40' if my_role == 'viewer' else 'bg-blue-900/40 text-blue-400 border border-blue-800/40' }}">
+        {{ my_role }}
+      </span>
+    </div>
+  </aside>
+
+  <!-- ── Main Canvas ─────────────────────────────────────────────────────── -->
+  <main class="flex-1 flex flex-col min-w-0 overflow-hidden bg-[#111111]">
+
+    <!-- Read-only Banner (if viewer) -->
+    {% if my_role == 'viewer' %}
+    <div class="bg-amber-950/40 border-b border-amber-800/50 px-4 py-1.5 flex items-center gap-2 text-xs text-amber-300 shrink-0">
+      <svg class="w-4 h-4 text-amber-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      <span><strong>Viewer Mode (Read-Only):</strong> You can inspect code and outputs, but kernel execution and notebook saves are disabled.</span>
+    </div>
+    {% endif %}
+
+    <!-- Top Toolbar -->
+    <header class="h-12 border-b border-white/[0.07] px-4 flex items-center justify-between bg-[#161616] shrink-0 gap-4">
+      <div class="flex items-center gap-3 min-w-0">
+        <span id="current-filename" class="text-sm font-medium text-gray-200 truncate">No notebook selected</span>
+        <span id="save-status" class="text-xs text-gray-500 hidden">Saved</span>
+        <!-- Kernel status pill -->
+        <div id="kernel-status-pill" class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-white/[0.04] border border-white/[0.06] text-xs text-gray-400">
+          <span id="kernel-dot" class="w-2 h-2 rounded-full bg-gray-500"></span>
+          <span id="kernel-text">Kernel Offline</span>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="flex items-center gap-1.5 shrink-0">
+        {% if my_role != 'viewer' %}
+        <button onclick="addCell('code')" title="Add Code Cell" class="btn-ghost text-xs py-1 px-2.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+          Code
+        </button>
+        <button onclick="addCell('markdown')" title="Add Markdown Cell" class="btn-ghost text-xs py-1 px-2.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+          Markdown
+        </button>
+        <div class="h-4 w-px bg-white/[0.1] mx-1"></div>
+        <button onclick="runSelectedCell()" id="btn-run" title="Run Selected Cell (Shift+Enter)" class="btn-primary text-xs py-1 px-3">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/></svg>
+          Run
+        </button>
+        <button onclick="runAllCells()" title="Run All Cells" class="btn-ghost text-xs py-1 px-2.5">
+          Run All
+        </button>
+        <button onclick="interruptKernel()" title="Interrupt Kernel" class="btn-ghost text-xs py-1 px-2 text-amber-400 hover:text-amber-300">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/></svg>
+        </button>
+        <button onclick="restartKernel()" title="Restart Kernel" class="btn-ghost text-xs py-1 px-2 text-rose-400 hover:text-rose-300">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        </button>
+        <div class="h-4 w-px bg-white/[0.1] mx-1"></div>
+        <button onclick="saveNotebook()" id="btn-save" title="Save Notebook (Ctrl/Cmd+S)" class="btn-ghost text-xs py-1 px-2.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>
+          Save
+        </button>
+        <button onclick="openAirflowModal()" title="Run in Apache Airflow" class="btn-ghost text-xs py-1 px-2.5 text-blue-400 hover:text-blue-300">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          Schedule / Run
+        </button>
+        {% endif %}
+        <button onclick="toggleHistoryDrawer()" title="View Historical Runs" class="btn-ghost text-xs py-1 px-2.5 text-gray-400 hover:text-gray-200">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          History
+        </button>
+      </div>
+    </header>
+
+    <!-- Empty State -->
+    <div id="empty-state" class="flex-1 flex flex-col items-center justify-center p-8 text-center">
+      <div class="w-16 h-16 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center mb-4">
+        <svg class="w-8 h-8 text-gray-500" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
+      </div>
+      <h3 class="text-base font-medium text-gray-200 mb-1">Select or Create a Notebook</h3>
+      <p class="text-xs text-gray-500 max-w-sm mb-6">Explore your Lakehouse data with native Python & DuckDB notebooks, fully backed by Lake of Tears permissions.</p>
+      {% if my_role != 'viewer' %}
+      <div class="flex items-center gap-3">
+        <button onclick="promptNewNotebook()" class="btn-primary text-xs">
+          + New Notebook
+        </button>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Active Notebook Canvas -->
+    <div id="notebook-canvas" class="flex-1 overflow-y-auto p-6 hidden">
+      <div class="max-w-5xl mx-auto space-y-4" id="cells-container">
+        <!-- Cells rendered dynamically here -->
+      </div>
+    </div>
+  </main>
+
+  <!-- ── Airflow Modal ─────────────────────────────────────────────────────── -->
+  <div id="airflow-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-[#1c1c1c] border border-white/[0.1] rounded-xl shadow-2xl w-full max-w-md p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-sm font-semibold text-gray-100 flex items-center gap-2">
+          <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          Run Notebook in Airflow
+        </h3>
+        <button onclick="closeAirflowModal()" class="text-gray-500 hover:text-gray-300">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <p class="text-xs text-gray-400 mb-4">Triggers headless execution with Papermill. Output artifacts and cell outputs will be archived to MinIO S3.</p>
+      
+      <div class="space-y-3 mb-6">
+        <div>
+          <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1">Notebook Path</label>
+          <input type="text" id="airflow-nb-path" readonly class="input-dark text-xs opacity-75 cursor-not-allowed bg-black/30"/>
+        </div>
+        <div>
+          <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1">Parameters (JSON)</label>
+          <textarea id="airflow-nb-params" rows="3" placeholder='{"date": "2026-10-12"}' class="input-dark font-mono text-xs"></textarea>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end gap-2">
+        <button onclick="closeAirflowModal()" class="btn-ghost text-xs">Cancel</button>
+        <button onclick="submitAirflowRun()" id="btn-submit-airflow" class="btn-primary text-xs">
+          Trigger Run Now
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Run History Drawer ────────────────────────────────────────────────── -->
+  <div id="history-drawer" class="fixed top-0 right-0 h-full w-96 bg-[#181818] border-l border-white/[0.1] shadow-2xl z-40 flex flex-col transform translate-x-full transition-transform duration-200">
+    <div class="h-12 border-b border-white/[0.08] px-4 flex items-center justify-between shrink-0">
+      <h3 class="text-xs font-semibold text-gray-200 uppercase tracking-wider flex items-center gap-2">
+        <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        Execution Run Archives
+      </h3>
+      <button onclick="toggleHistoryDrawer()" class="text-gray-400 hover:text-white">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="flex-1 overflow-y-auto p-4 space-y-2" id="history-list">
+      <div class="text-xs text-gray-500 text-center py-6">No historical runs found for this notebook.</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// State
+const CURRENT_ROLE = {{ my_role | tojson }};
+const IS_VIEWER = CURRENT_ROLE === 'viewer';
+let currentNotebookPath = null;
+let notebookModel = null;
+let activeCellIndex = 0;
+let codeMirrorInstances = [];
+let kernelSession = null;
+let kernelSocket = null;
+let isKernelBusy = false;
+let executionCounter = 1;
+let fileTreeItems = [];
+const ansiUp = new AnsiUp();
+
+// Initialization
+document.addEventListener('DOMContentLoaded', () => {
+  loadFiles();
+  setupKeyboardShortcuts();
+});
+
+function setupKeyboardShortcuts() {
+  window.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+      e.preventDefault();
+      if (!IS_VIEWER && currentNotebookPath) saveNotebook();
+    }
+    if (e.shiftKey && e.key === 'Enter') {
+      e.preventDefault();
+      if (!IS_VIEWER && currentNotebookPath) runSelectedCell();
+    }
+  });
+}
+
+// ── File Explorer ─────────────────────────────────────────────────────────
+
+async function loadFiles() {
+  try {
+    const res = await fetch('/api/notebooks');
+    if (!res.ok) throw new Error('Failed to load files');
+    const data = await res.json();
+    fileTreeItems = data.items || [];
+    renderFileList();
+  } catch (err) {
+    console.error('Error loading files:', err);
+    document.getElementById('file-list').innerHTML = `<div class="text-xs text-red-400 p-2">${err.message}</div>`;
+  }
+}
+
+function renderFileList() {
+  const container = document.getElementById('file-list');
+  const filter = (document.getElementById('file-filter').value || '').toLowerCase();
+  const items = fileTreeItems.filter(item => item.name.toLowerCase().includes(filter));
+
+  if (!items.length) {
+    container.innerHTML = '<div class="text-xs text-gray-500 text-center py-4">No notebooks found</div>';
+    return;
+  }
+
+  container.innerHTML = items.map(item => {
+    const isDir = item.type === 'directory';
+    const isCurrent = item.path === currentNotebookPath;
+    return `
+      <div class="group flex items-center justify-between px-2 py-1.5 rounded text-xs cursor-pointer transition-colors ${isCurrent ? 'bg-blue-600/20 text-blue-300 font-medium' : 'text-gray-300 hover:bg-white/[0.04]'}"
+           onclick="${isDir ? `browseFolder('${item.path}')` : `openNotebook('${item.path}')`}">
+        <div class="flex items-center gap-2 truncate">
+          <svg class="w-3.5 h-3.5 shrink-0 ${isDir ? 'text-amber-400' : 'text-blue-400'}" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            ${isDir
+              ? '<path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>'
+              : '<path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>'}
+          </svg>
+          <span class="truncate">${item.name}</span>
+        </div>
+        ${!IS_VIEWER ? `
+        <div class="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity shrink-0" onclick="event.stopPropagation()">
+          <button onclick="promptRename('${item.path}')" title="Rename" class="p-0.5 text-gray-500 hover:text-white">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+          </button>
+          <button onclick="promptDelete('${item.path}')" title="Delete" class="p-0.5 text-gray-500 hover:text-red-400">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          </button>
+        </div>` : ''}
+      </div>
+    `;
+  }).join('');
+}
+
+function filterFiles() {
+  renderFileList();
+}
+
+async function promptNewNotebook() {
+  const name = prompt('Notebook name:', 'analysis.ipynb');
+  if (!name) return;
+  const res = await fetch('/api/notebooks', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: name, type: 'notebook' })
+  });
+  if (res.ok) {
+    const data = await res.json();
+    await loadFiles();
+    openNotebook(data.rel_path || name);
+  } else {
+    alert('Failed to create notebook');
+  }
+}
+
+async function promptNewFolder() {
+  const name = prompt('Folder name:');
+  if (!name) return;
+  const res = await fetch('/api/notebooks', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: name, type: 'directory' })
+  });
+  if (res.ok) {
+    await loadFiles();
+  } else {
+    alert('Failed to create directory');
+  }
+}
+
+async function promptRename(path) {
+  const newName = prompt('New name:', path.split('/').pop());
+  if (!newName) return;
+  const parent = path.includes('/') ? path.substring(0, path.lastIndexOf('/') + 1) : '';
+  const newPath = parent + newName;
+  const res = await fetch(`/api/notebooks/${encodeURIComponent(path)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ new_path: newPath })
+  });
+  if (res.ok) {
+    if (currentNotebookPath === path) currentNotebookPath = newPath;
+    await loadFiles();
+  } else {
+    alert('Failed to rename item');
+  }
+}
+
+async function promptDelete(path) {
+  if (!confirm(`Are you sure you want to delete ${path}?`)) return;
+  const res = await fetch(`/api/notebooks/${encodeURIComponent(path)}`, {
+    method: 'DELETE'
+  });
+  if (res.ok) {
+    if (currentNotebookPath === path) closeNotebook();
+    await loadFiles();
+  } else {
+    alert('Failed to delete item');
+  }
+}
+
+// ── Notebook Lifecycle ───────────────────────────────────────────────────
+
+async function openNotebook(path) {
+  currentNotebookPath = path;
+  document.getElementById('current-filename').textContent = path.split('/').pop();
+  document.getElementById('empty-state').classList.add('hidden');
+  document.getElementById('notebook-canvas').classList.remove('hidden');
+
+  try {
+    const res = await fetch(`/api/notebooks/${encodeURIComponent(path)}`);
+    if (!res.ok) throw new Error('Could not open notebook');
+    const data = await res.json();
+    notebookModel = data.content || data;
+    renderNotebook();
+    renderFileList();
+    if (!IS_VIEWER) {
+      connectKernelSession(path);
+    }
+  } catch (err) {
+    alert(`Error: ${err.message}`);
+  }
+}
+
+function closeNotebook() {
+  currentNotebookPath = null;
+  notebookModel = null;
+  document.getElementById('current-filename').textContent = 'No notebook selected';
+  document.getElementById('notebook-canvas').classList.add('hidden');
+  document.getElementById('empty-state').classList.remove('hidden');
+  renderFileList();
+  disconnectKernel();
+}
+
+function renderNotebook() {
+  const container = document.getElementById('cells-container');
+  container.innerHTML = '';
+  codeMirrorInstances = [];
+
+  if (!notebookModel || !notebookModel.cells || !notebookModel.cells.length) {
+    notebookModel = { cells: [{ cell_type: 'code', source: ['# Start coding\n'], outputs: [] }] };
+  }
+
+  notebookModel.cells.forEach((cell, idx) => {
+    const cellEl = createCellElement(cell, idx);
+    container.appendChild(cellEl);
+  });
+}
+
+function createCellElement(cell, idx) {
+  const isCode = cell.cell_type === 'code';
+  const cellDiv = document.createElement('div');
+  cellDiv.id = `cell-container-${idx}`;
+  cellDiv.className = `card p-3 border transition-colors ${idx === activeCellIndex ? 'cell-focused' : 'border-white/[0.08]'}`;
+  cellDiv.onclick = () => setActiveCell(idx);
+
+  const rawSource = Array.isArray(cell.source) ? cell.source.join('') : (cell.source || '');
+
+  cellDiv.innerHTML = `
+    <div class="flex items-center justify-between mb-2 text-xs text-gray-400">
+      <div class="flex items-center gap-2">
+        <span class="font-mono text-gray-500 font-semibold" id="cell-counter-${idx}">${isCode ? `[${cell.execution_count || ' '}]:` : 'MD:'}</span>
+        <span class="px-1.5 py-0.5 rounded bg-white/[0.04] text-[10px] font-mono uppercase text-gray-400">${cell.cell_type}</span>
+      </div>
+      ${!IS_VIEWER ? `
+      <div class="flex items-center gap-1">
+        ${isCode ? `
+        <button onclick="runCell(${idx})" title="Run Cell (Shift+Enter)" class="p-1 hover:text-white rounded hover:bg-white/[0.06]">
+          <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/></svg>
+        </button>` : ''}
+        <button onclick="toggleCellType(${idx})" title="Convert to ${isCode ? 'Markdown' : 'Code'}" class="p-1 hover:text-white rounded hover:bg-white/[0.06] text-[11px]">
+          ${isCode ? 'MD' : 'PY'}
+        </button>
+        <button onclick="moveCell(${idx}, -1)" title="Move Up" class="p-1 hover:text-white rounded hover:bg-white/[0.06]">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 15l7-7 7 7"/></svg>
+        </button>
+        <button onclick="moveCell(${idx}, 1)" title="Move Down" class="p-1 hover:text-white rounded hover:bg-white/[0.06]">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <button onclick="deleteCell(${idx})" title="Delete Cell" class="p-1 hover:text-red-400 rounded hover:bg-white/[0.06]">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+        </button>
+      </div>` : ''}
+    </div>
+
+    <!-- Editor Wrapper -->
+    <div id="editor-wrap-${idx}" class="${cell.cell_type === 'markdown' && !cell._editing ? 'hidden' : ''}">
+      <textarea id="textarea-${idx}">${rawSource}</textarea>
+    </div>
+
+    <!-- Markdown Rendered Preview -->
+    ${cell.cell_type === 'markdown' ? `
+    <div id="md-preview-${idx}" class="p-3 text-sm text-gray-200 leading-relaxed prose prose-invert max-w-none cursor-pointer ${cell._editing ? 'hidden' : ''}" ondblclick="editMarkdownCell(${idx})">
+      ${marked.parse(rawSource || '*Empty markdown cell. Double click to edit.*')}
+    </div>` : ''}
+
+    <!-- Cell Outputs -->
+    <div id="outputs-${idx}" class="mt-2 space-y-2 ${isCode && cell.outputs && cell.outputs.length ? '' : 'hidden'}">
+      ${isCode && cell.outputs ? renderCellOutputs(cell.outputs) : ''}
+    </div>
+  `;
+
+  // Attach CodeMirror after DOM placement
+  setTimeout(() => {
+    const textarea = document.getElementById(`textarea-${idx}`);
+    if (textarea) {
+      const cm = CodeMirror.fromTextArea(textarea, {
+        mode: isCode ? 'python' : 'markdown',
+        theme: 'dracula',
+        lineNumbers: isCode,
+        readOnly: IS_VIEWER,
+        autoCloseBrackets: true,
+        matchBrackets: true,
+        tabSize: 4,
+        indentUnit: 4,
+      });
+      cm.on('change', () => {
+        cell.source = cm.getValue();
+        markDirty();
+      });
+      cm.on('focus', () => setActiveCell(idx));
+      codeMirrorInstances[idx] = cm;
+    }
+  }, 0);
+
+  return cellDiv;
+}
+
+function setActiveCell(idx) {
+  activeCellIndex = idx;
+  document.querySelectorAll('#cells-container > div').forEach((el, i) => {
+    if (i === idx) {
+      el.classList.add('cell-focused');
+    } else {
+      el.classList.remove('cell-focused');
+    }
+  });
+}
+
+function editMarkdownCell(idx) {
+  if (IS_VIEWER) return;
+  const cell = notebookModel.cells[idx];
+  cell._editing = true;
+  document.getElementById(`md-preview-${idx}`).classList.add('hidden');
+  document.getElementById(`editor-wrap-${idx}`).classList.remove('hidden');
+  if (codeMirrorInstances[idx]) codeMirrorInstances[idx].refresh();
+}
+
+function toggleCellType(idx) {
+  if (IS_VIEWER) return;
+  const cell = notebookModel.cells[idx];
+  cell.cell_type = cell.cell_type === 'code' ? 'markdown' : 'code';
+  cell._editing = false;
+  renderNotebook();
+  markDirty();
+}
+
+function addCell(type = 'code') {
+  if (IS_VIEWER) return;
+  const newCell = {
+    cell_type: type,
+    source: type === 'code' ? '' : '## Markdown Note\n',
+    metadata: {},
+    outputs: []
+  };
+  notebookModel.cells.splice(activeCellIndex + 1, 0, newCell);
+  activeCellIndex += 1;
+  renderNotebook();
+  markDirty();
+}
+
+function deleteCell(idx) {
+  if (IS_VIEWER) return;
+  if (notebookModel.cells.length <= 1) return;
+  notebookModel.cells.splice(idx, 1);
+  if (activeCellIndex >= notebookModel.cells.length) activeCellIndex = notebookModel.cells.length - 1;
+  renderNotebook();
+  markDirty();
+}
+
+function moveCell(idx, delta) {
+  if (IS_VIEWER) return;
+  const target = idx + delta;
+  if (target < 0 || target >= notebookModel.cells.length) return;
+  const temp = notebookModel.cells[idx];
+  notebookModel.cells[idx] = notebookModel.cells[target];
+  notebookModel.cells[target] = temp;
+  activeCellIndex = target;
+  renderNotebook();
+  markDirty();
+}
+
+function markDirty() {
+  const saveEl = document.getElementById('save-status');
+  saveEl.textContent = 'Unsaved *';
+  saveEl.classList.remove('hidden', 'text-gray-500');
+  saveEl.classList.add('text-amber-400');
+}
+
+async function saveNotebook() {
+  if (IS_VIEWER || !currentNotebookPath) return;
+  // Sync CodeMirror content to model
+  notebookModel.cells.forEach((cell, idx) => {
+    if (codeMirrorInstances[idx]) {
+      cell.source = codeMirrorInstances[idx].getValue();
+    }
+    delete cell._editing;
+  });
+
+  const btn = document.getElementById('btn-save');
+  btn.disabled = true;
+
+  try {
+    const res = await fetch(`/api/notebooks/${encodeURIComponent(currentNotebookPath)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: notebookModel })
+    });
+    if (!res.ok) throw new Error('Save failed');
+    const saveEl = document.getElementById('save-status');
+    saveEl.textContent = 'Saved';
+    saveEl.classList.remove('text-amber-400');
+    saveEl.classList.add('text-gray-500');
+  } catch (err) {
+    alert(`Could not save notebook: ${err.message}`);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ── Output Rendering ──────────────────────────────────────────────────────
+
+function renderCellOutputs(outputs) {
+  if (!outputs || !outputs.length) return '';
+  return outputs.map(out => {
+    if (out.output_type === 'stream') {
+      const text = Array.isArray(out.text) ? out.text.join('') : (out.text || '');
+      const isErr = out.name === 'stderr';
+      return `<pre class="p-2.5 rounded bg-black/40 font-mono text-xs overflow-x-auto whitespace-pre-wrap ${isErr ? 'text-red-300' : 'text-gray-300'}">${ansiUp.ansi_to_html(text)}</pre>`;
+    } else if (out.output_type === 'execute_result' || out.output_type === 'display_data') {
+      const data = out.data || {};
+      if (data['text/html']) {
+        const html = Array.isArray(data['text/html']) ? data['text/html'].join('') : data['text/html'];
+        return `<div class="dataframe-table overflow-x-auto my-2 rounded border border-white/[0.08]">${html}</div>`;
+      } else if (data['image/png']) {
+        return `<div class="my-2 p-2 bg-white rounded flex justify-center"><img src="data:image/png;base64,${data['image/png']}" class="max-w-full h-auto" /></div>`;
+      } else if (data['text/plain']) {
+        const plain = Array.isArray(data['text/plain']) ? data['text/plain'].join('') : data['text/plain'];
+        return `<pre class="p-2.5 rounded bg-black/40 font-mono text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">${plain}</pre>`;
+      }
+    } else if (out.output_type === 'error') {
+      const tb = (out.traceback || []).join('\n');
+      return `<pre class="p-2.5 rounded bg-rose-950/30 border border-rose-900/50 font-mono text-xs text-rose-300 overflow-x-auto whitespace-pre-wrap">${ansiUp.ansi_to_html(tb || `${out.ename}: ${out.evalue}`)}</pre>`;
+    }
+    return '';
+  }).join('');
+}
+
+// ── Kernel WebSocket & Execution ──────────────────────────────────────────
+
+async function connectKernelSession(path) {
+  disconnectKernel();
+  updateKernelStatus('connecting', 'Starting Kernel...');
+
+  try {
+    const res = await fetch('/api/notebooks/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: path, kernel_name: 'python3' })
+    });
+    if (!res.ok) throw new Error('Kernel session failed');
+    kernelSession = await res.json();
+    const kernelId = kernelSession.kernel ? kernelSession.kernel.id : kernelSession.id;
+
+    // Connect WebSocket
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/api/notebooks/kernels/${kernelId}/channels`;
+    kernelSocket = new WebSocket(wsUrl);
+
+    kernelSocket.onopen = () => {
+      updateKernelStatus('idle', 'Python 3 (Idle)');
+    };
+
+    kernelSocket.onmessage = (event) => {
+      handleKernelMessage(JSON.parse(event.data));
+    };
+
+    kernelSocket.onclose = () => {
+      updateKernelStatus('dead', 'Kernel Disconnected');
+    };
+
+    kernelSocket.onerror = (err) => {
+      console.warn('Kernel WS error:', err);
+      updateKernelStatus('dead', 'Kernel Error');
+    };
+  } catch (err) {
+    console.error('Failed to connect kernel:', err);
+    updateKernelStatus('dead', 'Kernel Offline');
+  }
+}
+
+function disconnectKernel() {
+  if (kernelSocket) {
+    kernelSocket.close();
+    kernelSocket = null;
+  }
+  kernelSession = null;
+  updateKernelStatus('dead', 'Kernel Offline');
+}
+
+function updateKernelStatus(state, label) {
+  const dot = document.getElementById('kernel-dot');
+  const text = document.getElementById('kernel-text');
+  text.textContent = label;
+  dot.className = 'w-2 h-2 rounded-full ';
+  if (state === 'idle') {
+    dot.className += 'bg-emerald-400';
+  } else if (state === 'busy') {
+    dot.className += 'bg-amber-400 animate-pulse';
+  } else if (state === 'connecting') {
+    dot.className += 'bg-blue-400 animate-pulse';
+  } else {
+    dot.className += 'bg-rose-500';
+  }
+}
+
+let executingCellIndex = null;
+
+function runSelectedCell() {
+  runCell(activeCellIndex);
+}
+
+function runCell(idx) {
+  if (IS_VIEWER) return;
+  const cell = notebookModel.cells[idx];
+  if (cell.cell_type !== 'code') return;
+  if (!kernelSocket || kernelSocket.readyState !== WebSocket.OPEN) {
+    alert('Kernel is not connected. Reconnecting...');
+    connectKernelSession(currentNotebookPath);
+    return;
+  }
+
+  // Sync editor content
+  if (codeMirrorInstances[idx]) {
+    cell.source = codeMirrorInstances[idx].getValue();
+  }
+
+  // Clear previous outputs
+  cell.outputs = [];
+  const outputsDiv = document.getElementById(`outputs-${idx}`);
+  outputsDiv.innerHTML = '';
+  outputsDiv.classList.remove('hidden');
+
+  const counterEl = document.getElementById(`cell-counter-${idx}`);
+  counterEl.textContent = '[*]:';
+
+  executingCellIndex = idx;
+  const msgId = crypto.randomUUID();
+
+  const executeMsg = {
+    header: {
+      msg_id: msgId,
+      username: 'lake_user',
+      session: kernelSession.id,
+      msg_type: 'execute_request',
+      version: '5.3'
+    },
+    parent_header: {},
+    metadata: {},
+    content: {
+      code: Array.isArray(cell.source) ? cell.source.join('') : cell.source,
+      silent: false,
+      store_history: true,
+      user_expressions: {},
+      allow_stdin: false,
+      stop_on_error: true
+    },
+    buffers: [],
+    channel: 'shell'
+  };
+
+  kernelSocket.send(JSON.stringify(executeMsg));
+}
+
+function runAllCells() {
+  if (IS_VIEWER) return;
+  notebookModel.cells.forEach((cell, idx) => {
+    if (cell.cell_type === 'code') {
+      setTimeout(() => runCell(idx), idx * 200);
+    }
+  });
+}
+
+function handleKernelMessage(msg) {
+  const msgType = msg.msg_type || (msg.header ? msg.header.msg_type : '');
+  const content = msg.content || {};
+
+  if (msgType === 'status') {
+    const state = content.execution_state;
+    if (state === 'busy') {
+      isKernelBusy = true;
+      updateKernelStatus('busy', 'Python 3 (Busy)');
+    } else if (state === 'idle') {
+      isKernelBusy = false;
+      updateKernelStatus('idle', 'Python 3 (Idle)');
+    }
+  } else if (msgType === 'execute_input' && executingCellIndex !== null) {
+    const counterEl = document.getElementById(`cell-counter-${executingCellIndex}`);
+    if (counterEl) counterEl.textContent = `[${content.execution_count}]:`;
+    notebookModel.cells[executingCellIndex].execution_count = content.execution_count;
+  } else if (executingCellIndex !== null && ['stream', 'execute_result', 'display_data', 'error'].includes(msgType)) {
+    const cell = notebookModel.cells[executingCellIndex];
+    const outObj = { output_type: msgType, ...content };
+    cell.outputs.push(outObj);
+    const outputsDiv = document.getElementById(`outputs-${executingCellIndex}`);
+    outputsDiv.innerHTML = renderCellOutputs(cell.outputs);
+    outputsDiv.classList.remove('hidden');
+    markDirty();
+  }
+}
+
+async function restartKernel() {
+  if (IS_VIEWER || !kernelSession) return;
+  const kernelId = kernelSession.kernel ? kernelSession.kernel.id : kernelSession.id;
+  updateKernelStatus('busy', 'Restarting...');
+  await fetch(`/api/notebooks/kernels/${kernelId}/restart`, { method: 'POST' });
+  setTimeout(() => connectKernelSession(currentNotebookPath), 500);
+}
+
+async function interruptKernel() {
+  if (IS_VIEWER || !kernelSession) return;
+  const kernelId = kernelSession.kernel ? kernelSession.kernel.id : kernelSession.id;
+  await fetch(`/api/notebooks/kernels/${kernelId}/interrupt`, { method: 'POST' });
+}
+
+// ── Airflow Integration ───────────────────────────────────────────────────
+
+function openAirflowModal() {
+  if (!currentNotebookPath) return;
+  document.getElementById('airflow-nb-path').value = currentNotebookPath;
+  document.getElementById('airflow-modal').classList.remove('hidden');
+}
+
+function closeAirflowModal() {
+  document.getElementById('airflow-modal').classList.add('hidden');
+}
+
+async function submitAirflowRun() {
+  const path = document.getElementById('airflow-nb-path').value;
+  const paramsRaw = document.getElementById('airflow-nb-params').value;
+  let params = {};
+  if (paramsRaw.trim()) {
+    try {
+      params = JSON.parse(paramsRaw);
+    } catch {
+      alert('Invalid JSON in parameters');
+      return;
+    }
+  }
+
+  const btn = document.getElementById('btn-submit-airflow');
+  btn.disabled = true;
+  btn.textContent = 'Triggering...';
+
+  try {
+    const res = await fetch('/api/notebooks/run-pipeline', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: path, parameters: params })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      alert(`Airflow run triggered successfully!\nRun ID: ${data.dag_run_id || 'manual'}`);
+      closeAirflowModal();
+    } else {
+      alert(`Error triggering Airflow run: ${data.error || 'Failed'}`);
+    }
+  } catch (err) {
+    alert(`Request error: ${err.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Trigger Run Now';
+  }
+}
+
+// ── Historical Run Drawer ─────────────────────────────────────────────────
+
+async function toggleHistoryDrawer() {
+  const drawer = document.getElementById('history-drawer');
+  const isClosed = drawer.classList.contains('translate-x-full');
+  if (isClosed) {
+    drawer.classList.remove('translate-x-full');
+    if (currentNotebookPath) await loadRunHistory();
+  } else {
+    drawer.classList.add('translate-x-full');
+  }
+}
+
+async function loadRunHistory() {
+  const container = document.getElementById('history-list');
+  container.innerHTML = '<div class="text-xs text-gray-500 text-center py-6">Loading archives...</div>';
+
+  try {
+    const res = await fetch(`/api/notebooks/runs?path=${encodeURIComponent(currentNotebookPath)}`);
+    const data = await res.json();
+    const runs = data.runs || [];
+
+    if (!runs.length) {
+      container.innerHTML = '<div class="text-xs text-gray-500 text-center py-6">No historical runs archived in S3.</div>';
+      return;
+    }
+
+    container.innerHTML = runs.map(run => `
+      <div class="card p-3 border border-white/[0.08] hover:border-white/[0.15] transition-colors space-y-1">
+        <div class="flex items-center justify-between text-xs">
+          <span class="font-medium text-gray-200 truncate">${run.filename}</span>
+          <span class="text-gray-500 text-[10px]">${(run.size / 1024).toFixed(1)} KB</span>
+        </div>
+        <div class="text-[11px] text-gray-500 flex items-center justify-between pt-1">
+          <span>${new Date(run.last_modified).toLocaleString()}</span>
+          <span class="text-emerald-400 font-mono text-[10px] uppercase">Completed</span>
+        </div>
+      </div>
+    `).join('');
+  } catch (err) {
+    container.innerHTML = `<div class="text-xs text-red-400 p-2">Error: ${err.message}</div>`;
+  }
+}
+</script>
+{% endblock %}

@@ -72,6 +72,12 @@ spec:
                 secretKeyRef:
                   name: {{ include "lake-of-tears.fullname" . }}-credentials
                   key: JUPYTER_TOKEN
+            - name: JUPYTER_SERVER_URL
+              value: "http://{{ include "lake-of-tears.fullname" . }}-jupyter:{{ .Values.jupyter.service.port }}"
+            - name: JUPYTER_BASE_URL
+              value: "/jupyter"
+            - name: AIRFLOW_URL
+              value: "http://{{ include "lake-of-tears.fullname" . }}-airflow:{{ .Values.airflow.service.port }}/airflow"
             - name: AUTH_ENABLED
               value: {{ .Values.backend.enabled | quote }}
           livenessProbe:
