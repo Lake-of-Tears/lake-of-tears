@@ -252,6 +252,34 @@ async def create_folder(workspace_slug: str, folder_path: str) -> tuple[int, dic
     return status, data if isinstance(data, dict) else {"result": data}
 
 
+async def list_workspace_folders(
+    workspace_slug: str, current_path: str = "", max_depth: int = 5
+) -> list[str]:
+    """Recursively list all subdirectories in the workspace."""
+    await ensure_workspace_dir(workspace_slug)
+    folders: list[str] = []
+    queue: list[tuple[str, int]] = [(current_path, 0)]
+    while queue:
+        sub, depth = queue.pop(0)
+        if depth > max_depth:
+            continue
+        ws_path = get_workspace_dir(workspace_slug, sub)
+        status, data = await jupyter_request("GET", f"contents/{ws_path}")
+        if status != 200 or not isinstance(data, dict):
+            continue
+        content = data.get("content", [])
+        if not isinstance(content, list):
+            continue
+        prefix = get_workspace_dir(workspace_slug) + "/"
+        for entry in content:
+            if entry.get("type") == "directory":
+                raw_path = entry.get("path", "")
+                rel_path = raw_path[len(prefix) :] if raw_path.startswith(prefix) else raw_path
+                folders.append(rel_path)
+                queue.append((rel_path, depth + 1))
+    return sorted(folders)
+
+
 async def delete_item(workspace_slug: str, path: str) -> tuple[int, dict[str, Any]]:
     """Delete a notebook or directory within the workspace."""
     ws_path = get_workspace_dir(workspace_slug, path)

@@ -1255,6 +1255,17 @@ async def api_notebook_runs(request: Request, path: str = ""):
     return JSONResponse({"runs": runs, "workspace": ws["slug"], "notebook": path})
 
 
+@app.get("/api/notebooks/directories")
+@app.get("/notebooks/api/directories")
+async def api_list_directories(request: Request):
+    auth_res = _get_notebook_auth_and_workspace(request, require_write=False)
+    if isinstance(auth_res, JSONResponse):
+        return auth_res
+    _, ws = auth_res
+    folders = await notebook_proxy.list_workspace_folders(ws["slug"])
+    return JSONResponse({"directories": folders, "workspace": ws["slug"]})
+
+
 @app.get("/api/notebooks/{path:path}")
 @app.get("/notebooks/api/{path:path}")
 async def api_get_notebook(request: Request, path: str):

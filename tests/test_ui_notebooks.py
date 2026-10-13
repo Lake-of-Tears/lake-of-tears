@@ -414,3 +414,77 @@ def test_notebooks_dual_routing():
         )
         assert res_dir.status_code == 201
         assert res_dir.json()["name"] == "testdir"
+
+
+@pytest.mark.anyio
+async def test_list_workspace_folders_recursive():
+    with (
+        patch.object(notebook_proxy, "ensure_workspace_dir", new_callable=AsyncMock),
+        patch.object(notebook_proxy, "jupyter_request", new_callable=AsyncMock) as mock_req,
+    ):
+        # Mock root listing having "dir_a" and "file.ipynb", then "dir_a" having "sub_b"
+        mock_req.side_effect = [
+            (
+                200,
+                {
+                    "content": [
+                        {"name": "dir_a", "type": "directory", "path": "workspaces/default/dir_a"},
+                        {
+                            "name": "nb.ipynb",
+                            "type": "notebook",
+                            "path": "workspaces/default/nb.ipynb",
+                        },
+                    ]
+                },
+            ),
+            (
+                200,
+                {
+                    "content": [
+                        {
+                            "name": "sub_b",
+                            "type": "directory",
+                            "path": "workspaces/default/dir_a/sub_b",
+                        },
+                    ]
+                },
+            ),
+            (200, {"content": []}),
+        ]
+        folders = await notebook_proxy.list_workspace_folders("default")
+        assert folders == ["dir_a", "dir_a/sub_b"]
+
+
+def test_api_list_directories_and_move_item():
+    token, workspaces = _create_auth_cookie(role="member")
+    cookies = {"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"}
+
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_fetch_workspaces", return_value=workspaces),
+        patch.object(
+            notebook_proxy,
+            "list_workspace_folders",
+            new_callable=AsyncMock,
+            return_value=["analytics", "analytics/models"],
+        ),
+        patch.object(
+            notebook_proxy,
+            "rename_item",
+            new_callable=AsyncMock,
+            return_value=(200, {"name": "models", "path": "workspaces/default/analytics/models"}),
+        ),
+    ):
+        # 1. Test listing directories
+        res_dirs = client.get("/notebooks/api/directories", cookies=cookies)
+        assert res_dirs.status_code == 200
+        assert res_dirs.json()["directories"] == ["analytics", "analytics/models"]
+
+        # 2. Test moving item (notebook or folder) into another directory
+        res_move = client.patch(
+            "/notebooks/api/models",
+            json={"new_path": "analytics/models"},
+            cookies=cookies,
+        )
+        assert res_move.status_code == 200
+        assert res_move.json()["path"] == "workspaces/default/analytics/models"

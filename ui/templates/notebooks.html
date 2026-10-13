@@ -82,10 +82,10 @@
       </div>
       {% if my_role != 'viewer' %}
       <div class="flex items-center gap-1">
-        <button onclick="promptNewNotebook()" title="New Notebook" class="p-1 text-gray-400 hover:text-white hover:bg-white/[0.08] rounded transition-colors">
+        <button onclick="openNewNotebookModal()" title="New Notebook" class="p-1 text-gray-400 hover:text-white hover:bg-white/[0.08] rounded transition-colors">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
         </button>
-        <button onclick="promptNewFolder()" title="New Folder" class="p-1 text-gray-400 hover:text-white hover:bg-white/[0.08] rounded transition-colors">
+        <button onclick="openNewFolderModal()" title="New Folder" class="p-1 text-gray-400 hover:text-white hover:bg-white/[0.08] rounded transition-colors">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
         </button>
         <button onclick="loadFiles()" title="Refresh" class="p-1 text-gray-400 hover:text-white hover:bg-white/[0.08] rounded transition-colors">
@@ -258,6 +258,159 @@
     </div>
   </div>
 
+  <!-- ── New Notebook Modal ─────────────────────────────────────────────────── -->
+  <div id="new-notebook-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-[#1c1c1c] border border-white/[0.1] rounded-xl shadow-2xl w-full max-w-md p-6">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-sm font-semibold text-gray-100 flex items-center gap-2">
+          <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+          New Notebook
+        </h3>
+        <button onclick="closeModal('new-notebook-modal')" class="text-gray-500 hover:text-gray-300">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <p class="text-xs text-gray-400 mb-4">Create a new Jupyter notebook in <span id="new-nb-location" class="font-mono text-blue-300 bg-blue-950/40 px-1.5 py-0.5 rounded border border-blue-800/40">/</span>.</p>
+      
+      <form onsubmit="submitNewNotebook(event)">
+        <div class="mb-5">
+          <label class="block text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-1.5">Notebook Name</label>
+          <input type="text" id="new-nb-input" placeholder="analysis.ipynb" class="input-dark text-xs w-full bg-[#141414] border border-white/[0.08] rounded-lg px-3 py-2 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500" required />
+        </div>
+        <div class="flex items-center justify-end gap-2">
+          <button type="button" onclick="closeModal('new-notebook-modal')" class="btn-ghost text-xs">Cancel</button>
+          <button type="submit" id="btn-create-nb" class="btn-primary text-xs">Create Notebook</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ── New Folder Modal ───────────────────────────────────────────────────── -->
+  <div id="new-folder-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-[#1c1c1c] border border-white/[0.1] rounded-xl shadow-2xl w-full max-w-md p-6">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-sm font-semibold text-gray-100 flex items-center gap-2">
+          <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+          New Folder
+        </h3>
+        <button onclick="closeModal('new-folder-modal')" class="text-gray-500 hover:text-gray-300">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <p class="text-xs text-gray-400 mb-4">Create a subfolder in <span id="new-folder-location" class="font-mono text-amber-300 bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-800/40">/</span>.</p>
+      
+      <form onsubmit="submitNewFolder(event)">
+        <div class="mb-5">
+          <label class="block text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-1.5">Folder Name</label>
+          <input type="text" id="new-folder-input" placeholder="e.g. data_models" class="input-dark text-xs w-full bg-[#141414] border border-white/[0.08] rounded-lg px-3 py-2 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500" required />
+        </div>
+        <div class="flex items-center justify-end gap-2">
+          <button type="button" onclick="closeModal('new-folder-modal')" class="btn-ghost text-xs">Cancel</button>
+          <button type="submit" id="btn-create-folder" class="btn-primary text-xs">Create Folder</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ── Rename Modal ───────────────────────────────────────────────────────── -->
+  <div id="rename-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-[#1c1c1c] border border-white/[0.1] rounded-xl shadow-2xl w-full max-w-md p-6">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-sm font-semibold text-gray-100 flex items-center gap-2">
+          <svg class="w-4 h-4 text-gray-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+          Rename Item
+        </h3>
+        <button onclick="closeModal('rename-modal')" class="text-gray-500 hover:text-gray-300">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <p class="text-xs text-gray-400 mb-4">Rename <span id="rename-item-current" class="font-mono text-gray-200"></span>.</p>
+      
+      <form onsubmit="submitRename(event)">
+        <input type="hidden" id="rename-target-path" />
+        <div class="mb-5">
+          <label class="block text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-1.5">New Name</label>
+          <input type="text" id="rename-input" class="input-dark text-xs w-full bg-[#141414] border border-white/[0.08] rounded-lg px-3 py-2 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500" required />
+        </div>
+        <div class="flex items-center justify-end gap-2">
+          <button type="button" onclick="closeModal('rename-modal')" class="btn-ghost text-xs">Cancel</button>
+          <button type="submit" id="btn-submit-rename" class="btn-primary text-xs">Rename</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ── Move Modal ─────────────────────────────────────────────────────────── -->
+  <div id="move-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-[#1c1c1c] border border-white/[0.1] rounded-xl shadow-2xl w-full max-w-md p-6">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-sm font-semibold text-gray-100 flex items-center gap-2">
+          <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+          Move Item
+        </h3>
+        <button onclick="closeModal('move-modal')" class="text-gray-500 hover:text-gray-300">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <p class="text-xs text-gray-400 mb-4">Move <span id="move-item-name" class="font-mono text-purple-300 font-medium"></span> to a different directory.</p>
+      
+      <form onsubmit="submitMove(event)">
+        <input type="hidden" id="move-target-path" />
+        <input type="hidden" id="move-is-dir" />
+        
+        <div class="space-y-3 mb-5">
+          <div>
+            <label class="block text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-1.5">Destination Directory</label>
+            <select id="move-dest-select" onchange="updateMovePreview()" class="input-dark text-xs w-full bg-[#141414] border border-white/[0.08] rounded-lg px-2.5 py-2 text-gray-200 focus:outline-none focus:border-blue-500">
+              <option value="">📁 / (Workspace Root)</option>
+            </select>
+          </div>
+
+          <div class="bg-black/40 border border-white/[0.06] rounded-lg p-2.5 text-xs text-gray-400 flex items-center gap-2">
+            <span class="text-[11px] uppercase tracking-wider text-gray-500">Destination:</span>
+            <span id="move-preview-path" class="font-mono text-blue-400 truncate"></span>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-end gap-2">
+          <button type="button" onclick="closeModal('move-modal')" class="btn-ghost text-xs">Cancel</button>
+          <button type="submit" id="btn-submit-move" class="btn-primary text-xs">Move Item</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ── Delete Confirmation Modal ─────────────────────────────────────────── -->
+  <div id="delete-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-[#1c1c1c] border border-white/[0.1] rounded-xl shadow-2xl w-full max-w-md p-6">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-sm font-semibold text-rose-400 flex items-center gap-2">
+          <svg class="w-4 h-4 text-rose-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          Delete Item
+        </h3>
+        <button onclick="closeModal('delete-modal')" class="text-gray-500 hover:text-gray-300">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <p class="text-xs text-gray-300 mb-2">Are you sure you want to permanently delete <strong id="delete-target-name" class="text-white font-mono"></strong>?</p>
+      <p class="text-[11px] text-rose-400/80 mb-5">This action cannot be undone and will permanently remove this item from persistent storage.</p>
+      
+      <input type="hidden" id="delete-target-path" />
+      <div class="flex items-center justify-end gap-2">
+        <button type="button" onclick="closeModal('delete-modal')" class="btn-ghost text-xs">Cancel</button>
+        <button type="button" onclick="confirmDelete()" id="btn-confirm-delete" class="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white text-xs font-medium rounded-md transition-colors cursor-pointer">
+          Delete Permanently
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Toast Notification Container ──────────────────────────────────────── -->
+  <div id="lot-toast" class="fixed bottom-5 right-5 z-[100] transform translate-y-10 opacity-0 pointer-events-none transition-all duration-300 flex items-center gap-2.5 px-4 py-2.5 rounded-xl shadow-2xl bg-[#1c1c1c] border text-xs">
+    <span id="toast-icon"></span>
+    <span id="toast-msg" class="text-gray-200"></span>
+  </div>
+
 </div>
 
 <script>
@@ -293,7 +446,52 @@ function setupKeyboardShortcuts() {
       e.preventDefault();
       if (!IS_VIEWER && currentNotebookPath) runSelectedCell();
     }
+    if (e.key === 'Escape') {
+      ['new-notebook-modal', 'new-folder-modal', 'rename-modal', 'move-modal', 'delete-modal', 'airflow-modal'].forEach(id => {
+        closeModal(id);
+      });
+    }
   });
+}
+
+// ── Modal & Toast Helpers ─────────────────────────────────────────────────
+
+function openModal(id) {
+  const el = document.getElementById(id);
+  if (el) {
+    el.classList.remove('hidden');
+    const input = el.querySelector('input:not([type=hidden]), select');
+    if (input) setTimeout(() => input.focus(), 60);
+  }
+}
+
+function closeModal(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.add('hidden');
+}
+
+let toastTimer = null;
+function showToast(msg, type = 'info') {
+  const el = document.getElementById('lot-toast');
+  const icon = document.getElementById('toast-icon');
+  const text = document.getElementById('toast-msg');
+  if (!el) return;
+  clearTimeout(toastTimer);
+  text.textContent = msg;
+  if (type === 'success') {
+    el.className = 'fixed bottom-5 right-5 z-[100] flex items-center gap-2.5 px-4 py-2.5 rounded-xl shadow-2xl bg-[#1c1c1c] border border-emerald-500/40 text-emerald-300 text-xs transition-all duration-300 transform translate-y-0 opacity-100';
+    icon.innerHTML = '<svg class="w-4 h-4 text-emerald-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>';
+  } else if (type === 'error') {
+    el.className = 'fixed bottom-5 right-5 z-[100] flex items-center gap-2.5 px-4 py-2.5 rounded-xl shadow-2xl bg-[#1c1c1c] border border-rose-500/40 text-rose-300 text-xs transition-all duration-300 transform translate-y-0 opacity-100';
+    icon.innerHTML = '<svg class="w-4 h-4 text-rose-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>';
+  } else {
+    el.className = 'fixed bottom-5 right-5 z-[100] flex items-center gap-2.5 px-4 py-2.5 rounded-xl shadow-2xl bg-[#1c1c1c] border border-blue-500/40 text-blue-300 text-xs transition-all duration-300 transform translate-y-0 opacity-100';
+    icon.innerHTML = '<svg class="w-4 h-4 text-blue-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>';
+  }
+  toastTimer = setTimeout(() => {
+    el.classList.add('translate-y-10', 'opacity-0', 'pointer-events-none');
+    el.classList.remove('translate-y-0', 'opacity-100');
+  }, 3500);
 }
 
 // ── File Explorer ─────────────────────────────────────────────────────────
@@ -308,7 +506,7 @@ function updateBreadcrumbs() {
   }
   bar.classList.remove('hidden');
   const parts = currentFolder.split('/');
-  let html = `<button onclick="browseFolder('')" class="hover:text-blue-400 text-gray-400 truncate">root</button>`;
+  let html = `<button onclick="browseFolder('')" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, '')" class="hover:text-blue-400 text-gray-400 truncate">root</button>`;
   let accumulated = '';
   for (let i = 0; i < parts.length; i++) {
     accumulated = accumulated ? `${accumulated}/${parts[i]}` : parts[i];
@@ -318,7 +516,7 @@ function updateBreadcrumbs() {
       html += `<span class="text-gray-200 font-medium truncate">${parts[i]}</span>`;
     } else {
       const target = accumulated;
-      html += `<button onclick="browseFolder('${target}')" class="hover:text-blue-400 text-gray-400 truncate">${parts[i]}</button>`;
+      html += `<button onclick="browseFolder('${target}')" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, '${target}')" class="hover:text-blue-400 text-gray-400 truncate">${parts[i]}</button>`;
     }
   }
   bar.innerHTML = html;
@@ -362,6 +560,7 @@ function renderFileList() {
   if (currentFolder) {
     html += `
       <div class="flex items-center gap-2 px-2 py-1.5 rounded text-xs cursor-pointer text-gray-400 hover:text-white hover:bg-white/[0.04] transition-colors"
+           ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDropToParent(event)"
            onclick="browseParentFolder()">
         <svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 17l-5-5m0 0l5-5m-5 5h12"/></svg>
         <span class="font-medium text-gray-300">.. (up to parent folder)</span>
@@ -380,6 +579,9 @@ function renderFileList() {
     const isCurrent = item.path === currentNotebookPath;
     return `
       <div class="group flex items-center justify-between px-2 py-1.5 rounded text-xs cursor-pointer transition-colors ${isCurrent ? 'bg-blue-600/20 text-blue-300 font-medium' : 'text-gray-300 hover:bg-white/[0.04]'}"
+           draggable="true"
+           ondragstart="handleDragStart(event, '${item.path}', '${item.type}')"
+           ${isDir ? `ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, '${item.path}')"` : ''}
            onclick="${isDir ? `browseFolder('${item.path}')` : `openNotebook('${item.path}')`}">
         <div class="flex items-center gap-2 truncate">
           <svg class="w-3.5 h-3.5 shrink-0 ${isDir ? 'text-amber-400' : 'text-blue-400'}" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -392,13 +594,16 @@ function renderFileList() {
         ${!IS_VIEWER ? `
         <div class="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity shrink-0" onclick="event.stopPropagation()">
           ${isDir ? `
-          <button onclick="promptNewNotebook('${item.path}')" title="New notebook in this folder" class="p-0.5 text-gray-500 hover:text-blue-400">
+          <button onclick="openNewNotebookModal('${item.path}')" title="New notebook in this folder" class="p-0.5 text-gray-500 hover:text-blue-400">
             <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
           </button>` : ''}
-          <button onclick="promptRename('${item.path}')" title="Rename" class="p-0.5 text-gray-500 hover:text-white">
+          <button onclick="openMoveModal('${item.path}', ${isDir})" title="Move to folder" class="p-0.5 text-gray-500 hover:text-purple-400">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+          </button>
+          <button onclick="openRenameModal('${item.path}')" title="Rename" class="p-0.5 text-gray-500 hover:text-white">
             <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
           </button>
-          <button onclick="promptDelete('${item.path}')" title="Delete" class="p-0.5 text-gray-500 hover:text-red-400">
+          <button onclick="openDeleteModal('${item.path}')" title="Delete" class="p-0.5 text-gray-500 hover:text-red-400">
             <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
           </button>
         </div>` : ''}
@@ -412,69 +617,305 @@ function filterFiles() {
   renderFileList();
 }
 
-async function promptNewNotebook(targetFolder = currentFolder) {
-  const promptMsg = targetFolder ? `Notebook name in /${targetFolder}:` : 'Notebook name:';
-  const name = prompt(promptMsg, 'analysis.ipynb');
+// ── Item Actions: New Notebook, Folder, Rename, Move, Delete ─────────────
+
+let targetNbFolder = '';
+function openNewNotebookModal(targetFolder = currentFolder) {
+  targetNbFolder = targetFolder || '';
+  const locEl = document.getElementById('new-nb-location');
+  locEl.textContent = targetNbFolder ? `/${targetNbFolder}` : '/';
+  const input = document.getElementById('new-nb-input');
+  input.value = '';
+  openModal('new-notebook-modal');
+}
+
+async function submitNewNotebook(e) {
+  e.preventDefault();
+  const name = document.getElementById('new-nb-input').value.trim();
   if (!name) return;
-  const res = await fetch(API_BASE, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: name, folder: targetFolder, type: 'notebook' })
-  });
-  if (res.ok) {
+  const btn = document.getElementById('btn-create-nb');
+  btn.disabled = true;
+  try {
+    const res = await fetch(API_BASE, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name, folder: targetNbFolder, type: 'notebook' })
+    });
     const data = await res.json();
-    await loadFiles(currentFolder);
-    openNotebook(data.rel_path || (targetFolder ? `${targetFolder}/${name}` : name));
-  } else {
-    alert('Failed to create notebook');
+    if (res.ok) {
+      closeModal('new-notebook-modal');
+      showToast(`Created notebook ${data.name || name}`, 'success');
+      await loadFiles(currentFolder);
+      openNotebook(data.rel_path || (targetNbFolder ? `${targetNbFolder}/${name}` : name));
+    } else {
+      showToast(data.error || data.message || 'Failed to create notebook', 'error');
+    }
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
   }
 }
 
-async function promptNewFolder(targetFolder = currentFolder) {
-  const promptMsg = targetFolder ? `Folder name in /${targetFolder}:` : 'Folder name:';
-  const name = prompt(promptMsg);
+let targetFolderParent = '';
+function openNewFolderModal(targetFolder = currentFolder) {
+  targetFolderParent = targetFolder || '';
+  const locEl = document.getElementById('new-folder-location');
+  locEl.textContent = targetFolderParent ? `/${targetFolderParent}` : '/';
+  const input = document.getElementById('new-folder-input');
+  input.value = '';
+  openModal('new-folder-modal');
+}
+
+async function submitNewFolder(e) {
+  e.preventDefault();
+  const name = document.getElementById('new-folder-input').value.trim();
   if (!name) return;
-  const res = await fetch(API_BASE, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: name, folder: targetFolder, type: 'directory' })
-  });
-  if (res.ok) {
-    await loadFiles(currentFolder);
-  } else {
-    alert('Failed to create directory');
+  const btn = document.getElementById('btn-create-folder');
+  btn.disabled = true;
+  try {
+    const res = await fetch(API_BASE, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name, folder: targetFolderParent, type: 'directory' })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      closeModal('new-folder-modal');
+      showToast(`Created folder /${data.name || name}`, 'success');
+      await loadFiles(currentFolder);
+    } else {
+      showToast(data.error || data.message || 'Failed to create folder', 'error');
+    }
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
   }
 }
 
-async function promptRename(path) {
-  const newName = prompt('New name:', path.split('/').pop());
+function openRenameModal(path) {
+  const currentName = path.split('/').pop();
+  document.getElementById('rename-target-path').value = path;
+  document.getElementById('rename-item-current').textContent = currentName;
+  const input = document.getElementById('rename-input');
+  input.value = currentName;
+  openModal('rename-modal');
+}
+
+async function submitRename(e) {
+  e.preventDefault();
+  const oldPath = document.getElementById('rename-target-path').value;
+  const newName = document.getElementById('rename-input').value.trim();
   if (!newName) return;
-  const parent = path.includes('/') ? path.substring(0, path.lastIndexOf('/') + 1) : '';
+  const parent = oldPath.includes('/') ? oldPath.substring(0, oldPath.lastIndexOf('/') + 1) : '';
   const newPath = parent + newName;
-  const res = await fetch(`${API_BASE}/${encodeURIComponent(path)}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ new_path: newPath })
-  });
-  if (res.ok) {
-    if (currentNotebookPath === path) currentNotebookPath = newPath;
-    await loadFiles(currentFolder);
-  } else {
-    alert('Failed to rename item');
+  if (newPath === oldPath) {
+    closeModal('rename-modal');
+    return;
+  }
+  const btn = document.getElementById('btn-submit-rename');
+  btn.disabled = true;
+  try {
+    const res = await fetch(`${API_BASE}/${encodeURIComponent(oldPath)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ new_path: newPath })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      closeModal('rename-modal');
+      showToast(`Renamed to ${newName}`, 'success');
+      if (currentNotebookPath === oldPath) currentNotebookPath = newPath;
+      await loadFiles(currentFolder);
+    } else {
+      showToast(data.error || data.message || 'Failed to rename item', 'error');
+    }
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
   }
 }
 
-async function promptDelete(path) {
-  if (!confirm(`Are you sure you want to delete ${path}?`)) return;
-  const res = await fetch(`${API_BASE}/${encodeURIComponent(path)}`, {
-    method: 'DELETE'
-  });
-  if (res.ok) {
-    if (currentNotebookPath === path) closeNotebook();
-    await loadFiles(currentFolder);
-  } else {
-    alert('Failed to delete item');
+let movingItemPath = '';
+let movingItemIsDir = false;
+
+async function openMoveModal(path, isDir = false) {
+  movingItemPath = path;
+  movingItemIsDir = isDir;
+  document.getElementById('move-target-path').value = path;
+  document.getElementById('move-is-dir').value = isDir ? '1' : '0';
+  document.getElementById('move-item-name').textContent = path.split('/').pop();
+
+  const select = document.getElementById('move-dest-select');
+  select.innerHTML = '<option value="">📁 / (Workspace Root)</option>';
+
+  try {
+    const res = await fetch(`${API_BASE}/directories`);
+    if (res.ok) {
+      const data = await res.json();
+      const dirs = data.directories || [];
+      dirs.forEach(d => {
+        // Can't move a folder into itself or its own subdirectories
+        if (isDir && (d === path || d.startsWith(path + '/'))) return;
+        const opt = document.createElement('option');
+        opt.value = d;
+        opt.textContent = `📁 /${d}`;
+        select.appendChild(opt);
+      });
+    }
+  } catch (err) {
+    console.warn('Failed to load directories for move modal:', err);
   }
+
+  // Pre-select current parent if applicable
+  const currentParent = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : '';
+  select.value = currentParent;
+  updateMovePreview();
+  openModal('move-modal');
+}
+
+function updateMovePreview() {
+  const select = document.getElementById('move-dest-select');
+  const dest = select.value;
+  const name = movingItemPath.split('/').pop();
+  const target = dest ? `${dest}/${name}` : name;
+  document.getElementById('move-preview-path').textContent = `/${target}`;
+}
+
+async function submitMove(e) {
+  e.preventDefault();
+  const oldPath = document.getElementById('move-target-path').value;
+  const destDir = document.getElementById('move-dest-select').value;
+  const name = oldPath.split('/').pop();
+  const newPath = destDir ? `${destDir}/${name}` : name;
+
+  if (newPath === oldPath) {
+    closeModal('move-modal');
+    return;
+  }
+
+  const btn = document.getElementById('btn-submit-move');
+  btn.disabled = true;
+
+  try {
+    const res = await fetch(`${API_BASE}/${encodeURIComponent(oldPath)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ new_path: newPath })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      closeModal('move-modal');
+      showToast(`Moved ${name} to /${destDir || ''}`, 'success');
+      if (currentNotebookPath === oldPath) currentNotebookPath = newPath;
+      await loadFiles(currentFolder);
+    } else {
+      showToast(data.error || data.message || 'Failed to move item', 'error');
+    }
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function openDeleteModal(path) {
+  document.getElementById('delete-target-path').value = path;
+  document.getElementById('delete-target-name').textContent = path.split('/').pop();
+  openModal('delete-modal');
+}
+
+async function confirmDelete() {
+  const path = document.getElementById('delete-target-path').value;
+  if (!path) return;
+  const btn = document.getElementById('btn-confirm-delete');
+  btn.disabled = true;
+  try {
+    const res = await fetch(`${API_BASE}/${encodeURIComponent(path)}`, {
+      method: 'DELETE'
+    });
+    if (res.ok || res.status === 204) {
+      closeModal('delete-modal');
+      showToast(`Deleted ${path.split('/').pop()}`, 'success');
+      if (currentNotebookPath === path) closeNotebook();
+      await loadFiles(currentFolder);
+    } else {
+      const data = await res.json().catch(() => ({}));
+      showToast(data.error || data.message || 'Failed to delete item', 'error');
+    }
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ── Drag & Drop ───────────────────────────────────────────────────────────
+
+let draggedPath = null;
+let draggedType = null;
+
+function handleDragStart(e, path, type) {
+  draggedPath = path;
+  draggedType = type;
+  e.dataTransfer.setData('text/plain', path);
+  e.dataTransfer.effectAllowed = 'move';
+}
+
+function handleDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  e.currentTarget.classList.add('bg-blue-600/20', 'border-blue-500');
+}
+
+function handleDragLeave(e) {
+  e.currentTarget.classList.remove('bg-blue-600/20', 'border-blue-500');
+}
+
+async function handleDrop(e, targetFolder) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('bg-blue-600/20', 'border-blue-500');
+  if (!draggedPath) return;
+
+  const oldPath = draggedPath;
+  const name = oldPath.split('/').pop();
+  // Don't drop onto itself or into its own subfolder
+  if (draggedType === 'directory' && (targetFolder === oldPath || targetFolder.startsWith(oldPath + '/'))) {
+    return;
+  }
+  const newPath = targetFolder ? `${targetFolder}/${name}` : name;
+  if (newPath === oldPath) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/${encodeURIComponent(oldPath)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ new_path: newPath })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showToast(`Moved ${name} to /${targetFolder || ''}`, 'success');
+      if (currentNotebookPath === oldPath) currentNotebookPath = newPath;
+      await loadFiles(currentFolder);
+    } else {
+      showToast(data.error || data.message || 'Failed to move item', 'error');
+    }
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    draggedPath = null;
+    draggedType = null;
+  }
+}
+
+function handleDropToParent(e) {
+  if (!currentFolder) return;
+  const parts = currentFolder.split('/');
+  parts.pop();
+  const parentFolder = parts.join('/');
+  handleDrop(e, parentFolder);
 }
 
 // ── Notebook Lifecycle ───────────────────────────────────────────────────
@@ -496,7 +937,7 @@ async function openNotebook(path) {
       connectKernelSession(path);
     }
   } catch (err) {
-    alert(`Error: ${err.message}`);
+    showToast(err.message, 'error');
   }
 }
 
@@ -699,8 +1140,9 @@ async function saveNotebook() {
     saveEl.textContent = 'Saved';
     saveEl.classList.remove('text-amber-400');
     saveEl.classList.add('text-gray-500');
+    showToast('Notebook saved', 'success');
   } catch (err) {
-    alert(`Could not save notebook: ${err.message}`);
+    showToast(`Could not save notebook: ${err.message}`, 'error');
   } finally {
     btn.disabled = false;
   }
@@ -813,7 +1255,7 @@ function runCell(idx) {
   const cell = notebookModel.cells[idx];
   if (cell.cell_type !== 'code') return;
   if (!kernelSocket || kernelSocket.readyState !== WebSocket.OPEN) {
-    alert('Kernel is not connected. Reconnecting...');
+    showToast('Kernel is not connected. Reconnecting...', 'info');
     connectKernelSession(currentNotebookPath);
     return;
   }
@@ -931,7 +1373,7 @@ async function submitAirflowRun() {
     try {
       params = JSON.parse(paramsRaw);
     } catch {
-      alert('Invalid JSON in parameters');
+      showToast('Invalid JSON in parameters', 'error');
       return;
     }
   }
@@ -948,13 +1390,13 @@ async function submitAirflowRun() {
     });
     const data = await res.json();
     if (res.ok) {
-      alert(`Airflow run triggered successfully!\nRun ID: ${data.dag_run_id || 'manual'}`);
+      showToast(`Airflow run triggered! (ID: ${data.dag_run_id || 'manual'})`, 'success');
       closeAirflowModal();
     } else {
-      alert(`Error triggering Airflow run: ${data.error || 'Failed'}`);
+      showToast(data.error || 'Failed to trigger Airflow run', 'error');
     }
   } catch (err) {
-    alert(`Request error: ${err.message}`);
+    showToast(err.message, 'error');
   } finally {
     btn.disabled = false;
     btn.textContent = 'Trigger Run Now';
