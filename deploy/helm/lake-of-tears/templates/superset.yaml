@@ -22,8 +22,16 @@ spec:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/superset-config.yaml") . | sha256sum }}
     spec:
+      {{- with .Values.superset.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: superset
+          {{- with .Values.superset.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           image: {{ .Values.superset.image.repository }}:{{ .Values.superset.image.tag }}
           imagePullPolicy: {{ .Values.superset.image.pullPolicy }}
           env:
@@ -92,8 +100,16 @@ spec:
   template:
     spec:
       restartPolicy: OnFailure
+      {{- with .Values.superset.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       initContainers:
         - name: wait-for-superset
+          {{- with .Values.superset.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           image: busybox
           command:
             - sh
@@ -104,6 +120,10 @@ spec:
               done
       containers:
         - name: superset-init
+          {{- with .Values.superset.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           image: {{ .Values.superset.image.repository }}:{{ .Values.superset.image.tag }}
           env:
             - name: SUPERSET_SECRET_KEY

@@ -59,6 +59,20 @@ minio:
       cpu: "2"
       memory: "4Gi"
 
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+    seccompProfile:
+      type: RuntimeDefault
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+
 # ---------------------------------------------------------------------------
 # Lake UI — FastAPI + Tailwind unified shell
 # ---------------------------------------------------------------------------
@@ -89,6 +103,19 @@ lakeui:
       cpu: "500m"
       memory: "512Mi"
 
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    seccompProfile:
+      type: RuntimeDefault
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+
 # ---------------------------------------------------------------------------
 # JupyterLab — interactive data exploration
 # ---------------------------------------------------------------------------
@@ -114,6 +141,20 @@ jupyter:
     limits:
       cpu: "2"
       memory: "4Gi"
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 100
+    fsGroup: 100
+    seccompProfile:
+      type: RuntimeDefault
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
 
 # ---------------------------------------------------------------------------
 # Apache Superset — dashboards and BI
@@ -143,6 +184,20 @@ superset:
     limits:
       cpu: "1"
       memory: "2Gi"
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
 
 # ---------------------------------------------------------------------------
 # Apache Airflow — pipeline orchestration
@@ -175,6 +230,20 @@ airflow:
     limits:
       cpu: "2"
       memory: "4Gi"
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 50000
+    runAsGroup: 0
+    fsGroup: 50000
+    seccompProfile:
+      type: RuntimeDefault
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
 
 # ---------------------------------------------------------------------------
 # Auth backend — FastAPI service handling login, SSO, and user management
@@ -226,6 +295,19 @@ backend:
       cpu: "500m"
       memory: "512Mi"
 
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    seccompProfile:
+      type: RuntimeDefault
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+
 # ---------------------------------------------------------------------------
 # PostgreSQL — auth database
 # ---------------------------------------------------------------------------
@@ -256,6 +338,20 @@ postgres:
     limits:
       cpu: "500m"
       memory: "1Gi"
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 70
+    runAsGroup: 70
+    fsGroup: 70
+    seccompProfile:
+      type: RuntimeDefault
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
 
   # External Postgres DSN used by Airflow pipeline scripts (optional, unrelated to auth)
   dsn: ""

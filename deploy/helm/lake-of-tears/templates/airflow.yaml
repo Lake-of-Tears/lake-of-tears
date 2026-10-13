@@ -20,10 +20,16 @@ spec:
         app.kubernetes.io/name: {{ include "lake-of-tears.name" . }}
         app.kubernetes.io/component: airflow
     spec:
+      {{- with .Values.airflow.podSecurityContext }}
       securityContext:
-        runAsUser: 0   # root required for pip installs at startup
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: airflow
+          {{- with .Values.airflow.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           image: {{ .Values.airflow.image.repository }}:{{ .Values.airflow.image.tag }}
           imagePullPolicy: {{ .Values.airflow.image.pullPolicy }}
           command: ["/usr/bin/dumb-init", "--", "/bin/bash", "-c"]

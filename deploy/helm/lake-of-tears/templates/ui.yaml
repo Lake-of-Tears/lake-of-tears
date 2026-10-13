@@ -20,8 +20,16 @@ spec:
         app.kubernetes.io/component: lakeui
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
+      {{- with .Values.lakeui.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: lakeui
+          {{- with .Values.lakeui.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           image: {{ .Values.lakeui.image.repository }}:{{ .Values.lakeui.image.tag }}
           imagePullPolicy: {{ .Values.lakeui.image.pullPolicy | default "IfNotPresent" }}
           ports:
