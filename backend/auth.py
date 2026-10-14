@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 import jwt
 from database import get_db
 from fastapi import Cookie, Depends, Header, HTTPException
-from models import SystemSetting, User, WorkspaceMember
+from models import SystemSetting, User, Workspace, WorkspaceMember
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
@@ -144,3 +144,73 @@ def require_workspace_admin(
     if not member:
         raise HTTPException(403, "Workspace admin access required")
     return member
+
+
+def get_notebook_workspace_and_role(
+    workspace_id: str | None = None,
+    workspace_slug: str | None = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    require_write: bool = False,
+) -> tuple[Workspace, str]:
+    """Resolve workspace and verify user permissions for notebook operations."""
+    ws = None
+    if workspace_slug:
+        ws = (
+            db.query(Workspace)
+            .filter(Workspace.slug == workspace_slug.strip(), Workspace.status == "active")
+            .first()
+        )
+    elif workspace_id:
+        try:
+            ws_uuid = uuid.UUID(str(workspace_id))
+            ws = (
+                db.query(Workspace)
+                .filter(Workspace.id == ws_uuid, Workspace.status == "active")
+                .first()
+            )
+        except (ValueError, TypeError):
+            ws = None
+
+    if not ws:
+        if current_user.role == "superadmin":
+            ws = (
+                db.query(Workspace)
+                .filter(Workspace.status == "active")
+                .order_by(Workspace.created_at)
+                .first()
+            )
+        else:
+            ws = (
+                db.query(Workspace)
+                .join(WorkspaceMember, WorkspaceMember.workspace_id == Workspace.id)
+                .filter(WorkspaceMember.user_id == current_user.id, Workspace.status == "active")
+                .order_by(Workspace.created_at)
+                .first()
+            )
+
+    if not ws:
+        raise HTTPException(404, "Workspace not found")
+
+    member = (
+        db.query(WorkspaceMember)
+        .filter(
+            WorkspaceMember.workspace_id == ws.id,
+            WorkspaceMember.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not member and current_user.role != "superadmin":
+        raise HTTPException(403, "Not a member of this workspace")
+
+    role = (
+        member.role if member else ("superadmin" if current_user.role == "superadmin" else "viewer")
+    )
+
+    if require_write and current_user.role != "superadmin" and role == "viewer":
+        raise HTTPException(
+            403, "Workspace viewer role is read-only. Cannot modify or execute notebooks."
+        )
+
+    return ws, role

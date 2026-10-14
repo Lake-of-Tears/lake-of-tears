@@ -1210,6 +1210,13 @@ def _get_notebook_auth_and_workspace(
     return user, active
 
 
+def _get_request_token(request: Request) -> str | None:
+    tok = request.cookies.get("lake_token")
+    if not tok and request.headers.get("Authorization", "").startswith("Bearer "):
+        tok = request.headers.get("Authorization", "").split(" ", 1)[1]
+    return tok
+
+
 @app.get("/api/notebooks")
 @app.get("/notebooks/api")
 async def api_list_notebooks(request: Request, subpath: str = ""):
@@ -1217,7 +1224,8 @@ async def api_list_notebooks(request: Request, subpath: str = ""):
     if isinstance(auth_res, JSONResponse):
         return auth_res
     _, ws = auth_res
-    res = await notebook_proxy.list_workspace_notebooks(ws["slug"], subpath)
+    token = _get_request_token(request)
+    res = await notebook_proxy.list_workspace_notebooks(ws["slug"], subpath, auth_token=token)
     return JSONResponse(res)
 
 
@@ -1228,6 +1236,7 @@ async def api_create_notebook(request: Request):
     if isinstance(auth_res, JSONResponse):
         return auth_res
     _, ws = auth_res
+    token = _get_request_token(request)
     try:
         body = await request.json()
     except Exception:
@@ -1237,9 +1246,11 @@ async def api_create_notebook(request: Request):
     folder = body.get("folder") or body.get("folder_path") or ""
     if item_type == "directory":
         target = f"{folder}/{name}" if folder and name else (name or "new_folder")
-        status_code, data = await notebook_proxy.create_folder(ws["slug"], target)
+        status_code, data = await notebook_proxy.create_folder(ws["slug"], target, auth_token=token)
     else:
-        status_code, data = await notebook_proxy.create_notebook(ws["slug"], folder, name)
+        status_code, data = await notebook_proxy.create_notebook(
+            ws["slug"], folder, name, auth_token=token
+        )
     return JSONResponse(data, status_code=status_code)
 
 
@@ -1250,13 +1261,16 @@ async def api_create_session(request: Request):
     if isinstance(auth_res, JSONResponse):
         return auth_res
     _, ws = auth_res
+    token = _get_request_token(request)
     try:
         body = await request.json()
     except Exception:
         body = {}
     path = body.get("path", "")
     kernel_name = body.get("kernel_name", "python3")
-    status_code, data = await notebook_proxy.get_or_create_session(ws["slug"], path, kernel_name)
+    status_code, data = await notebook_proxy.get_or_create_session(
+        ws["slug"], path, kernel_name, auth_token=token
+    )
     return JSONResponse(data, status_code=status_code)
 
 
@@ -1266,7 +1280,8 @@ async def api_interrupt_kernel(request: Request, kernel_id: str):
     auth_res = _get_notebook_auth_and_workspace(request, require_write=True)
     if isinstance(auth_res, JSONResponse):
         return auth_res
-    status_code, data = await notebook_proxy.interrupt_kernel(kernel_id)
+    token = _get_request_token(request)
+    status_code, data = await notebook_proxy.interrupt_kernel(kernel_id, auth_token=token)
     return JSONResponse(data, status_code=status_code)
 
 
@@ -1276,7 +1291,8 @@ async def api_restart_kernel(request: Request, kernel_id: str):
     auth_res = _get_notebook_auth_and_workspace(request, require_write=True)
     if isinstance(auth_res, JSONResponse):
         return auth_res
-    status_code, data = await notebook_proxy.restart_kernel(kernel_id)
+    token = _get_request_token(request)
+    status_code, data = await notebook_proxy.restart_kernel(kernel_id, auth_token=token)
     return JSONResponse(data, status_code=status_code)
 
 
@@ -1318,7 +1334,8 @@ async def api_list_directories(request: Request):
     if isinstance(auth_res, JSONResponse):
         return auth_res
     _, ws = auth_res
-    folders = await notebook_proxy.list_workspace_folders(ws["slug"])
+    token = _get_request_token(request)
+    folders = await notebook_proxy.list_workspace_folders(ws["slug"], auth_token=token)
     return JSONResponse({"directories": folders, "workspace": ws["slug"]})
 
 
@@ -1504,11 +1521,12 @@ async def api_get_notebook(request: Request, path: str):
     if isinstance(auth_res, JSONResponse):
         return auth_res
     _, ws = auth_res
+    token = _get_request_token(request)
     try:
         clean_path = notebook_proxy.sanitize_notebook_path(path)
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
-    status_code, data = await notebook_proxy.get_notebook(ws["slug"], clean_path)
+    status_code, data = await notebook_proxy.get_notebook(ws["slug"], clean_path, auth_token=token)
     return JSONResponse(data, status_code=status_code)
 
 
@@ -1519,6 +1537,7 @@ async def api_save_notebook(request: Request, path: str):
     if isinstance(auth_res, JSONResponse):
         return auth_res
     _, ws = auth_res
+    token = _get_request_token(request)
     try:
         clean_path = notebook_proxy.sanitize_notebook_path(path)
     except ValueError as exc:
@@ -1527,7 +1546,9 @@ async def api_save_notebook(request: Request, path: str):
         body = await request.json()
     except Exception:
         return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
-    status_code, data = await notebook_proxy.save_notebook(ws["slug"], clean_path, body)
+    status_code, data = await notebook_proxy.save_notebook(
+        ws["slug"], clean_path, body, auth_token=token
+    )
     return JSONResponse(data, status_code=status_code)
 
 
@@ -1538,11 +1559,12 @@ async def api_delete_notebook(request: Request, path: str):
     if isinstance(auth_res, JSONResponse):
         return auth_res
     _, ws = auth_res
+    token = _get_request_token(request)
     try:
         clean_path = notebook_proxy.sanitize_notebook_path(path)
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
-    status_code, data = await notebook_proxy.delete_item(ws["slug"], clean_path)
+    status_code, data = await notebook_proxy.delete_item(ws["slug"], clean_path, auth_token=token)
     return JSONResponse(data, status_code=status_code)
 
 
@@ -1553,6 +1575,7 @@ async def api_rename_notebook(request: Request, path: str):
     if isinstance(auth_res, JSONResponse):
         return auth_res
     _, ws = auth_res
+    token = _get_request_token(request)
     try:
         clean_path = notebook_proxy.sanitize_notebook_path(path)
     except ValueError as exc:
@@ -1568,7 +1591,9 @@ async def api_rename_notebook(request: Request, path: str):
         clean_new_path = notebook_proxy.sanitize_notebook_path(new_path)
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
-    status_code, data = await notebook_proxy.rename_item(ws["slug"], clean_path, clean_new_path)
+    status_code, data = await notebook_proxy.rename_item(
+        ws["slug"], clean_path, clean_new_path, auth_token=token
+    )
     return JSONResponse(data, status_code=status_code)
 
 
