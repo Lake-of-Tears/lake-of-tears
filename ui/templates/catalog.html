@@ -4,6 +4,22 @@
 {% block content %}
 <div class="max-w-4xl mx-auto">
 
+  {% if error %}
+  <div id="catalog-error-banner" class="mb-5 px-4 py-3 rounded-lg bg-red-900/30 border border-red-800/50 text-red-300 text-sm flex items-center justify-between">
+    <div class="flex items-center gap-2.5">
+      <svg class="w-4 h-4 text-red-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+      </svg>
+      <span>{{ error }}</span>
+    </div>
+    <button type="button" onclick="document.getElementById('catalog-error-banner').remove()" class="text-red-400 hover:text-red-200">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+      </svg>
+    </button>
+  </div>
+  {% endif %}
+
   <!-- Header -->
   <div class="flex items-center justify-between mb-6">
     <div>
@@ -180,7 +196,25 @@
   <div class="bg-[#1a1a1a] border border-white/[0.08] rounded-xl shadow-2xl w-full max-w-md p-6">
     <h2 class="text-base font-semibold text-gray-100 mb-4">Create catalog</h2>
     <form action="/catalog/create" method="post" class="flex flex-col gap-3">
+      {% if not request.state.workspace %}
+      <div class="px-3 py-2 rounded bg-amber-900/30 border border-amber-800/40 text-amber-300 text-xs">
+        No active workspace found. Please select or join a workspace before creating a catalog.
+      </div>
+      {% endif %}
+      {% if request.state.workspaces and request.state.workspaces | length > 1 %}
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Workspace</label>
+        <select name="workspace_id" class="input-dark">
+          {% for ws in request.state.workspaces %}
+          <option value="{{ ws.id }}" {% if request.state.workspace and ws.id == request.state.workspace.id %}selected{% endif %}>
+            {{ ws.name }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      {% else %}
       <input type="hidden" name="workspace_id" value="{{ request.state.workspace.id if request.state.workspace else '' }}"/>
+      {% endif %}
       <div>
         <label class="block text-xs text-gray-500 mb-1">Name</label>
         <input name="name" type="text" required placeholder="e.g. production" class="input-dark"/>
@@ -192,7 +226,7 @@
       <div class="flex gap-2 justify-end mt-2">
         <button type="button" onclick="document.getElementById('create-catalog-modal').classList.add('hidden')"
                 class="btn-ghost">Cancel</button>
-        <button type="submit" class="btn-primary">Create</button>
+        <button type="submit" class="btn-primary" {% if not request.state.workspace %}disabled{% endif %}>Create</button>
       </div>
     </form>
   </div>

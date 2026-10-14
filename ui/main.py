@@ -83,7 +83,7 @@ def _get_session_config() -> dict:
     return {"session_inactivity_timeout_minutes": 0, "session_max_hours": 24}
 
 
-def _fetch_workspaces(token: str) -> list[dict]:
+def _fetch_workspaces(token: str) -> list[dict] | None:
     try:
         with httpx.Client(timeout=3) as client:
             resp = client.get(
@@ -92,6 +92,8 @@ def _fetch_workspaces(token: str) -> list[dict]:
             )
         if resp.status_code == 200:
             return resp.json()
+        if resp.status_code == 401:
+            return None
     except Exception:
         pass
     return []
@@ -133,6 +135,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
         loop = asyncio.get_event_loop()
         session_cfg = await loop.run_in_executor(None, _get_session_config)
         workspaces = await loop.run_in_executor(None, _fetch_workspaces, token)
+        if workspaces is None:
+            resp = RedirectResponse(url="/login?reason=session_expired", status_code=302)
+            resp.delete_cookie("lake_token")
+            resp.delete_cookie(_WORKSPACE_COOKIE)
+            return resp
+
         request.state.session_config = session_cfg
         request.state.workspaces = workspaces
 
@@ -468,9 +476,10 @@ async def catalog(request: Request):
         catalogs = _backend_get(f"/api/workspaces/{ws['id']}/catalogs", token) or []
     elif token:
         catalogs = _backend_get("/api/catalogs", token) or []
+    error = request.query_params.get("error")
     return templates.TemplateResponse(
         "catalog.html",
-        {"request": request, "catalogs": catalogs, "page": "catalog"},
+        {"request": request, "catalogs": catalogs, "page": "catalog", "error": error},
     )
 
 
@@ -482,19 +491,41 @@ async def catalog_create(
     workspace_id: str = Form(""),
 ):
     token = request.cookies.get("lake_token")
+    if not token:
+        return RedirectResponse(url="/login?reason=session_expired", status_code=302)
+
     # Prefer the live session workspace over the form field — the form value is
     # baked in at page-render time and can be stale (cached page, back-nav, etc.).
     ws = request.state.workspace
     effective_workspace_id = (str(ws["id"]) if ws else None) or workspace_id or None
-    if token:
-        _backend_post(
-            "/api/catalogs",
-            token,
-            {
-                "name": name,
-                "description": description or None,
-                "workspace_id": effective_workspace_id,
-            },
+    if not effective_workspace_id:
+        err = "No active workspace selected. Please select a workspace first."
+        return RedirectResponse(
+            url=f"/catalog?error={urllib.parse.quote_plus(err)}",
+            status_code=302,
+        )
+
+    name_clean = name.strip()
+    if not name_clean:
+        err = "Catalog name cannot be empty."
+        return RedirectResponse(
+            url=f"/catalog?error={urllib.parse.quote_plus(err)}",
+            status_code=302,
+        )
+
+    _, error = _backend_post_with_error(
+        "/api/catalogs",
+        token,
+        {
+            "name": name_clean,
+            "description": description.strip() if description else None,
+            "workspace_id": effective_workspace_id,
+        },
+    )
+    if error:
+        return RedirectResponse(
+            url=f"/catalog?error={urllib.parse.quote_plus(error)}",
+            status_code=302,
         )
     return RedirectResponse(url="/catalog", status_code=302)
 
@@ -663,7 +694,7 @@ def _backend_get(path: str, token: str) -> dict | list | None:
     return None
 
 
-def _backend_post(path: str, token: str, json: dict) -> dict | None:
+def _backend_post_with_error(path: str, token: str, json: dict) -> tuple[dict | None, str | None]:
     try:
         with httpx.Client(timeout=5) as client:
             resp = client.post(
@@ -672,10 +703,34 @@ def _backend_post(path: str, token: str, json: dict) -> dict | None:
                 headers={"Authorization": f"Bearer {token}"},
             )
         if resp.status_code in (200, 201):
-            return resp.json()
+            return resp.json(), None
+
+        try:
+            err_data = resp.json()
+            if isinstance(err_data, dict) and "detail" in err_data:
+                detail = err_data["detail"]
+                if isinstance(detail, list):
+                    messages = [
+                        item.get("msg", str(item)) if isinstance(item, dict) else str(item)
+                        for item in detail
+                    ]
+                    return None, "; ".join(messages)
+                return None, str(detail)
+        except Exception:
+            pass
+
+        if resp.text.strip():
+            return None, resp.text.strip()
+        return None, f"Request failed with status {resp.status_code}"
+    except httpx.TimeoutException:
+        return None, "Backend request timed out"
     except Exception:
-        pass
-    return None
+        return None, "Backend service unreachable"
+
+
+def _backend_post(path: str, token: str, json: dict) -> dict | None:
+    data, _ = _backend_post_with_error(path, token, json)
+    return data
 
 
 def _backend_patch(path: str, token: str, json: dict) -> dict | None:
@@ -1127,7 +1182,7 @@ def _get_notebook_auth_and_workspace(
     except Exception:
         return JSONResponse({"detail": "Invalid or expired token"}, status_code=401)
 
-    workspaces = _fetch_workspaces(token)
+    workspaces = _fetch_workspaces(token) or []
     active_id = request.cookies.get(_WORKSPACE_COOKIE, "")
     active = next((w for w in workspaces if str(w["id"]) == active_id), None)
     if not active and workspaces:
@@ -1546,7 +1601,7 @@ async def websocket_kernel_proxy(websocket: WebSocket, kernel_id: str):
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
 
-        workspaces = _fetch_workspaces(token)
+        workspaces = _fetch_workspaces(token) or []
         active_id = websocket.cookies.get(_WORKSPACE_COOKIE, "")
         active = next((w for w in workspaces if str(w["id"]) == active_id), None)
         if not active and workspaces:

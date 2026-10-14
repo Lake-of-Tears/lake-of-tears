@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import threading
+import uuid
 from datetime import UTC, datetime, timedelta
 
 import jwt as _jwt
@@ -302,7 +303,13 @@ def refresh_token(
     except _jwt.InvalidTokenError:
         raise HTTPException(401, "Invalid token")
 
-    user = db.query(User).filter(User.id == payload["sub"]).first()
+    sub_val = payload.get("sub")
+    try:
+        user_uuid = uuid.UUID(str(sub_val))
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(401, "Invalid token")
+
+    user = db.query(User).filter(User.id == user_uuid).first()
     if not user or not user.is_active:
         raise HTTPException(401, "User not found or disabled")
 
