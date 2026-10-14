@@ -19,6 +19,9 @@ AIRFLOW_URL = os.getenv("AIRFLOW_URL", "http://airflow:8080/airflow").rstrip("/"
 AIRFLOW_ADMIN_USER = os.getenv("AIRFLOW_ADMIN_USER", "admin")
 AIRFLOW_ADMIN_PASSWORD = os.getenv("AIRFLOW_ADMIN_PASSWORD", "")
 
+BACKEND_URL = os.getenv("BACKEND_URL", "http://backend:8000").rstrip("/")
+USE_BACKEND_NOTEBOOKS = os.getenv("USE_BACKEND_NOTEBOOKS", "true").lower() in ("true", "1", "yes")
+
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "")
@@ -103,6 +106,46 @@ def _get_headers() -> dict[str, str]:
     return headers
 
 
+async def _backend_request(
+    method: str,
+    endpoint: str,
+    workspace_slug: str = "",
+    params: dict[str, Any] | None = None,
+    json_data: dict[str, Any] | None = None,
+    auth_token: str | None = None,
+    timeout: float = 15.0,
+) -> tuple[int, Any] | None:
+    """Attempt to forward request to core backend API gateway."""
+    if not USE_BACKEND_NOTEBOOKS or not BACKEND_URL:
+        return None
+    url = f"{BACKEND_URL}/api/v1/notebooks/{endpoint.lstrip('/')}"
+    headers = {"Content-Type": "application/json"}
+    if auth_token:
+        headers["Authorization"] = f"Bearer {auth_token}"
+    req_params = {}
+    if workspace_slug:
+        req_params["workspace_slug"] = workspace_slug
+    if params:
+        req_params.update(params)
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.request(
+                method=method,
+                url=url,
+                headers=headers,
+                params=req_params or None,
+                json=json_data,
+            )
+            try:
+                data = resp.json()
+            except Exception:
+                data = resp.text
+            return resp.status_code, data
+    except Exception as exc:
+        logger.debug("Backend proxy skipped or unavailable, using direct fallback: %s", exc)
+        return None
+
+
 async def jupyter_request(
     method: str,
     path: str,
@@ -154,8 +197,19 @@ async def ensure_workspace_dir(workspace_slug: str) -> None:
         )
 
 
-async def list_workspace_notebooks(workspace_slug: str, subpath: str = "") -> dict[str, Any]:
+async def list_workspace_notebooks(
+    workspace_slug: str, subpath: str = "", auth_token: str | None = None
+) -> dict[str, Any]:
     """List notebooks and folders in the workspace directory."""
+    if auth_token:
+        backend_res = await _backend_request(
+            "GET", "files", workspace_slug, params={"subpath": subpath}, auth_token=auth_token
+        )
+        if backend_res is not None:
+            status, data = backend_res
+            if status == 200 and isinstance(data, dict):
+                return data
+
     await ensure_workspace_dir(workspace_slug)
     ws_path = get_workspace_dir(workspace_slug, subpath)
     status, data = await jupyter_request("GET", f"contents/{ws_path}")
@@ -187,8 +241,18 @@ async def list_workspace_notebooks(workspace_slug: str, subpath: str = "") -> di
     return {"items": items, "path": subpath, "workspace": workspace_slug}
 
 
-async def get_notebook(workspace_slug: str, path: str) -> tuple[int, dict[str, Any]]:
+async def get_notebook(
+    workspace_slug: str, path: str, auth_token: str | None = None
+) -> tuple[int, dict[str, Any]]:
     """Retrieve a notebook by path within the workspace."""
+    if auth_token:
+        clean_path = sanitize_notebook_path(path)
+        backend_res = await _backend_request(
+            "GET", clean_path, workspace_slug, auth_token=auth_token
+        )
+        if backend_res is not None:
+            return backend_res
+
     ws_path = get_workspace_dir(workspace_slug, path)
     status, data = await jupyter_request("GET", f"contents/{ws_path}", params={"type": "notebook"})
     if status == 200 and isinstance(data, dict):
@@ -197,9 +261,20 @@ async def get_notebook(workspace_slug: str, path: str) -> tuple[int, dict[str, A
 
 
 async def save_notebook(
-    workspace_slug: str, path: str, notebook_data: dict[str, Any]
+    workspace_slug: str,
+    path: str,
+    notebook_data: dict[str, Any],
+    auth_token: str | None = None,
 ) -> tuple[int, dict[str, Any]]:
     """Save/update notebook content."""
+    if auth_token:
+        clean_path = sanitize_notebook_path(path)
+        backend_res = await _backend_request(
+            "PUT", clean_path, workspace_slug, json_data=notebook_data, auth_token=auth_token
+        )
+        if backend_res is not None:
+            return backend_res
+
     ws_path = get_workspace_dir(workspace_slug, path)
     payload = {
         "type": "notebook",
@@ -211,9 +286,23 @@ async def save_notebook(
 
 
 async def create_notebook(
-    workspace_slug: str, folder_path: str = "", name: str | None = None
+    workspace_slug: str,
+    folder_path: str = "",
+    name: str | None = None,
+    auth_token: str | None = None,
 ) -> tuple[int, dict[str, Any]]:
     """Create a new notebook inside the workspace."""
+    if auth_token:
+        backend_res = await _backend_request(
+            "POST",
+            "create",
+            workspace_slug,
+            json_data={"type": "notebook", "folder": folder_path, "name": name},
+            auth_token=auth_token,
+        )
+        if backend_res is not None:
+            return backend_res
+
     await ensure_workspace_dir(workspace_slug)
     clean_folder = sanitize_notebook_path(folder_path) if folder_path else ""
     if clean_folder and name and name.startswith(clean_folder + "/"):
@@ -240,8 +329,21 @@ async def create_notebook(
     return status, data if isinstance(data, dict) else {"result": data}
 
 
-async def create_folder(workspace_slug: str, folder_path: str) -> tuple[int, dict[str, Any]]:
+async def create_folder(
+    workspace_slug: str, folder_path: str, auth_token: str | None = None
+) -> tuple[int, dict[str, Any]]:
     """Create a new directory inside the workspace."""
+    if auth_token:
+        backend_res = await _backend_request(
+            "POST",
+            "create",
+            workspace_slug,
+            json_data={"type": "directory", "name": folder_path},
+            auth_token=auth_token,
+        )
+        if backend_res is not None:
+            return backend_res
+
     await ensure_workspace_dir(workspace_slug)
     clean_path = sanitize_notebook_path(folder_path)
     if not clean_path:
@@ -253,9 +355,21 @@ async def create_folder(workspace_slug: str, folder_path: str) -> tuple[int, dic
 
 
 async def list_workspace_folders(
-    workspace_slug: str, current_path: str = "", max_depth: int = 5
+    workspace_slug: str,
+    current_path: str = "",
+    max_depth: int = 5,
+    auth_token: str | None = None,
 ) -> list[str]:
     """Recursively list all subdirectories in the workspace."""
+    if auth_token:
+        backend_res = await _backend_request(
+            "GET", "directories", workspace_slug, auth_token=auth_token
+        )
+        if backend_res is not None:
+            status, data = backend_res
+            if status == 200 and isinstance(data, dict) and "directories" in data:
+                return data["directories"]
+
     await ensure_workspace_dir(workspace_slug)
     folders: list[str] = []
     queue: list[tuple[str, int]] = [(current_path, 0)]
@@ -286,8 +400,22 @@ async def search_workspace_items(
     subpath: str = "",
     max_depth: int = 10,
     limit: int = 300,
+    auth_token: str | None = None,
 ) -> list[dict[str, Any]]:
     """Recursively search for notebooks, files, and directories matching query starting from subpath."""
+    if auth_token:
+        backend_res = await _backend_request(
+            "GET",
+            "search",
+            workspace_slug,
+            params={"q": query, "subpath": subpath},
+            auth_token=auth_token,
+        )
+        if backend_res is not None:
+            status, data = backend_res
+            if status == 200 and isinstance(data, dict) and "items" in data:
+                return data["items"]
+
     await ensure_workspace_dir(workspace_slug)
     clean_subpath = sanitize_notebook_path(subpath) if subpath else ""
     q = query.strip().lower()
@@ -356,17 +484,39 @@ async def search_workspace_items(
     return results
 
 
-async def delete_item(workspace_slug: str, path: str) -> tuple[int, dict[str, Any]]:
+async def delete_item(
+    workspace_slug: str, path: str, auth_token: str | None = None
+) -> tuple[int, dict[str, Any]]:
     """Delete a notebook or directory within the workspace."""
+    if auth_token:
+        clean_path = sanitize_notebook_path(path)
+        backend_res = await _backend_request(
+            "DELETE", clean_path, workspace_slug, auth_token=auth_token
+        )
+        if backend_res is not None:
+            return backend_res
+
     ws_path = get_workspace_dir(workspace_slug, path)
     status, data = await jupyter_request("DELETE", f"contents/{ws_path}")
     return status, data if isinstance(data, dict) else {"status": status}
 
 
 async def rename_item(
-    workspace_slug: str, old_path: str, new_path: str
+    workspace_slug: str, old_path: str, new_path: str, auth_token: str | None = None
 ) -> tuple[int, dict[str, Any]]:
     """Rename or move a notebook within the workspace."""
+    if auth_token:
+        clean_old = sanitize_notebook_path(old_path)
+        backend_res = await _backend_request(
+            "PATCH",
+            clean_old,
+            workspace_slug,
+            json_data={"new_path": new_path},
+            auth_token=auth_token,
+        )
+        if backend_res is not None:
+            return backend_res
+
     old_ws_path = get_workspace_dir(workspace_slug, old_path)
     new_ws_path = get_workspace_dir(workspace_slug, new_path)
     payload = {"path": new_ws_path}
@@ -375,9 +525,23 @@ async def rename_item(
 
 
 async def get_or_create_session(
-    workspace_slug: str, notebook_path: str, kernel_name: str = "python3"
+    workspace_slug: str,
+    notebook_path: str,
+    kernel_name: str = "python3",
+    auth_token: str | None = None,
 ) -> tuple[int, dict[str, Any]]:
     """Start or attach to an existing kernel session for a notebook."""
+    if auth_token:
+        backend_res = await _backend_request(
+            "POST",
+            "sessions",
+            workspace_slug,
+            json_data={"path": notebook_path, "kernel_name": kernel_name},
+            auth_token=auth_token,
+        )
+        if backend_res is not None:
+            return backend_res
+
     ws_path = get_workspace_dir(workspace_slug, notebook_path)
     # Check existing sessions first
     status, sessions = await jupyter_request("GET", "sessions")
@@ -397,14 +561,32 @@ async def get_or_create_session(
     return status, data if isinstance(data, dict) else {"result": data}
 
 
-async def restart_kernel(kernel_id: str) -> tuple[int, dict[str, Any]]:
+async def restart_kernel(
+    kernel_id: str, auth_token: str | None = None
+) -> tuple[int, dict[str, Any]]:
     """Restart a running kernel."""
+    if auth_token:
+        backend_res = await _backend_request(
+            "POST", f"kernels/{kernel_id}/restart", auth_token=auth_token
+        )
+        if backend_res is not None:
+            return backend_res
+
     status, data = await jupyter_request("POST", f"kernels/{kernel_id}/restart")
     return status, data if isinstance(data, dict) else {"status": status}
 
 
-async def interrupt_kernel(kernel_id: str) -> tuple[int, dict[str, Any]]:
+async def interrupt_kernel(
+    kernel_id: str, auth_token: str | None = None
+) -> tuple[int, dict[str, Any]]:
     """Interrupt kernel execution."""
+    if auth_token:
+        backend_res = await _backend_request(
+            "POST", f"kernels/{kernel_id}/interrupt", auth_token=auth_token
+        )
+        if backend_res is not None:
+            return backend_res
+
     status, data = await jupyter_request("POST", f"kernels/{kernel_id}/interrupt")
     return status, data if isinstance(data, dict) else {"status": status}
 

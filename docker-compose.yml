@@ -95,6 +95,13 @@ services:
       OIDC_USERINFO_URL: ${OIDC_USERINFO_URL:-}
       OIDC_SCOPE: ${OIDC_SCOPE:-openid email profile}
       OIDC_DISPLAY_NAME: ${OIDC_DISPLAY_NAME:-SSO}
+      JUPYTER_SERVER_URL: http://jupyter:8888
+      JUPYTER_BASE_URL: /jupyter
+      JUPYTER_TOKEN: ${JUPYTER_TOKEN}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: datalake
     depends_on:
       postgres:
         condition: service_healthy

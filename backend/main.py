@@ -31,6 +31,7 @@ from models import (
     Workspace,
     WorkspaceMember,
 )
+from notebooks_router import router as notebooks_router
 from oauth import enabled_providers, get_oauth_redirect, handle_oauth_callback
 from schemas import (
     AddMemberRequest,
@@ -96,6 +97,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(notebooks_router, prefix="/api/v1/notebooks", tags=["notebooks"])
+app.include_router(notebooks_router, prefix="/api/notebooks", tags=["notebooks"])
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
