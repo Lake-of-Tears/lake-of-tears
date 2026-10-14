@@ -634,7 +634,7 @@ logger = logging.getLogger("airflow.task.{dag_id}")
 default_args = {{
     "owner": "lake-of-tears",
     "retries": 1,
-    "retry_delay": timedelta(minutes=5),
+    "retry_delay": timedelta(seconds=10),
     "execution_timeout": timedelta(hours=2),
 }}
 

@@ -83,6 +83,15 @@ spec:
                   key: AIRFLOW_ADMIN_PASSWORD
             - name: _PIP_ADDITIONAL_REQUIREMENTS
               value: {{ .Values.airflow.extraPipPackages | join " " | quote }}
+            - name: JUPYTER_SERVER_URL
+              value: "http://{{ include "lake-of-tears.fullname" . }}-jupyter:{{ .Values.jupyter.service.port }}"
+            - name: JUPYTER_BASE_URL
+              value: "/jupyter"
+            - name: JUPYTER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "lake-of-tears.fullname" . }}-credentials
+                  key: JUPYTER_TOKEN
             - name: MINIO_ENDPOINT
               value: "{{ include "lake-of-tears.fullname" . }}-minio:{{ .Values.minio.service.apiPort }}"
             - name: MINIO_ACCESS_KEY

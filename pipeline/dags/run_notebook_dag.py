@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import tempfile
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from airflow import DAG
@@ -15,6 +15,7 @@ logger = logging.getLogger("airflow.task.run_notebook")
 default_args = {
     "owner": "airflow",
     "retries": 1,
+    "retry_delay": timedelta(seconds=10),
 }
 
 JUPYTER_SERVER_URL = os.getenv("JUPYTER_SERVER_URL", "http://lake-of-tears-jupyter:8888").rstrip(
