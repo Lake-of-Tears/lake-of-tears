@@ -314,7 +314,117 @@ The existing notebook "Schedule / Run" modal is expanded with two distinct tabs:
 
 ---
 
-## 6. Compute Isolation Model (Databricks Job Cluster Model)
+## 6. Visual 24-Hour Pipeline Schedule Timeline & Color Management
+
+### 6.1. Visual 24-Hour Timeline Architecture & Layout
+To give data engineering and analytics teams immediate visual situational awareness of their job executions, Lake of Tears provides an interactive 24-hour visual schedule timeline directly above the pipelines table (Split / Combined View):
+- **Collapsible Timeline Banner:** Positioned prominently at the top of `/pipelines`, with a toggle switch (`[− Hide Timeline]` / `[+ Show Timeline]`) and persistent visibility state saved in user preferences / localStorage.
+- **Calendar Day Window Scope:**
+  - Strict 24-hour window from **00:00:00 to 23:59:59** in the user's local timezone.
+  - **Date Navigation Controls:** `< Previous Day`, `Today` (with active badge), and `Next Day >` buttons, plus an interactive calendar date selector.
+  - **Real-Time "NOW" Indicator:** When viewing the current calendar day, a bright, vertical glowing cursor line indicates the current time and moves in real time (refreshing every 60s).
+
+### 6.2. Interactive Zoom & Pan Engine
+Users can fluidly inspect high-density schedules or zoom in to examine micro-batches and tight cadences:
+- **Zoom Presets & Granularity:**
+  - `24h` (Full Day): 1-hour primary tick marks. High-level daily overview.
+  - `12h` (Half Day): 30-minute tick marks. Balanced workload view.
+  - `6h` (Quarter Day): 15-minute tick marks. Detailed shift scheduling.
+  - `1h` (Micro View): 5-minute tick marks. High-frequency or cascading pipeline sequences.
+- **Zoom Controls:** Range slider (`1h` to `24h`) alongside mousewheel/trackpad zoom and click-and-drag horizontal panning when zoomed in.
+- **Auto-Scroll to "NOW":** When viewing "Today", opening the timeline or switching zoom automatically centers the view on the current time cursor.
+
+### 6.3. Timeline Swimlanes & Visual Job Nodes
+- **Pipeline Swimlanes:** Each pipeline has its own horizontal swimlane with the pipeline name, status pill, and assigned color swatch badge on the left sticky header.
+- **Job Run Blocks:**
+  - **Executed / Past Runs:** Solid colored rectangular pill blocks spanning the actual duration (`start_date` to `end_date`), color-coded by pipeline with a status border/badge (Emerald = Success, Rose = Failed, Amber = Running with glowing pulse animation).
+  - **Projected / Upcoming Runs:** Translucent / striped pill blocks positioned at predicted future firing times based on cron intervals, clearly differentiating scheduled invocations from historical executions.
+- **Hover Micro-Inspector Tooltip:** Hovering over any job block reveals a floating card with:
+  - Pipeline Title & DAG ID
+  - Scheduled Time & Actual Start/End Timestamps
+  - Execution Duration (e.g., `42.5s`)
+  - Run Status & Trigger Type (`manual` vs `scheduled`)
+  - Run Parameters Summary
+
+### 6.4. Unified Slide-Drawer Integration
+- **Direct Link to Unified Inspector:** Clicking any job block (past or scheduled) on the timeline immediately opens the **identical slide-over inspector drawer** that opens when clicking a row in the pipeline table.
+- **Deep Linking to Run & Logs:**
+  - Clicking an executed run opens the drawer directly on the **Task Execution Log** tab for that specific `dag_run_id`, auto-scrolling to the ANSI live terminal log output.
+  - Clicking a scheduled run opens the drawer on the **Execution Runs** history tab with pre-filled trigger configuration.
+
+### 6.5. Workspace-Shared Color Management & Customization
+To allow teams to instantly categorize pipelines by domain (e.g., Ingestion = Blue, Transformation = Violet, Notebook Analytics = Emerald, Maintenance = Amber):
+- **12-Color Accessible Master Palette:**
+  - Emerald (`#10B981`), Blue (`#3B82F6`), Indigo (`#6366F1`), Violet (`#8B5CF6`), Fuchsia (`#D946EF`), Pink (`#EC4899`), Rose (`#F43F5E`), Amber (`#F59E0B`), Orange (`#F97316`), Teal (`#14B8A6`), Cyan (`#06B6D4`), Lime (`#84CC16`).
+- **Workspace-Shared Persistence in Database:**
+  - Pipeline display configurations are stored in PostgreSQL table `pipeline_metadata` (or workspace-scoped JSON settings):
+    ```sql
+    CREATE TABLE pipeline_metadata (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        dag_id VARCHAR(255) NOT NULL,
+        color_hex VARCHAR(32) NOT NULL DEFAULT '#3B82F6',
+        display_label VARCHAR(255),
+        is_visible_on_timeline BOOLEAN NOT NULL DEFAULT TRUE,
+        updated_by UUID REFERENCES users(id),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        UNIQUE (workspace_id, dag_id)
+    );
+    ```
+- **Interactive Color Swatch & Custom Hex Picker:**
+  - Clicking the color dot next to any pipeline opens a lightweight popover palette with the 12 preset colors plus a custom hex input.
+  - Updating a color saves immediately via `PATCH /api/v1/pipelines/{dag_id}/settings` and updates all timeline swimlanes, table badges, and team member views in real time.
+- **Default Auto-Assignment:** If a pipeline has no custom color assigned, a deterministic hash of `dag_id` selects a default color from the master palette.
+
+### 6.6. Timeline Schedule Calculation & Data Gateway API
+- **Endpoint:** `GET /api/v1/pipelines/timeline`
+  - **Query Parameters:**
+    - `date`: `YYYY-MM-DD` (defaults to today in user's local timezone).
+    - `tz`: IANA timezone string (e.g. `America/New_York` or `UTC`).
+  - **Processing Logic:**
+    1. Determines calendar day boundaries: `[dateT00:00:00, dateT23:59:59]` in requested timezone.
+    2. Queries Airflow REST API `GET /api/v1/dags/{dag_id}/dagRuns` within the day window to collect actual runs.
+    3. For active (unpaused) pipelines with recurring cron schedules, uses `croniter` to calculate all scheduled firing timestamps within the 24-hour day window.
+    4. Enriches each pipeline with its assigned color, display label, past runs, and upcoming predicted runs.
+  - **Response Schema:**
+    ```json
+    {
+      "date": "2026-10-14",
+      "timezone": "America/New_York",
+      "window_start": "2026-10-14T00:00:00-04:00",
+      "window_end": "2026-10-14T23:59:59-04:00",
+      "current_time": "2026-10-14T19:45:00-04:00",
+      "pipelines": [
+        {
+          "dag_id": "ingest_weather",
+          "display_label": "Ingest Weather Data",
+          "color_hex": "#06B6D4",
+          "schedule_interval": "0 6 * * *",
+          "is_paused": false,
+          "runs": [
+            {
+              "type": "actual",
+              "dag_run_id": "scheduled__2026-10-14T06:00:00+00:00",
+              "state": "success",
+              "start_time": "2026-10-14T06:00:02-04:00",
+              "end_time": "2026-10-14T06:00:45-04:00",
+              "duration_seconds": 43.2
+            },
+            {
+              "type": "projected",
+              "dag_run_id": "projected__2026-10-14T18:00:00-04:00",
+              "state": "scheduled",
+              "scheduled_time": "2026-10-14T18:00:00-04:00"
+            }
+          ]
+        }
+      ]
+    }
+    ```
+
+---
+
+## 7. Compute Isolation Model (Databricks Job Cluster Model)
 
 To prevent noisy-neighbor starvation where long-running notebooks consume CPU/RAM required by production ingestion pipelines:
 
@@ -359,15 +469,17 @@ To prevent noisy-neighbor starvation where long-running notebooks consume CPU/RA
 
 ---
 
-## 7. Comprehensive Unit & Integration Test Specification
+---
 
-To guarantee platform stability, multi-tenant isolation, RBAC compliance, and zero regression, two dedicated test suites will be introduced:
-1. `tests/test_backend_pipelines.py` (Backend router, service layer, RBAC, AST code generation, and Airflow proxying)
-2. `tests/test_ui_pipelines.py` (UI presentation layer, dual-theme rendering, role-restricted UI elements, and notebook schedule modal)
+## 8. Comprehensive Unit & Integration Test Specification
 
-### 7.1. Backend Unit Tests (`tests/test_backend_pipelines.py`)
+To guarantee platform stability, multi-tenant isolation, RBAC compliance, and zero regression, two dedicated test suites cover backend logic and frontend presentations:
+1. `tests/test_backend_pipelines.py` (Backend router, service layer, RBAC, AST code generation, Airflow proxying, timeline calculation, and color settings)
+2. `tests/test_ui_pipelines.py` (UI presentation layer, dual-theme rendering, role-restricted UI elements, timeline zoom/pan, and notebook schedule modal)
 
-#### 7.1.1. Service Layer Tests (`backend/pipeline_service.py`)
+### 8.1. Backend Unit Tests (`tests/test_backend_pipelines.py`)
+
+#### 8.1.1. Service Layer Tests (`backend/pipeline_service.py`)
 - **`test_sanitize_pipeline_name_and_dag_id`**:
   - Verify alphanumeric characters, hyphens, and underscores are preserved.
   - Verify spaces and illegal symbols (`/`, `\`, `..`, `:`, `?`, `*`) are sanitized or rejected.
@@ -404,13 +516,14 @@ To guarantee platform stability, multi-tenant isolation, RBAC compliance, and ze
   - Simulate `httpx.ConnectError` or `httpx.TimeoutException` from Airflow API.
   - Assert backend returns HTTP 503 / 502 with structured error JSON `{"error": "Airflow service unavailable", "detail": "..."}` without unhandled exceptions or crashes.
 
-#### 7.1.2. Router & RBAC Matrix Tests (`backend/pipelines_router.py`)
+#### 8.1.2. Router & RBAC Matrix Tests (`backend/pipelines_router.py`)
 - **`test_pipelines_unauthenticated_returns_401`**:
   - Request `/api/v1/pipelines` without token or cookie -> Assert HTTP 401 Unauthorized.
 - **`test_pipelines_viewer_can_read_all_get_endpoints`**:
   - Generate user with `viewer` role in workspace.
   - Assert HTTP 200 on:
     - `GET /api/v1/pipelines`
+    - `GET /api/v1/pipelines/timeline`
     - `GET /api/v1/pipelines/{dag_id}`
     - `GET /api/v1/pipelines/{dag_id}/runs`
     - `GET /api/v1/pipelines/{dag_id}/runs/{run_id}`
@@ -419,6 +532,7 @@ To guarantee platform stability, multi-tenant isolation, RBAC compliance, and ze
 - **`test_pipelines_viewer_mutation_forbidden_403`**:
   - User with `viewer` role attempts mutations:
     - `PATCH /api/v1/pipelines/{dag_id}` (toggle pause) -> Assert HTTP 403 Forbidden.
+    - `PATCH /api/v1/pipelines/{dag_id}/settings` (change color) -> Assert HTTP 403 Forbidden.
     - `POST /api/v1/pipelines/{dag_id}/trigger` (manual run) -> Assert HTTP 403 Forbidden.
     - `POST /api/v1/pipelines/schedule-notebook` (new schedule) -> Assert HTTP 403 Forbidden.
     - `DELETE /api/v1/pipelines/schedule-notebook/{dag_id}` (delete schedule) -> Assert HTTP 403 Forbidden.
@@ -432,21 +546,36 @@ To guarantee platform stability, multi-tenant isolation, RBAC compliance, and ze
   - Invoke endpoints with `Authorization: Bearer <lake_token>` header.
   - Assert seamless headless authentication without requiring browser session cookies.
 
+#### 8.1.3. Timeline & Color Settings Tests (`backend/pipelines_router.py`)
+- **`test_timeline_schedule_calculation_24h_window`**:
+  - Request `GET /api/v1/pipelines/timeline?date=2026-10-15`.
+  - Verify recurring cron schedules (e.g. `0 6 * * *`, `@hourly`, `*/30 * * * *`) generate correct projected firing times within calendar day boundary `2026-10-15T00:00:00` to `2026-10-15T23:59:59`.
+- **`test_timeline_merges_past_actual_and_upcoming_projected_runs`**:
+  - Mock Airflow actual runs for the specified day.
+  - Assert the response merges both past actual execution bars (with real duration/status) and future projected firing blocks.
+- **`test_pipeline_color_settings_persistence`**:
+  - Send `PATCH /api/v1/pipelines/{dag_id}/settings` with `{"color_hex": "#10B981", "display_label": "Production Weather ETL"}` as workspace editor.
+  - Assert HTTP 200 and verify persistence in `pipeline_metadata`.
+  - Assert subsequent `GET /api/v1/pipelines` and `GET /api/v1/pipelines/timeline` reflect the custom color `#10B981`.
+
 ---
 
-### 7.2. UI Unit Tests (`tests/test_ui_pipelines.py`)
+### 8.2. UI Unit Tests (`tests/test_ui_pipelines.py`)
 
 - **`test_pipelines_page_renders_native_template`**:
   - Send `GET /pipelines` with authenticated user session.
   - Assert HTTP 200 OK.
   - Assert response HTML does NOT contain `<iframe` or `embed.html`.
   - Assert response HTML contains `#pipelines-container`, search input, status filter pills, and inspector drawer skeleton.
+- **`test_pipelines_page_renders_timeline_banner`**:
+  - Send `GET /pipelines`.
+  - Assert `#timeline-wrapper`, zoom presets (`24h`, `12h`, `6h`, `1h`), date controls (`Previous Day`, `Today`, `Next Day`), and collapsible toggle switch exist in DOM.
 - **`test_pipelines_page_dual_theme_elements`**:
   - Verify template references CSS variables and Tailwind classes conforming to both `:root` and `html[data-theme="light"]`.
 - **`test_pipelines_viewer_mode_ui_restrictions`**:
   - Render `/pipelines` with `role="viewer"`.
   - Assert pause switches are disabled (`disabled` attribute and visual opacity).
-  - Assert "Run Now" buttons and "Schedule Notebook" buttons are hidden or disabled.
+  - Assert "Run Now" buttons and color picker buttons are hidden or disabled.
 - **`test_notebooks_page_contains_enhanced_schedule_modal`**:
   - Send `GET /notebooks`.
   - Assert `#airflow-modal` contains tabs for "Run Now" (`tab-run-now`) and "Recurring Pipeline" (`tab-schedule-recurring`).
@@ -456,7 +585,7 @@ To guarantee platform stability, multi-tenant isolation, RBAC compliance, and ze
 
 ---
 
-### 7.3. Test Execution & Quality Gates
+### 8.3. Test Execution & Quality Gates
 
 | Check | Command | Passing Target |
 |---|---|---|
