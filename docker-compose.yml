@@ -181,6 +181,8 @@ services:
       JUPYTER_BASE_URL: /jupyter
       JUPYTER_TOKEN: ${JUPYTER_TOKEN}
       AIRFLOW_URL: http://airflow:8080/airflow
+      AIRFLOW_ADMIN_USER: ${AIRFLOW_ADMIN_USER:-admin}
+      AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_PASSWORD:-airflowadminpassword}
     depends_on:
       minio:
         condition: service_healthy

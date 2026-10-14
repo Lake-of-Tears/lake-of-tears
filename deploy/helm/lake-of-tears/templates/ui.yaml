@@ -78,6 +78,13 @@ spec:
               value: "/jupyter"
             - name: AIRFLOW_URL
               value: "http://{{ include "lake-of-tears.fullname" . }}-airflow:{{ .Values.airflow.service.port }}/airflow"
+            - name: AIRFLOW_ADMIN_USER
+              value: "admin"
+            - name: AIRFLOW_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "lake-of-tears.fullname" . }}-credentials
+                  key: AIRFLOW_ADMIN_PASSWORD
             - name: AUTH_ENABLED
               value: {{ .Values.backend.enabled | quote }}
           livenessProbe:

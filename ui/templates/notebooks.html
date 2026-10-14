@@ -1885,7 +1885,7 @@ async function submitAirflowRun() {
       showToast(`Airflow run triggered! (ID: ${data.dag_run_id || 'manual'})`, 'success');
       closeAirflowModal();
     } else {
-      showToast(data.error || 'Failed to trigger Airflow run', 'error');
+      showToast(data.error || data.detail || data.title || 'Failed to trigger Airflow run', 'error');
     }
   } catch (err) {
     showToast(err.message, 'error');

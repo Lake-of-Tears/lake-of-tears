@@ -1315,6 +1315,8 @@ async def api_run_pipeline(request: Request):
     status_code, data = await notebook_proxy.trigger_airflow_notebook_run(
         ws["slug"], path, params, user_email
     )
+    if status_code >= 400 and isinstance(data, dict) and "error" not in data:
+        data["error"] = data.get("detail") or data.get("title") or f"Airflow error ({status_code})"
     return JSONResponse(data, status_code=status_code)
 
 
