@@ -21,11 +21,28 @@ MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "datalake")
 
 
+def get_jupyter_server_url() -> str:
+    """Return the base Jupyter Server URL, checking environment dynamically."""
+    return os.getenv("JUPYTER_SERVER_URL", JUPYTER_SERVER_URL).rstrip("/")
+
+
+def get_jupyter_base_url() -> str:
+    """Return the base URL path prefix for Jupyter Server."""
+    return os.getenv("JUPYTER_BASE_URL", JUPYTER_BASE_URL).strip("/")
+
+
+def get_jupyter_token() -> str:
+    """Return the configured Jupyter token dynamically."""
+    return os.getenv("JUPYTER_TOKEN", JUPYTER_TOKEN)
+
+
 def get_jupyter_api_base() -> str:
     """Return the absolute URL to Jupyter Server's API root."""
-    if JUPYTER_BASE_URL:
-        return f"{JUPYTER_SERVER_URL}/{JUPYTER_BASE_URL}"
-    return JUPYTER_SERVER_URL
+    server = get_jupyter_server_url()
+    base = get_jupyter_base_url()
+    if base:
+        return f"{server}/{base}"
+    return server
 
 
 def sanitize_notebook_path(path: str) -> str:
@@ -94,8 +111,9 @@ def create_empty_notebook_dict(title: str = "Untitled") -> dict[str, Any]:
 
 def _get_headers() -> dict[str, str]:
     headers = {"Content-Type": "application/json"}
-    if JUPYTER_TOKEN:
-        headers["Authorization"] = f"token {JUPYTER_TOKEN}"
+    token = get_jupyter_token()
+    if token:
+        headers["Authorization"] = f"token {token}"
     return headers
 
 
@@ -409,14 +427,18 @@ def list_archived_runs(workspace_slug: str, notebook_path: str) -> list[dict[str
     results = []
 
     try:
+        endpoint = os.getenv("MINIO_ENDPOINT", MINIO_ENDPOINT)
+        access_key = os.getenv("MINIO_ACCESS_KEY", MINIO_ACCESS_KEY)
+        secret_key = os.getenv("MINIO_SECRET_KEY", MINIO_SECRET_KEY)
+        bucket = os.getenv("MINIO_BUCKET", MINIO_BUCKET)
         s3 = boto3.client(
             "s3",
-            endpoint_url=f"http://{MINIO_ENDPOINT}",
-            aws_access_key_id=MINIO_ACCESS_KEY,
-            aws_secret_access_key=MINIO_SECRET_KEY,
+            endpoint_url=f"http://{endpoint}",
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
             region_name="us-east-1",
         )
-        resp = s3.list_objects_v2(Bucket=MINIO_BUCKET, Prefix=prefix)
+        resp = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
         for obj in resp.get("Contents", []):
             key = obj.get("Key", "")
             filename = key.split("/")[-1]

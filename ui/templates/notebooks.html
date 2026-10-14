@@ -207,7 +207,7 @@
       <p class="text-xs text-gray-500 max-w-sm mb-6">Explore your Lakehouse data with native Python & DuckDB notebooks, fully backed by Lake of Tears permissions.</p>
       {% if my_role != 'viewer' %}
       <div class="flex items-center gap-3">
-        <button onclick="promptNewNotebook()" class="btn-primary text-xs">
+        <button onclick="openNewNotebookModal()" class="btn-primary text-xs">
           + New Notebook
         </button>
       </div>
@@ -833,6 +833,7 @@ function openNewNotebookModal(targetFolder = currentFolder) {
   input.value = '';
   openModal('new-notebook-modal');
 }
+window.promptNewNotebook = openNewNotebookModal;
 
 async function submitNewNotebook(e) {
   e.preventDefault();

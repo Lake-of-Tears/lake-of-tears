@@ -84,6 +84,31 @@ spec:
               value: {{ .Values.backend.oidc.scope | quote }}
             - name: OIDC_DISPLAY_NAME
               value: {{ .Values.backend.oidc.displayName | quote }}
+            - name: JUPYTER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "lake-of-tears.fullname" . }}-credentials
+                  key: JUPYTER_TOKEN
+            - name: JUPYTER_SERVER_URL
+              value: "http://{{ include "lake-of-tears.fullname" . }}-jupyter:{{ .Values.jupyter.service.port }}"
+            - name: JUPYTER_BASE_URL
+              value: "/jupyter"
+            - name: MINIO_ENDPOINT
+              value: "{{ include "lake-of-tears.fullname" . }}-minio:{{ .Values.minio.service.apiPort }}"
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "lake-of-tears.fullname" . }}-credentials
+                  key: MINIO_ROOT_USER
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "lake-of-tears.fullname" . }}-credentials
+                  key: MINIO_ROOT_PASSWORD
+            - name: MINIO_BUCKET
+              value: datalake
+            - name: AIRFLOW_URL
+              value: "http://{{ include "lake-of-tears.fullname" . }}-airflow:{{ .Values.airflow.service.port }}/airflow"
           livenessProbe:
             httpGet:
               path: /api/health

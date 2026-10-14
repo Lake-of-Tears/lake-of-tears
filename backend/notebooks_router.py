@@ -472,8 +472,9 @@ async def websocket_kernel_proxy(
     api_base = notebook_service.get_jupyter_api_base()
     ws_base = api_base.replace("http://", "ws://").replace("https://", "wss://")
     upstream_url = f"{ws_base}/api/kernels/{kernel_id}/channels"
-    if notebook_service.JUPYTER_TOKEN:
-        upstream_url += f"?token={notebook_service.JUPYTER_TOKEN}"
+    token = notebook_service.get_jupyter_token()
+    if token:
+        upstream_url += f"?token={token}"
 
     try:
         async with websockets.connect(upstream_url) as upstream:

@@ -91,6 +91,30 @@ def test_get_notebooks_page_renders_native_template():
         assert "playSuccessSound" in response.text
         assert "playErrorSound" in response.text
         assert '<iframe src="/jupyter/' not in response.text
+        assert (
+            '<button onclick="openNewNotebookModal()" class="btn-primary text-xs">' in response.text
+        )
+        assert "window.promptNewNotebook = openNewNotebookModal" in response.text
+
+
+def test_get_notebooks_page_empty_state_create_button():
+    token = jwt.encode(
+        {"sub": "user@lake.local", "email": "user@lake.local", "role": "user"},
+        main.AUTH_SECRET_KEY,
+        algorithm="HS256",
+    )
+    mock_workspaces = [{"id": "ws-1", "name": "Default", "slug": "default", "my_role": "member"}]
+
+    with patch.object(main, "_fetch_workspaces", return_value=mock_workspaces):
+        response = client.get(
+            "/notebooks",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
+        )
+        assert response.status_code == 200
+        assert (
+            '<button onclick="openNewNotebookModal()" class="btn-primary text-xs">' in response.text
+        )
+        assert "window.promptNewNotebook = openNewNotebookModal" in response.text
 
 
 def test_get_notebooks_page_viewer_mode_banner():
