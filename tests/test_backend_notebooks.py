@@ -511,3 +511,33 @@ def test_websocket_kernel_proxy_viewer_rejected():
                 assert "Viewer cannot execute cells" in msg["content"]["evalue"]
     finally:
         backend_main.app.dependency_overrides.clear()
+
+
+def test_notebook_service_dynamic_environment_resolution(monkeypatch):
+    """Verify notebook_service dynamically resolves runtime environment variables."""
+    monkeypatch.setenv("JUPYTER_SERVER_URL", "http://custom-jupyter:9999")
+    monkeypatch.setenv("JUPYTER_BASE_URL", "/custom-prefix")
+    monkeypatch.setenv("JUPYTER_TOKEN", "test-token-123")
+
+    assert notebook_service.get_jupyter_server_url() == "http://custom-jupyter:9999"
+    assert notebook_service.get_jupyter_base_url() == "custom-prefix"
+    assert notebook_service.get_jupyter_token() == "test-token-123"
+    assert notebook_service.get_jupyter_api_base() == "http://custom-jupyter:9999/custom-prefix"
+
+    headers = notebook_service._get_headers()
+    assert headers["Authorization"] == "token test-token-123"
+
+
+def test_helm_backend_template_contains_jupyter_and_minio_env_vars():
+    """Verify backend Helm template injects Jupyter, MinIO, and Airflow env vars."""
+    helm_file = Path(__file__).parents[1] / "deploy/helm/lake-of-tears/templates/backend.yaml"
+    assert helm_file.exists()
+    content = helm_file.read_text(encoding="utf-8")
+
+    assert "name: JUPYTER_SERVER_URL" in content
+    assert "name: JUPYTER_TOKEN" in content
+    assert "name: JUPYTER_BASE_URL" in content
+    assert "name: MINIO_ENDPOINT" in content
+    assert "name: MINIO_ACCESS_KEY" in content
+    assert "name: MINIO_SECRET_KEY" in content
+    assert "name: AIRFLOW_URL" in content
