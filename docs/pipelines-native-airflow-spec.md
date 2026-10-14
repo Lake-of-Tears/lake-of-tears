@@ -331,7 +331,12 @@ To prevent noisy-neighbor starvation where long-running notebooks consume CPU/RA
       namespace="lake-of-tears",
       image="jupyter/datascience-notebook:latest",
       cmds=["papermill"],
-      arguments=["/workspace/notebook.ipynb", "/workspace/output.ipynb", "-f", "/workspace/params.json"],
+      arguments=[
+          "/workspace/notebook.ipynb",
+          "/workspace/output.ipynb",
+          "-f",
+          "/workspace/params.json",
+      ],
       container_resources=k8s.V1ResourceRequirements(
           requests={"cpu": "500m", "memory": "1Gi"},
           limits={"cpu": "2", "memory": "4Gi"},

@@ -224,34 +224,87 @@
 
   <!-- ── Airflow Modal ─────────────────────────────────────────────────────── -->
   <div id="airflow-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
-    <div class="bg-[#1c1c1c] border border-white/[0.1] rounded-xl shadow-2xl w-full max-w-md p-6">
+    <div class="bg-[#1c1c1c] border border-white/[0.1] rounded-xl shadow-2xl w-full max-w-lg p-6">
       <div class="flex items-center justify-between mb-4">
         <h3 class="text-sm font-semibold text-gray-100 flex items-center gap-2">
           <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-          Run Notebook in Airflow
+          Airflow Pipeline Orchestration
         </h3>
         <button onclick="closeAirflowModal()" class="text-gray-500 hover:text-gray-300">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
       </div>
-      <p class="text-xs text-gray-400 mb-4">Triggers headless execution with Papermill. Output artifacts and cell outputs will be archived to MinIO S3.</p>
-      
-      <div class="space-y-3 mb-6">
+
+      <!-- Modal Tabs -->
+      <div class="flex items-center gap-1 border-b border-white/[0.08] mb-4 text-xs">
+        <button onclick="switchAirflowTab('run')" id="tab-run-now" class="px-3 py-2 border-b-2 border-blue-500 text-blue-400 font-medium">
+          Run Now
+        </button>
+        <button onclick="switchAirflowTab('schedule')" id="tab-schedule-recurring" class="px-3 py-2 border-b-2 border-transparent text-gray-400 hover:text-gray-200 font-medium">
+          Recurring Schedule
+        </button>
+      </div>
+
+      <!-- Tab: Run Now -->
+      <div id="pane-run-now" class="space-y-3">
+        <p class="text-xs text-gray-400">Triggers immediate headless execution with Papermill. Output artifacts and cell outputs will be archived to MinIO S3.</p>
         <div>
           <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1">Notebook Path</label>
           <input type="text" id="airflow-nb-path" readonly class="input-dark text-xs opacity-75 cursor-not-allowed bg-black/30"/>
         </div>
         <div>
           <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1">Parameters (JSON)</label>
-          <textarea id="airflow-nb-params" rows="3" placeholder='{"date": "2026-10-12"}' class="input-dark font-mono text-xs"></textarea>
+          <textarea id="airflow-nb-params" rows="3" placeholder='{"date": "2026-10-14"}' class="input-dark font-mono text-xs"></textarea>
+        </div>
+        <div class="flex items-center justify-between pt-3">
+          <a href="/pipelines" class="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1">
+            Open Pipelines Dashboard &rarr;
+          </a>
+          <div class="flex items-center gap-2">
+            <button onclick="closeAirflowModal()" class="btn-ghost text-xs">Cancel</button>
+            <button onclick="submitAirflowRun()" id="btn-submit-airflow" class="btn-primary text-xs">
+              Trigger Run Now
+            </button>
+          </div>
         </div>
       </div>
 
-      <div class="flex items-center justify-end gap-2">
-        <button onclick="closeAirflowModal()" class="btn-ghost text-xs">Cancel</button>
-        <button onclick="submitAirflowRun()" id="btn-submit-airflow" class="btn-primary text-xs">
-          Trigger Run Now
-        </button>
+      <!-- Tab: Recurring Schedule -->
+      <div id="pane-schedule-recurring" class="space-y-3 hidden">
+        <p class="text-xs text-gray-400">Create an automated Airflow DAG that invokes this notebook on a recurring cron cadence.</p>
+        <div>
+          <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1">Pipeline Title</label>
+          <input type="text" id="airflow-sched-title" placeholder="Daily Sales ETL" class="input-dark text-xs"/>
+        </div>
+        <div>
+          <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1">Cadence / Schedule Interval</label>
+          <select id="airflow-sched-cadence" onchange="toggleCustomCron()" class="input-dark text-xs">
+            <option value="@hourly">Hourly (@hourly)</option>
+            <option value="@daily" selected>Daily at Midnight (@daily)</option>
+            <option value="@weekly">Weekly on Monday (@weekly)</option>
+            <option value="custom">Custom Cron Expression</option>
+          </select>
+        </div>
+        <div id="wrap-custom-cron" class="hidden">
+          <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1">Cron Expression</label>
+          <input type="text" id="airflow-sched-cron" placeholder="0 4 * * 1-5" class="input-dark font-mono text-xs"/>
+          <p class="text-[10px] text-gray-500 mt-0.5">Standard 5-field cron: minute hour day-of-month month day-of-week</p>
+        </div>
+        <div>
+          <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1">Default Parameters (JSON)</label>
+          <textarea id="airflow-sched-params" rows="2" placeholder='{"alpha": 0.05}' class="input-dark font-mono text-xs"></textarea>
+        </div>
+        <div class="flex items-center justify-between pt-3">
+          <a href="/pipelines" class="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1">
+            Open Pipelines Dashboard &rarr;
+          </a>
+          <div class="flex items-center gap-2">
+            <button onclick="closeAirflowModal()" class="btn-ghost text-xs">Cancel</button>
+            <button onclick="submitNotebookSchedule()" id="btn-submit-schedule" class="btn-primary text-xs">
+              Save Pipeline Schedule
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -1839,6 +1892,93 @@ async function submitAirflowRun() {
   } finally {
     btn.disabled = false;
     btn.textContent = 'Trigger Run Now';
+  }
+}
+
+function switchAirflowTab(tab) {
+  const tabRun = document.getElementById('tab-run-now');
+  const tabSched = document.getElementById('tab-schedule-recurring');
+  const paneRun = document.getElementById('pane-run-now');
+  const paneSched = document.getElementById('pane-schedule-recurring');
+
+  if (tab === 'run') {
+    tabRun.className = 'px-3 py-2 border-b-2 border-blue-500 text-blue-400 font-medium';
+    tabSched.className = 'px-3 py-2 border-b-2 border-transparent text-gray-400 hover:text-gray-200 font-medium';
+    paneRun.classList.remove('hidden');
+    paneSched.classList.add('hidden');
+  } else {
+    tabSched.className = 'px-3 py-2 border-b-2 border-blue-500 text-blue-400 font-medium';
+    tabRun.className = 'px-3 py-2 border-b-2 border-transparent text-gray-400 hover:text-gray-200 font-medium';
+    paneSched.classList.remove('hidden');
+    paneRun.classList.add('hidden');
+    const titleInput = document.getElementById('airflow-sched-title');
+    if (!titleInput.value && currentNotebookPath) {
+      const baseName = currentNotebookPath.split('/').pop().replace('.ipynb', '').replace(/[_-]/g, ' ');
+      titleInput.value = baseName.replace(/\b\w/g, l => l.toUpperCase());
+    }
+  }
+}
+
+function toggleCustomCron() {
+  const cadence = document.getElementById('airflow-sched-cadence').value;
+  const wrap = document.getElementById('wrap-custom-cron');
+  if (cadence === 'custom') {
+    wrap.classList.remove('hidden');
+  } else {
+    wrap.classList.add('hidden');
+  }
+}
+
+async function submitNotebookSchedule() {
+  const path = document.getElementById('airflow-nb-path').value;
+  const title = document.getElementById('airflow-sched-title').value.trim();
+  const cadence = document.getElementById('airflow-sched-cadence').value;
+  const customCron = document.getElementById('airflow-sched-cron').value.trim();
+  const paramsRaw = document.getElementById('airflow-sched-params').value.trim();
+
+  const finalSchedule = (cadence === 'custom') ? customCron : cadence;
+  if (!finalSchedule) {
+    showToast('Please specify a valid schedule interval or cron expression', 'error');
+    return;
+  }
+
+  let params = {};
+  if (paramsRaw) {
+    try {
+      params = JSON.parse(paramsRaw);
+    } catch {
+      showToast('Invalid JSON in schedule parameters', 'error');
+      return;
+    }
+  }
+
+  const btn = document.getElementById('btn-submit-schedule');
+  btn.disabled = true;
+  btn.textContent = 'Saving...';
+
+  try {
+    const res = await fetch('/api/pipelines/schedule-notebook', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        notebook_path: path,
+        pipeline_title: title || undefined,
+        schedule_interval: finalSchedule,
+        parameters: params,
+      })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showToast(`Pipeline schedule created! (${data.dag_id})`, 'success');
+      closeAirflowModal();
+    } else {
+      showToast(data.detail || data.error || 'Failed to save schedule', 'error');
+    }
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save Pipeline Schedule';
   }
 }
 

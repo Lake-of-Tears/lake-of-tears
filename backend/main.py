@@ -33,6 +33,7 @@ from models import (
 )
 from notebooks_router import router as notebooks_router
 from oauth import enabled_providers, get_oauth_redirect, handle_oauth_callback
+from pipelines_router import router as pipelines_router
 from schemas import (
     AddMemberRequest,
     CatalogAccessResponse,
@@ -100,6 +101,8 @@ app.add_middleware(
 
 app.include_router(notebooks_router, prefix="/api/v1/notebooks", tags=["notebooks"])
 app.include_router(notebooks_router, prefix="/api/notebooks", tags=["notebooks"])
+app.include_router(pipelines_router, prefix="/api/v1/pipelines", tags=["pipelines"])
+app.include_router(pipelines_router, prefix="/api/pipelines", tags=["pipelines"])
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

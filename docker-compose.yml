@@ -102,6 +102,12 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       MINIO_BUCKET: datalake
+      AIRFLOW_URL: http://airflow:8080/airflow
+      AIRFLOW_ADMIN_USER: admin
+      AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_PASSWORD}
+      AIRFLOW_DAGS_DIR: /opt/airflow/dags
+    volumes:
+      - ${DATALAKE_DATA_DIR:-~}/airflow/dags:/opt/airflow/dags
     depends_on:
       postgres:
         condition: service_healthy

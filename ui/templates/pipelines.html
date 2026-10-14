@@ -1,0 +1,710 @@
+{% extends "base.html" %}
+{% block title %}Pipelines · Lake of Tears{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto space-y-6" id="pipelines-container">
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="fixed top-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+  <!-- Page Header -->
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-white/[0.07]">
+    <div>
+      <div class="flex items-center gap-3">
+        <h1 class="text-xl font-bold tracking-tight text-gray-100">Pipelines</h1>
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">
+          <span class="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
+          {{ workspace.name if workspace else 'All Workspaces' }}
+        </span>
+        {% if my_role == 'viewer' %}
+        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-gray-500/10 text-gray-400 border border-gray-500/20">
+          Read-Only Viewer
+        </span>
+        {% endif %}
+      </div>
+      <p class="text-xs text-gray-500 mt-1">Native workspace pipeline orchestration and headless Airflow execution</p>
+    </div>
+
+    <!-- Top Action Controls -->
+    <div class="flex items-center gap-2">
+      <button onclick="fetchPipelines()" id="btn-refresh" class="btn-ghost text-xs flex items-center gap-1.5 py-1.5 px-3">
+        <svg id="refresh-icon" class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        <span>Refresh</span>
+        <span id="last-updated-ts" class="text-[10px] text-gray-500 font-mono ml-1"></span>
+      </button>
+
+      {% if my_role != 'viewer' %}
+      <a href="/notebooks" class="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+        </svg>
+        <span>Schedule Notebook</span>
+      </a>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Filter & Search Toolbar -->
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    <!-- Filter Pills -->
+    <div class="flex items-center gap-1 bg-white/[0.04] p-1 rounded-lg border border-white/[0.06] text-xs">
+      <button onclick="setFilter('all')" id="filter-all" class="filter-pill active px-3 py-1 rounded-md font-medium transition-colors">
+        All <span id="count-all" class="text-gray-500 ml-1 font-mono">0</span>
+      </button>
+      <button onclick="setFilter('active')" id="filter-active" class="filter-pill px-3 py-1 rounded-md text-gray-400 hover:text-gray-200 transition-colors">
+        Active <span id="count-active" class="text-gray-500 ml-1 font-mono">0</span>
+      </button>
+      <button onclick="setFilter('paused')" id="filter-paused" class="filter-pill px-3 py-1 rounded-md text-gray-400 hover:text-gray-200 transition-colors">
+        Paused <span id="count-paused" class="text-gray-500 ml-1 font-mono">0</span>
+      </button>
+      <button onclick="setFilter('running')" id="filter-running" class="filter-pill px-3 py-1 rounded-md text-gray-400 hover:text-gray-200 transition-colors">
+        Running <span id="count-running" class="text-gray-500 ml-1 font-mono">0</span>
+      </button>
+      <button onclick="setFilter('failed')" id="filter-failed" class="filter-pill px-3 py-1 rounded-md text-gray-400 hover:text-gray-200 transition-colors">
+        Failed <span id="count-failed" class="text-gray-500 ml-1 font-mono">0</span>
+      </button>
+    </div>
+
+    <!-- Search input -->
+    <div class="relative w-full sm:w-72">
+      <svg class="w-3.5 h-3.5 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+      </svg>
+      <input type="text" id="pipeline-search" oninput="applyFilters()" placeholder="Filter by name, ID, or tag..."
+             class="input-dark pl-9 py-1.5 text-xs w-full"/>
+    </div>
+  </div>
+
+  <!-- Pipelines Table Card -->
+  <div class="card overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-xs text-gray-300">
+        <thead class="bg-white/[0.02] border-b border-white/[0.07] text-[11px] font-medium text-gray-500 uppercase tracking-wider">
+          <tr>
+            <th class="py-3 px-4 w-12 text-center">Status</th>
+            <th class="py-3 px-4">Pipeline</th>
+            <th class="py-3 px-4">Schedule</th>
+            <th class="py-3 px-4">Last Run</th>
+            <th class="py-3 px-4">Duration</th>
+            <th class="py-3 px-4">Next Run</th>
+            <th class="py-3 px-4 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="pipelines-table-body" class="divide-y divide-white/[0.04]">
+          <!-- Skeleton Loader -->
+          <tr>
+            <td colspan="7" class="py-12 text-center text-gray-500">
+              <div class="flex flex-col items-center justify-center gap-2">
+                <svg class="w-6 h-6 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                </svg>
+                <span>Loading pipelines...</span>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Empty State (Hidden by default) -->
+  <div id="pipelines-empty-state" class="hidden card p-12 text-center flex flex-col items-center justify-center gap-3">
+    <div class="w-12 h-12 rounded-xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center text-gray-500">
+      <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/>
+      </svg>
+    </div>
+    <h3 class="text-sm font-medium text-gray-200">No pipelines found</h3>
+    <p class="text-xs text-gray-500 max-w-sm">No Airflow DAGs match the current workspace or filter criteria.</p>
+    {% if my_role != 'viewer' %}
+    <a href="/notebooks" class="btn-primary text-xs mt-2">+ Create from Notebook</a>
+    {% endif %}
+  </div>
+
+</div>
+
+<!-- ── Slide-Over Inspector Drawer ─────────────────────────────────────────── -->
+<div id="inspector-drawer" class="fixed inset-0 z-50 overflow-hidden hidden" aria-labelledby="drawer-title" role="dialog" aria-modal="true">
+  <div class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onclick="closeInspector()"></div>
+
+  <div class="fixed inset-y-0 right-0 max-w-full flex pl-10">
+    <div class="w-screen max-w-2xl bg-[#161616] border-l border-white/[0.08] shadow-2xl flex flex-col h-full">
+
+      <!-- Drawer Header -->
+      <div class="p-4 border-b border-white/[0.08] flex items-center justify-between shrink-0 bg-[#1a1a1a]">
+        <div class="flex items-center gap-3 min-w-0">
+          <div class="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0">
+            <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h7"/>
+            </svg>
+          </div>
+          <div class="min-w-0">
+            <h3 id="drawer-dag-id" class="text-sm font-semibold text-gray-100 truncate font-mono">pipeline_id</h3>
+            <p id="drawer-dag-desc" class="text-xs text-gray-500 truncate">Pipeline Description</p>
+          </div>
+        </div>
+        <button onclick="closeInspector()" class="p-1.5 text-gray-400 hover:text-gray-200 rounded-lg hover:bg-white/[0.06] transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Drawer Tabs -->
+      <div class="flex items-center px-4 border-b border-white/[0.08] bg-black/20 text-xs shrink-0">
+        <button onclick="setDrawerTab('runs')" id="drawer-tab-runs" class="px-3 py-2.5 border-b-2 border-blue-500 text-blue-400 font-medium">
+          Execution Runs (<span id="drawer-runs-count">0</span>)
+        </button>
+        <button onclick="setDrawerTab('logs')" id="drawer-tab-logs" class="px-3 py-2.5 border-b-2 border-transparent text-gray-400 hover:text-gray-200 font-medium">
+          Task Execution Log
+        </button>
+      </div>
+
+      <!-- Drawer Content -->
+      <div class="flex-1 overflow-y-auto p-4 space-y-4">
+
+        <!-- Runs Tab Pane -->
+        <div id="drawer-pane-runs" class="space-y-4">
+          <div class="flex items-center justify-between text-xs text-gray-400">
+            <span>Historical runs for this pipeline</span>
+            <button onclick="loadDrawerRuns(currentDrawerDagId)" class="hover:text-gray-200 flex items-center gap-1">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+              Refresh
+            </button>
+          </div>
+
+          <div id="drawer-runs-list" class="space-y-2">
+            <!-- Dynamic run cards -->
+          </div>
+        </div>
+
+        <!-- Logs Tab Pane -->
+        <div id="drawer-pane-logs" class="hidden flex flex-col h-full space-y-3">
+          <div class="flex items-center justify-between text-xs text-gray-400 shrink-0">
+            <div class="flex items-center gap-2">
+              <span id="log-target-task" class="font-mono text-gray-300">task: execute_and_archive_notebook</span>
+              <span id="log-polling-indicator" class="hidden items-center gap-1 text-[11px] text-blue-400">
+                <span class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></span> Streaming
+              </span>
+            </div>
+            <div class="flex items-center gap-2">
+              <button onclick="scrollLogsToBottom()" class="btn-ghost py-1 px-2 text-[11px]">Scroll to Bottom</button>
+              <button onclick="refreshCurrentTaskLogs()" class="btn-ghost py-1 px-2 text-[11px]">Refresh</button>
+            </div>
+          </div>
+
+          <!-- Log Viewer Terminal -->
+          <div class="flex-1 bg-black/60 border border-white/[0.08] rounded-lg p-3 font-mono text-[11px] leading-relaxed overflow-y-auto max-h-[500px]" id="log-terminal">
+            <pre id="log-pre" class="whitespace-pre-wrap break-all text-gray-300">Select a run and task to inspect logs.</pre>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ── Trigger Pipeline Run Modal ─────────────────────────────────────────── -->
+<div id="trigger-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+  <div class="bg-[#1c1c1c] border border-white/[0.1] rounded-xl shadow-2xl w-full max-w-md p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-sm font-semibold text-gray-100 flex items-center gap-2">
+        <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        Trigger Pipeline Run
+      </h3>
+      <button onclick="closeTriggerModal()" class="text-gray-500 hover:text-gray-300">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    <p class="text-xs text-gray-400 mb-4">Trigger an immediate execution of <code id="trigger-dag-id" class="text-blue-300">dag_id</code>. Custom JSON parameters are passed to runtime tasks.</p>
+
+    <div class="space-y-3 mb-6">
+      <div>
+        <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1">Runtime Parameters (JSON)</label>
+        <textarea id="trigger-params" rows="4" placeholder='{"batch_id": 101, "mode": "full"}'
+                  class="input-dark font-mono text-xs"></textarea>
+      </div>
+    </div>
+
+    <div class="flex items-center justify-end gap-3">
+      <button onclick="closeTriggerModal()" class="btn-ghost text-xs">Cancel</button>
+      <button onclick="submitPipelineTrigger()" id="btn-submit-trigger" class="btn-primary text-xs">
+        Trigger Run
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+  let allPipelines = [];
+  let currentFilter = 'all';
+  let currentDrawerDagId = null;
+  let activeLogPollingTimer = null;
+  let currentSelectedRunId = null;
+  let currentSelectedTaskId = null;
+  const userRole = "{{ my_role }}";
+
+  // ── Toast Utility ──────────────────────────────────────────────────────────
+  function showToast(message, type = 'info') {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = `px-4 py-2.5 rounded-lg shadow-lg text-xs font-medium border flex items-center gap-2 pointer-events-auto transition-all duration-200 transform translate-y-2 opacity-0 ${
+      type === 'success' ? 'bg-emerald-950/90 text-emerald-300 border-emerald-800' :
+      type === 'error'   ? 'bg-rose-950/90 text-rose-300 border-rose-800' :
+                           'bg-gray-900/90 text-gray-200 border-white/[0.1]'
+    }`;
+    toast.innerHTML = `<span>${message}</span>`;
+    container.appendChild(toast);
+
+    requestAnimationFrame(() => {
+      toast.classList.remove('translate-y-2', 'opacity-0');
+    });
+
+    setTimeout(() => {
+      toast.classList.add('opacity-0', 'translate-y-2');
+      setTimeout(() => toast.remove(), 200);
+    }, 3500);
+  }
+
+  // ── Fetch & Render Pipelines ───────────────────────────────────────────────
+  async function fetchPipelines() {
+    const icon = document.getElementById('refresh-icon');
+    icon.classList.add('animate-spin');
+
+    try {
+      const res = await fetch('/api/pipelines');
+      if (!res.ok) {
+        throw new Error(`Failed to load pipelines: ${res.statusText}`);
+      }
+      const data = await res.json();
+      allPipelines = data.pipelines || [];
+      document.getElementById('last-updated-ts').textContent = new Date().toLocaleTimeString();
+      applyFilters();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      icon.classList.remove('animate-spin');
+    }
+  }
+
+  // ── Filter & Search Logic ──────────────────────────────────────────────────
+  function setFilter(filter) {
+    currentFilter = filter;
+    document.querySelectorAll('.filter-pill').forEach(btn => {
+      btn.classList.remove('active', 'bg-blue-600/20', 'text-blue-400');
+      btn.classList.add('text-gray-400');
+    });
+    const activeBtn = document.getElementById(`filter-${filter}`);
+    if (activeBtn) {
+      activeBtn.classList.add('active', 'bg-blue-600/20', 'text-blue-400');
+      activeBtn.classList.remove('text-gray-400');
+    }
+    applyFilters();
+  }
+
+  function applyFilters() {
+    const search = document.getElementById('pipeline-search').value.toLowerCase().trim();
+
+    // Update Counts
+    document.getElementById('count-all').textContent = allPipelines.length;
+    document.getElementById('count-active').textContent = allPipelines.filter(p => !p.is_paused).length;
+    document.getElementById('count-paused').textContent = allPipelines.filter(p => p.is_paused).length;
+    document.getElementById('count-running').textContent = allPipelines.filter(p => p.last_run && p.last_run.state === 'running').length;
+    document.getElementById('count-failed').textContent = allPipelines.filter(p => p.last_run && p.last_run.state === 'failed').length;
+
+    const filtered = allPipelines.filter(p => {
+      // Status filter
+      if (currentFilter === 'active' && p.is_paused) return false;
+      if (currentFilter === 'paused' && !p.is_paused) return false;
+      if (currentFilter === 'running' && (!p.last_run || p.last_run.state !== 'running')) return false;
+      if (currentFilter === 'failed' && (!p.last_run || p.last_run.state !== 'failed')) return false;
+
+      // Text search
+      if (search) {
+        const matchName = (p.pipeline_name || '').toLowerCase().includes(search);
+        const matchId = (p.dag_id || '').toLowerCase().includes(search);
+        const matchDesc = (p.description || '').toLowerCase().includes(search);
+        const matchTags = (p.tags || []).some(t => t.toLowerCase().includes(search));
+        if (!matchName && !matchId && !matchDesc && !matchTags) return false;
+      }
+      return true;
+    });
+
+    renderPipelinesTable(filtered);
+  }
+
+  function renderPipelinesTable(pipelines) {
+    const tbody = document.getElementById('pipelines-table-body');
+    const emptyState = document.getElementById('pipelines-empty-state');
+
+    if (pipelines.length === 0) {
+      tbody.innerHTML = '';
+      emptyState.classList.remove('hidden');
+      return;
+    }
+
+    emptyState.classList.add('hidden');
+    tbody.innerHTML = pipelines.map(p => {
+      const isPaused = p.is_paused;
+      const lastRun = p.last_run;
+      const runState = lastRun ? lastRun.state : 'none';
+
+      let stateBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-gray-500/10 text-gray-400 border border-gray-500/20">No Runs</span>`;
+      if (runState === 'success') {
+        stateBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Success
+        </span>`;
+      } else if (runState === 'running') {
+        stateBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20 animate-pulse">
+          <span class="w-1.5 h-1.5 rounded-full bg-blue-400"></span> Running
+        </span>`;
+      } else if (runState === 'failed') {
+        stateBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-rose-500/10 text-rose-400 border border-rose-500/20">
+          <span class="w-1.5 h-1.5 rounded-full bg-rose-400"></span> Failed
+        </span>`;
+      } else if (runState === 'queued') {
+        stateBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> Queued
+        </span>`;
+      }
+
+      const durationStr = lastRun && lastRun.duration_seconds !== null
+        ? `${Math.round(lastRun.duration_seconds)}s`
+        : '—';
+
+      const nextRunStr = p.next_dagrun
+        ? new Date(p.next_dagrun).toLocaleString()
+        : '—';
+
+      const isViewer = (userRole === 'viewer');
+
+      return `
+        <tr class="hover:bg-white/[0.02] transition-colors">
+          <!-- Pause/Resume Toggle -->
+          <td class="py-3 px-4 text-center">
+            <button onclick="togglePipelinePause('${p.dag_id}', ${!isPaused})"
+                    ${isViewer ? 'disabled title="Viewer role cannot pause/resume pipelines"' : `title="${isPaused ? 'Click to Unpause' : 'Click to Pause'}"`}
+                    class="relative inline-flex h-4 w-8 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      isPaused ? 'bg-gray-700' : 'bg-blue-600'
+                    } ${isViewer ? 'opacity-50 cursor-not-allowed' : ''}">
+              <span class="pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                isPaused ? 'translate-x-0' : 'translate-x-4'
+              }"></span>
+            </button>
+          </td>
+
+          <!-- Pipeline Info -->
+          <td class="py-3 px-4">
+            <div class="flex items-center gap-2">
+              <span class="font-medium text-gray-200 hover:text-blue-400 cursor-pointer font-mono text-xs" onclick="openInspector('${p.dag_id}')">
+                ${p.dag_id}
+              </span>
+              ${p.is_notebook_job ? `<span class="px-1.5 py-0.2 bg-purple-500/10 text-purple-400 border border-purple-500/20 text-[10px] rounded">Notebook</span>` : ''}
+            </div>
+            <p class="text-[11px] text-gray-500 truncate max-w-xs mt-0.5">${p.description || 'No description provided'}</p>
+          </td>
+
+          <!-- Schedule -->
+          <td class="py-3 px-4">
+            <span class="inline-flex items-center gap-1 font-mono text-[11px] text-gray-400 bg-white/[0.03] px-2 py-0.5 rounded border border-white/[0.06]">
+              <svg class="w-3 h-3 text-gray-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              ${p.schedule_interval}
+            </span>
+          </td>
+
+          <!-- Last Run -->
+          <td class="py-3 px-4">
+            ${stateBadge}
+          </td>
+
+          <!-- Duration -->
+          <td class="py-3 px-4 font-mono text-gray-400">
+            ${durationStr}
+          </td>
+
+          <!-- Next Run -->
+          <td class="py-3 px-4 text-gray-400 text-[11px]">
+            ${nextRunStr}
+          </td>
+
+          <!-- Actions -->
+          <td class="py-3 px-4 text-right space-x-1">
+            ${!isViewer ? `
+            <button onclick="openTriggerModal('${p.dag_id}')" title="Trigger Run Now"
+                    class="btn-ghost py-1 px-2 text-xs text-blue-400 hover:text-blue-300">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+              </svg>
+            </button>
+            ` : ''}
+
+            <button onclick="openInspector('${p.dag_id}')" title="Run History & Logs"
+                    class="btn-ghost py-1 px-2 text-xs text-gray-400 hover:text-gray-200">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16m-7 6h7"/>
+              </svg>
+            </button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  // ── Toggle Pause / Resume ──────────────────────────────────────────────────
+  async function togglePipelinePause(dagId, newPausedState) {
+    if (userRole === 'viewer') return;
+
+    try {
+      const res = await fetch(`/api/pipelines/${dagId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_paused: newPausedState }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Failed to update pause state');
+      }
+      showToast(`Pipeline ${newPausedState ? 'paused' : 'unpaused'}`, 'success');
+      const p = allPipelines.find(item => item.dag_id === dagId);
+      if (p) p.is_paused = newPausedState;
+      applyFilters();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+
+  // ── Trigger Run Modal ──────────────────────────────────────────────────────
+  let targetTriggerDagId = null;
+
+  function openTriggerModal(dagId) {
+    targetTriggerDagId = dagId;
+    document.getElementById('trigger-dag-id').textContent = dagId;
+    document.getElementById('trigger-params').value = '';
+    document.getElementById('trigger-modal').classList.remove('hidden');
+  }
+
+  function closeTriggerModal() {
+    document.getElementById('trigger-modal').classList.add('hidden');
+  }
+
+  async function submitPipelineTrigger() {
+    if (!targetTriggerDagId) return;
+
+    const rawParams = document.getElementById('trigger-params').value.trim();
+    let conf = {};
+    if (rawParams) {
+      try {
+        conf = JSON.parse(rawParams);
+      } catch {
+        showToast('Invalid JSON in parameters field', 'error');
+        return;
+      }
+    }
+
+    const btn = document.getElementById('btn-submit-trigger');
+    btn.disabled = true;
+    btn.textContent = 'Triggering...';
+
+    try {
+      const res = await fetch(`/api/pipelines/${targetTriggerDagId}/trigger`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conf }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || 'Failed to trigger run');
+      }
+      showToast(`Run queued! ID: ${data.dag_run_id}`, 'success');
+      closeTriggerModal();
+      fetchPipelines();
+      openInspector(targetTriggerDagId);
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Trigger Run';
+    }
+  }
+
+  // ── Inspector Drawer (Runs & Logs) ─────────────────────────────────────────
+  async function openInspector(dagId) {
+    currentDrawerDagId = dagId;
+    const p = allPipelines.find(item => item.dag_id === dagId);
+
+    document.getElementById('drawer-dag-id').textContent = dagId;
+    document.getElementById('drawer-dag-desc').textContent = p ? (p.description || 'No description') : dagId;
+    document.getElementById('inspector-drawer').classList.remove('hidden');
+
+    setDrawerTab('runs');
+    await loadDrawerRuns(dagId);
+  }
+
+  function closeInspector() {
+    document.getElementById('inspector-drawer').classList.add('hidden');
+    stopLogPolling();
+  }
+
+  function setDrawerTab(tab) {
+    const tabRuns = document.getElementById('drawer-tab-runs');
+    const tabLogs = document.getElementById('drawer-tab-logs');
+    const paneRuns = document.getElementById('drawer-pane-runs');
+    const paneLogs = document.getElementById('drawer-pane-logs');
+
+    if (tab === 'runs') {
+      tabRuns.className = 'px-3 py-2.5 border-b-2 border-blue-500 text-blue-400 font-medium';
+      tabLogs.className = 'px-3 py-2.5 border-b-2 border-transparent text-gray-400 hover:text-gray-200 font-medium';
+      paneRuns.classList.remove('hidden');
+      paneLogs.classList.add('hidden');
+      stopLogPolling();
+    } else {
+      tabLogs.className = 'px-3 py-2.5 border-b-2 border-blue-500 text-blue-400 font-medium';
+      tabRuns.className = 'px-3 py-2.5 border-b-2 border-transparent text-gray-400 hover:text-gray-200 font-medium';
+      paneLogs.classList.remove('hidden');
+      paneRuns.classList.add('hidden');
+    }
+  }
+
+  async function loadDrawerRuns(dagId) {
+    const listEl = document.getElementById('drawer-runs-list');
+    listEl.innerHTML = '<div class="py-8 text-center text-gray-500">Loading historical runs...</div>';
+
+    try {
+      const res = await fetch(`/api/pipelines/${dagId}/runs`);
+      if (!res.ok) throw new Error('Failed to load runs');
+      const data = await res.json();
+      const runs = data.runs || [];
+      document.getElementById('drawer-runs-count').textContent = runs.length;
+
+      if (runs.length === 0) {
+        listEl.innerHTML = '<div class="py-8 text-center text-gray-500 text-xs">No historical runs recorded for this pipeline.</div>';
+        return;
+      }
+
+      listEl.innerHTML = runs.map(r => {
+        const isRunning = (r.state === 'running');
+        return `
+          <div class="p-3 bg-white/[0.02] border border-white/[0.06] rounded-lg hover:border-white/[0.12] transition-colors space-y-2">
+            <div class="flex items-center justify-between text-xs">
+              <span class="font-mono text-gray-200 font-medium truncate max-w-xs">${r.dag_run_id}</span>
+              <span class="px-2 py-0.5 rounded text-[10px] font-medium ${
+                r.state === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                isRunning             ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20 animate-pulse' :
+                r.state === 'failed'  ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
+                                        'bg-gray-500/10 text-gray-400 border border-gray-500/20'
+              }">${r.state}</span>
+            </div>
+
+            <div class="flex items-center justify-between text-[11px] text-gray-500 font-mono">
+              <span>Date: ${r.execution_date ? new Date(r.execution_date).toLocaleString() : '—'}</span>
+              <span>Duration: ${r.duration_seconds !== null ? `${Math.round(r.duration_seconds)}s` : '—'}</span>
+            </div>
+
+            <div class="pt-2 border-t border-white/[0.04] flex items-center justify-between">
+              <button onclick="inspectRunTasks('${dagId}', '${r.dag_run_id}', ${isRunning})"
+                      class="text-xs text-blue-400 hover:text-blue-300 font-medium flex items-center gap-1">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                Inspect Tasks & Logs
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    } catch (err) {
+      listEl.innerHTML = `<div class="py-8 text-center text-rose-400 text-xs">${err.message}</div>`;
+    }
+  }
+
+  async function inspectRunTasks(dagId, runId, isRunning) {
+    currentSelectedRunId = runId;
+    setDrawerTab('logs');
+    document.getElementById('log-pre').textContent = `Loading task instances for ${runId}...`;
+
+    try {
+      const res = await fetch(`/api/pipelines/${dagId}/runs/${runId}/tasks`);
+      if (!res.ok) throw new Error('Failed to load task instances');
+      const data = await res.json();
+      const tasks = data.tasks || [];
+      if (tasks.length === 0) {
+        document.getElementById('log-pre').textContent = 'No task instances found for this run.';
+        return;
+      }
+
+      const primaryTask = tasks[0];
+      currentSelectedTaskId = primaryTask.task_id;
+      document.getElementById('log-target-task').textContent = `task: ${primaryTask.task_id} (try: ${primaryTask.try_number})`;
+
+      await loadTaskLogs(dagId, runId, primaryTask.task_id, primaryTask.try_number);
+
+      if (isRunning || primaryTask.state === 'running') {
+        startLogPolling(dagId, runId, primaryTask.task_id, primaryTask.try_number);
+      } else {
+        stopLogPolling();
+      }
+    } catch (err) {
+      document.getElementById('log-pre').textContent = `Error loading tasks: ${err.message}`;
+    }
+  }
+
+  async function loadTaskLogs(dagId, runId, taskId, tryNum) {
+    try {
+      const res = await fetch(`/api/pipelines/${dagId}/runs/${runId}/tasks/${taskId}/logs?try_number=${tryNum}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const rawContent = data.content || 'No log output.';
+      // Clean ANSI escape codes for display
+      const cleanContent = rawContent.replace(/\\u001b\\[[0-9;]*[mK]/g, '').replace(/\x1b\[[0-9;]*[mK]/g, '');
+      document.getElementById('log-pre').textContent = cleanContent;
+    } catch (err) {
+      document.getElementById('log-pre').textContent = `Failed to stream logs: ${err.message}`;
+    }
+  }
+
+  function startLogPolling(dagId, runId, taskId, tryNum) {
+    stopLogPolling();
+    document.getElementById('log-polling-indicator').classList.remove('hidden');
+    document.getElementById('log-polling-indicator').classList.add('flex');
+
+    activeLogPollingTimer = setInterval(async () => {
+      await loadTaskLogs(dagId, runId, taskId, tryNum);
+    }, 5000);
+  }
+
+  function stopLogPolling() {
+    if (activeLogPollingTimer) {
+      clearInterval(activeLogPollingTimer);
+      activeLogPollingTimer = null;
+    }
+    const indicator = document.getElementById('log-polling-indicator');
+    if (indicator) {
+      indicator.classList.add('hidden');
+      indicator.classList.remove('flex');
+    }
+  }
+
+  function refreshCurrentTaskLogs() {
+    if (currentDrawerDagId && currentSelectedRunId && currentSelectedTaskId) {
+      loadTaskLogs(currentDrawerDagId, currentSelectedRunId, currentSelectedTaskId, 1);
+    }
+  }
+
+  function scrollLogsToBottom() {
+    const term = document.getElementById('log-terminal');
+    if (term) term.scrollTop = term.scrollHeight;
+  }
+
+  // Initial load
+  document.addEventListener('DOMContentLoaded', () => {
+    fetchPipelines();
+  });
+</script>
+{% endblock %}
