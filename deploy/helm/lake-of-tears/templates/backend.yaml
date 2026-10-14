@@ -109,6 +109,15 @@ spec:
               value: datalake
             - name: AIRFLOW_URL
               value: "http://{{ include "lake-of-tears.fullname" . }}-airflow:{{ .Values.airflow.service.port }}/airflow"
+            - name: AIRFLOW_ADMIN_USER
+              value: "admin"
+            - name: AIRFLOW_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "lake-of-tears.fullname" . }}-credentials
+                  key: AIRFLOW_ADMIN_PASSWORD
+            - name: AIRFLOW_DAGS_DIR
+              value: "/opt/airflow/dags"
           livenessProbe:
             httpGet:
               path: /api/health
@@ -122,6 +131,13 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 10
           resources: {{ toYaml .Values.backend.resources | nindent 12 }}
+          volumeMounts:
+            - name: airflow-home
+              mountPath: /opt/airflow
+      volumes:
+        - name: airflow-home
+          persistentVolumeClaim:
+            claimName: {{ include "lake-of-tears.fullname" . }}-airflow-home
 ---
 apiVersion: v1
 kind: Service

@@ -36,6 +36,10 @@ spec:
           args:
             - |
               rm -f /opt/airflow/airflow-webserver.pid
+              (
+                sleep 5
+                airflow users reset-password -u admin -p "$_AIRFLOW_WWW_USER_PASSWORD" 2>/dev/null || true
+              ) &
               exec /entrypoint standalone
           env:
             - name: CONNECTION_CHECK_MAX_COUNT
@@ -51,6 +55,8 @@ spec:
               value: "False"
             - name: AIRFLOW__CORE__DAGS_FOLDER
               value: /opt/airflow/dags
+            - name: AIRFLOW__API__AUTH_BACKENDS
+              value: "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session"
             - name: AIRFLOW__WEBSERVER__SECRET_KEY
               valueFrom:
                 secretKeyRef:
