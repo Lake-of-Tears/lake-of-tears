@@ -526,9 +526,21 @@ def test_compute_projected_runs_for_day():
     assert len(runs_daily) == 1
     assert "00:00:00" in runs_daily[0]["scheduled_time"]
 
-    # 3. Non-standard or none interval produces empty list
+    # 3. Human timetable description fallbacks
+    runs_at_8 = pipeline_service.compute_projected_runs_for_day("At 08:00", start, end)
+    assert len(runs_at_8) == 1
+    assert "08:00:00" in runs_at_8[0]["scheduled_time"]
+
+    runs_every_hour = pipeline_service.compute_projected_runs_for_day("Every hour", start, end)
+    assert len(runs_every_hour) == 24
+
+    runs_every_2h = pipeline_service.compute_projected_runs_for_day("Every 2 hours", start, end)
+    assert len(runs_every_2h) == 12
+
+    # 4. Non-standard or none interval produces empty list
     assert pipeline_service.compute_projected_runs_for_day(None, start, end) == []
     assert pipeline_service.compute_projected_runs_for_day("invalid-cron", start, end) == []
+
 
 
 def test_pipeline_metadata_db_crud():

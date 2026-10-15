@@ -233,15 +233,15 @@ async def list_workspace_dags(
                 dag_id = dag.get("dag_id", "")
                 tags_raw = dag.get("tags", [])
                 tags = [t.get("name", t) if isinstance(t, dict) else str(t) for t in tags_raw]
-                schedule = dag.get("timetable_description")
-                if not schedule:
-                    sched_obj = dag.get("schedule_interval")
-                    if isinstance(sched_obj, dict):
-                        schedule = sched_obj.get("value")
-                    elif sched_obj:
-                        schedule = str(sched_obj)
-                    else:
-                        schedule = "None (Manual)"
+                sched_obj = dag.get("schedule_interval")
+                cron_val = None
+                if isinstance(sched_obj, dict):
+                    cron_val = sched_obj.get("value")
+                elif sched_obj and str(sched_obj).lower() not in ("none", "null"):
+                    cron_val = str(sched_obj)
+
+                # Prioritize cron expression for machine scheduling & projection; fallback to timetable_description
+                schedule = cron_val or dag.get("timetable_description") or "None (Manual)"
 
                 last_run = await _fetch_latest_dag_run(client, api_base, auth, dag_id)
 
@@ -303,14 +303,14 @@ async def get_dag_details(
             last_run = await _fetch_latest_dag_run(client, api_base, auth, dag_id)
             tags_raw = dag.get("tags", [])
             tags = [t.get("name", t) if isinstance(t, dict) else str(t) for t in tags_raw]
-            schedule = dag.get("timetable_description")
-            if not schedule:
-                sched_obj = dag.get("schedule_interval")
-                schedule = (
-                    sched_obj.get("value")
-                    if isinstance(sched_obj, dict)
-                    else str(sched_obj or "None (Manual)")
-                )
+            sched_obj = dag.get("schedule_interval")
+            cron_val = None
+            if isinstance(sched_obj, dict):
+                cron_val = sched_obj.get("value")
+            elif sched_obj and str(sched_obj).lower() not in ("none", "null"):
+                cron_val = str(sched_obj)
+
+            schedule = cron_val or dag.get("timetable_description") or "None (Manual)"
 
             return {
                 "dag_id": dag_id,
@@ -832,25 +832,44 @@ def compute_projected_runs_for_day(
 
     raw = schedule_interval.strip()
     cron_expr = PRESET_MAP.get(raw, raw)
+
+    # Translate common human timetable descriptions if not already valid cron
+    if not croniter.is_valid(cron_expr):
+        m_at = re.match(r"^At\s+(\d{1,2}):(\d{2})$", raw, re.IGNORECASE)
+        if m_at:
+            cron_expr = f"{int(m_at.group(2))} {int(m_at.group(1))} * * *"
+        elif re.match(r"^Every\s+hour$", raw, re.IGNORECASE):
+            cron_expr = "0 * * * *"
+        elif re.match(r"^Every\s+(\d+)\s+hours?$", raw, re.IGNORECASE):
+            m_h = re.match(r"^Every\s+(\d+)\s+hours?$", raw, re.IGNORECASE)
+            cron_expr = f"0 */{m_h.group(1)} * * *"
+
     if not croniter.is_valid(cron_expr):
         return []
 
     projected: list[dict[str, Any]] = []
     try:
-        base_time = day_start - timedelta(seconds=1)
+        user_tz = day_start.tzinfo or UTC
+        # Airflow schedules execute in UTC by default
+        day_start_utc = day_start.astimezone(UTC)
+        day_end_utc = day_end.astimezone(UTC)
+
+        base_time = day_start_utc - timedelta(seconds=1)
         iter_cron = croniter(cron_expr, base_time)
         count = 0
         while count < max_runs:
-            next_dt = iter_cron.get_next(datetime)
-            if next_dt > day_end:
+            next_dt_utc = iter_cron.get_next(datetime)
+            if next_dt_utc > day_end_utc:
                 break
+            # Convert to local timezone for the response
+            next_dt_local = next_dt_utc.astimezone(user_tz)
             projected.append(
                 {
                     "type": "projected",
-                    "dag_run_id": f"projected__{next_dt.strftime('%Y%m%dT%H%M%SZ')}",
+                    "dag_run_id": f"projected__{next_dt_utc.strftime('%Y%m%dT%H%M%SZ')}",
                     "state": "scheduled",
-                    "scheduled_time": next_dt.isoformat(),
-                    "start_time": next_dt.isoformat(),
+                    "scheduled_time": next_dt_local.isoformat(),
+                    "start_time": next_dt_local.isoformat(),
                     "end_time": None,
                     "duration_seconds": None,
                 }
@@ -993,9 +1012,8 @@ async def get_workspace_timeline(
                 resp = await client.get(
                     url,
                     params={
-                        "execution_date_gte": day_start_utc.isoformat(),
-                        "execution_date_lte": day_end_utc.isoformat(),
-                        "limit": 100,
+                        "order_by": "-execution_date",
+                        "limit": 50,
                     },
                     auth=auth,
                 )
@@ -1006,14 +1024,52 @@ async def get_workspace_timeline(
                         end = r.get("end_date")
                         state = r.get("state")
                         duration = _calculate_duration(start, end, state)
+
+                        # Determine if this run belongs to the viewed day
+                        # A run belongs to this day if its start_date, data_interval_end,
+                        # or execution_date falls within [day_start_utc, day_end_utc]
+                        candidates: list[datetime] = []
+                        for k in ("start_date", "data_interval_end", "execution_date"):
+                            v = r.get(k)
+                            if v:
+                                try:
+                                    candidates.append(
+                                        datetime.fromisoformat(v.replace("Z", "+00:00"))
+                                    )
+                                except Exception:
+                                    pass
+
+                        matched = [
+                            dt for dt in candidates
+                            if day_start_utc <= dt <= day_end_utc
+                        ]
+                        if not matched:
+                            continue
+
+                        # Reference time in local timezone
+                        ref_dt = matched[0].astimezone(user_tz)
+                        start_local = (
+                            datetime.fromisoformat(start.replace("Z", "+00:00"))
+                            .astimezone(user_tz)
+                            .isoformat()
+                            if start
+                            else ref_dt.isoformat()
+                        )
+                        end_local = (
+                            datetime.fromisoformat(end.replace("Z", "+00:00"))
+                            .astimezone(user_tz)
+                            .isoformat()
+                            if end
+                            else None
+                        )
                         actual_runs.append(
                             {
                                 "type": "actual",
                                 "dag_run_id": r.get("dag_run_id"),
                                 "state": state,
-                                "scheduled_time": r.get("execution_date"),
-                                "start_time": start or r.get("execution_date"),
-                                "end_time": end,
+                                "scheduled_time": ref_dt.isoformat(),
+                                "start_time": start_local,
+                                "end_time": end_local,
                                 "duration_seconds": duration,
                                 "conf": r.get("conf", {}),
                             }
@@ -1027,19 +1083,18 @@ async def get_workspace_timeline(
                 raw_projected = compute_projected_runs_for_day(
                     p["schedule_interval"], day_start, day_end
                 )
-                # Filter out projected runs that match an actual run or are in the past when viewing today
                 for proj in raw_projected:
-                    proj_dt = datetime.fromisoformat(proj["scheduled_time"])
-                    if is_today and proj_dt < now_tz:
-                        continue
-                    # Check if actual run exists within 60s
+                    proj_dt_utc = datetime.fromisoformat(
+                        proj["scheduled_time"]
+                    ).astimezone(UTC)
+                    # Check if actual run exists within 60s of this scheduled slot
                     already_ran = any(
                         abs(
                             (
                                 datetime.fromisoformat(
-                                    act["scheduled_time"].replace("Z", "+00:00")
-                                )
-                                - proj_dt.astimezone(UTC)
+                                    act["scheduled_time"]
+                                ).astimezone(UTC)
+                                - proj_dt_utc
                             ).total_seconds()
                         )
                         < 60
@@ -1047,6 +1102,41 @@ async def get_workspace_timeline(
                     )
                     if not already_ran:
                         projected_runs.append(proj)
+
+            # 3. Include next_dagrun from Airflow if available and falls within this day
+            if not p.get("is_paused") and p.get("next_dagrun"):
+                try:
+                    next_dt_utc = datetime.fromisoformat(
+                        p["next_dagrun"].replace("Z", "+00:00")
+                    )
+                    if day_start_utc <= next_dt_utc <= day_end_utc:
+                        next_dt_local = next_dt_utc.astimezone(user_tz)
+                        already_included = any(
+                            abs(
+                                (
+                                    datetime.fromisoformat(
+                                        r["scheduled_time"]
+                                    ).astimezone(UTC)
+                                    - next_dt_utc
+                                ).total_seconds()
+                            )
+                            < 60
+                            for r in actual_runs + projected_runs
+                        )
+                        if not already_included:
+                            projected_runs.append(
+                                {
+                                    "type": "projected",
+                                    "dag_run_id": f"projected__{next_dt_utc.strftime('%Y%m%dT%H%M%SZ')}",
+                                    "state": "scheduled",
+                                    "scheduled_time": next_dt_local.isoformat(),
+                                    "start_time": next_dt_local.isoformat(),
+                                    "end_time": None,
+                                    "duration_seconds": None,
+                                }
+                            )
+                except Exception as exc:
+                    logger.debug("Failed parsing next_dagrun: %s", exc)
 
             combined_runs = sorted(
                 actual_runs + projected_runs,
