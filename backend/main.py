@@ -72,6 +72,7 @@ from schemas import (
 )
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+from storage_router import router as storage_router
 
 _DEFAULT_SOFT_DELETE_DAYS = 30
 _DEFAULT_WORKSPACE_INACTIVE_DAYS = 30
@@ -113,6 +114,8 @@ app.include_router(notebooks_router, prefix="/api/v1/notebooks", tags=["notebook
 app.include_router(notebooks_router, prefix="/api/notebooks", tags=["notebooks"])
 app.include_router(pipelines_router, prefix="/api/v1/pipelines", tags=["pipelines"])
 app.include_router(pipelines_router, prefix="/api/pipelines", tags=["pipelines"])
+app.include_router(storage_router, prefix="/api/v1/storage", tags=["storage"])
+app.include_router(storage_router, prefix="/api/storage", tags=["storage"])
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

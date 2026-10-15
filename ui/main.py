@@ -16,7 +16,7 @@ import jwt
 import websockets
 from dotenv import load_dotenv
 from fastapi import FastAPI, Form, Request, WebSocket, WebSocketDisconnect, status
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from google import genai
@@ -543,6 +543,11 @@ async def catalog_refresh_schema(request: Request, table_id: str):
 @app.get("/storage", response_class=HTMLResponse)
 async def storage(request: Request):
     stats = _get_bucket_stats()
+    user = getattr(request.state, "user", None) or {}
+    ws = getattr(request.state, "workspace", None) or {}
+    is_superadmin = user.get("role") == "superadmin"
+    user_role = user.get("role") if is_superadmin else (ws.get("role") or "viewer")
+    can_delete = is_superadmin or user_role in ("admin", "editor")
     return templates.TemplateResponse(
         request=request,
         name="storage.html",
@@ -551,12 +556,18 @@ async def storage(request: Request):
             "stats": stats,
             "page": "storage",
             "minio_console_url": MINIO_CONSOLE_URL,
+            "minio_bucket": MINIO_BUCKET,
+            "is_superadmin": is_superadmin,
+            "user_role": user_role,
+            "can_delete": can_delete,
         },
     )
 
 
 @app.get("/sql", response_class=HTMLResponse)
 async def sql_get(request: Request):
+    query_sql = request.query_params.get("q") or request.query_params.get("sql")
+    selected_sql = query_sql if query_sql else EXAMPLE_QUERIES[0]["sql"]
     return templates.TemplateResponse(
         request=request,
         name="sql.html",
@@ -564,7 +575,7 @@ async def sql_get(request: Request):
             "request": request,
             "page": "sql",
             "result": None,
-            "sql": EXAMPLE_QUERIES[0]["sql"],
+            "sql": selected_sql,
             "example_queries": EXAMPLE_QUERIES,
         },
     )
@@ -2179,6 +2190,178 @@ async def ui_cancel_pipeline_run(request: Request, dag_id: str, run_id: str):
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
                 f"{BACKEND_URL}/api/v1/pipelines/{dag_id}/runs/{run_id}/cancel",
+                headers=headers,
+                params=params,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+# ── Storage API Proxy Endpoints ───────────────────────────────────────────────
+
+
+@app.get("/api/storage/stats")
+@app.get("/api/v1/storage/stats")
+async def ui_get_storage_stats(request: Request):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params = {}
+    if ws and ws.get("slug"):
+        params["workspace_slug"] = ws["slug"]
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{BACKEND_URL}/api/v1/storage/stats",
+                headers=headers,
+                params=params,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@app.get("/api/storage/browse")
+@app.get("/api/v1/storage/browse")
+async def ui_browse_storage(
+    request: Request,
+    prefix: str = "",
+    limit: int = 100,
+    continuation_token: str | None = None,
+):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params = {"prefix": prefix, "limit": limit}
+    if continuation_token:
+        params["continuation_token"] = continuation_token
+    if ws and ws.get("slug"):
+        params["workspace_slug"] = ws["slug"]
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"{BACKEND_URL}/api/v1/storage/browse",
+                headers=headers,
+                params=params,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@app.get("/api/storage/objects/{key:path}/metadata")
+@app.get("/api/v1/storage/objects/{key:path}/metadata")
+async def ui_get_object_metadata(request: Request, key: str):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params = {}
+    if ws and ws.get("slug"):
+        params["workspace_slug"] = ws["slug"]
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"{BACKEND_URL}/api/v1/storage/objects/{key}/metadata",
+                headers=headers,
+                params=params,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@app.get("/api/storage/objects/{key:path}/download")
+@app.get("/api/v1/storage/objects/{key:path}/download")
+async def ui_get_object_download(request: Request, key: str, expires_in: int = 3600):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params = {"expires_in": expires_in}
+    if ws and ws.get("slug"):
+        params["workspace_slug"] = ws["slug"]
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{BACKEND_URL}/api/v1/storage/objects/{key}/download",
+                headers=headers,
+                params=params,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@app.get("/api/storage/objects/{key:path}/stream")
+@app.get("/api/v1/storage/objects/{key:path}/stream")
+async def ui_stream_object(request: Request, key: str):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params = {}
+    if ws and ws.get("slug"):
+        params["workspace_slug"] = ws["slug"]
+
+    client = httpx.AsyncClient(timeout=60.0)
+    try:
+        req = client.build_request(
+            "GET",
+            f"{BACKEND_URL}/api/v1/storage/objects/{key}/stream",
+            headers=headers,
+            params=params,
+            cookies=request.cookies,
+        )
+        resp = await client.send(req, stream=True)
+
+        async def _body_stream():
+            try:
+                async for chunk in resp.aiter_bytes():
+                    yield chunk
+            finally:
+                await resp.aclose()
+                await client.aclose()
+
+        resp_headers = {
+            "Content-Type": resp.headers.get("content-type", "application/octet-stream"),
+        }
+        if "content-disposition" in resp.headers:
+            resp_headers["Content-Disposition"] = resp.headers["content-disposition"]
+        if "content-length" in resp.headers:
+            resp_headers["Content-Length"] = resp.headers["content-length"]
+
+        return StreamingResponse(
+            _body_stream(),
+            status_code=resp.status_code,
+            headers=resp_headers,
+        )
+    except Exception as exc:
+        await client.aclose()
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@app.delete("/api/storage/objects/{key:path}")
+@app.delete("/api/v1/storage/objects/{key:path}")
+async def ui_delete_object(request: Request, key: str):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params = {}
+    if ws and ws.get("slug"):
+        params["workspace_slug"] = ws["slug"]
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.delete(
+                f"{BACKEND_URL}/api/v1/storage/objects/{key}",
                 headers=headers,
                 params=params,
                 cookies=request.cookies,
