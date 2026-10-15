@@ -19,5 +19,12 @@ data:
     WTF_CSRF_ENABLED = False
     TALISMAN_ENABLED = False
     TALISMAN_CONFIG = {"force_https": False, "frame_options": "ALLOWALL"}
+    # Enable native embedded dashboards and guest token authentication
+    FEATURE_FLAGS = {
+        "EMBEDDED_SUPERSET": True,
+    }
+    ENABLE_TEMPLATE_PROCESSING = True
+    GUEST_ROLE_NAME = "Gamma"
     # Grant anonymous users Gamma-level read access so the iframe loads without login.
     PUBLIC_ROLE_LIKE = "Gamma"
+
