@@ -28,6 +28,10 @@ class User(Base):
         back_populates="user", cascade="all, delete-orphan"
     )
 
+    @property
+    def has_password(self) -> bool:
+        return self.hashed_password is not None
+
 
 class OAuthAccount(Base):
     __tablename__ = "oauth_accounts"
