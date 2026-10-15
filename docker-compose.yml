@@ -117,7 +117,7 @@ services:
   # ── Object storage ──────────────────────────────────────────────────────
 
   minio:
-    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
+    image: ghcr.io/coollabsio/minio:latest
     container_name: minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -130,7 +130,7 @@ services:
     volumes:
       - minio_data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/9000; printf \"GET /minio/health/live HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n\" >&3; read -u 3 status; [[ $$status == *\"200\"* ]]'"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -139,7 +139,7 @@ services:
       - datalake
 
   minio-init:
-    image: minio/mc:RELEASE.2024-11-17T19-35-25Z
+    image: ghcr.io/coollabsio/minio:latest
     container_name: minio-init
     restart: "no"
     depends_on:
