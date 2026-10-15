@@ -49,13 +49,13 @@ jobs:
       - name: Run pip-audit
         run: pip-audit -r backend/requirements.txt -r ui/requirements.txt
 
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@v0.3.1
+
       - name: Run Trivy Dockerfile scan
-        uses: aquasecurity/trivy-action@v0.30.0
-        with:
-          scan-type: "config"
-          scan-ref: "."
-          severity: "HIGH,CRITICAL"
-          exit-code: "1"
+        run: |
+          trivy config backend/Dockerfile --severity HIGH,CRITICAL --exit-code 1
+          trivy config ui/Dockerfile --severity HIGH,CRITICAL --exit-code 1
 
   docker-build:
     name: Docker Build (UI & Backend)
