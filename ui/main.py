@@ -448,7 +448,9 @@ async def login_page(request: Request):
                 return RedirectResponse(url="/", status_code=302)
             except jwt.InvalidTokenError:
                 pass
-    return templates.TemplateResponse("login.html", {"request": request})
+    return templates.TemplateResponse(
+        request=request, name="login.html", context={"request": request}
+    )
 
 
 @app.post("/logout")
@@ -462,8 +464,9 @@ async def logout():
 async def home(request: Request):
     stats = _get_bucket_stats()
     return templates.TemplateResponse(
-        "home.html",
-        {"request": request, "stats": stats, "page": "home"},
+        request=request,
+        name="home.html",
+        context={"request": request, "stats": stats, "page": "home"},
     )
 
 
@@ -478,8 +481,9 @@ async def catalog(request: Request):
         catalogs = _backend_get("/api/catalogs", token) or []
     error = request.query_params.get("error")
     return templates.TemplateResponse(
-        "catalog.html",
-        {"request": request, "catalogs": catalogs, "page": "catalog", "error": error},
+        request=request,
+        name="catalog.html",
+        context={"request": request, "catalogs": catalogs, "page": "catalog", "error": error},
     )
 
 
@@ -540,8 +544,9 @@ async def catalog_refresh_schema(request: Request, table_id: str):
 async def storage(request: Request):
     stats = _get_bucket_stats()
     return templates.TemplateResponse(
-        "storage.html",
-        {
+        request=request,
+        name="storage.html",
+        context={
             "request": request,
             "stats": stats,
             "page": "storage",
@@ -553,8 +558,9 @@ async def storage(request: Request):
 @app.get("/sql", response_class=HTMLResponse)
 async def sql_get(request: Request):
     return templates.TemplateResponse(
-        "sql.html",
-        {
+        request=request,
+        name="sql.html",
+        context={
             "request": request,
             "page": "sql",
             "result": None,
@@ -568,8 +574,9 @@ async def sql_get(request: Request):
 async def sql_post(request: Request, sql: str = Form(...)):
     result = _run_query(sql)
     return templates.TemplateResponse(
-        "sql.html",
-        {
+        request=request,
+        name="sql.html",
+        context={
             "request": request,
             "page": "sql",
             "result": result,
@@ -582,8 +589,9 @@ async def sql_post(request: Request, sql: str = Form(...)):
 @app.get("/dashboards", response_class=HTMLResponse)
 async def dashboards(request: Request):
     return templates.TemplateResponse(
-        "embed.html",
-        {
+        request=request,
+        name="embed.html",
+        context={
             "request": request,
             "page": "dashboards",
             "embed_url": SUPERSET_URL,
@@ -600,8 +608,9 @@ async def pipelines(request: Request):
     user_role = user.get("role") if user else "user"
     my_role = (ws.get("my_role") if ws else None) or user_role
     return templates.TemplateResponse(
-        "pipelines.html",
-        {
+        request=request,
+        name="pipelines.html",
+        context={
             "request": request,
             "page": "pipelines",
             "workspace": ws,
@@ -618,8 +627,9 @@ async def notebooks(request: Request):
     user_role = user.get("role") if user else "user"
     my_role = (ws.get("my_role") if ws else None) or user_role
     return templates.TemplateResponse(
-        "notebooks.html",
-        {
+        request=request,
+        name="notebooks.html",
+        context={
             "request": request,
             "page": "notebooks",
             "workspace": ws,
@@ -632,16 +642,18 @@ async def notebooks(request: Request):
 async def ingest(request: Request):
     stats = _get_bucket_stats()
     return templates.TemplateResponse(
-        "ingest.html",
-        {"request": request, "stats": stats, "page": "ingest"},
+        request=request,
+        name="ingest.html",
+        context={"request": request, "stats": stats, "page": "ingest"},
     )
 
 
 @app.get("/ai", response_class=HTMLResponse)
 async def ai_get(request: Request):
     return templates.TemplateResponse(
-        "ai.html",
-        {
+        request=request,
+        name="ai.html",
+        context={
             "request": request,
             "page": "ai",
             "result": None,
@@ -655,8 +667,9 @@ async def ai_get(request: Request):
 async def ai_post(request: Request, question: str = Form(...)):
     result = _ai_query(question)
     return templates.TemplateResponse(
-        "ai.html",
-        {
+        request=request,
+        name="ai.html",
+        context={
             "request": request,
             "page": "ai",
             "result": result,
@@ -669,8 +682,9 @@ async def ai_post(request: Request, question: str = Form(...)):
 @app.get("/anomalies", response_class=HTMLResponse)
 async def anomalies(request: Request):
     return templates.TemplateResponse(
-        "anomalies.html",
-        {"request": request, "page": "anomalies"},
+        request=request,
+        name="anomalies.html",
+        context={"request": request, "page": "anomalies"},
     )
 
 
@@ -774,8 +788,9 @@ async def settings_account_get(request: Request):
     password_saved = request.query_params.get("password_saved")
     password_error = request.query_params.get("password_error")
     return templates.TemplateResponse(
-        "settings/account.html",
-        {
+        request=request,
+        name="settings/account.html",
+        context={
             "request": request,
             "page": "settings_account",
             "saved": saved,
@@ -859,8 +874,9 @@ async def settings_workspace_get(request: Request):
             _backend_get(f"/api/workspaces/{ws['id']}/access/requests/inbound", token) or []
         )
     return templates.TemplateResponse(
-        "settings/workspace.html",
-        {
+        request=request,
+        name="settings/workspace.html",
+        context={
             "request": request,
             "page": "settings_workspace",
             "members": members,
@@ -949,8 +965,9 @@ async def settings_admin_get(request: Request):
         "session_max_hours": 24,
     }
     return templates.TemplateResponse(
-        "settings/admin.html",
-        {
+        request=request,
+        name="settings/admin.html",
+        context={
             "request": request,
             "page": "settings_admin",
             "users": users_list,

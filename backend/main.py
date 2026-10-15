@@ -4,6 +4,7 @@ import os
 import re
 import threading
 import uuid
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
 import jwt as _jwt
@@ -77,11 +78,9 @@ _DEFAULT_WORKSPACE_INACTIVE_DAYS = 30
 _DEFAULT_SESSION_INACTIVITY_TIMEOUT_MINUTES = 0
 _DEFAULT_SESSION_MAX_HOURS = 24
 
-app = FastAPI(title="Lake of Tears Auth API", docs_url=None, redoc_url=None)
 
-
-@app.on_event("startup")
-def on_startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     from database import Base, SessionLocal, engine
 
     Base.metadata.create_all(bind=engine)
@@ -91,6 +90,15 @@ def on_startup():
         _ensure_system_settings(db)
     finally:
         db.close()
+    yield
+
+
+app = FastAPI(
+    title="Lake of Tears Auth API",
+    docs_url=None,
+    redoc_url=None,
+    lifespan=lifespan,
+)
 
 
 app.add_middleware(
