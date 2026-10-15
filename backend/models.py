@@ -216,9 +216,7 @@ class SystemSetting(Base):
 
 class PipelineMetadata(Base):
     __tablename__ = "pipeline_metadata"
-    __table_args__ = (
-        UniqueConstraint("workspace_id", "dag_id", name="uq_workspace_dag_metadata"),
-    )
+    __table_args__ = (UniqueConstraint("workspace_id", "dag_id", name="uq_workspace_dag_metadata"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     workspace_id: Mapped[uuid.UUID] = mapped_column(
@@ -236,9 +234,10 @@ class PipelineMetadata(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     workspace: Mapped["Workspace"] = relationship(foreign_keys=[workspace_id])
     updater: Mapped["User"] = relationship(foreign_keys=[updated_by])
-
