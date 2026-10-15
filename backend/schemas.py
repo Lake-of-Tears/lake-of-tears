@@ -390,3 +390,58 @@ class UpdateSystemSettingsRequest(BaseModel):
         if v is not None and (v < 0 or v > 365):
             raise ValueError("Days must be between 0 and 365")
         return v
+
+
+# ── Dashboards ────────────────────────────────────────────────────────────────
+
+
+class CreateDashboardRequest(BaseModel):
+    title: str
+    description: str | None = None
+    is_published: bool = True
+
+
+class LinkDashboardRequest(BaseModel):
+    superset_dashboard_id: int
+    title: str | None = None
+    description: str | None = None
+    is_published: bool = True
+
+
+class UpdateDashboardRequest(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    is_published: bool | None = None
+
+
+class DashboardResponse(BaseModel):
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    superset_dashboard_id: int
+    embedded_uuid: str
+    title: str
+    slug: str
+    description: str | None
+    charts_count: int
+    is_published: bool
+    created_by: uuid.UUID | None
+    created_at: datetime
+    updated_at: datetime
+    superset_url: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class GuestTokenResponse(BaseModel):
+    token: str
+    embedded_uuid: str
+    dashboard_id: uuid.UUID
+    superset_dashboard_id: int
+    superset_domain: str
+
+
+class DashboardStatsResponse(BaseModel):
+    total_dashboards: int
+    published_dashboards: int
+    total_charts: int
+    superset_online: bool

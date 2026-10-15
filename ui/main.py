@@ -599,15 +599,41 @@ async def sql_post(request: Request, sql: str = Form(...)):
 
 @app.get("/dashboards", response_class=HTMLResponse)
 async def dashboards(request: Request):
+    ws = getattr(request.state, "workspace", None)
+    user = getattr(request.state, "user", None)
+    user_role = user.get("role") if user else "user"
+    my_role = (ws.get("my_role") if ws else None) or user_role
     return templates.TemplateResponse(
         request=request,
-        name="embed.html",
+        name="dashboards.html",
         context={
             "request": request,
             "page": "dashboards",
-            "embed_url": SUPERSET_URL,
-            "embed_title": "Visualizations",
-            "embed_service": "Apache Superset",
+            "workspace": ws,
+            "user": user,
+            "my_role": my_role,
+            "superset_url": SUPERSET_URL,
+        },
+    )
+
+
+@app.get("/dashboards/{dashboard_id}", response_class=HTMLResponse)
+async def dashboard_view(request: Request, dashboard_id: str):
+    ws = getattr(request.state, "workspace", None)
+    user = getattr(request.state, "user", None)
+    user_role = user.get("role") if user else "user"
+    my_role = (ws.get("my_role") if ws else None) or user_role
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard_view.html",
+        context={
+            "request": request,
+            "page": "dashboards",
+            "dashboard_id": dashboard_id,
+            "workspace": ws,
+            "user": user,
+            "my_role": my_role,
+            "superset_url": SUPERSET_URL,
         },
     )
 
@@ -2362,6 +2388,222 @@ async def ui_delete_object(request: Request, key: str):
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.delete(
                 f"{BACKEND_URL}/api/v1/storage/objects/{key}",
+                headers=headers,
+                params=params,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+# ── Dashboard API Proxy Endpoints ─────────────────────────────────────────────
+
+
+@app.get("/api/dashboards/stats")
+@app.get("/api/v1/dashboards/stats")
+async def ui_get_dashboard_stats(request: Request):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params = {}
+    if ws and ws.get("slug"):
+        params["workspace_slug"] = ws["slug"]
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{BACKEND_URL}/api/v1/dashboards/stats",
+                headers=headers,
+                params=params,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@app.get("/api/dashboards/superset-available")
+@app.get("/api/v1/dashboards/superset-available")
+async def ui_get_available_superset_dashboards(request: Request):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params = {}
+    if ws and ws.get("slug"):
+        params["workspace_slug"] = ws["slug"]
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{BACKEND_URL}/api/v1/dashboards/superset-available",
+                headers=headers,
+                params=params,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@app.get("/api/dashboards")
+@app.get("/api/v1/dashboards")
+async def ui_list_dashboards(request: Request):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params = {}
+    if ws and ws.get("slug"):
+        params["workspace_slug"] = ws["slug"]
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{BACKEND_URL}/api/v1/dashboards",
+                headers=headers,
+                params=params,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@app.post("/api/dashboards")
+@app.post("/api/v1/dashboards")
+async def ui_create_dashboard(request: Request):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params = {}
+    if ws and ws.get("slug"):
+        params["workspace_slug"] = ws["slug"]
+
+    try:
+        body = await request.json()
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{BACKEND_URL}/api/v1/dashboards",
+                headers=headers,
+                params=params,
+                json=body,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@app.post("/api/dashboards/link")
+@app.post("/api/v1/dashboards/link")
+async def ui_link_dashboard(request: Request):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params = {}
+    if ws and ws.get("slug"):
+        params["workspace_slug"] = ws["slug"]
+
+    try:
+        body = await request.json()
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{BACKEND_URL}/api/v1/dashboards/link",
+                headers=headers,
+                params=params,
+                json=body,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@app.get("/api/dashboards/{dashboard_id}")
+@app.get("/api/v1/dashboards/{dashboard_id}")
+async def ui_get_dashboard(request: Request, dashboard_id: str):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params = {}
+    if ws and ws.get("slug"):
+        params["workspace_slug"] = ws["slug"]
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{BACKEND_URL}/api/v1/dashboards/{dashboard_id}",
+                headers=headers,
+                params=params,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@app.get("/api/dashboards/{dashboard_id}/guest-token")
+@app.get("/api/v1/dashboards/{dashboard_id}/guest-token")
+async def ui_get_dashboard_guest_token(request: Request, dashboard_id: str):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params = {}
+    if ws and ws.get("slug"):
+        params["workspace_slug"] = ws["slug"]
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{BACKEND_URL}/api/v1/dashboards/{dashboard_id}/guest-token",
+                headers=headers,
+                params=params,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@app.patch("/api/dashboards/{dashboard_id}")
+@app.patch("/api/v1/dashboards/{dashboard_id}")
+async def ui_patch_dashboard(request: Request, dashboard_id: str):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params = {}
+    if ws and ws.get("slug"):
+        params["workspace_slug"] = ws["slug"]
+
+    try:
+        body = await request.json()
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.patch(
+                f"{BACKEND_URL}/api/v1/dashboards/{dashboard_id}",
+                headers=headers,
+                params=params,
+                json=body,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@app.delete("/api/dashboards/{dashboard_id}")
+@app.delete("/api/v1/dashboards/{dashboard_id}")
+async def ui_delete_dashboard(request: Request, dashboard_id: str, purge_superset: bool = False):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params: dict[str, Any] = {"purge_superset": purge_superset}
+    if ws and ws.get("slug"):
+        params["workspace_slug"] = ws["slug"]
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.delete(
+                f"{BACKEND_URL}/api/v1/dashboards/{dashboard_id}",
                 headers=headers,
                 params=params,
                 cookies=request.cookies,

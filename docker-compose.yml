@@ -106,6 +106,10 @@ services:
       AIRFLOW_ADMIN_USER: admin
       AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_PASSWORD}
       AIRFLOW_DAGS_DIR: /opt/airflow/dags
+      SUPERSET_URL: http://superset:8088/superset
+      SUPERSET_ADMIN_USERNAME: admin
+      SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD}
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:-please_change_me}
     volumes:
       - ${DATALAKE_DATA_DIR:-~}/airflow/dags:/opt/airflow/dags
     depends_on:

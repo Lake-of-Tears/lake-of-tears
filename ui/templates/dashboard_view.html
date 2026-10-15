@@ -1,0 +1,280 @@
+{% extends "base.html" %}
+{% block title %}Dashboard View · Lake of Tears{% endblock %}
+{% block content_class %}p-0 h-full overflow-hidden flex flex-col{% endblock %}
+
+{% block head %}
+<!-- Official Apache Superset Embedded SDK -->
+<script src="https://unpkg.com/@superset-ui/embedded-sdk@0.1.0-alpha.11/bundle/index.js"></script>
+
+<style>
+  #dashboard-mount-point iframe {
+    width: 100% !important;
+    height: 100% !important;
+    border: none !important;
+    display: block;
+    background-color: transparent;
+  }
+  .fullscreen-mode {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 9999 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    background: var(--c-content-bg, #111111);
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="h-full flex flex-col flex-1 overflow-hidden" id="dashboard-view-container">
+
+  <!-- Top Action Toolbar -->
+  <header class="px-5 py-3 border-b border-white/[0.08] bg-black/20 flex flex-wrap items-center justify-between gap-3 shrink-0">
+    
+    <!-- Left: Breadcrumbs & Title -->
+    <div class="flex items-center gap-3">
+      <a href="/dashboards" class="btn-ghost text-xs py-1 px-2 text-gray-400 hover:text-white flex items-center gap-1.5" title="Return to Dashboards Gallery">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"/>
+        </svg>
+        <span>Dashboards</span>
+      </a>
+
+      <span class="text-gray-600">/</span>
+
+      <h1 class="text-sm font-semibold text-gray-100 flex items-center gap-2" id="dash-title">
+        <span class="inline-block w-24 h-4 bg-gray-800 rounded animate-pulse"></span>
+      </h1>
+
+      <span id="dash-pub-pill" class="hidden text-[10px] font-medium px-2 py-0.5 rounded"></span>
+    </div>
+
+    <!-- Right: Viewer Controls -->
+    <div class="flex items-center gap-2">
+      <!-- Fullscreen Toggle -->
+      <button onclick="toggleFullscreen()" id="btn-fullscreen" class="btn-ghost text-xs py-1.5 px-2.5 flex items-center gap-1.5" title="Toggle Fullscreen">
+        <svg id="fullscreen-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15"/>
+        </svg>
+        <span class="hidden sm:inline" id="fullscreen-label">Fullscreen</span>
+      </button>
+
+      <!-- Reload / Refresh Dashboard Data -->
+      <button onclick="refreshDashboard()" id="btn-refresh" class="btn-ghost text-xs py-1.5 px-2.5 flex items-center gap-1.5" title="Re-fetch and reload dashboard">
+        <svg id="refresh-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        <span class="hidden sm:inline">Refresh</span>
+      </button>
+
+      {% if my_role != 'viewer' %}
+      <!-- Open in Superset Studio for authoring/layout editing -->
+      <a id="btn-edit-studio" href="#" target="_blank" rel="noopener" class="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5" title="Launch Superset layout designer in a new tab">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10"/>
+        </svg>
+        <span>Edit in Superset</span>
+      </a>
+      {% endif %}
+    </div>
+
+  </header>
+
+  <!-- Embedded Dashboard Mount Point Viewport -->
+  <main class="flex-1 w-full h-full relative overflow-hidden bg-black/10" id="viewer-viewport">
+    
+    <!-- Loading Spinner & State -->
+    <div id="loader-overlay" class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/40 backdrop-blur-[2px]">
+      <div class="w-9 h-9 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mb-3"></div>
+      <p class="text-xs text-gray-300 font-medium">Authorizing guest token & mounting Superset dashboard...</p>
+    </div>
+
+    <!-- Error State Container (hidden by default) -->
+    <div id="error-overlay" class="hidden absolute inset-0 z-20 flex flex-col items-center justify-center p-6 text-center">
+      <div class="w-12 h-12 rounded-full bg-red-900/30 border border-red-800/50 flex items-center justify-center mb-3 text-red-400">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/>
+        </svg>
+      </div>
+      <h3 class="text-sm font-semibold text-gray-200" id="error-msg">Failed to load dashboard</h3>
+      <p class="text-xs text-gray-400 max-w-md mt-1 mb-4" id="error-desc">Ensure Superset is running and guest tokens are enabled.</p>
+      <button onclick="refreshDashboard()" class="btn-primary text-xs py-1.5 px-3">Try Again</button>
+    </div>
+
+    <!-- Mount Point for SDK -->
+    <div id="dashboard-mount-point" class="w-full h-full relative"></div>
+
+  </main>
+
+</div>
+
+<script>
+  const dashboardId = '{{ dashboard_id }}';
+  const supersetFallbackUrl = '{{ superset_url }}';
+  let dashboardMeta = null;
+  let isFullscreen = false;
+
+  async function fetchDashboardMetadata() {
+    try {
+      const resp = await fetch(`/api/dashboards/${dashboardId}`);
+      if (!resp.ok) {
+        throw new Error('Dashboard not found in workspace');
+      }
+      dashboardMeta = await resp.json();
+      document.getElementById('dash-title').textContent = dashboardMeta.title;
+
+      // Update published pill
+      const pubPill = document.getElementById('dash-pub-pill');
+      pubPill.classList.remove('hidden');
+      if (dashboardMeta.is_published) {
+        pubPill.className = 'text-[10px] font-medium px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+        pubPill.textContent = 'Published';
+      } else {
+        pubPill.className = 'text-[10px] font-medium px-2 py-0.5 rounded bg-gray-500/10 text-gray-400 border border-gray-500/20';
+        pubPill.textContent = 'Draft';
+      }
+
+      // Update Superset Studio button link
+      const editBtn = document.getElementById('btn-edit-studio');
+      if (editBtn) {
+        editBtn.href = dashboardMeta.superset_url || `${supersetFallbackUrl}/superset/dashboard/${dashboardMeta.superset_dashboard_id}/`;
+      }
+
+      return dashboardMeta;
+    } catch (err) {
+      console.error(err);
+      showError('Dashboard not found', err.message);
+      return null;
+    }
+  }
+
+  async function fetchGuestToken() {
+    const resp = await fetch(`/api/dashboards/${dashboardId}/guest-token`);
+    if (!resp.ok) {
+      throw new Error(`Failed to mint guest token: status ${resp.status}`);
+    }
+    const data = await resp.json();
+    return data.token;
+  }
+
+  async function mountSupersetDashboard() {
+    const meta = await fetchDashboardMetadata();
+    if (!meta) return;
+
+    const mountPoint = document.getElementById('dashboard-mount-point');
+    mountPoint.innerHTML = ''; // clear any existing frame
+
+    // Determine target Superset domain from current location or configured URL
+    let domain = window.location.origin;
+    if (meta.superset_url && meta.superset_url.startsWith('http')) {
+      try {
+        const u = new URL(meta.superset_url);
+        domain = u.origin;
+      } catch (e) {}
+    }
+
+    try {
+      // Check if SDK loaded
+      if (typeof supersetEmbeddedSdk !== 'undefined' && supersetEmbeddedSdk.embedDashboard) {
+        await supersetEmbeddedSdk.embedDashboard({
+          id: meta.embedded_uuid,
+          supersetDomain: domain,
+          mountPoint: mountPoint,
+          fetchGuestToken: () => fetchGuestToken(),
+          dashboardUiConfig: {
+            hideTitle: true,
+            hideTab: false,
+            hideChartControls: false,
+            filters: {
+              expanded: false,
+            },
+          },
+        });
+      } else {
+        // Fallback standard iframe embed if SDK unpkg is blocked or fails
+        console.warn('supersetEmbeddedSdk not detected, falling back to direct iframe');
+        const token = await fetchGuestToken();
+        const iframe = document.createElement('iframe');
+        iframe.src = `${domain}/superset/dashboard/${meta.superset_dashboard_id}/?standalone=true&guest_token=${encodeURIComponent(token)}`;
+        iframe.className = 'w-full h-full border-0 block';
+        mountPoint.appendChild(iframe);
+      }
+
+      // Hide loader overlay after mount
+      setTimeout(() => {
+        const loader = document.getElementById('loader-overlay');
+        if (loader) loader.classList.add('hidden');
+      }, 700);
+
+    } catch (err) {
+      console.error('Error mounting embedded dashboard:', err);
+      showError('Failed to load dashboard', 'Could not establish guest session with Superset. ' + err.message);
+    }
+  }
+
+  function showError(msg, desc) {
+    document.getElementById('loader-overlay').classList.add('hidden');
+    document.getElementById('error-overlay').classList.remove('hidden');
+    document.getElementById('error-msg').textContent = msg;
+    if (desc) document.getElementById('error-desc').textContent = desc;
+  }
+
+  function refreshDashboard() {
+    const refreshIcon = document.getElementById('refresh-icon');
+    if (refreshIcon) refreshIcon.classList.add('animate-spin');
+    document.getElementById('error-overlay').classList.add('hidden');
+    document.getElementById('loader-overlay').classList.remove('hidden');
+
+    mountSupersetDashboard().finally(() => {
+      if (refreshIcon) refreshIcon.classList.remove('animate-spin');
+    });
+  }
+
+  function toggleFullscreen() {
+    const container = document.getElementById('dashboard-view-container');
+    const label = document.getElementById('fullscreen-label');
+    isFullscreen = !isFullscreen;
+
+    if (isFullscreen) {
+      container.classList.add('fullscreen-mode');
+      if (label) label.textContent = 'Exit Fullscreen';
+      if (container.requestFullscreen) {
+        container.requestFullscreen().catch(() => {});
+      }
+    } else {
+      container.classList.remove('fullscreen-mode');
+      if (label) label.textContent = 'Fullscreen';
+      if (document.fullscreenElement && document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      }
+    }
+  }
+
+  // Handle escape key for fullscreen
+  document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement && isFullscreen) {
+      toggleFullscreen();
+    }
+  });
+
+  // Theme change observer
+  const observer = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      if (mutation.type === 'attributes' && mutation.attributeName === 'data-theme') {
+        const currentTheme = document.documentElement.getAttribute('data-theme');
+        // Iframe background syncing
+        const mount = document.getElementById('dashboard-mount-point');
+        if (mount) {
+          mount.style.backgroundColor = currentTheme === 'light' ? '#f5f5f5' : '#111111';
+        }
+      }
+    });
+  });
+  observer.observe(document.documentElement, { attributes: true });
+
+  // Initialize
+  document.addEventListener('DOMContentLoaded', () => {
+    mountSupersetDashboard();
+  });
+</script>
+{% endblock %}

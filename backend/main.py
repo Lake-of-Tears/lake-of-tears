@@ -18,6 +18,7 @@ from auth import (
     require_superadmin,
     verify_password,
 )
+from dashboards_router import router as dashboards_router
 from database import get_db
 from email_service import send_access_removed, send_access_requested, send_access_reviewed
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response
@@ -116,6 +117,8 @@ app.include_router(pipelines_router, prefix="/api/v1/pipelines", tags=["pipeline
 app.include_router(pipelines_router, prefix="/api/pipelines", tags=["pipelines"])
 app.include_router(storage_router, prefix="/api/v1/storage", tags=["storage"])
 app.include_router(storage_router, prefix="/api/storage", tags=["storage"])
+app.include_router(dashboards_router, prefix="/api/v1/dashboards", tags=["dashboards"])
+app.include_router(dashboards_router, prefix="/api/dashboards", tags=["dashboards"])
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
