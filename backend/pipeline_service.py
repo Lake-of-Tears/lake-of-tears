@@ -57,7 +57,7 @@ PRESET_MAP = {
 
 def get_default_color_for_dag(dag_id: str) -> str:
     """Return a deterministic color from the master palette based on dag_id."""
-    h = int(hashlib.md5(dag_id.encode("utf-8")).hexdigest(), 16)
+    h = int(hashlib.sha256(dag_id.encode("utf-8")).hexdigest(), 16)
     return DEFAULT_PALETTE[h % len(DEFAULT_PALETTE)]
 
 
@@ -664,7 +664,7 @@ def generate_dynamic_dag_code(
     mem_limit = "4Gi" if mem_req in ("1Gi", "2Gi") else mem_req
 
     if exec_mode == "k8s":
-        code = f'''# Dynamic Lake of Tears Pipeline DAG (Kubernetes Compute Isolation)
+        code = f"""# Dynamic Lake of Tears Pipeline DAG (Kubernetes Compute Isolation)
 # Generated automatically for workspace: {clean_slug}
 
 from __future__ import annotations
@@ -710,9 +710,9 @@ with DAG(
         is_delete_operator_pod=True,
         get_logs=True,
     )
-'''
+"""
     else:
-        code = f'''# Dynamic Lake of Tears Pipeline DAG (Docker / Worker Compute Isolation)
+        code = f"""# Dynamic Lake of Tears Pipeline DAG (Docker / Worker Compute Isolation)
 # Generated automatically for workspace: {clean_slug}
 
 from __future__ import annotations
@@ -796,7 +796,7 @@ with DAG(
         task_id="execute_and_archive_notebook",
         python_callable=_run_notebook_callable,
     )
-'''
+"""
 
     # Validate generated Python syntax
     ast.parse(code)
@@ -939,9 +939,7 @@ def compute_projected_runs_for_day(
     return projected
 
 
-def get_pipeline_metadata_map(
-    workspace_id: uuid.UUID | None, db: Session | None
-) -> dict[str, Any]:
+def get_pipeline_metadata_map(workspace_id: uuid.UUID | None, db: Session | None) -> dict[str, Any]:
     """Retrieve color and display label metadata for a workspace's pipelines."""
     if not workspace_id or not db:
         return {}
@@ -949,9 +947,7 @@ def get_pipeline_metadata_map(
         from models import PipelineMetadata
 
         rows = (
-            db.query(PipelineMetadata)
-            .filter(PipelineMetadata.workspace_id == workspace_id)
-            .all()
+            db.query(PipelineMetadata).filter(PipelineMetadata.workspace_id == workspace_id).all()
         )
         return {row.dag_id: row for row in rows}
     except Exception as exc:
@@ -990,7 +986,9 @@ def upsert_pipeline_metadata(
             color_hex=color_hex or get_default_color_for_dag(dag_id),
             display_label=display_label or dag_id.replace("_", " ").title(),
             description=description,
-            is_visible_on_timeline=True if is_visible_on_timeline is None else is_visible_on_timeline,
+            is_visible_on_timeline=True
+            if is_visible_on_timeline is None
+            else is_visible_on_timeline,
             updated_by=user_id,
             updated_at=datetime.now(UTC),
         )
@@ -1037,9 +1035,7 @@ async def cancel_dag_run(
             if resp.status_code == 404:
                 raise HTTPException(404, f"Run {run_id} not found")
             if resp.status_code not in (200, 201):
-                raise HTTPException(
-                    resp.status_code, f"Failed to cancel DAG run: {resp.text}"
-                )
+                raise HTTPException(resp.status_code, f"Failed to cancel DAG run: {resp.text}")
             r = resp.json()
             return {
                 "dag_id": dag_id,
@@ -1078,7 +1074,9 @@ async def get_workspace_timeline(
         parsed_d = now_tz.date()
 
     day_start = datetime(parsed_d.year, parsed_d.month, parsed_d.day, 0, 0, 0, tzinfo=user_tz)
-    day_end = datetime(parsed_d.year, parsed_d.month, parsed_d.day, 23, 59, 59, 999999, tzinfo=user_tz)
+    day_end = datetime(
+        parsed_d.year, parsed_d.month, parsed_d.day, 23, 59, 59, 999999, tzinfo=user_tz
+    )
     day_start_utc = day_start.astimezone(UTC)
     day_end_utc = day_end.astimezone(UTC)
 
@@ -1097,7 +1095,9 @@ async def get_workspace_timeline(
         for p in pipelines:
             dag_id = p["dag_id"]
             meta = meta_map.get(dag_id)
-            color_hex = meta.color_hex if meta and meta.color_hex else get_default_color_for_dag(dag_id)
+            color_hex = (
+                meta.color_hex if meta and meta.color_hex else get_default_color_for_dag(dag_id)
+            )
             display_label = (
                 meta.display_label
                 if meta and meta.display_label
@@ -1138,10 +1138,7 @@ async def get_workspace_timeline(
                                 except Exception:
                                     pass
 
-                        matched = [
-                            dt for dt in candidates
-                            if day_start_utc <= dt <= day_end_utc
-                        ]
+                        matched = [dt for dt in candidates if day_start_utc <= dt <= day_end_utc]
                         if not matched:
                             continue
 
@@ -1183,16 +1180,12 @@ async def get_workspace_timeline(
                     p["schedule_interval"], day_start, day_end
                 )
                 for proj in raw_projected:
-                    proj_dt_utc = datetime.fromisoformat(
-                        proj["scheduled_time"]
-                    ).astimezone(UTC)
+                    proj_dt_utc = datetime.fromisoformat(proj["scheduled_time"]).astimezone(UTC)
                     # Check if actual run exists within 60s of this scheduled slot
                     already_ran = any(
                         abs(
                             (
-                                datetime.fromisoformat(
-                                    act["scheduled_time"]
-                                ).astimezone(UTC)
+                                datetime.fromisoformat(act["scheduled_time"]).astimezone(UTC)
                                 - proj_dt_utc
                             ).total_seconds()
                         )
@@ -1205,17 +1198,13 @@ async def get_workspace_timeline(
             # 3. Include next_dagrun from Airflow if available and falls within this day
             if not p.get("is_paused") and p.get("next_dagrun"):
                 try:
-                    next_dt_utc = datetime.fromisoformat(
-                        p["next_dagrun"].replace("Z", "+00:00")
-                    )
+                    next_dt_utc = datetime.fromisoformat(p["next_dagrun"].replace("Z", "+00:00"))
                     if day_start_utc <= next_dt_utc <= day_end_utc:
                         next_dt_local = next_dt_utc.astimezone(user_tz)
                         already_included = any(
                             abs(
                                 (
-                                    datetime.fromisoformat(
-                                        r["scheduled_time"]
-                                    ).astimezone(UTC)
+                                    datetime.fromisoformat(r["scheduled_time"]).astimezone(UTC)
                                     - next_dt_utc
                                 ).total_seconds()
                             )
@@ -1264,4 +1253,3 @@ async def get_workspace_timeline(
         "palette": DEFAULT_PALETTE,
         "pipelines": timeline_pipelines,
     }
-

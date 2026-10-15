@@ -29,14 +29,23 @@ def upgrade() -> None:
         sa.Column("display_label", sa.String(255), nullable=True),
         sa.Column("is_visible_on_timeline", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("updated_by", postgresql.UUID(as_uuid=True), nullable=True),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
         sa.ForeignKeyConstraint(["workspace_id"], ["workspaces.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["updated_by"], ["users.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("workspace_id", "dag_id", name="uq_pipeline_metadata_ws_dag"),
     )
-    op.create_index(op.f("ix_pipeline_metadata_workspace_id"), "pipeline_metadata", ["workspace_id"], unique=False)
-    op.create_index(op.f("ix_pipeline_metadata_dag_id"), "pipeline_metadata", ["dag_id"], unique=False)
+    op.create_index(
+        op.f("ix_pipeline_metadata_workspace_id"),
+        "pipeline_metadata",
+        ["workspace_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_pipeline_metadata_dag_id"), "pipeline_metadata", ["dag_id"], unique=False
+    )
 
 
 def downgrade() -> None:

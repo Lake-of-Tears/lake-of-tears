@@ -339,18 +339,26 @@ async def test_ui_pipeline_settings_proxy():
     mock_get_resp = httpx.Response(
         200,
         json={"dag_id": "ws_analytics_etl", "color_hex": "#3B82F6", "palette": ["#3B82F6"]},
-        request=httpx.Request("GET", "http://backend:8000/api/v1/pipelines/ws_analytics_etl/settings"),
+        request=httpx.Request(
+            "GET", "http://backend:8000/api/v1/pipelines/ws_analytics_etl/settings"
+        ),
     )
     mock_patch_resp = httpx.Response(
         200,
         json={"dag_id": "ws_analytics_etl", "color_hex": "#10B981"},
-        request=httpx.Request("PATCH", "http://backend:8000/api/v1/pipelines/ws_analytics_etl/settings"),
+        request=httpx.Request(
+            "PATCH", "http://backend:8000/api/v1/pipelines/ws_analytics_etl/settings"
+        ),
     )
 
     with (
         patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
-        patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_get_resp) as mock_get,
-        patch("httpx.AsyncClient.patch", new_callable=AsyncMock, return_value=mock_patch_resp) as mock_patch,
+        patch(
+            "httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_get_resp
+        ) as mock_get,
+        patch(
+            "httpx.AsyncClient.patch", new_callable=AsyncMock, return_value=mock_patch_resp
+        ) as mock_patch,
     ):
         cookies = {"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"}
 
@@ -383,12 +391,16 @@ async def test_ui_cancel_pipeline_run_proxy():
             "state": "failed",
             "message": "DAG run cancelled successfully",
         },
-        request=httpx.Request("POST", "http://backend:8000/api/v1/pipelines/ws_analytics_etl/runs/manual__1/cancel"),
+        request=httpx.Request(
+            "POST", "http://backend:8000/api/v1/pipelines/ws_analytics_etl/runs/manual__1/cancel"
+        ),
     )
 
     with (
         patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
-        patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp) as mock_post,
+        patch(
+            "httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp
+        ) as mock_post,
     ):
         cookies = {"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"}
         res = client.post("/api/pipelines/ws_analytics_etl/runs/manual__1/cancel", cookies=cookies)
@@ -450,4 +462,3 @@ def test_pipelines_page_renders_editable_fields_and_notebook_link():
         assert 'id="drawer-metadata-section"' in response.text
         assert 'id="btn-save-drawer-meta"' in response.text
         assert 'id="drawer-color-swatch"' in response.text
-

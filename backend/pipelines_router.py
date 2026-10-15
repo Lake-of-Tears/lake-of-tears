@@ -226,7 +226,9 @@ async def get_pipeline_settings(
     return {
         "dag_id": dag_id,
         "color_hex": meta.color_hex if meta else pipeline_service.get_default_color_for_dag(dag_id),
-        "display_label": meta.display_label if meta and meta.display_label else dag_id.replace("_", " ").title(),
+        "display_label": meta.display_label
+        if meta and meta.display_label
+        else dag_id.replace("_", " ").title(),
         "description": meta.description if meta and meta.description is not None else "",
         "is_visible_on_timeline": meta.is_visible_on_timeline if meta else True,
         "palette": pipeline_service.DEFAULT_PALETTE,

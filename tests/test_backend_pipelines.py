@@ -511,7 +511,6 @@ def test_get_default_color_for_dag():
 
 
 def test_compute_projected_runs_for_day():
-
     start = datetime(2026, 10, 14, 0, 0, 0, tzinfo=UTC)
     end = datetime(2026, 10, 14, 23, 59, 59, tzinfo=UTC)
 
@@ -540,7 +539,6 @@ def test_compute_projected_runs_for_day():
     # 4. Non-standard or none interval produces empty list
     assert pipeline_service.compute_projected_runs_for_day(None, start, end) == []
     assert pipeline_service.compute_projected_runs_for_day("invalid-cron", start, end) == []
-
 
 
 def test_pipeline_metadata_db_crud():
@@ -818,4 +816,3 @@ def test_pipeline_settings_patch_description_and_name():
             mock_upsert.assert_called_once()
     finally:
         backend_main.app.dependency_overrides.clear()
-

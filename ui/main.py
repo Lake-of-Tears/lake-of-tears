@@ -1449,16 +1449,31 @@ async def api_workspace_search(request: Request, q: str = ""):
 
     if not pipelines_list:
         pipelines_list = [
-            {"dag_id": "run_notebook", "name": "run_notebook", "desc": "On-demand execution of notebooks via Airflow"},
-            {"dag_id": "daily_ingest", "name": "daily_ingest", "desc": "Scheduled ingestion & normalization"},
+            {
+                "dag_id": "run_notebook",
+                "name": "run_notebook",
+                "desc": "On-demand execution of notebooks via Airflow",
+            },
+            {
+                "dag_id": "daily_ingest",
+                "name": "daily_ingest",
+                "desc": "Scheduled ingestion & normalization",
+            },
             {"dag_id": "ecommerce_sync", "name": "ecommerce_sync", "desc": "Shopify & Stripe sync"},
         ]
 
     for pipe in pipelines_list:
         dag_id = pipe.get("dag_id") or pipe.get("name", "")
-        pipe_name = pipe.get("display_label") or pipe.get("pipeline_name") or pipe.get("name") or dag_id
+        pipe_name = (
+            pipe.get("display_label") or pipe.get("pipeline_name") or pipe.get("name") or dag_id
+        )
         pipe_desc = pipe.get("description") or pipe.get("desc") or f"Pipeline {dag_id}"
-        if not query or query in pipe_name.lower() or query in pipe_desc.lower() or query in dag_id.lower():
+        if (
+            not query
+            or query in pipe_name.lower()
+            or query in pipe_desc.lower()
+            or query in dag_id.lower()
+        ):
             results.append(
                 {
                     "category": "Pipelines",
