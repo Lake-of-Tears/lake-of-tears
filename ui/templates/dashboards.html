@@ -1,0 +1,595 @@
+{% extends "base.html" %}
+{% block title %}Dashboards · Lake of Tears{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto space-y-6 pb-12" id="dashboards-gallery">
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="fixed top-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+  <!-- Page Header -->
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-white/[0.07]">
+    <div>
+      <div class="flex items-center gap-3">
+        <h1 class="text-xl font-bold tracking-tight text-gray-100">Dashboards</h1>
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">
+          <span class="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
+          {{ workspace.name if workspace else 'Active Workspace' }}
+        </span>
+        {% if my_role == 'viewer' %}
+        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-gray-500/10 text-gray-400 border border-gray-500/20">
+          Viewer (Read-Only)
+        </span>
+        {% endif %}
+      </div>
+      <p class="text-xs text-gray-400 mt-1">Native workspace business intelligence powered by Apache Superset and Lake of Tears RBAC</p>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="flex items-center gap-2">
+      <button onclick="loadDashboardGallery()" id="btn-refresh" class="btn-ghost text-xs flex items-center gap-1.5 py-1.5 px-3">
+        <svg id="refresh-icon" class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        <span>Refresh</span>
+      </button>
+
+      {% if my_role != 'viewer' %}
+      <button onclick="openCreateModal()" class="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+        </svg>
+        <span>New Dashboard</span>
+      </button>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Stats Metric Cards -->
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4" id="stats-container">
+    <div class="card p-4 flex flex-col justify-between">
+      <span class="text-xs text-gray-400 uppercase tracking-wider font-semibold">Total Dashboards</span>
+      <div class="flex items-baseline justify-between mt-2">
+        <span class="text-2xl font-bold text-gray-100" id="stat-total">-</span>
+        <span class="text-xs text-blue-400">Workspace</span>
+      </div>
+    </div>
+    <div class="card p-4 flex flex-col justify-between">
+      <span class="text-xs text-gray-400 uppercase tracking-wider font-semibold">Published</span>
+      <div class="flex items-baseline justify-between mt-2">
+        <span class="text-2xl font-bold text-emerald-400" id="stat-published">-</span>
+        <span class="text-xs text-emerald-500/80">Active</span>
+      </div>
+    </div>
+    <div class="card p-4 flex flex-col justify-between">
+      <span class="text-xs text-gray-400 uppercase tracking-wider font-semibold">Visual Charts</span>
+      <div class="flex items-baseline justify-between mt-2">
+        <span class="text-2xl font-bold text-purple-400" id="stat-charts">-</span>
+        <span class="text-xs text-purple-500/80">Total Widgets</span>
+      </div>
+    </div>
+    <div class="card p-4 flex flex-col justify-between">
+      <span class="text-xs text-gray-400 uppercase tracking-wider font-semibold">Superset Engine</span>
+      <div class="flex items-baseline justify-between mt-2">
+        <div class="flex items-center gap-1.5" id="stat-engine-badge">
+          <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span class="text-sm font-semibold text-gray-200" id="stat-engine">Online</span>
+        </div>
+        <span class="text-xs text-gray-500 font-mono">v4.1</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Search & Filter Controls -->
+  <div class="card p-3.5 flex flex-col sm:flex-row items-center justify-between gap-3">
+    <div class="relative w-full sm:w-80">
+      <input
+        id="search-input"
+        type="text"
+        placeholder="Filter dashboards by title or slug..."
+        oninput="handleFilter()"
+        class="input-dark text-xs py-1.5 pl-8 pr-3 w-full"
+      />
+      <svg class="w-3.5 h-3.5 text-gray-500 absolute left-2.5 top-2.5 pointer-events-none" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+      </svg>
+    </div>
+
+    <div class="flex items-center gap-2 self-end sm:self-auto">
+      <button onclick="setFilterStatus('all')" id="filter-all" class="px-2.5 py-1 rounded text-xs font-medium transition-colors bg-white/10 text-white">All</button>
+      <button onclick="setFilterStatus('published')" id="filter-published" class="px-2.5 py-1 rounded text-xs font-medium transition-colors text-gray-400 hover:text-white">Published</button>
+      <button onclick="setFilterStatus('draft')" id="filter-draft" class="px-2.5 py-1 rounded text-xs font-medium transition-colors text-gray-400 hover:text-white">Drafts</button>
+    </div>
+  </div>
+
+  <!-- Dashboard Grid -->
+  <div id="dashboards-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+    <div class="col-span-full py-16 flex flex-col items-center justify-center text-center">
+      <div class="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mb-3"></div>
+      <p class="text-sm text-gray-400">Loading workspace dashboards...</p>
+    </div>
+  </div>
+
+  <!-- Empty State (hidden by default) -->
+  <div id="empty-state" class="hidden card p-16 flex flex-col items-center text-center">
+    <div class="w-16 h-16 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center mb-4 text-blue-400">
+      <svg class="w-8 h-8" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5M9 11.25v1.5M12 9v3.75m3-6v6"/>
+      </svg>
+    </div>
+    <h3 class="text-base font-semibold text-gray-200">No dashboards in this workspace</h3>
+    <p class="text-xs text-gray-400 max-w-sm mt-1 mb-5">Create a native dashboard or link an existing Superset visualization to get started.</p>
+    {% if my_role != 'viewer' %}
+    <button onclick="openCreateModal()" class="btn-primary text-xs py-2 px-4 flex items-center gap-1.5">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+      </svg>
+      <span>Create Your First Dashboard</span>
+    </button>
+    {% endif %}
+  </div>
+
+</div>
+
+<!-- Create / Link Dashboard Modal -->
+<div id="create-modal" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm hidden flex items-center justify-center p-4">
+  <div class="card w-full max-w-lg overflow-hidden border border-gray-700 shadow-2xl">
+    <!-- Modal Header -->
+    <div class="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
+      <h3 class="text-sm font-semibold text-gray-100">Add Workspace Dashboard</h3>
+      <button onclick="closeCreateModal()" class="text-gray-400 hover:text-white transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Tabs: Create Blank vs Link Existing -->
+    <div class="flex border-b border-gray-800 bg-black/20 text-xs">
+      <button id="tab-btn-create" onclick="switchModalTab('create')" class="flex-1 py-2.5 px-4 font-medium border-b-2 border-blue-500 text-blue-400">
+        Create Blank
+      </button>
+      <button id="tab-btn-link" onclick="switchModalTab('link')" class="flex-1 py-2.5 px-4 font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200">
+        Link Existing Superset
+      </button>
+    </div>
+
+    <!-- Tab 1: Create Blank Form -->
+    <form id="form-create-dashboard" onsubmit="handleCreateDashboard(event)" class="p-5 space-y-4">
+      <div>
+        <label class="block text-xs font-medium text-gray-300 mb-1">Dashboard Title</label>
+        <input type="text" id="create-title" required placeholder="e.g. Executive KPI Overview" class="input-dark text-xs w-full py-2 px-3"/>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-300 mb-1">Description (Optional)</label>
+        <textarea id="create-desc" rows="3" placeholder="Brief summary of charts and metrics..." class="input-dark text-xs w-full py-2 px-3"></textarea>
+      </div>
+      <div class="flex items-center gap-2 pt-1">
+        <input type="checkbox" id="create-published" checked class="rounded border-gray-700 bg-gray-900 text-blue-500 focus:ring-0"/>
+        <label for="create-published" class="text-xs text-gray-300">Publish immediately to workspace members</label>
+      </div>
+
+      <div class="flex items-center justify-end gap-2.5 pt-3 border-t border-gray-800">
+        <button type="button" onclick="closeCreateModal()" class="btn-ghost text-xs px-3 py-1.5">Cancel</button>
+        <button type="submit" id="btn-submit-create" class="btn-primary text-xs px-4 py-1.5 flex items-center gap-1.5">
+          <span>Create Dashboard</span>
+        </button>
+      </div>
+    </form>
+
+    <!-- Tab 2: Link Existing Form -->
+    <form id="form-link-dashboard" onsubmit="handleLinkDashboard(event)" class="p-5 space-y-4 hidden">
+      <div>
+        <label class="block text-xs font-medium text-gray-300 mb-1">Select Superset Dashboard</label>
+        <select id="link-superset-id" required class="input-dark text-xs w-full py-2 px-3">
+          <option value="">Loading Superset dashboards...</option>
+        </select>
+        <p class="text-[11px] text-gray-500 mt-1">Select from existing dashboards in the underlying Superset instance.</p>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-300 mb-1">Display Title (Leave blank to use original)</label>
+        <input type="text" id="link-title" placeholder="Optional custom title in workspace" class="input-dark text-xs w-full py-2 px-3"/>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-300 mb-1">Workspace Description (Optional)</label>
+        <textarea id="link-desc" rows="2" placeholder="Custom workspace notes..." class="input-dark text-xs w-full py-2 px-3"></textarea>
+      </div>
+
+      <div class="flex items-center justify-end gap-2.5 pt-3 border-t border-gray-800">
+        <button type="button" onclick="closeCreateModal()" class="btn-ghost text-xs px-3 py-1.5">Cancel</button>
+        <button type="submit" id="btn-submit-link" class="btn-primary text-xs px-4 py-1.5 flex items-center gap-1.5">
+          <span>Link to Workspace</span>
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div id="delete-modal" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm hidden flex items-center justify-center p-4">
+  <div class="card w-full max-w-md p-5 border border-red-900/40 shadow-2xl space-y-4">
+    <div class="flex items-center gap-3 text-red-400">
+      <div class="w-9 h-9 rounded-full bg-red-900/30 border border-red-800/50 flex items-center justify-center shrink-0">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+        </svg>
+      </div>
+      <div>
+        <h3 class="text-sm font-semibold text-gray-100">Unlink Dashboard</h3>
+        <p class="text-xs text-gray-400" id="delete-modal-title"></p>
+      </div>
+    </div>
+
+    <p class="text-xs text-gray-300">
+      Are you sure you want to remove this dashboard from the active workspace?
+    </p>
+
+    <div class="p-3 rounded bg-red-950/20 border border-red-900/30">
+      <label class="flex items-start gap-2.5 cursor-pointer">
+        <input type="checkbox" id="delete-purge-checkbox" class="mt-0.5 rounded border-red-700 bg-gray-900 text-red-500 focus:ring-0"/>
+        <span class="text-xs text-red-300 font-medium leading-tight">
+          Also permanently purge underlying dashboard and charts from Apache Superset
+        </span>
+      </label>
+    </div>
+
+    <div class="flex items-center justify-end gap-2.5 pt-2">
+      <button type="button" onclick="closeDeleteModal()" class="btn-ghost text-xs px-3 py-1.5">Cancel</button>
+      <button type="button" id="btn-confirm-delete" onclick="executeDelete()" class="btn-danger text-xs px-4 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded">
+        Confirm Remove
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+  let allDashboards = [];
+  let currentFilter = 'all';
+  let pendingDeleteId = null;
+  const userRole = '{{ my_role }}';
+  const supersetBase = '{{ superset_url }}';
+
+  function showToast(message, type = 'info') {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    const isError = type === 'error';
+    const isSuccess = type === 'success';
+    const bgClass = isError ? 'bg-red-950/90 border-red-800 text-red-200' : (isSuccess ? 'bg-emerald-950/90 border-emerald-800 text-emerald-200' : 'bg-gray-900/90 border-gray-700 text-gray-200');
+    toast.className = `px-4 py-2.5 rounded-lg border text-xs shadow-lg flex items-center gap-2 pointer-events-auto transition-all duration-300 transform translate-y-2 opacity-0 ${bgClass}`;
+    toast.innerHTML = `<span>${message}</span>`;
+    container.appendChild(toast);
+    requestAnimationFrame(() => {
+      toast.classList.remove('translate-y-2', 'opacity-0');
+    });
+    setTimeout(() => {
+      toast.classList.add('opacity-0', 'translate-y-2');
+      setTimeout(() => toast.remove(), 300);
+    }, 4000);
+  }
+
+  async function loadDashboardGallery() {
+    const refreshIcon = document.getElementById('refresh-icon');
+    if (refreshIcon) refreshIcon.classList.add('animate-spin');
+
+    try {
+      // 1. Fetch stats
+      const statsResp = await fetch('/api/dashboards/stats');
+      if (statsResp.ok) {
+        const stats = await statsResp.json();
+        document.getElementById('stat-total').textContent = stats.total_dashboards;
+        document.getElementById('stat-published').textContent = stats.published_dashboards;
+        document.getElementById('stat-charts').textContent = stats.total_charts;
+        const engineBadge = document.getElementById('stat-engine-badge');
+        const engineLabel = document.getElementById('stat-engine');
+        if (stats.superset_online) {
+          engineLabel.textContent = 'Online';
+          engineBadge.innerHTML = '<span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span><span class="text-sm font-semibold text-gray-200">Online</span>';
+        } else {
+          engineBadge.innerHTML = '<span class="w-2.5 h-2.5 rounded-full bg-yellow-400"></span><span class="text-sm font-semibold text-yellow-300">Connecting</span>';
+        }
+      }
+
+      // 2. Fetch list
+      const resp = await fetch('/api/dashboards');
+      if (resp.ok) {
+        allDashboards = await resp.json();
+        renderDashboards();
+      } else {
+        showToast('Failed to load dashboards', 'error');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Error connecting to dashboards API', 'error');
+    } finally {
+      if (refreshIcon) refreshIcon.classList.remove('animate-spin');
+    }
+  }
+
+  function setFilterStatus(status) {
+    currentFilter = status;
+    ['all', 'published', 'draft'].forEach(s => {
+      const btn = document.getElementById(`filter-${s}`);
+      if (s === status) {
+        btn.className = 'px-2.5 py-1 rounded text-xs font-medium transition-colors bg-white/10 text-white';
+      } else {
+        btn.className = 'px-2.5 py-1 rounded text-xs font-medium transition-colors text-gray-400 hover:text-white';
+      }
+    });
+    renderDashboards();
+  }
+
+  function handleFilter() {
+    renderDashboards();
+  }
+
+  function renderDashboards() {
+    const query = (document.getElementById('search-input')?.value || '').toLowerCase().trim();
+    const grid = document.getElementById('dashboards-grid');
+    const emptyState = document.getElementById('empty-state');
+
+    const filtered = allDashboards.filter(d => {
+      if (currentFilter === 'published' && !d.is_published) return false;
+      if (currentFilter === 'draft' && d.is_published) return false;
+      if (query) {
+        const titleMatch = (d.title || '').toLowerCase().includes(query);
+        const slugMatch = (d.slug || '').toLowerCase().includes(query);
+        const descMatch = (d.description || '').toLowerCase().includes(query);
+        return titleMatch || slugMatch || descMatch;
+      }
+      return true;
+    });
+
+    if (allDashboards.length === 0) {
+      grid.classList.add('hidden');
+      emptyState.classList.remove('hidden');
+      return;
+    }
+
+    grid.classList.remove('hidden');
+    emptyState.classList.add('hidden');
+
+    if (filtered.length === 0) {
+      grid.innerHTML = `
+        <div class="col-span-full py-12 text-center text-xs text-gray-400">
+          No dashboards match the filter criteria.
+        </div>
+      `;
+      return;
+    }
+
+    grid.innerHTML = filtered.map(d => {
+      const pubBadge = d.is_published
+        ? '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>Published</span>'
+        : '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-gray-500/10 text-gray-400 border border-gray-500/20">Draft</span>';
+
+      const chartsBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono bg-purple-500/10 text-purple-300 border border-purple-500/20"><svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/></svg>${d.charts_count || 0} charts</span>`;
+
+      const editAction = (userRole !== 'viewer') ? `
+        <a href="${d.superset_url || supersetBase + '/superset/dashboard/' + d.superset_dashboard_id + '/'}" target="_blank" rel="noopener" class="btn-ghost text-[11px] py-1 px-2 text-gray-400 hover:text-white" title="Open drag-and-drop designer in Apache Superset">
+          <svg class="w-3 h-3 inline mr-1" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10"/></svg>Edit
+        </a>
+      ` : '';
+
+      const deleteAction = (userRole !== 'viewer') ? `
+        <button onclick="confirmDelete('${d.id}', '${escapeHtml(d.title)}')" class="btn-ghost text-[11px] py-1 px-2 text-red-400 hover:text-red-300 hover:bg-red-950/20" title="Unlink dashboard">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>
+        </button>
+      ` : '';
+
+      return `
+        <div class="card p-5 flex flex-col justify-between hover:border-gray-600 transition-colors group">
+          <div>
+            <div class="flex items-start justify-between gap-2 mb-2">
+              <div class="flex items-center gap-2">
+                ${pubBadge}
+                ${chartsBadge}
+              </div>
+              <div class="flex items-center gap-1">
+                ${editAction}
+                ${deleteAction}
+              </div>
+            </div>
+
+            <a href="/dashboards/${d.id}" class="block group-hover:text-blue-400 transition-colors">
+              <h3 class="text-sm font-semibold text-gray-100 line-clamp-1">${escapeHtml(d.title)}</h3>
+            </a>
+
+            <p class="text-xs text-gray-400 mt-1 line-clamp-2 min-h-[32px]">
+              ${escapeHtml(d.description || 'No description provided for this dashboard.')}
+            </p>
+          </div>
+
+          <div class="pt-4 mt-4 border-t border-white/[0.06] flex items-center justify-between text-xs">
+            <span class="text-[11px] text-gray-500 font-mono">slug: ${escapeHtml(d.slug)}</span>
+            <a href="/dashboards/${d.id}" class="text-blue-400 hover:text-blue-300 font-medium inline-flex items-center gap-1 text-xs">
+              View In-App
+              <svg class="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
+            </a>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // Modal handlers
+  function openCreateModal() {
+    document.getElementById('create-modal').classList.remove('hidden');
+    switchModalTab('create');
+  }
+
+  function closeCreateModal() {
+    document.getElementById('create-modal').classList.add('hidden');
+  }
+
+  async function switchModalTab(tab) {
+    const createBtn = document.getElementById('tab-btn-create');
+    const linkBtn = document.getElementById('tab-btn-link');
+    const createForm = document.getElementById('form-create-dashboard');
+    const linkForm = document.getElementById('form-link-dashboard');
+
+    if (tab === 'create') {
+      createBtn.className = 'flex-1 py-2.5 px-4 font-medium border-b-2 border-blue-500 text-blue-400';
+      linkBtn.className = 'flex-1 py-2.5 px-4 font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200';
+      createForm.classList.remove('hidden');
+      linkForm.classList.add('hidden');
+    } else {
+      linkBtn.className = 'flex-1 py-2.5 px-4 font-medium border-b-2 border-blue-500 text-blue-400';
+      createBtn.className = 'flex-1 py-2.5 px-4 font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200';
+      linkForm.classList.remove('hidden');
+      createForm.classList.add('hidden');
+      loadAvailableSupersetDashboards();
+    }
+  }
+
+  async function loadAvailableSupersetDashboards() {
+    const select = document.getElementById('link-superset-id');
+    select.innerHTML = '<option value="">Loading Superset dashboards...</option>';
+    try {
+      const resp = await fetch('/api/dashboards/superset-available');
+      if (resp.ok) {
+        const list = await resp.json();
+        if (list.length === 0) {
+          select.innerHTML = '<option value="">No existing Superset dashboards found</option>';
+          return;
+        }
+        select.innerHTML = '<option value="">-- Choose a dashboard --</option>' + list.map(d => {
+          const linkedText = d.is_linked ? ' (Already Linked)' : '';
+          const disabled = d.is_linked ? 'disabled' : '';
+          return `<option value="${d.id}" ${disabled}>#${d.id} - ${escapeHtml(d.title)}${linkedText}</option>`;
+        }).join('');
+      } else {
+        select.innerHTML = '<option value="">Failed to query Superset</option>';
+      }
+    } catch (err) {
+      select.innerHTML = '<option value="">Error loading Superset list</option>';
+    }
+  }
+
+  async function handleCreateDashboard(e) {
+    e.preventDefault();
+    const btn = document.getElementById('btn-submit-create');
+    btn.disabled = true;
+    btn.innerHTML = '<span>Creating...</span>';
+
+    const title = document.getElementById('create-title').value.trim();
+    const desc = document.getElementById('create-desc').value.trim();
+    const published = document.getElementById('create-published').checked;
+
+    try {
+      const resp = await fetch('/api/dashboards', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          description: desc || null,
+          is_published: published,
+        }),
+      });
+
+      if (resp.ok) {
+        const created = await resp.json();
+        showToast(`Dashboard "${title}" created successfully!`, 'success');
+        closeCreateModal();
+        loadDashboardGallery();
+      } else {
+        const err = await resp.json();
+        showToast(err.detail || 'Failed to create dashboard', 'error');
+      }
+    } catch (err) {
+      showToast('Connection error while creating dashboard', 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<span>Create Dashboard</span>';
+    }
+  }
+
+  async function handleLinkDashboard(e) {
+    e.preventDefault();
+    const btn = document.getElementById('btn-submit-link');
+    const supersetId = parseInt(document.getElementById('link-superset-id').value, 10);
+    if (!supersetId) {
+      showToast('Please select a Superset dashboard', 'error');
+      return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = '<span>Linking...</span>';
+
+    const title = document.getElementById('link-title').value.trim();
+    const desc = document.getElementById('link-desc').value.trim();
+
+    try {
+      const resp = await fetch('/api/dashboards/link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          superset_dashboard_id: supersetId,
+          title: title || null,
+          description: desc || null,
+        }),
+      });
+
+      if (resp.ok) {
+        showToast('Dashboard linked to workspace!', 'success');
+        closeCreateModal();
+        loadDashboardGallery();
+      } else {
+        const err = await resp.json();
+        showToast(err.detail || 'Failed to link dashboard', 'error');
+      }
+    } catch (err) {
+      showToast('Connection error while linking dashboard', 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<span>Link to Workspace</span>';
+    }
+  }
+
+  function confirmDelete(id, title) {
+    pendingDeleteId = id;
+    document.getElementById('delete-modal-title').textContent = title;
+    document.getElementById('delete-purge-checkbox').checked = false;
+    document.getElementById('delete-modal').classList.remove('hidden');
+  }
+
+  function closeDeleteModal() {
+    pendingDeleteId = null;
+    document.getElementById('delete-modal').classList.add('hidden');
+  }
+
+  async function executeDelete() {
+    if (!pendingDeleteId) return;
+    const purge = document.getElementById('delete-purge-checkbox').checked;
+    const btn = document.getElementById('btn-confirm-delete');
+    btn.disabled = true;
+
+    try {
+      const resp = await fetch(`/api/dashboards/${pendingDeleteId}?purge_superset=${purge}`, {
+        method: 'DELETE',
+      });
+      if (resp.ok) {
+        showToast('Dashboard removed', 'success');
+        closeDeleteModal();
+        loadDashboardGallery();
+      } else {
+        const err = await resp.json();
+        showToast(err.detail || 'Failed to delete dashboard', 'error');
+      }
+    } catch (err) {
+      showToast('Error deleting dashboard', 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // Initialize
+  document.addEventListener('DOMContentLoaded', () => {
+    loadDashboardGallery();
+  });
+</script>
+{% endblock %}

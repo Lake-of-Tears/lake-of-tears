@@ -245,3 +245,37 @@ class PipelineMetadata(Base):
 
     workspace: Mapped["Workspace"] = relationship(foreign_keys=[workspace_id])
     updater: Mapped["User"] = relationship(foreign_keys=[updated_by])
+
+
+class WorkspaceDashboard(Base):
+    __tablename__ = "workspace_dashboards"
+    __table_args__ = (UniqueConstraint("workspace_id", "slug", name="uq_workspace_dashboard_slug"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    superset_dashboard_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    embedded_uuid: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    slug: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    charts_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    is_published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    workspace: Mapped["Workspace"] = relationship(foreign_keys=[workspace_id])
+    creator: Mapped["User | None"] = relationship(foreign_keys=[created_by])
