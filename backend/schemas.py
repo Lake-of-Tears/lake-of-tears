@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, field_validator, model_validator
 
 
 class RegisterRequest(BaseModel):
@@ -18,6 +18,30 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("New password must be at least 8 characters long")
+        if len(v) > 128:
+            raise ValueError("New password cannot exceed 128 characters")
+        return v
+
+    @model_validator(mode="after")
+    def passwords_differ(self) -> Self:
+        if (
+            self.current_password
+            and self.new_password
+            and self.current_password == self.new_password
+        ):
+            raise ValueError("New password must be different from current password")
+        return self
+
+
 class UserResponse(BaseModel):
     id: uuid.UUID
     email: str
@@ -25,6 +49,7 @@ class UserResponse(BaseModel):
     role: str
     is_active: bool
     created_at: datetime
+    has_password: bool = True
 
     model_config = {"from_attributes": True}
 

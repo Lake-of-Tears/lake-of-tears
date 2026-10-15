@@ -41,6 +41,7 @@ from schemas import (
     CatalogResponse,
     CatalogSchemaResponse,
     CatalogTableResponse,
+    ChangePasswordRequest,
     CreateCatalogRequest,
     CreateSchemaRequest,
     CreateTableRequest,
@@ -180,7 +181,7 @@ def _set_auth_cookie(
     user: User,
     db: Session,
     session_start_ts: float | None = None,
-) -> None:
+) -> str:
     expires_delta = get_session_expires_delta(db)
     token = create_token(
         {
@@ -194,6 +195,7 @@ def _set_auth_cookie(
     )
     max_age = int(expires_delta.total_seconds())
     response.set_cookie(COOKIE_NAME, token, max_age=max_age, httponly=True, samesite="lax")
+    return token
 
 
 def _workspace_response(ws: Workspace, user: User) -> WorkspaceResponse:
@@ -352,6 +354,28 @@ def update_me(
     db.refresh(current_user)
     _set_auth_cookie(response, current_user, db)
     return UserResponse.model_validate(current_user)
+
+
+@app.post("/api/auth/change-password")
+def change_password(
+    req: ChangePasswordRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user.hashed_password:
+        raise HTTPException(
+            400,
+            "Password changes are not available for accounts managed via SSO/OAuth.",
+        )
+    if not verify_password(req.current_password, current_user.hashed_password):
+        raise HTTPException(400, "Incorrect current password")
+
+    current_user.hashed_password = hash_password(req.new_password)
+    db.commit()
+    db.refresh(current_user)
+    token = _set_auth_cookie(response, current_user, db)
+    return {"ok": True, "token": token}
 
 
 @app.get("/api/auth/providers")

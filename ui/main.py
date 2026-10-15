@@ -771,9 +771,18 @@ async def settings_account_get(request: Request):
     token = request.cookies.get("lake_token")
     profile = _backend_get("/api/auth/me", token) if token else None
     saved = request.query_params.get("saved")
+    password_saved = request.query_params.get("password_saved")
+    password_error = request.query_params.get("password_error")
     return templates.TemplateResponse(
         "settings/account.html",
-        {"request": request, "page": "settings_account", "saved": saved, "profile": profile},
+        {
+            "request": request,
+            "page": "settings_account",
+            "saved": saved,
+            "password_saved": password_saved,
+            "password_error": password_error,
+            "profile": profile,
+        },
     )
 
 
@@ -783,6 +792,50 @@ async def settings_account_post(request: Request, display_name: str = Form(...))
     if token:
         _backend_patch("/api/auth/me", token, {"display_name": display_name})
     return RedirectResponse(url="/settings/account?saved=1", status_code=302)
+
+
+@app.post("/settings/account/password", response_class=HTMLResponse)
+async def settings_account_password_post(
+    request: Request,
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+    confirm_password: str = Form(...),
+):
+    token = request.cookies.get("lake_token")
+    if not token:
+        return RedirectResponse(url="/login", status_code=302)
+
+    if new_password != confirm_password:
+        err = urllib.parse.quote_plus("New passwords do not match.")
+        return RedirectResponse(url=f"/settings/account?password_error={err}", status_code=302)
+
+    if len(new_password) < 8:
+        err = urllib.parse.quote_plus("New password must be at least 8 characters long.")
+        return RedirectResponse(url=f"/settings/account?password_error={err}", status_code=302)
+
+    data, err = _backend_post_with_error(
+        "/api/auth/change-password",
+        token,
+        {"current_password": current_password, "new_password": new_password},
+    )
+
+    if err:
+        return RedirectResponse(
+            url=f"/settings/account?password_error={urllib.parse.quote_plus(err)}",
+            status_code=302,
+        )
+
+    resp = RedirectResponse(url="/settings/account?password_saved=1", status_code=302)
+    if data and isinstance(data, dict) and data.get("token"):
+        new_token = data["token"]
+        try:
+            payload = jwt.decode(new_token, AUTH_SECRET_KEY, algorithms=["HS256"])
+            exp = payload.get("exp")
+            max_age = int(exp - time.time()) if exp else None
+        except Exception:
+            max_age = None
+        resp.set_cookie("lake_token", new_token, max_age=max_age, httponly=True, samesite="lax")
+    return resp
 
 
 # ── Settings: Workspace ───────────────────────────────────────────────────
