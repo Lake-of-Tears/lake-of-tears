@@ -370,3 +370,84 @@ async def test_ui_pipeline_settings_proxy():
         assert r_patch.json()["color_hex"] == "#10B981"
         assert mock_patch.called
 
+
+@pytest.mark.anyio
+async def test_ui_cancel_pipeline_run_proxy():
+    token, mock_workspaces = _create_auth_cookie(role="editor")
+
+    mock_resp = httpx.Response(
+        200,
+        json={
+            "dag_id": "ws_analytics_etl",
+            "dag_run_id": "manual__1",
+            "state": "failed",
+            "message": "DAG run cancelled successfully",
+        },
+        request=httpx.Request("POST", "http://backend:8000/api/v1/pipelines/ws_analytics_etl/runs/manual__1/cancel"),
+    )
+
+    with (
+        patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
+        patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp) as mock_post,
+    ):
+        cookies = {"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"}
+        res = client.post("/api/pipelines/ws_analytics_etl/runs/manual__1/cancel", cookies=cookies)
+        assert res.status_code == 200
+        assert res.json()["state"] == "failed"
+        assert mock_post.called
+
+
+def test_ui_workspace_search_finds_live_pipelines():
+    token, mock_workspaces = _create_auth_cookie(role="member")
+
+    mock_backend_pipeline_data = {
+        "workspace": "analytics",
+        "total": 2,
+        "pipelines": [
+            {
+                "dag_id": "ws_analytics_anomaly_detect",
+                "display_label": "Anomaly Detection Pipeline",
+                "description": "Scans sales data for anomalies",
+            },
+            {
+                "dag_id": "ws_analytics_nightly_backup",
+                "display_label": "Nightly Backup",
+                "description": "MinIO backup job",
+            },
+        ],
+    }
+
+    with (
+        patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
+        patch.object(main, "_backend_get", return_value=mock_backend_pipeline_data),
+    ):
+        cookies = {"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"}
+        res = client.get("/api/workspace/search?q=anomaly", cookies=cookies)
+        assert res.status_code == 200
+        data = res.json()
+        results = data.get("results", [])
+        pipeline_results = [r for r in results if r.get("category") == "Pipelines"]
+        assert len(pipeline_results) == 1
+        assert pipeline_results[0]["title"] == "Anomaly Detection Pipeline"
+        assert pipeline_results[0]["type"] == "pipeline"
+        assert pipeline_results[0]["dag_id"] == "ws_analytics_anomaly_detect"
+        assert pipeline_results[0]["url"] == "/pipelines?open=ws_analytics_anomaly_detect"
+
+
+def test_pipelines_page_renders_editable_fields_and_notebook_link():
+    token, mock_workspaces = _create_auth_cookie(role="member")
+
+    with patch.object(main, "_fetch_workspaces", return_value=mock_workspaces):
+        response = client.get(
+            "/pipelines",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
+        )
+        assert response.status_code == 200
+        assert 'id="drawer-name-input"' in response.text
+        assert 'id="drawer-desc-input"' in response.text
+        assert 'id="drawer-notebook-link-wrap"' in response.text
+        assert 'id="drawer-active-run-alert"' in response.text
+        assert 'id="drawer-metadata-section"' in response.text
+        assert 'id="btn-save-drawer-meta"' in response.text
+        assert 'id="drawer-color-swatch"' in response.text
+

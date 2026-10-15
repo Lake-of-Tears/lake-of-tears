@@ -639,6 +639,16 @@
         }
       }
 
+      // If already on the pipelines page, seamlessly open inspector without full reload
+      if (window.location.pathname.startsWith('/pipelines') && item.type === 'pipeline') {
+        const dagId = item.dag_id || item.path;
+        if (dagId && typeof openInspector === 'function') {
+          openInspector(dagId);
+          window.history.pushState({}, '', item.url);
+          return;
+        }
+      }
+
       window.location.href = item.url;
     }
 

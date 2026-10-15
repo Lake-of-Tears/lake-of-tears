@@ -721,3 +721,101 @@ def test_pipeline_settings_patch_viewer_forbidden():
     finally:
         backend_main.app.dependency_overrides.clear()
 
+
+@pytest.mark.anyio
+async def test_cancel_dag_run_service():
+    with (
+        patch.object(pipeline_service, "get_dag_details", new_callable=AsyncMock),
+        patch("httpx.AsyncClient.patch", new_callable=AsyncMock) as mock_patch,
+    ):
+        mock_patch.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {"dag_run_id": "manual__1", "state": "failed"},
+        )
+        res = await pipeline_service.cancel_dag_run("analytics", "ws_analytics_etl", "manual__1")
+        assert res["dag_id"] == "ws_analytics_etl"
+        assert res["dag_run_id"] == "manual__1"
+        assert res["state"] == "failed"
+        assert "cancelled successfully" in res["message"]
+
+
+def test_cancel_pipeline_run_endpoint_success():
+    user_editor, workspace, member, token_editor = _generate_test_user_and_token(role="editor")
+    mock_db = MagicMock()
+
+    backend_main.app.dependency_overrides[database.get_db] = lambda: mock_db
+    backend_main.app.dependency_overrides[auth.get_current_user] = lambda: user_editor
+
+    try:
+        with (
+            patch(
+                "pipelines_router.get_pipeline_workspace_and_role",
+                return_value=(workspace, "editor"),
+            ),
+            patch.object(
+                pipeline_service,
+                "cancel_dag_run",
+                new_callable=AsyncMock,
+                return_value={
+                    "dag_id": "ws_analytics_etl",
+                    "dag_run_id": "manual__run_1",
+                    "state": "failed",
+                    "message": "DAG run cancelled successfully",
+                },
+            ),
+        ):
+            headers = {"Authorization": f"Bearer {token_editor}"}
+            r = client.post(
+                "/api/v1/pipelines/ws_analytics_etl/runs/manual__run_1/cancel",
+                headers=headers,
+            )
+            assert r.status_code == 200
+            assert r.json()["state"] == "failed"
+    finally:
+        backend_main.app.dependency_overrides.clear()
+
+
+def test_pipeline_settings_patch_description_and_name():
+    user_editor, workspace, member, token_editor = _generate_test_user_and_token(role="editor")
+    mock_db = MagicMock()
+
+    backend_main.app.dependency_overrides[database.get_db] = lambda: mock_db
+    backend_main.app.dependency_overrides[auth.get_current_user] = lambda: user_editor
+
+    try:
+        with (
+            patch(
+                "pipelines_router.get_pipeline_workspace_and_role",
+                return_value=(workspace, "editor"),
+            ),
+            patch.object(
+                pipeline_service,
+                "upsert_pipeline_metadata",
+                return_value={
+                    "dag_id": "ws_analytics_etl",
+                    "color_hex": "#8B5CF6",
+                    "display_label": "Custom Pipeline Title",
+                    "description": "Custom edited description",
+                    "is_visible_on_timeline": True,
+                },
+            ) as mock_upsert,
+        ):
+            headers = {"Authorization": f"Bearer {token_editor}"}
+            r = client.patch(
+                "/api/v1/pipelines/ws_analytics_etl/settings",
+                json={
+                    "display_label": "Custom Pipeline Title",
+                    "description": "Custom edited description",
+                    "color_hex": "#8B5CF6",
+                },
+                headers=headers,
+            )
+            assert r.status_code == 200
+            data = r.json()
+            assert data["display_label"] == "Custom Pipeline Title"
+            assert data["description"] == "Custom edited description"
+            assert data["color_hex"] == "#8B5CF6"
+            mock_upsert.assert_called_once()
+    finally:
+        backend_main.app.dependency_overrides.clear()
+

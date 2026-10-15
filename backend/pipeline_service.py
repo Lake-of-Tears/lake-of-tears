@@ -205,7 +205,10 @@ async def _fetch_latest_dag_run(
 
 
 async def list_workspace_dags(
-    workspace_slug: str, is_superadmin: bool = False
+    workspace_slug: str,
+    is_superadmin: bool = False,
+    workspace_id: uuid.UUID | None = None,
+    db: Session | None = None,
 ) -> list[dict[str, Any]]:
     """List pipelines visible to the current workspace, enriched with latest run info."""
     api_base = get_airflow_api_base()
@@ -227,6 +230,8 @@ async def list_workspace_dags(
                 for d in raw_dags
                 if is_dag_accessible_by_workspace(d, workspace_slug, is_superadmin)
             ]
+
+            meta_map = get_pipeline_metadata_map(workspace_id, db) if workspace_id and db else {}
 
             results = []
             for dag in matching_dags:
@@ -258,11 +263,27 @@ async def list_workspace_dags(
                         nb_path = t[len("notebook:") :]
                         break
 
+                meta = meta_map.get(dag_id)
+                color_hex = meta.color_hex if meta else get_default_color_for_dag(dag_id)
+                display_label = (
+                    meta.display_label
+                    if meta and meta.display_label
+                    else (dag.get("description") or dag_id.replace("_", " ").title())
+                )
+                description = (
+                    meta.description
+                    if meta and meta.description is not None
+                    else (dag.get("description") or "")
+                )
+
                 results.append(
                     {
                         "dag_id": dag_id,
-                        "pipeline_name": dag.get("description") or dag_id,
-                        "description": dag.get("description", ""),
+                        "pipeline_name": display_label,
+                        "display_label": display_label,
+                        "description": description,
+                        "color_hex": color_hex,
+                        "is_visible_on_timeline": meta.is_visible_on_timeline if meta else True,
                         "is_paused": dag.get("is_paused", False),
                         "schedule_interval": schedule,
                         "next_dagrun": dag.get("next_dagrun"),
@@ -281,7 +302,11 @@ async def list_workspace_dags(
 
 
 async def get_dag_details(
-    workspace_slug: str, dag_id: str, is_superadmin: bool = False
+    workspace_slug: str,
+    dag_id: str,
+    is_superadmin: bool = False,
+    workspace_id: uuid.UUID | None = None,
+    db: Session | None = None,
 ) -> dict[str, Any]:
     """Retrieve detailed metadata for a single pipeline."""
     api_base = get_airflow_api_base()
@@ -312,18 +337,51 @@ async def get_dag_details(
 
             schedule = cron_val or dag.get("timetable_description") or "None (Manual)"
 
+            is_nb = (
+                "notebook" in tags
+                or "notebooks" in tags
+                or dag_id.startswith(f"ws_{workspace_slug}_")
+                or dag_id == "run_notebook"
+            )
+
+            nb_path = None
+            for t in tags:
+                if t.startswith("notebook:"):
+                    nb_path = t[len("notebook:") :]
+                    break
+
+            meta_map = get_pipeline_metadata_map(workspace_id, db) if workspace_id and db else {}
+            meta = meta_map.get(dag_id)
+            color_hex = meta.color_hex if meta else get_default_color_for_dag(dag_id)
+            display_label = (
+                meta.display_label
+                if meta and meta.display_label
+                else (dag.get("description") or dag_id.replace("_", " ").title())
+            )
+            description = (
+                meta.description
+                if meta and meta.description is not None
+                else (dag.get("description") or "")
+            )
+
             return {
                 "dag_id": dag_id,
-                "pipeline_name": dag.get("description") or dag_id,
-                "description": dag.get("description", ""),
+                "pipeline_name": display_label,
+                "display_label": display_label,
+                "description": description,
+                "color_hex": color_hex,
+                "is_visible_on_timeline": meta.is_visible_on_timeline if meta else True,
                 "is_paused": dag.get("is_paused", False),
                 "schedule_interval": schedule,
                 "next_dagrun": dag.get("next_dagrun"),
                 "tags": tags,
+                "is_notebook_job": is_nb,
+                "notebook_path": nb_path,
                 "last_run": last_run,
                 "fileloc": dag.get("fileloc"),
                 "max_active_runs": dag.get("max_active_runs"),
             }
+
     except HTTPException:
         raise
     except httpx.HTTPError as exc:
@@ -906,11 +964,12 @@ def upsert_pipeline_metadata(
     dag_id: str,
     color_hex: str | None = None,
     display_label: str | None = None,
+    description: str | None = None,
     is_visible_on_timeline: bool | None = None,
     user_id: uuid.UUID | None = None,
     db: Session | None = None,
 ) -> dict[str, Any]:
-    """Persist or update workspace-shared pipeline color and label metadata."""
+    """Persist or update workspace-shared pipeline color, label, and description metadata."""
     if not db:
         raise HTTPException(500, "Database session required")
 
@@ -930,6 +989,7 @@ def upsert_pipeline_metadata(
             dag_id=dag_id,
             color_hex=color_hex or get_default_color_for_dag(dag_id),
             display_label=display_label or dag_id.replace("_", " ").title(),
+            description=description,
             is_visible_on_timeline=True if is_visible_on_timeline is None else is_visible_on_timeline,
             updated_by=user_id,
             updated_at=datetime.now(UTC),
@@ -940,6 +1000,8 @@ def upsert_pipeline_metadata(
             row.color_hex = color_hex
         if display_label is not None:
             row.display_label = display_label
+        if description is not None:
+            row.description = description
         if is_visible_on_timeline is not None:
             row.is_visible_on_timeline = is_visible_on_timeline
         row.updated_by = user_id
@@ -951,8 +1013,45 @@ def upsert_pipeline_metadata(
         "dag_id": row.dag_id,
         "color_hex": row.color_hex,
         "display_label": row.display_label,
+        "description": row.description,
         "is_visible_on_timeline": row.is_visible_on_timeline,
     }
+
+
+async def cancel_dag_run(
+    workspace_slug: str,
+    dag_id: str,
+    run_id: str,
+    is_superadmin: bool = False,
+) -> dict[str, Any]:
+    """Cancel (terminate / mark failed) an active or queued DAG run."""
+    await get_dag_details(workspace_slug, dag_id, is_superadmin)
+
+    api_base = get_airflow_api_base()
+    auth = get_airflow_auth()
+    url = f"{api_base}/dags/{sanitize_dag_id(dag_id)}/dagRuns/{run_id}"
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.patch(url, json={"state": "failed"}, auth=auth)
+            if resp.status_code == 404:
+                raise HTTPException(404, f"Run {run_id} not found")
+            if resp.status_code not in (200, 201):
+                raise HTTPException(
+                    resp.status_code, f"Failed to cancel DAG run: {resp.text}"
+                )
+            r = resp.json()
+            return {
+                "dag_id": dag_id,
+                "dag_run_id": r.get("dag_run_id", run_id),
+                "state": r.get("state", "failed"),
+                "message": "DAG run cancelled successfully",
+            }
+    except HTTPException:
+        raise
+    except httpx.HTTPError as exc:
+        logger.error("Airflow connection error: %s", exc)
+        raise HTTPException(503, f"Airflow service unavailable: {exc}") from exc
 
 
 async def get_workspace_timeline(

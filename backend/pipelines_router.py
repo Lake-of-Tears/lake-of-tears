@@ -45,6 +45,7 @@ class ScheduleNotebookRequest(BaseModel):
 class PipelineSettingsRequest(BaseModel):
     color_hex: str | None = None
     display_label: str | None = None
+    description: str | None = None
     is_visible_on_timeline: bool | None = None
 
 
@@ -96,7 +97,10 @@ async def list_pipelines(
     )
     is_superadmin = current_user.role == "superadmin"
     pipelines = await pipeline_service.list_workspace_dags(
-        workspace_slug=ws.slug, is_superadmin=is_superadmin
+        workspace_slug=ws.slug,
+        is_superadmin=is_superadmin,
+        workspace_id=ws.id,
+        db=db,
     )
     return {
         "workspace": ws.slug,
@@ -223,6 +227,7 @@ async def get_pipeline_settings(
         "dag_id": dag_id,
         "color_hex": meta.color_hex if meta else pipeline_service.get_default_color_for_dag(dag_id),
         "display_label": meta.display_label if meta and meta.display_label else dag_id.replace("_", " ").title(),
+        "description": meta.description if meta and meta.description is not None else "",
         "is_visible_on_timeline": meta.is_visible_on_timeline if meta else True,
         "palette": pipeline_service.DEFAULT_PALETTE,
     }
@@ -239,7 +244,7 @@ async def update_pipeline_settings(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Update workspace-shared pipeline color and label metadata."""
+    """Update workspace-shared pipeline color, label, and description metadata."""
     ws, role = _resolve_workspace_context(
         workspace_slug=workspace_slug,
         x_workspace_slug=x_workspace_slug,
@@ -254,6 +259,7 @@ async def update_pipeline_settings(
         dag_id=dag_id,
         color_hex=req.color_hex,
         display_label=req.display_label,
+        description=req.description,
         is_visible_on_timeline=req.is_visible_on_timeline,
         user_id=current_user.id,
         db=db,
@@ -282,7 +288,11 @@ async def get_pipeline(
     )
     is_superadmin = current_user.role == "superadmin"
     return await pipeline_service.get_dag_details(
-        workspace_slug=ws.slug, dag_id=dag_id, is_superadmin=is_superadmin
+        workspace_slug=ws.slug,
+        dag_id=dag_id,
+        is_superadmin=is_superadmin,
+        workspace_id=ws.id,
+        db=db,
     )
 
 
@@ -479,5 +489,35 @@ async def get_pipeline_task_logs(
         run_id=run_id,
         task_id=task_id,
         try_number=try_number,
+        is_superadmin=is_superadmin,
+    )
+
+
+@router.post("/{dag_id}/runs/{run_id}/cancel")
+async def cancel_pipeline_run(
+    dag_id: str,
+    run_id: str,
+    workspace_slug: str | None = Query(None),
+    x_workspace_slug: str | None = Header(None, alias="X-Workspace-Slug"),
+    x_workspace_id: str | None = Header(None, alias="X-Workspace-Id"),
+    lake_active_workspace: str | None = Cookie(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Cancel / stop an active or queued execution run."""
+    ws, role = _resolve_workspace_context(
+        workspace_slug=workspace_slug,
+        x_workspace_slug=x_workspace_slug,
+        x_workspace_id=x_workspace_id,
+        lake_active_workspace=lake_active_workspace,
+        current_user=current_user,
+        db=db,
+        require_write=True,
+    )
+    is_superadmin = current_user.role == "superadmin"
+    return await pipeline_service.cancel_dag_run(
+        workspace_slug=ws.slug,
+        dag_id=dag_id,
+        run_id=run_id,
         is_superadmin=is_superadmin,
     )

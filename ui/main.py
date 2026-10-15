@@ -1434,21 +1434,40 @@ async def api_workspace_search(request: Request, q: str = ""):
         logger.warning("Error searching catalog in workspace search: %s", exc)
 
     # 3. Pipelines (Airflow DAGs)
-    pipelines_list = [
-        {"name": "run_notebook", "desc": "On-demand execution of notebooks via Airflow"},
-        {"name": "daily_ingest", "desc": "Scheduled ingestion & normalization"},
-        {"name": "ecommerce_sync", "desc": "Shopify & Stripe sync"},
-    ]
+    pipelines_list = []
+    try:
+        if token:
+            ws_slug = ws.get("slug") if ws else None
+            pipe_params = f"?workspace_slug={urllib.parse.quote(ws_slug)}" if ws_slug else ""
+            pipe_data = _backend_get(f"/api/v1/pipelines{pipe_params}", token)
+            if pipe_data and isinstance(pipe_data, dict):
+                pipelines_list = pipe_data.get("pipelines", [])
+            elif isinstance(pipe_data, list):
+                pipelines_list = pipe_data
+    except Exception as exc:
+        logger.warning("Error searching pipelines in workspace search: %s", exc)
+
+    if not pipelines_list:
+        pipelines_list = [
+            {"dag_id": "run_notebook", "name": "run_notebook", "desc": "On-demand execution of notebooks via Airflow"},
+            {"dag_id": "daily_ingest", "name": "daily_ingest", "desc": "Scheduled ingestion & normalization"},
+            {"dag_id": "ecommerce_sync", "name": "ecommerce_sync", "desc": "Shopify & Stripe sync"},
+        ]
+
     for pipe in pipelines_list:
-        if not query or query in pipe["name"].lower() or query in pipe["desc"].lower():
+        dag_id = pipe.get("dag_id") or pipe.get("name", "")
+        pipe_name = pipe.get("display_label") or pipe.get("pipeline_name") or pipe.get("name") or dag_id
+        pipe_desc = pipe.get("description") or pipe.get("desc") or f"Pipeline {dag_id}"
+        if not query or query in pipe_name.lower() or query in pipe_desc.lower() or query in dag_id.lower():
             results.append(
                 {
                     "category": "Pipelines",
-                    "title": pipe["name"],
-                    "subtitle": pipe["desc"],
-                    "url": "/pipelines",
+                    "title": pipe_name,
+                    "subtitle": pipe_desc,
+                    "url": f"/pipelines?open={urllib.parse.quote(dag_id)}",
                     "type": "pipeline",
-                    "path": pipe["name"],
+                    "dag_id": dag_id,
+                    "path": dag_id,
                 }
             )
 
@@ -2052,6 +2071,29 @@ async def ui_get_pipeline_task_logs(
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
                 f"{BACKEND_URL}/api/v1/pipelines/{dag_id}/runs/{run_id}/tasks/{task_id}/logs",
+                headers=headers,
+                params=params,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@app.post("/api/pipelines/{dag_id}/runs/{run_id}/cancel")
+@app.post("/api/v1/pipelines/{dag_id}/runs/{run_id}/cancel")
+async def ui_cancel_pipeline_run(request: Request, dag_id: str, run_id: str):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params = {}
+    if ws and ws.get("slug"):
+        params["workspace_slug"] = ws["slug"]
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{BACKEND_URL}/api/v1/pipelines/{dag_id}/runs/{run_id}/cancel",
                 headers=headers,
                 params=params,
                 cookies=request.cookies,

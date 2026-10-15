@@ -170,18 +170,43 @@
     html[data-theme="light"] #calendar-popover .calendar-day-dimmed {
       color: #9ca3af !important;
     }
-    html[data-theme="light"] #inspector-drawer {
+    html[data-theme="light"] #inspector-drawer-panel {
       background-color: #ffffff !important;
       border-left-color: #e5e7eb !important;
       color: #111827 !important;
       box-shadow: -4px 0 24px rgba(0, 0, 0, 0.08) !important;
     }
-    html[data-theme="light"] #inspector-drawer .bg-white\/\[0\.02\] {
+    html[data-theme="light"] #inspector-drawer-header {
+      background-color: #f9fafb !important;
+      border-bottom-color: #e5e7eb !important;
+    }
+    html[data-theme="light"] #drawer-metadata-section {
+      background-color: #f9fafb !important;
+      border-bottom-color: #e5e7eb !important;
+    }
+    html[data-theme="light"] #drawer-metadata-section .bg-black\/20 {
+      background-color: #ffffff !important;
+      border-color: #e5e7eb !important;
+    }
+    html[data-theme="light"] #drawer-metadata-section .text-gray-200 {
+      color: #111827 !important;
+    }
+    html[data-theme="light"] #drawer-tabs-bar {
+      background-color: #f3f4f6 !important;
+      border-bottom-color: #e5e7eb !important;
+    }
+    html[data-theme="light"] #inspector-drawer-panel .bg-white\/\[0\.02\] {
       background-color: #f9fafb !important;
     }
-    html[data-theme="light"] #inspector-drawer .border-white\/\[0\.06\],
-    html[data-theme="light"] #inspector-drawer .border-white\/\[0\.08\] {
+    html[data-theme="light"] #inspector-drawer-panel .border-white\/\[0\.06\],
+    html[data-theme="light"] #inspector-drawer-panel .border-white\/\[0\.08\] {
       border-color: #e5e7eb !important;
+    }
+    html[data-theme="light"] #inspector-drawer-panel input,
+    html[data-theme="light"] #inspector-drawer-panel textarea {
+      background-color: #ffffff !important;
+      border-color: #d1d5db !important;
+      color: #111827 !important;
     }
     html[data-theme="light"] .filter-pill-container {
       background-color: #ffffff !important;
@@ -415,30 +440,97 @@
   <div class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onclick="closeInspector()"></div>
 
   <div class="fixed inset-y-0 right-0 max-w-full flex pl-10">
-    <div class="w-screen max-w-2xl bg-[#161616] border-l border-white/[0.08] shadow-2xl flex flex-col h-full">
+    <div id="inspector-drawer-panel" class="w-screen max-w-2xl bg-[#161616] border-l border-white/[0.08] shadow-2xl flex flex-col h-full">
 
       <!-- Drawer Header -->
-      <div class="p-4 border-b border-white/[0.08] flex items-center justify-between shrink-0 bg-[#1a1a1a]">
-        <div class="flex items-center gap-3 min-w-0">
-          <div class="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0">
-            <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h7"/>
-            </svg>
-          </div>
-          <div class="min-w-0">
-            <h3 id="drawer-dag-id" class="text-sm font-semibold text-gray-100 truncate font-mono">pipeline_id</h3>
-            <p id="drawer-dag-desc" class="text-xs text-gray-500 truncate">Pipeline Description</p>
+      <div id="inspector-drawer-header" class="p-4 border-b border-white/[0.08] flex items-center justify-between shrink-0 bg-[#1a1a1a]">
+        <div class="flex items-center gap-3 min-w-0 flex-1">
+          <button id="drawer-color-swatch" onclick="openColorPicker(currentDrawerDagId, event)"
+                  class="w-7 h-7 rounded-lg border border-white/20 flex items-center justify-center shrink-0 cursor-pointer hover:scale-110 transition-transform shadow"
+                  title="Change Pipeline Color">
+          </button>
+          <div class="min-w-0 flex-1 pr-2">
+            <div class="flex items-center gap-2">
+              <span id="drawer-dag-id" class="text-xs text-gray-400 font-mono">pipeline_id</span>
+              <span id="drawer-status-badge"></span>
+            </div>
+            <div class="flex items-center gap-2 mt-0.5">
+              <input id="drawer-name-input" type="text"
+                     placeholder="Pipeline Display Name"
+                     class="text-sm font-semibold text-gray-100 bg-transparent border-b border-dashed border-gray-600 focus:border-blue-400 focus:outline-none w-full max-w-xs px-0.5 py-0.5 transition-colors"/>
+            </div>
           </div>
         </div>
-        <button onclick="closeInspector()" class="p-1.5 text-gray-400 hover:text-gray-200 rounded-lg hover:bg-white/[0.06] transition-colors">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
-          </svg>
-        </button>
+        <div class="flex items-center gap-2 shrink-0">
+          {% if my_role != 'viewer' %}
+          <button onclick="savePipelineMetadata(currentDrawerDagId)" id="btn-save-drawer-meta"
+                  class="btn-primary text-xs py-1.5 px-3 flex items-center gap-1">
+            <span>Save</span>
+          </button>
+          {% endif %}
+          <button onclick="closeInspector()" class="p-1.5 text-gray-400 hover:text-gray-200 rounded-lg hover:bg-white/[0.06] transition-colors" title="Close Drawer">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Pipeline Details & Metadata Card -->
+      <div class="p-4 bg-white/[0.02] border-b border-white/[0.06] space-y-3 shrink-0" id="drawer-metadata-section">
+        <!-- Editable Description -->
+        <div>
+          <label class="block text-[10px] font-medium text-gray-400 uppercase tracking-wider mb-1">Description</label>
+          <textarea id="drawer-desc-input" rows="2" placeholder="Add a description for this pipeline..."
+                    class="input-dark text-xs w-full resize-none"></textarea>
+        </div>
+
+        <!-- Notebook Job Link (Dynamic) -->
+        <div id="drawer-notebook-link-wrap" class="hidden"></div>
+
+        <!-- Stuck / Running Active Run Alert with Cancel Button (Dynamic) -->
+        <div id="drawer-active-run-alert" class="hidden"></div>
+
+        <!-- Metadata Grid (Row Data from Table) -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-xs">
+          <!-- Status & Toggle -->
+          <div class="p-2.5 rounded-lg bg-black/20 border border-white/[0.06]">
+            <div class="text-[10px] text-gray-400 uppercase font-medium">Status</div>
+            <div class="flex items-center justify-between mt-1">
+              <span id="drawer-meta-status" class="font-medium text-gray-200 text-xs">Active</span>
+              <button id="drawer-pause-btn" onclick="togglePipelinePauseFromDrawer()"
+                      title="Toggle Pipeline Pause/Resume"
+                      class="relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none bg-blue-600">
+                <span id="drawer-pause-dot" class="pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out translate-x-3"></span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Schedule Interval -->
+          <div class="p-2.5 rounded-lg bg-black/20 border border-white/[0.06]">
+            <div class="text-[10px] text-gray-400 uppercase font-medium">Schedule</div>
+            <div id="drawer-meta-schedule" class="font-mono text-xs text-gray-200 truncate mt-1" title="Schedule">None</div>
+          </div>
+
+          <!-- Last Run & Duration -->
+          <div class="p-2.5 rounded-lg bg-black/20 border border-white/[0.06]">
+            <div class="text-[10px] text-gray-400 uppercase font-medium">Last Run / Duration</div>
+            <div class="flex items-center gap-1.5 mt-1 truncate">
+              <span id="drawer-meta-last-run-badge"></span>
+              <span id="drawer-meta-duration" class="font-mono text-xs text-gray-400"></span>
+            </div>
+          </div>
+
+          <!-- Next Scheduled Run -->
+          <div class="p-2.5 rounded-lg bg-black/20 border border-white/[0.06]">
+            <div class="text-[10px] text-gray-400 uppercase font-medium">Next Run</div>
+            <div id="drawer-meta-next-run" class="font-mono text-xs text-gray-200 truncate mt-1">—</div>
+          </div>
+        </div>
       </div>
 
       <!-- Drawer Tabs -->
-      <div class="flex items-center px-4 border-b border-white/[0.08] bg-black/20 text-xs shrink-0">
+      <div id="drawer-tabs-bar" class="flex items-center px-4 border-b border-white/[0.08] bg-black/20 text-xs shrink-0">
         <button onclick="setDrawerTab('runs')" id="drawer-tab-runs" class="px-3 py-2.5 border-b-2 border-blue-500 text-blue-400 font-medium">
           Execution Runs (<span id="drawer-runs-count">0</span>)
         </button>
@@ -624,6 +716,9 @@
       const found = timelineData.pipelines.find(item => item.dag_id === dagId);
       if (found && found.color_hex) return found.color_hex;
     }
+    const foundAll = allPipelines.find(item => item.dag_id === dagId);
+    if (foundAll && foundAll.color_hex) return foundAll.color_hex;
+
     // Fallback deterministic palette hash
     let hash = 0;
     for (let i = 0; i < dagId.length; i++) {
@@ -692,6 +787,14 @@
         const p = timelineData.pipelines.find(item => item.dag_id === dagId);
         if (p) p.color_hex = colorHex;
       }
+      const pInAll = allPipelines.find(item => item.dag_id === dagId);
+      if (pInAll) pInAll.color_hex = colorHex;
+
+      if (currentDrawerDagId === dagId) {
+        const swatch = document.getElementById('drawer-color-swatch');
+        if (swatch) swatch.style.backgroundColor = colorHex;
+      }
+
       renderTimelineSwimlanes();
       applyFilters(); // refresh table color dot
     } catch (err) {
@@ -1380,13 +1483,18 @@
             </button>
           </td>
 
-          <!-- Pipeline Info with Color Dot -->
+          <!-- Pipeline Info with Color Swatch -->
           <td class="py-3 px-4">
             <div class="flex items-center gap-2">
-              <span class="w-2.5 h-2.5 rounded-full shrink-0 shadow-sm" style="background-color: ${colorHex};" title="Timeline Color: ${colorHex}"></span>
+              <button onclick="openColorPicker('${p.dag_id}', event)"
+                      ${isViewer ? 'disabled title="Viewer cannot edit pipeline color"' : 'title="Change Pipeline Color"'}
+                      class="w-3 h-3 rounded-full shrink-0 shadow-sm cursor-pointer hover:scale-125 transition-transform border border-white/[0.2]"
+                      style="background-color: ${colorHex};">
+              </button>
               <span class="font-medium text-gray-200 hover:text-blue-400 cursor-pointer font-mono text-xs" onclick="openInspector('${p.dag_id}')">
-                ${p.dag_id}
+                ${p.display_label || p.pipeline_name || p.dag_id}
               </span>
+              ${(p.display_label && p.display_label !== p.dag_id) ? `<span class="text-[10px] text-gray-500 font-mono">(${p.dag_id})</span>` : ''}
               ${p.is_notebook_job ? `<span class="px-1.5 py-0.2 bg-purple-500/10 text-purple-400 border border-purple-500/20 text-[10px] rounded">Notebook</span>` : ''}
             </div>
             <p class="text-[11px] text-gray-500 truncate max-w-xs mt-0.5">${p.description || 'No description provided'}</p>
@@ -1520,10 +1628,18 @@
   // ── Inspector Drawer (Runs & Logs) ─────────────────────────────────────────
   async function openInspector(dagId, targetRunId = null) {
     currentDrawerDagId = dagId;
-    const p = allPipelines.find(item => item.dag_id === dagId);
+    let p = allPipelines.find(item => item.dag_id === dagId);
 
-    document.getElementById('drawer-dag-id').textContent = dagId;
-    document.getElementById('drawer-dag-desc').textContent = p ? (p.description || 'No description') : dagId;
+    if (!p) {
+      try {
+        const resp = await fetch(`/api/pipelines/${dagId}`);
+        if (resp.ok) {
+          p = await resp.json();
+        }
+      } catch (e) {}
+    }
+
+    renderDrawerDetails(dagId, p);
     document.getElementById('inspector-drawer').classList.remove('hidden');
 
     setDrawerTab('runs');
@@ -1555,6 +1671,223 @@
     }
   }
 
+  function renderDrawerDetails(dagId, p) {
+    const colorHex = getPipelineColor(dagId);
+    const swatch = document.getElementById('drawer-color-swatch');
+    if (swatch) swatch.style.backgroundColor = colorHex;
+
+    const dagIdEl = document.getElementById('drawer-dag-id');
+    if (dagIdEl) dagIdEl.textContent = dagId;
+
+    const nameInput = document.getElementById('drawer-name-input');
+    if (nameInput) nameInput.value = p ? (p.display_label || p.pipeline_name || dagId) : dagId;
+
+    const descInput = document.getElementById('drawer-desc-input');
+    if (descInput) descInput.value = p ? (p.description || '') : '';
+
+    const isPaused = p ? p.is_paused : false;
+    const statusBadge = document.getElementById('drawer-status-badge');
+    if (statusBadge) {
+      statusBadge.innerHTML = isPaused
+        ? `<span class="px-2 py-0.5 rounded text-[10px] font-medium bg-gray-500/10 text-gray-400 border border-gray-500/20">Paused</span>`
+        : `<span class="px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Active</span>`;
+    }
+
+    const metaStatus = document.getElementById('drawer-meta-status');
+    if (metaStatus) metaStatus.textContent = isPaused ? 'Paused' : 'Active';
+
+    const pauseBtn = document.getElementById('drawer-pause-btn');
+    const pauseDot = document.getElementById('drawer-pause-dot');
+    if (pauseBtn && pauseDot) {
+      pauseBtn.className = `relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${isPaused ? 'bg-gray-700' : 'bg-blue-600'} ${userRole === 'viewer' ? 'opacity-50 cursor-not-allowed' : ''}`;
+      pauseDot.className = `pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${isPaused ? 'translate-x-0' : 'translate-x-3'}`;
+    }
+
+    const schedEl = document.getElementById('drawer-meta-schedule');
+    if (schedEl) {
+      const sched = p ? (p.schedule_interval || 'None') : 'None';
+      schedEl.textContent = sched;
+      schedEl.title = sched;
+    }
+
+    const lastRunBadge = document.getElementById('drawer-meta-last-run-badge');
+    const durationEl = document.getElementById('drawer-meta-duration');
+    const lastRun = p ? p.last_run : null;
+    const runState = lastRun ? lastRun.state : 'none';
+
+    if (lastRunBadge) {
+      if (runState === 'success') {
+        lastRunBadge.innerHTML = `<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Success</span>`;
+      } else if (runState === 'running') {
+        lastRunBadge.innerHTML = `<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20 animate-pulse">Running</span>`;
+      } else if (runState === 'failed') {
+        lastRunBadge.innerHTML = `<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-500/10 text-rose-400 border border-rose-500/20">Failed</span>`;
+      } else if (runState === 'queued') {
+        lastRunBadge.innerHTML = `<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">Queued</span>`;
+      } else {
+        lastRunBadge.innerHTML = `<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-500/10 text-gray-400 border border-gray-500/20">No Runs</span>`;
+      }
+    }
+
+    if (durationEl) {
+      durationEl.textContent = lastRun && lastRun.duration_seconds !== null ? `${Math.round(lastRun.duration_seconds)}s` : '—';
+    }
+
+    const nextRunEl = document.getElementById('drawer-meta-next-run');
+    if (nextRunEl) {
+      nextRunEl.textContent = p && p.next_dagrun ? new Date(p.next_dagrun).toLocaleString() : '—';
+    }
+
+    const nbWrap = document.getElementById('drawer-notebook-link-wrap');
+    if (nbWrap) {
+      if (p && p.notebook_path) {
+        nbWrap.innerHTML = `
+          <div class="flex items-center justify-between text-xs p-2.5 rounded-lg bg-purple-500/10 border border-purple-500/20">
+            <div class="flex items-center gap-2 min-w-0">
+              <svg class="w-4 h-4 text-purple-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
+              <div class="min-w-0">
+                <div class="text-[10px] text-purple-300 uppercase font-medium">Notebook Source</div>
+                <div class="font-mono text-xs text-purple-200 truncate" title="${p.notebook_path}">${p.notebook_path}</div>
+              </div>
+            </div>
+            <a href="/notebooks?path=${encodeURIComponent(p.notebook_path)}" class="px-2.5 py-1 rounded bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-medium transition-colors shrink-0 flex items-center gap-1 shadow-sm">
+              Open Notebook
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+            </a>
+          </div>
+        `;
+        nbWrap.classList.remove('hidden');
+      } else if (p && p.is_notebook_job) {
+        nbWrap.innerHTML = `
+          <div class="flex items-center justify-between text-xs p-2.5 rounded-lg bg-purple-500/10 border border-purple-500/20">
+            <div class="flex items-center gap-2 min-w-0">
+              <svg class="w-4 h-4 text-purple-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
+              <div class="min-w-0">
+                <div class="text-[10px] text-purple-300 uppercase font-medium">Notebook Pipeline</div>
+                <div class="font-mono text-xs text-purple-200 truncate">Configured from workspace notebook</div>
+              </div>
+            </div>
+            <a href="/notebooks" class="px-2.5 py-1 rounded bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-medium transition-colors shrink-0 flex items-center gap-1 shadow-sm">
+              Browse Notebooks
+            </a>
+          </div>
+        `;
+        nbWrap.classList.remove('hidden');
+      } else {
+        nbWrap.innerHTML = '';
+        nbWrap.classList.add('hidden');
+      }
+    }
+  }
+
+  async function togglePipelinePauseFromDrawer() {
+    if (userRole === 'viewer' || !currentDrawerDagId) return;
+    const p = allPipelines.find(item => item.dag_id === currentDrawerDagId);
+    const targetState = p ? !p.is_paused : false;
+    await togglePipelinePause(currentDrawerDagId, targetState);
+    if (p) {
+      renderDrawerDetails(currentDrawerDagId, p);
+    }
+  }
+
+  async function savePipelineMetadata(dagId) {
+    if (userRole === 'viewer' || !dagId) return;
+    const nameInput = document.getElementById('drawer-name-input');
+    const descInput = document.getElementById('drawer-desc-input');
+    const display_label = nameInput ? nameInput.value.trim() : null;
+    const description = descInput ? descInput.value.trim() : null;
+
+    const btn = document.getElementById('btn-save-drawer-meta');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+    }
+
+    try {
+      const res = await fetch(`/api/pipelines/${dagId}/settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ display_label, description }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || 'Failed to update pipeline settings');
+      }
+      showToast('Pipeline name and description updated', 'success');
+
+      // Update locally in allPipelines and timelineData
+      const p = allPipelines.find(item => item.dag_id === dagId);
+      if (p) {
+        if (display_label) {
+          p.display_label = display_label;
+          p.pipeline_name = display_label;
+        }
+        if (description !== null) p.description = description;
+      }
+      if (timelineData && timelineData.pipelines) {
+        const tp = timelineData.pipelines.find(item => item.dag_id === dagId);
+        if (tp && display_label) tp.display_label = display_label;
+      }
+
+      applyFilters();
+      renderTimelineSwimlanes();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Save';
+      }
+    }
+  }
+
+  function updateDrawerActiveRunBanner(dagId, activeRun) {
+    const alertEl = document.getElementById('drawer-active-run-alert');
+    if (!alertEl) return;
+    if (activeRun) {
+      alertEl.innerHTML = `
+        <div class="flex items-center justify-between p-2.5 rounded-lg bg-rose-950/40 border border-rose-500/30 text-xs">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="w-2 h-2 rounded-full bg-rose-400 animate-pulse shrink-0"></span>
+            <span class="text-rose-200 truncate">Run <strong class="font-mono text-rose-100">${activeRun.dag_run_id}</strong> is ${activeRun.state}</span>
+          </div>
+          ${userRole !== 'viewer' ? `
+            <button onclick="cancelPipelineRun('${dagId}', '${activeRun.dag_run_id}')"
+                    class="px-2.5 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white font-medium text-xs flex items-center gap-1 shrink-0 shadow transition-colors ml-2">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+              Cancel Run
+            </button>
+          ` : ''}
+        </div>
+      `;
+      alertEl.classList.remove('hidden');
+    } else {
+      alertEl.innerHTML = '';
+      alertEl.classList.add('hidden');
+    }
+  }
+
+  async function cancelPipelineRun(dagId, runId) {
+    if (userRole === 'viewer') return;
+    if (!confirm(`Are you sure you want to cancel run ${runId}?`)) return;
+
+    try {
+      const res = await fetch(`/api/pipelines/${dagId}/runs/${runId}/cancel`, {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || data.error || 'Failed to cancel DAG run');
+      }
+      showToast(`Run ${runId} cancelled successfully`, 'success');
+      await loadDrawerRuns(dagId);
+      fetchPipelines();
+      fetchTimeline();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+
   async function loadDrawerRuns(dagId, targetRunId = null) {
     const listEl = document.getElementById('drawer-runs-list');
     listEl.innerHTML = '<div class="py-8 text-center text-gray-500">Loading historical runs...</div>';
@@ -1565,6 +1898,10 @@
       const data = await res.json();
       const runs = data.runs || [];
       document.getElementById('drawer-runs-count').textContent = runs.length;
+
+      // Update active run alert banner
+      const activeRun = runs.find(r => r.state === 'running' || r.state === 'queued');
+      updateDrawerActiveRunBanner(dagId, activeRun);
 
       if (runs.length === 0) {
         listEl.innerHTML = '<div class="py-8 text-center text-gray-500 text-xs">No historical runs recorded for this pipeline.</div>';
@@ -1597,6 +1934,13 @@
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
                 Inspect Tasks & Logs
               </button>
+              ${(isRunning || r.state === 'queued') && userRole !== 'viewer' ? `
+                <button onclick="cancelPipelineRun('${dagId}', '${r.dag_run_id}')"
+                        class="text-xs text-rose-400 hover:text-rose-300 font-medium flex items-center gap-1 px-2 py-0.5 rounded bg-rose-500/10 border border-rose-500/20 hover:bg-rose-500/20 transition-colors">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                  Cancel Run
+                </button>
+              ` : ''}
             </div>
           </div>
         `;
@@ -1692,10 +2036,17 @@
   }
 
   // Initial load
-  document.addEventListener('DOMContentLoaded', () => {
+  document.addEventListener('DOMContentLoaded', async () => {
     initTimelineCollapseState();
-    fetchPipelines();
+    await fetchPipelines();
     fetchTimeline();
+
+    // Auto-open pipeline inspector if ?open=<dag_id> is present
+    const urlParams = new URLSearchParams(window.location.search);
+    const openDagId = urlParams.get('open');
+    if (openDagId) {
+      openInspector(openDagId);
+    }
   });
 </script>
 {% endblock %}

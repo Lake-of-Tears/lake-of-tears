@@ -230,6 +230,7 @@ class PipelineMetadata(Base):
     dag_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     color_hex: Mapped[str] = mapped_column(String(32), nullable=False, default="#3B82F6")
     display_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_visible_on_timeline: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     updated_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
