@@ -49,8 +49,16 @@ jobs:
       - name: Run pip-audit
         run: pip-audit -r backend/requirements.txt -r ui/requirements.txt
 
+      - name: Run Trivy Dockerfile scan
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          scan-type: "config"
+          scan-ref: "."
+          severity: "HIGH,CRITICAL"
+          exit-code: "1"
+
   docker-build:
-    name: Docker Build (UI)
+    name: Docker Build (UI & Backend)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -63,6 +71,15 @@ jobs:
           context: ui/
           push: false
           tags: lake-of-tears-ui:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build Backend image
+        uses: docker/build-push-action@v7
+        with:
+          context: backend/
+          push: false
+          tags: lake-of-tears-backend:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
