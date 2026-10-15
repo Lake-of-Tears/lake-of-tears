@@ -115,7 +115,44 @@ All services are accessible from the left sidebar. Direct ports are also availab
 - DNS records pointing your chosen hostnames at the cluster's ingress IP
 - `helm` v3 and `kubectl` configured for your cluster
 
-### How configuration works
+### Local Development (OrbStack / Docker Desktop / kind / k3s)
+
+For local Kubernetes clusters, the repository provides `deploy/helm/values-local.yaml` pre-configured with:
+- Standard RFC 6761 `*.localhost` domains (`localhost`, `minio.localhost`, `superset.localhost`, `s3.localhost`), which resolve out of the box on modern operating systems without modifying `/etc/hosts`.
+- Dynamic storage provisioning via `global.storageClass: "local-path"`.
+- Development-safe default credentials for all services.
+- `IfNotPresent` image pull policies.
+
+#### One-Command Install
+
+```bash
+helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
+  --namespace lake-of-tears \
+  --create-namespace \
+  -f deploy/helm/values-local.yaml
+```
+
+Upon installation, Helm displays post-install notes (`NOTES.txt`) with access URLs and default credentials.
+
+#### Local Service URLs & Default Credentials
+
+| Service | Local Ingress URL | Credentials / Access |
+|---------|-------------------|----------------------|
+| **Lake UI shell** | http://localhost | Register first user (automatically granted `admin` role) |
+| **Auth API** | http://localhost/api/ | — |
+| **JupyterLab** | http://localhost/jupyter/ | Token: `jupytertoken123` |
+| **Apache Airflow** | http://localhost/airflow/ | User: `admin` / Password: `airflowadminpassword` |
+| **Apache Superset** | http://superset.localhost | User: `admin` / Password: `supersetadminpassword` |
+| **MinIO Console** | http://minio.localhost | User: `minioadmin` / Password: `minioadminpassword` |
+| **MinIO S3 API** | http://s3.localhost | Key: `minioadmin` / Secret: `minioadminpassword` |
+
+To customize credentials or settings locally, you can modify `deploy/helm/values-local.yaml` or use `deploy/helm/values-local.example.yaml` as a reference template for custom override files.
+
+---
+
+### Production Deployment
+
+#### How configuration works
 
 The Helm chart separates **non-secret config** (hostnames, image tags, resource limits) from **secrets** (passwords, API keys, tokens). The recommended approach is two files:
 

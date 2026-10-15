@@ -2,7 +2,6 @@
 .env
 *.tfvars
 !*.tfvars.example
-deploy/helm/values-local.yaml
 deploy/helm/*secret*.yaml
 
 # Terraform state

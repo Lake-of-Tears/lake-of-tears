@@ -14,15 +14,40 @@
 *******************************************************************************
 {{- end }}
 
+{{- $proto := "http" }}
+{{- if .Values.ingress.tls }}
+{{- $proto = "https" }}
+{{- end }}
+
 Access Endpoints (via Ingress):
 -------------------------------------------------------------------------------
-  Lake UI / Shell:    http://{{ .Values.ingress.host }}/
-  Auth API:           http://{{ .Values.ingress.host }}/api/
-  JupyterLab:         http://{{ .Values.ingress.host }}/jupyter/
-  Apache Airflow:     http://{{ .Values.ingress.host }}/airflow/
-  Apache Superset:    http://{{ .Values.ingress.supersetHost }}/
-  MinIO Console:      http://{{ .Values.ingress.minioConsoleHost }}/
-  MinIO S3 API:       http://{{ .Values.ingress.minioApiHost }}/
+  Lake UI / Shell:    {{ $proto }}://{{ .Values.ingress.host }}/
+  Auth API:           {{ $proto }}://{{ .Values.ingress.host }}/api/
+  JupyterLab:         {{ $proto }}://{{ .Values.ingress.host }}/jupyter/
+  Apache Airflow:     {{ $proto }}://{{ .Values.ingress.host }}/airflow/
+  Apache Superset:    {{ $proto }}://{{ .Values.ingress.supersetHost }}/
+  MinIO Console:      {{ $proto }}://{{ .Values.ingress.minioConsoleHost }}/
+  MinIO S3 API:       {{ $proto }}://{{ .Values.ingress.minioApiHost }}/
+
+Default Credentials & Initial Setup:
+-------------------------------------------------------------------------------
+  Lake UI / Shell:
+    • Register the first user at {{ $proto }}://{{ .Values.ingress.host }}/
+      (The first registered user is automatically granted the admin role)
+  Apache Airflow:
+    • Username: admin
+    • Password: {{ .Values.airflow.adminPassword | default "(managed via secret)" }}
+  Apache Superset:
+    • Username: admin
+    • Password: {{ .Values.superset.adminPassword | default "(managed via secret)" }}
+  MinIO Console / S3:
+    • Username: {{ .Values.minio.rootUser | default "minioadmin" }}
+    • Password: {{ .Values.minio.rootPassword | default "(managed via secret)" }}
+  JupyterLab:
+    • Token:    {{ .Values.jupyter.token | default "(managed via secret)" }}
+
+  [NOTE] For production deployments, ensure sensitive passwords are supplied via
+         values-secret.yaml or rotated regularly.
 
 Verification Commands:
 -------------------------------------------------------------------------------
