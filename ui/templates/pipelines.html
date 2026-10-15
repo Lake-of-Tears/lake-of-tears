@@ -46,6 +46,138 @@
     </div>
   </div>
 
+  <style>
+    .timeline-scrollbar::-webkit-scrollbar {
+      height: 6px;
+    }
+    .timeline-scrollbar::-webkit-scrollbar-track {
+      background: rgba(0, 0, 0, 0.25);
+    }
+    .timeline-scrollbar::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 9999px;
+    }
+    .timeline-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.3);
+    }
+  </style>
+
+  <!-- ── 24-Hour Visual Schedule Timeline ─────────────────────────────────── -->
+  <div id="timeline-banner" class="card overflow-hidden border border-white/[0.08] bg-[#141414] transition-all duration-200">
+    <!-- Banner Header Toolbar -->
+    <div class="px-4 py-2.5 bg-white/[0.02] border-b border-white/[0.06] flex flex-wrap items-center justify-between gap-3 select-none">
+      <!-- Left Title & Date Navigator -->
+      <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2">
+          <div class="w-6 h-6 rounded bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+          </div>
+          <span class="text-xs font-semibold text-gray-200">24-Hour Schedule Timeline</span>
+        </div>
+
+        <!-- Date Navigation Pill -->
+        <div id="timeline-date-nav" class="flex items-center bg-black/40 border border-white/[0.08] rounded-md p-0.5 text-xs text-gray-300">
+          <button onclick="navigateTimelineDay(-1)" title="Previous Day" class="px-2 py-1 hover:text-white hover:bg-white/[0.08] rounded transition-colors">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+          </button>
+          <button onclick="navigateTimelineToday()" id="btn-timeline-today" class="px-2.5 py-1 text-xs font-medium text-blue-400 hover:text-blue-300 transition-colors">
+            Today
+          </button>
+          <button onclick="navigateTimelineDay(1)" title="Next Day" class="px-2 py-1 hover:text-white hover:bg-white/[0.08] rounded transition-colors">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+          </button>
+          <div class="h-3.5 w-px bg-white/[0.1] mx-1"></div>
+          <span id="timeline-current-date-label" class="px-2 py-0.5 text-xs font-mono text-gray-200">Loading...</span>
+          <input type="date" id="timeline-datepicker" onchange="onTimelineDatePicked(this.value)" class="opacity-0 absolute pointer-events-none w-0 h-0" />
+          <button onclick="document.getElementById('timeline-datepicker').showPicker()" title="Choose Date" class="px-1.5 py-1 text-gray-400 hover:text-gray-200">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Timezone badge -->
+        <span id="timeline-tz-badge" class="hidden sm:inline-flex px-2 py-0.5 rounded text-[10px] font-mono text-gray-400 bg-white/[0.03] border border-white/[0.06]">
+          UTC
+        </span>
+      </div>
+
+      <!-- Right Controls: Zoom & Collapse -->
+      <div class="flex items-center gap-2">
+        <!-- Zoom Buttons -->
+        <div id="timeline-zoom-controls" class="flex items-center bg-black/40 border border-white/[0.08] rounded-md p-0.5 text-xs text-gray-400">
+          <button onclick="setTimelineZoom('24h')" id="btn-zoom-24h" class="zoom-btn active px-2.5 py-1 rounded text-xs font-medium transition-colors bg-white/[0.08] text-white">
+            24h
+          </button>
+          <button onclick="setTimelineZoom('12h')" id="btn-zoom-12h" class="zoom-btn px-2.5 py-1 rounded text-xs font-medium hover:text-white transition-colors">
+            12h
+          </button>
+          <button onclick="setTimelineZoom('6h')" id="btn-zoom-6h" class="zoom-btn px-2.5 py-1 rounded text-xs font-medium hover:text-white transition-colors">
+            6h
+          </button>
+          <button onclick="setTimelineZoom('1h')" id="btn-zoom-1h" class="zoom-btn px-2.5 py-1 rounded text-xs font-medium hover:text-white transition-colors">
+            1h
+          </button>
+        </div>
+
+        <!-- Collapse Toggle -->
+        <button onclick="toggleTimelineCollapse()" id="btn-toggle-timeline" class="btn-ghost py-1 px-2 text-xs flex items-center gap-1 text-gray-400 hover:text-white" title="Toggle Timeline">
+          <svg id="timeline-collapse-icon" class="w-4 h-4 transform transition-transform duration-200" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Banner Content Area (Collapsible) -->
+    <div id="timeline-content-body" class="relative">
+      <!-- Loading overlay -->
+      <div id="timeline-loading" class="py-12 flex flex-col items-center justify-center gap-2 text-gray-500">
+        <svg class="w-5 h-5 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+        </svg>
+        <span class="text-xs">Loading 24h schedule timeline...</span>
+      </div>
+
+      <!-- Empty state -->
+      <div id="timeline-empty" class="hidden py-10 text-center text-xs text-gray-500">
+        No scheduled pipelines in this workspace.
+      </div>
+
+      <!-- Scrollable Viewport -->
+      <div id="timeline-viewport" class="hidden overflow-x-auto overflow-y-hidden select-none relative timeline-scrollbar">
+        <div id="timeline-canvas" class="min-w-full flex flex-col relative" style="width: 100%; min-width: 900px;">
+          <!-- Time Axis Header -->
+          <div class="flex items-center border-b border-white/[0.06] bg-black/30 sticky top-0 z-20">
+            <!-- Fixed Left Column Header -->
+            <div class="w-48 sm:w-60 shrink-0 px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wider border-r border-white/[0.06] bg-[#141414] sticky left-0 z-30">
+              Pipeline
+            </div>
+            <!-- Time Ticks Ruler -->
+            <div id="timeline-ruler" class="flex-1 relative h-7 overflow-visible">
+              <!-- Generated 24h Ticks -->
+            </div>
+          </div>
+
+          <!-- Swimlanes Wrapper with Grid Overlay -->
+          <div id="timeline-swimlanes-wrapper" class="relative">
+            <!-- Grid overlay across the swimlane track area -->
+            <div id="timeline-grid-overlay" class="absolute top-0 bottom-0 right-0 left-48 sm:left-60 pointer-events-none z-0">
+              <!-- Vertical hour grid lines & NOW indicator line -->
+            </div>
+            <!-- Swimlanes Container -->
+            <div id="timeline-swimlanes" class="relative divide-y divide-white/[0.04] z-10">
+              <!-- Dynamic Pipeline Swimlane Rows -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Filter & Search Toolbar -->
   <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
     <!-- Filter Pills -->
@@ -244,6 +376,25 @@
   </div>
 </div>
 
+<!-- ── Color Picker Popover ─────────────────────────────────────────────── -->
+<div id="color-picker-popover" class="hidden fixed z-50 bg-[#1c1c1c] border border-white/[0.12] rounded-xl shadow-2xl p-3 w-64 space-y-3 select-none">
+  <div class="flex items-center justify-between">
+    <span class="text-xs font-semibold text-gray-200">Pipeline Color</span>
+    <button onclick="closeColorPicker()" class="text-gray-400 hover:text-white p-0.5">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+    </button>
+  </div>
+  <p class="text-[11px] text-gray-400">Assigned workspace color on the 24-hour schedule timeline.</p>
+  <div id="color-palette-grid" class="grid grid-cols-6 gap-2">
+    <!-- 12 palette swatches -->
+  </div>
+  <div class="flex items-center gap-2 pt-2 border-t border-white/[0.06]">
+    <label class="text-[11px] text-gray-400">Custom:</label>
+    <input type="color" id="custom-color-input" onchange="applyCustomColor(this.value)" class="w-6 h-6 rounded border border-white/[0.1] bg-transparent cursor-pointer" />
+    <input type="text" id="custom-color-hex" maxlength="7" placeholder="#3B82F6" class="input-dark text-xs py-1 px-2 font-mono flex-1" onchange="applyCustomColor(this.value)" />
+  </div>
+</div>
+
 <script>
   let allPipelines = [];
   let currentFilter = 'all';
@@ -252,6 +403,18 @@
   let currentSelectedRunId = null;
   let currentSelectedTaskId = null;
   const userRole = "{{ my_role }}";
+
+  // ── Timeline & Palette State ───────────────────────────────────────────────
+  const DEFAULT_PALETTE = [
+    '#3B82F6', '#10B981', '#8B5CF6', '#F59E0B',
+    '#EC4899', '#06B6D4', '#F97316', '#14B8A6',
+    '#6366F1', '#84CC16', '#E11D48', '#A855F7'
+  ];
+  let currentTimelineDate = new Date().toISOString().split('T')[0];
+  let timelineZoom = '24h';
+  let timelineData = null;
+  let activeColorPickerDagId = null;
+  const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
   // ── Toast Utility ──────────────────────────────────────────────────────────
   function showToast(message, type = 'info') {
@@ -275,7 +438,430 @@
     }, 3500);
   }
 
-  // ── Fetch & Render Pipelines ───────────────────────────────────────────────
+  // ── Color Utilities ────────────────────────────────────────────────────────
+  function getPipelineColor(dagId) {
+    if (timelineData && timelineData.pipelines) {
+      const found = timelineData.pipelines.find(item => item.dag_id === dagId);
+      if (found && found.color_hex) return found.color_hex;
+    }
+    // Fallback deterministic palette hash
+    let hash = 0;
+    for (let i = 0; i < dagId.length; i++) {
+      hash = (hash << 5) - hash + dagId.charCodeAt(i);
+      hash |= 0;
+    }
+    const idx = Math.abs(hash) % DEFAULT_PALETTE.length;
+    return DEFAULT_PALETTE[idx];
+  }
+
+  function openColorPicker(dagId, event) {
+    if (userRole === 'viewer') return;
+    event.stopPropagation();
+    activeColorPickerDagId = dagId;
+
+    const currentColor = getPipelineColor(dagId);
+    const pop = document.getElementById('color-picker-popover');
+    const grid = document.getElementById('color-palette-grid');
+
+    grid.innerHTML = DEFAULT_PALETTE.map(hex => {
+      const isSelected = (hex.toLowerCase() === currentColor.toLowerCase());
+      return `
+        <button onclick="selectTimelineColor('${dagId}', '${hex}')"
+                class="w-7 h-7 rounded-lg border flex items-center justify-center transition-transform hover:scale-110 ${
+                  isSelected ? 'border-white ring-2 ring-white/50' : 'border-transparent hover:border-white/30'
+                }"
+                style="background-color: ${hex};"
+                title="${hex}">
+          ${isSelected ? '<svg class="w-3.5 h-3.5 text-white filter drop-shadow" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>' : ''}
+        </button>
+      `;
+    }).join('');
+
+    document.getElementById('custom-color-input').value = currentColor;
+    document.getElementById('custom-color-hex').value = currentColor;
+
+    const rect = event.target.getBoundingClientRect();
+    pop.style.top = `${Math.min(window.innerHeight - 260, rect.bottom + 6)}px`;
+    pop.style.left = `${Math.min(window.innerWidth - 280, Math.max(10, rect.left - 100))}px`;
+    pop.classList.remove('hidden');
+  }
+
+  function closeColorPicker() {
+    const pop = document.getElementById('color-picker-popover');
+    if (pop) pop.classList.add('hidden');
+    activeColorPickerDagId = null;
+  }
+
+  async function selectTimelineColor(dagId, colorHex) {
+    if (userRole === 'viewer') return;
+    try {
+      const res = await fetch(`/api/pipelines/${dagId}/settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ color_hex: colorHex }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Failed to update pipeline settings');
+      }
+      showToast(`Updated timeline color for ${dagId}`, 'success');
+      closeColorPicker();
+
+      // Update in local timelineData
+      if (timelineData && timelineData.pipelines) {
+        const p = timelineData.pipelines.find(item => item.dag_id === dagId);
+        if (p) p.color_hex = colorHex;
+      }
+      renderTimelineSwimlanes();
+      applyFilters(); // refresh table color dot
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+
+  function applyCustomColor(hexVal) {
+    if (!activeColorPickerDagId) return;
+    let clean = hexVal.trim();
+    if (!clean.startsWith('#')) clean = '#' + clean;
+    if (/^#[0-9A-Fa-f]{6}$/.test(clean)) {
+      selectTimelineColor(activeColorPickerDagId, clean);
+    }
+  }
+
+  // Click outside listener for color picker popover
+  document.addEventListener('click', (e) => {
+    const pop = document.getElementById('color-picker-popover');
+    if (pop && !pop.classList.contains('hidden') && !pop.contains(e.target)) {
+      closeColorPicker();
+    }
+  });
+
+  // ── Timeline Collapse & Date Navigation ────────────────────────────────────
+  function initTimelineCollapseState() {
+    const collapsed = localStorage.getItem('timeline_collapsed') === 'true';
+    const content = document.getElementById('timeline-content-body');
+    const icon = document.getElementById('timeline-collapse-icon');
+    if (collapsed) {
+      content.classList.add('hidden');
+      icon.classList.add('-rotate-90');
+    } else {
+      content.classList.remove('hidden');
+      icon.classList.remove('-rotate-90');
+    }
+  }
+
+  function toggleTimelineCollapse() {
+    const content = document.getElementById('timeline-content-body');
+    const icon = document.getElementById('timeline-collapse-icon');
+    const isHidden = content.classList.contains('hidden');
+    if (isHidden) {
+      content.classList.remove('hidden');
+      icon.classList.remove('-rotate-90');
+      localStorage.setItem('timeline_collapsed', 'false');
+      // If we uncollapse and timeline is loaded, center view
+      setTimeout(() => centerTimelineOnNowOrFirstRun(), 100);
+    } else {
+      content.classList.add('hidden');
+      icon.classList.add('-rotate-90');
+      localStorage.setItem('timeline_collapsed', 'true');
+    }
+  }
+
+  function formatTimelineDateLabel(dateStr) {
+    const parts = dateStr.split('-');
+    const dt = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    const todayStr = new Date().toISOString().split('T')[0];
+    const isToday = (dateStr === todayStr);
+    const formatted = dt.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+    return isToday ? `Today (${formatted})` : formatted;
+  }
+
+  function navigateTimelineDay(delta) {
+    const parts = currentTimelineDate.split('-');
+    const dt = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    dt.setDate(dt.getDate() + delta);
+    currentTimelineDate = dt.toISOString().split('T')[0];
+    document.getElementById('timeline-datepicker').value = currentTimelineDate;
+    fetchTimeline();
+  }
+
+  function navigateTimelineToday() {
+    currentTimelineDate = new Date().toISOString().split('T')[0];
+    document.getElementById('timeline-datepicker').value = currentTimelineDate;
+    fetchTimeline();
+  }
+
+  function onTimelineDatePicked(val) {
+    if (val) {
+      currentTimelineDate = val;
+      fetchTimeline();
+    }
+  }
+
+  // ── Timeline Zoom & Centering ──────────────────────────────────────────────
+  function setTimelineZoom(level) {
+    timelineZoom = level;
+    document.querySelectorAll('.zoom-btn').forEach(b => {
+      b.classList.remove('active', 'bg-white/[0.08]', 'text-white');
+      b.classList.add('text-gray-400');
+    });
+    const btn = document.getElementById(`btn-zoom-${level}`);
+    if (btn) {
+      btn.classList.add('active', 'bg-white/[0.08]', 'text-white');
+      btn.classList.remove('text-gray-400');
+    }
+
+    const canvas = document.getElementById('timeline-canvas');
+    if (!canvas) return;
+
+    if (level === '24h') {
+      canvas.style.width = '100%';
+      canvas.style.minWidth = '900px';
+    } else if (level === '12h') {
+      canvas.style.width = '200%';
+      canvas.style.minWidth = '1800px';
+    } else if (level === '6h') {
+      canvas.style.width = '400%';
+      canvas.style.minWidth = '3600px';
+    } else if (level === '1h') {
+      canvas.style.width = '2400%';
+      canvas.style.minWidth = '21600px';
+    }
+
+    renderTimelineRuler();
+    renderTimelineGridOverlay();
+    setTimeout(() => {
+      centerTimelineOnNowOrFirstRun();
+    }, 50);
+  }
+
+  function centerTimelineOnNowOrFirstRun() {
+    const viewport = document.getElementById('timeline-viewport');
+    if (!viewport) return;
+    const nowIndicator = document.getElementById('timeline-now-line');
+    if (nowIndicator) {
+      const left = nowIndicator.offsetLeft;
+      viewport.scrollLeft = Math.max(0, left - (viewport.clientWidth / 2));
+    } else {
+      const firstRun = document.querySelector('.timeline-run-block');
+      if (firstRun) {
+        viewport.scrollLeft = Math.max(0, firstRun.offsetLeft - (viewport.clientWidth / 3));
+      } else {
+        viewport.scrollLeft = 0;
+      }
+    }
+  }
+
+  // ── Fetch & Render Timeline ────────────────────────────────────────────────
+  async function fetchTimeline() {
+    const loadingEl = document.getElementById('timeline-loading');
+    const emptyEl = document.getElementById('timeline-empty');
+    const viewportEl = document.getElementById('timeline-viewport');
+
+    loadingEl.classList.remove('hidden');
+    emptyEl.classList.add('hidden');
+    viewportEl.classList.add('hidden');
+
+    document.getElementById('timeline-current-date-label').textContent = formatTimelineDateLabel(currentTimelineDate);
+    document.getElementById('timeline-tz-badge').textContent = userTimezone;
+
+    try {
+      const res = await fetch(`/api/pipelines/timeline?date=${encodeURIComponent(currentTimelineDate)}&tz=${encodeURIComponent(userTimezone)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      timelineData = await res.json();
+
+      loadingEl.classList.add('hidden');
+
+      if (!timelineData.pipelines || timelineData.pipelines.length === 0) {
+        emptyEl.classList.remove('hidden');
+        return;
+      }
+
+      viewportEl.classList.remove('hidden');
+      renderTimelineRuler();
+      renderTimelineGridOverlay();
+      renderTimelineSwimlanes();
+
+      setTimeout(() => centerTimelineOnNowOrFirstRun(), 80);
+    } catch (err) {
+      loadingEl.innerHTML = `<span class="text-xs text-rose-400">Failed to load timeline: ${err.message}</span>`;
+    }
+  }
+
+  function renderTimelineRuler() {
+    const rulerEl = document.getElementById('timeline-ruler');
+    if (!rulerEl) return;
+    rulerEl.innerHTML = '';
+
+    for (let h = 0; h <= 24; h++) {
+      const pct = (h / 24) * 100;
+      const hh = String(h % 24).padStart(2, '0') + ':00';
+      const tick = document.createElement('div');
+      tick.className = 'absolute top-0 bottom-0 flex flex-col items-center pointer-events-none';
+      tick.style.left = `${pct}%`;
+      tick.innerHTML = `
+        <span class="text-[10px] font-mono text-gray-500 transform -translate-x-1/2 pt-1 select-none">${hh}</span>
+        <div class="w-px h-2 bg-white/[0.15] mt-auto"></div>
+      `;
+      rulerEl.appendChild(tick);
+    }
+  }
+
+  function renderTimelineGridOverlay() {
+    const overlay = document.getElementById('timeline-grid-overlay');
+    if (!overlay) return;
+    overlay.innerHTML = '';
+
+    for (let h = 0; h <= 24; h++) {
+      const pct = (h / 24) * 100;
+      const line = document.createElement('div');
+      line.className = 'absolute top-0 bottom-0 w-px bg-white/[0.03] pointer-events-none';
+      line.style.left = `${pct}%`;
+      overlay.appendChild(line);
+    }
+
+    if (timelineData && timelineData.is_today) {
+      renderTimelineNowIndicator(timelineData.current_time, timelineData.window_start, timelineData.window_end);
+    }
+  }
+
+  function renderTimelineNowIndicator(nowIso, windowStartIso, windowEndIso) {
+    const overlay = document.getElementById('timeline-grid-overlay');
+    if (!overlay) return;
+
+    const existingNow = document.getElementById('timeline-now-line');
+    if (existingNow) existingNow.remove();
+
+    if (!timelineData || !timelineData.is_today) return;
+
+    const nowDt = new Date(nowIso);
+    const startDt = new Date(windowStartIso);
+    const endDt = new Date(windowEndIso);
+    const totalMs = endDt.getTime() - startDt.getTime();
+    const currentMs = nowDt.getTime() - startDt.getTime();
+    const pct = Math.max(0, Math.min(100, (currentMs / totalMs) * 100));
+
+    const nowEl = document.createElement('div');
+    nowEl.id = 'timeline-now-line';
+    nowEl.className = 'absolute top-0 bottom-0 z-20 pointer-events-none flex flex-col items-center';
+    nowEl.style.left = `${pct}%`;
+    nowEl.innerHTML = `
+      <div class="bg-cyan-400 text-black text-[9px] font-bold font-mono px-1.5 py-0.5 rounded shadow-lg shadow-cyan-500/50 transform -translate-x-1/2 -translate-y-1 flex items-center gap-1 select-none">
+        <span class="w-1.5 h-1.5 rounded-full bg-cyan-900 animate-ping"></span>
+        <span>NOW ${nowDt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
+      </div>
+      <div class="w-0.5 flex-1 bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.8)]"></div>
+    `;
+    overlay.appendChild(nowEl);
+  }
+
+  function renderTimelineSwimlanes() {
+    const container = document.getElementById('timeline-swimlanes');
+    if (!container || !timelineData) return;
+
+    const pipelines = timelineData.pipelines || [];
+    container.innerHTML = pipelines.map(p => {
+      const dagId = p.dag_id;
+      const colorHex = p.color_hex || getPipelineColor(dagId);
+      const label = p.display_label || dagId;
+      const schedule = p.schedule_interval || 'None';
+      const runs = p.runs || [];
+      const isPaused = p.is_paused;
+
+      const runBlocksHtml = runs.map(r => {
+        const isActual = (r.type === 'actual');
+        const timeStr = r.start_time || r.scheduled_time;
+        const runDate = new Date(timeStr);
+        const startDt = new Date(timelineData.window_start);
+        const endDt = new Date(timelineData.window_end);
+        const totalMs = endDt.getTime() - startDt.getTime();
+        const runMs = runDate.getTime() - startDt.getTime();
+        const pct = Math.max(0, Math.min(99.5, (runMs / totalMs) * 100));
+
+        const durationSec = r.duration_seconds || 0;
+        const durationPct = Math.max(1.8, Math.min(25, (durationSec / 86400) * 100));
+        const formattedTime = runDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+
+        if (isActual) {
+          const state = r.state || 'unknown';
+          let bgStyle = `background-color: ${colorHex}25; border-color: ${colorHex}88; color: #fff;`;
+          let dotColor = 'bg-gray-400';
+          if (state === 'success') {
+            dotColor = 'bg-emerald-400';
+          } else if (state === 'running') {
+            dotColor = 'bg-blue-400 animate-pulse';
+          } else if (state === 'failed') {
+            dotColor = 'bg-rose-400';
+          } else if (state === 'queued') {
+            dotColor = 'bg-amber-400';
+          }
+
+          const runTooltip = `Pipeline: ${dagId}&#10;Run ID: ${r.dag_run_id}&#10;Status: ${state}&#10;Time: ${runDate.toLocaleString()}&#10;Duration: ${durationSec > 0 ? Math.round(durationSec) + 's' : 'In Progress'}&#10;Click to inspect run & logs`;
+
+          return `
+            <div onclick="onTimelineRunClick('${dagId}', '${r.dag_run_id}', true)"
+                 title="${runTooltip}"
+                 style="left: ${pct}%; width: ${durationPct}%; min-width: 48px; ${bgStyle}"
+                 class="timeline-run-block absolute top-1.5 bottom-1.5 rounded border shadow-sm px-1.5 flex items-center justify-between gap-1 text-[10px] font-mono cursor-pointer hover:brightness-125 hover:z-30 transition-all select-none group">
+              <span class="w-1.5 h-1.5 rounded-full shrink-0 ${dotColor}"></span>
+              <span class="truncate font-semibold">${formattedTime}</span>
+              <span class="text-[9px] opacity-75 truncate uppercase hidden sm:inline">${state}</span>
+            </div>
+          `;
+        } else {
+          // Projected run
+          const runTooltip = `Pipeline: ${dagId}&#10;Type: Projected Run&#10;Scheduled Time: ${runDate.toLocaleString()}&#10;Cadence: ${schedule}&#10;Click to view pipeline history`;
+          return `
+            <div onclick="onTimelineRunClick('${dagId}', null, false)"
+                 title="${runTooltip}"
+                 style="left: ${pct}%; min-width: 44px; border-color: ${colorHex}66; background-color: ${colorHex}10;"
+                 class="timeline-run-block absolute top-2 bottom-2 rounded border border-dashed text-gray-300 px-1.5 flex items-center gap-1 text-[10px] font-mono cursor-pointer hover:border-white/[0.6] hover:text-white hover:z-30 transition-all select-none">
+              <svg class="w-2.5 h-2.5 shrink-0 opacity-70" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              <span class="truncate">${formattedTime}</span>
+            </div>
+          `;
+        }
+      }).join('');
+
+      const isViewer = (userRole === 'viewer');
+
+      return `
+        <div class="flex items-center hover:bg-white/[0.02] transition-colors group relative" id="swimlane-${dagId}">
+          <!-- Sticky Left Pipeline Lane Info -->
+          <div class="w-48 sm:w-60 shrink-0 px-3 py-2 flex items-center justify-between border-r border-white/[0.06] bg-[#141414] sticky left-0 z-10">
+            <div class="flex items-center gap-2 min-w-0">
+              <button onclick="openColorPicker('${dagId}', event)"
+                      ${isViewer ? 'disabled title="Viewer cannot edit pipeline color"' : 'title="Change Pipeline Color"'}
+                      class="w-3 h-3 rounded-full shrink-0 shadow-sm cursor-pointer hover:scale-125 transition-transform border border-white/[0.2]"
+                      style="background-color: ${colorHex};">
+              </button>
+              <span onclick="openInspector('${dagId}')"
+                    class="font-mono text-xs font-medium text-gray-200 hover:text-blue-400 cursor-pointer truncate"
+                    title="${dagId}">
+                ${label}
+              </span>
+            </div>
+            <div class="flex items-center gap-1 shrink-0 ml-2">
+              <span class="px-1.5 py-0.5 rounded text-[9px] font-mono ${isPaused ? 'bg-gray-800 text-gray-500' : 'bg-white/[0.04] text-gray-400 border border-white/[0.06]'}">
+                ${schedule}
+              </span>
+            </div>
+          </div>
+
+          <!-- Relative Track Area -->
+          <div class="flex-1 relative h-10 overflow-hidden">
+            ${runBlocksHtml}
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function onTimelineRunClick(dagId, runId, isActual) {
+    openInspector(dagId, isActual ? runId : null);
+  }
+
+  // ── Fetch & Render Pipelines (Table) ───────────────────────────────────────
   async function fetchPipelines() {
     const icon = document.getElementById('refresh-icon');
     icon.classList.add('animate-spin');
@@ -357,6 +943,7 @@
       const isPaused = p.is_paused;
       const lastRun = p.last_run;
       const runState = lastRun ? lastRun.state : 'none';
+      const colorHex = getPipelineColor(p.dag_id);
 
       let stateBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-gray-500/10 text-gray-400 border border-gray-500/20">No Runs</span>`;
       if (runState === 'success') {
@@ -402,9 +989,10 @@
             </button>
           </td>
 
-          <!-- Pipeline Info -->
+          <!-- Pipeline Info with Color Dot -->
           <td class="py-3 px-4">
             <div class="flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full shrink-0 shadow-sm" style="background-color: ${colorHex};" title="Timeline Color: ${colorHex}"></span>
               <span class="font-medium text-gray-200 hover:text-blue-400 cursor-pointer font-mono text-xs" onclick="openInspector('${p.dag_id}')">
                 ${p.dag_id}
               </span>
@@ -477,6 +1065,7 @@
       const p = allPipelines.find(item => item.dag_id === dagId);
       if (p) p.is_paused = newPausedState;
       applyFilters();
+      fetchTimeline(); // refresh projected runs in timeline
     } catch (err) {
       showToast(err.message, 'error');
     }
@@ -527,7 +1116,8 @@
       showToast(`Run queued! ID: ${data.dag_run_id}`, 'success');
       closeTriggerModal();
       fetchPipelines();
-      openInspector(targetTriggerDagId);
+      fetchTimeline();
+      openInspector(targetTriggerDagId, data.dag_run_id);
     } catch (err) {
       showToast(err.message, 'error');
     } finally {
@@ -537,7 +1127,7 @@
   }
 
   // ── Inspector Drawer (Runs & Logs) ─────────────────────────────────────────
-  async function openInspector(dagId) {
+  async function openInspector(dagId, targetRunId = null) {
     currentDrawerDagId = dagId;
     const p = allPipelines.find(item => item.dag_id === dagId);
 
@@ -546,7 +1136,7 @@
     document.getElementById('inspector-drawer').classList.remove('hidden');
 
     setDrawerTab('runs');
-    await loadDrawerRuns(dagId);
+    await loadDrawerRuns(dagId, targetRunId);
   }
 
   function closeInspector() {
@@ -574,7 +1164,7 @@
     }
   }
 
-  async function loadDrawerRuns(dagId) {
+  async function loadDrawerRuns(dagId, targetRunId = null) {
     const listEl = document.getElementById('drawer-runs-list');
     listEl.innerHTML = '<div class="py-8 text-center text-gray-500">Loading historical runs...</div>';
 
@@ -592,10 +1182,11 @@
 
       listEl.innerHTML = runs.map(r => {
         const isRunning = (r.state === 'running');
+        const isTarget = Boolean(targetRunId && r.dag_run_id === targetRunId);
         return `
-          <div class="p-3 bg-white/[0.02] border border-white/[0.06] rounded-lg hover:border-white/[0.12] transition-colors space-y-2">
+          <div id="drawer-run-${r.dag_run_id}" class="p-3 bg-white/[0.02] border ${isTarget ? 'border-blue-500 ring-2 ring-blue-500/40 bg-blue-500/[0.05]' : 'border-white/[0.06]'} rounded-lg hover:border-white/[0.12] transition-colors space-y-2">
             <div class="flex items-center justify-between text-xs">
-              <span class="font-mono text-gray-200 font-medium truncate max-w-xs">${r.dag_run_id}</span>
+              <span class="font-mono text-gray-200 font-medium truncate max-w-xs ${isTarget ? 'text-blue-300 font-bold' : ''}">${r.dag_run_id}</span>
               <span class="px-2 py-0.5 rounded text-[10px] font-medium ${
                 r.state === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
                 isRunning             ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20 animate-pulse' :
@@ -619,6 +1210,13 @@
           </div>
         `;
       }).join('');
+
+      if (targetRunId) {
+        setTimeout(() => {
+          const el = document.getElementById(`drawer-run-${targetRunId}`);
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }, 50);
+      }
     } catch (err) {
       listEl.innerHTML = `<div class="py-8 text-center text-rose-400 text-xs">${err.message}</div>`;
     }
@@ -704,7 +1302,9 @@
 
   // Initial load
   document.addEventListener('DOMContentLoaded', () => {
+    initTimelineCollapseState();
     fetchPipelines();
+    fetchTimeline();
   });
 </script>
 {% endblock %}

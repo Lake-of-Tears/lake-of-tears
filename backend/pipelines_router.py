@@ -42,6 +42,12 @@ class ScheduleNotebookRequest(BaseModel):
     compute_resources: dict[str, str] | None = None
 
 
+class PipelineSettingsRequest(BaseModel):
+    color_hex: str | None = None
+    display_label: str | None = None
+    is_visible_on_timeline: bool | None = None
+
+
 # ── Dependency Context Resolution ─────────────────────────────────────────────
 
 
@@ -156,6 +162,101 @@ async def delete_scheduled_notebook_pipeline(
         workspace_slug=ws.slug,
         dag_id=dag_id,
         is_superadmin=is_superadmin,
+    )
+
+
+@router.get("/timeline")
+async def get_pipeline_timeline(
+    date: str | None = Query(None, description="Calendar date YYYY-MM-DD"),
+    tz: str = Query("UTC", description="IANA timezone name"),
+    workspace_slug: str | None = Query(None),
+    x_workspace_slug: str | None = Header(None, alias="X-Workspace-Slug"),
+    x_workspace_id: str | None = Header(None, alias="X-Workspace-Id"),
+    lake_active_workspace: str | None = Cookie(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Retrieve 24-hour visual schedule timeline for the selected calendar day."""
+    ws, role = _resolve_workspace_context(
+        workspace_slug=workspace_slug,
+        x_workspace_slug=x_workspace_slug,
+        x_workspace_id=x_workspace_id,
+        lake_active_workspace=lake_active_workspace,
+        current_user=current_user,
+        db=db,
+        require_write=False,
+    )
+    is_superadmin = current_user.role == "superadmin"
+    return await pipeline_service.get_workspace_timeline(
+        workspace_slug=ws.slug,
+        workspace_id=ws.id,
+        target_date_str=date,
+        tz_str=tz,
+        is_superadmin=is_superadmin,
+        db=db,
+    )
+
+
+@router.get("/{dag_id}/settings")
+async def get_pipeline_settings(
+    dag_id: str,
+    workspace_slug: str | None = Query(None),
+    x_workspace_slug: str | None = Header(None, alias="X-Workspace-Slug"),
+    x_workspace_id: str | None = Header(None, alias="X-Workspace-Id"),
+    lake_active_workspace: str | None = Cookie(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get color and label display settings for a pipeline."""
+    ws, role = _resolve_workspace_context(
+        workspace_slug=workspace_slug,
+        x_workspace_slug=x_workspace_slug,
+        x_workspace_id=x_workspace_id,
+        lake_active_workspace=lake_active_workspace,
+        current_user=current_user,
+        db=db,
+        require_write=False,
+    )
+    meta_map = pipeline_service.get_pipeline_metadata_map(ws.id, db)
+    meta = meta_map.get(dag_id)
+    return {
+        "dag_id": dag_id,
+        "color_hex": meta.color_hex if meta else pipeline_service.get_default_color_for_dag(dag_id),
+        "display_label": meta.display_label if meta and meta.display_label else dag_id.replace("_", " ").title(),
+        "is_visible_on_timeline": meta.is_visible_on_timeline if meta else True,
+        "palette": pipeline_service.DEFAULT_PALETTE,
+    }
+
+
+@router.patch("/{dag_id}/settings")
+async def update_pipeline_settings(
+    dag_id: str,
+    req: PipelineSettingsRequest,
+    workspace_slug: str | None = Query(None),
+    x_workspace_slug: str | None = Header(None, alias="X-Workspace-Slug"),
+    x_workspace_id: str | None = Header(None, alias="X-Workspace-Id"),
+    lake_active_workspace: str | None = Cookie(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update workspace-shared pipeline color and label metadata."""
+    ws, role = _resolve_workspace_context(
+        workspace_slug=workspace_slug,
+        x_workspace_slug=x_workspace_slug,
+        x_workspace_id=x_workspace_id,
+        lake_active_workspace=lake_active_workspace,
+        current_user=current_user,
+        db=db,
+        require_write=True,
+    )
+    return pipeline_service.upsert_pipeline_metadata(
+        workspace_id=ws.id,
+        dag_id=dag_id,
+        color_hex=req.color_hex,
+        display_label=req.display_label,
+        is_visible_on_timeline=req.is_visible_on_timeline,
+        user_id=current_user.id,
+        db=db,
     )
 
 

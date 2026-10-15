@@ -1,16 +1,23 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import logging
 import os
 import re
-from datetime import UTC, datetime
+import uuid
+import zoneinfo
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
+from croniter import croniter
 from fastapi import HTTPException
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 logger = logging.getLogger("lake.backend.pipelines")
 
@@ -21,6 +28,37 @@ AIRFLOW_ADMIN_PASSWORD = (
 )
 AIRFLOW_DAGS_DIR = os.getenv("AIRFLOW_DAGS_DIR", "/opt/airflow/dags")
 EXECUTION_MODE = os.getenv("EXECUTION_MODE", "docker")
+
+DEFAULT_PALETTE = [
+    "#10B981",  # Emerald
+    "#3B82F6",  # Blue
+    "#6366F1",  # Indigo
+    "#8B5CF6",  # Violet
+    "#D946EF",  # Fuchsia
+    "#EC4899",  # Pink
+    "#F43F5E",  # Rose
+    "#F59E0B",  # Amber
+    "#F97316",  # Orange
+    "#14B8A6",  # Teal
+    "#06B6D4",  # Cyan
+    "#84CC16",  # Lime
+]
+
+PRESET_MAP = {
+    "@hourly": "0 * * * *",
+    "@daily": "0 0 * * *",
+    "@midnight": "0 0 * * *",
+    "@weekly": "0 0 * * 0",
+    "@monthly": "0 0 1 * *",
+    "@yearly": "0 0 1 1 *",
+    "@annually": "0 0 1 1 *",
+}
+
+
+def get_default_color_for_dag(dag_id: str) -> str:
+    """Return a deterministic color from the master palette based on dag_id."""
+    h = int(hashlib.md5(dag_id.encode("utf-8")).hexdigest(), 16)
+    return DEFAULT_PALETTE[h % len(DEFAULT_PALETTE)]
 
 
 def get_airflow_server_url() -> str:
@@ -780,3 +818,261 @@ async def delete_scheduled_notebook(
         logger.warning("Could not delete DAG from Airflow API: %s", exc)
 
     return {"dag_id": clean_id, "status": "deleted"}
+
+
+def compute_projected_runs_for_day(
+    schedule_interval: str | None,
+    day_start: datetime,
+    day_end: datetime,
+    max_runs: int = 48,
+) -> list[dict[str, Any]]:
+    """Compute projected future or scheduled execution points for a cron expression within [day_start, day_end]."""
+    if not schedule_interval or schedule_interval.lower() in ("none", "null", "@once", ""):
+        return []
+
+    raw = schedule_interval.strip()
+    cron_expr = PRESET_MAP.get(raw, raw)
+    if not croniter.is_valid(cron_expr):
+        return []
+
+    projected: list[dict[str, Any]] = []
+    try:
+        base_time = day_start - timedelta(seconds=1)
+        iter_cron = croniter(cron_expr, base_time)
+        count = 0
+        while count < max_runs:
+            next_dt = iter_cron.get_next(datetime)
+            if next_dt > day_end:
+                break
+            projected.append(
+                {
+                    "type": "projected",
+                    "dag_run_id": f"projected__{next_dt.strftime('%Y%m%dT%H%M%SZ')}",
+                    "state": "scheduled",
+                    "scheduled_time": next_dt.isoformat(),
+                    "start_time": next_dt.isoformat(),
+                    "end_time": None,
+                    "duration_seconds": None,
+                }
+            )
+            count += 1
+    except Exception as exc:
+        logger.debug("Failed computing cron projected runs: %s", exc)
+
+    return projected
+
+
+def get_pipeline_metadata_map(
+    workspace_id: uuid.UUID | None, db: Session | None
+) -> dict[str, Any]:
+    """Retrieve color and display label metadata for a workspace's pipelines."""
+    if not workspace_id or not db:
+        return {}
+    try:
+        from models import PipelineMetadata
+
+        rows = (
+            db.query(PipelineMetadata)
+            .filter(PipelineMetadata.workspace_id == workspace_id)
+            .all()
+        )
+        return {row.dag_id: row for row in rows}
+    except Exception as exc:
+        logger.warning("Failed to query pipeline_metadata: %s", exc)
+        return {}
+
+
+def upsert_pipeline_metadata(
+    workspace_id: uuid.UUID,
+    dag_id: str,
+    color_hex: str | None = None,
+    display_label: str | None = None,
+    is_visible_on_timeline: bool | None = None,
+    user_id: uuid.UUID | None = None,
+    db: Session | None = None,
+) -> dict[str, Any]:
+    """Persist or update workspace-shared pipeline color and label metadata."""
+    if not db:
+        raise HTTPException(500, "Database session required")
+
+    from models import PipelineMetadata
+
+    row = (
+        db.query(PipelineMetadata)
+        .filter(
+            PipelineMetadata.workspace_id == workspace_id,
+            PipelineMetadata.dag_id == dag_id,
+        )
+        .first()
+    )
+    if not row:
+        row = PipelineMetadata(
+            workspace_id=workspace_id,
+            dag_id=dag_id,
+            color_hex=color_hex or get_default_color_for_dag(dag_id),
+            display_label=display_label or dag_id.replace("_", " ").title(),
+            is_visible_on_timeline=True if is_visible_on_timeline is None else is_visible_on_timeline,
+            updated_by=user_id,
+            updated_at=datetime.now(UTC),
+        )
+        db.add(row)
+    else:
+        if color_hex is not None:
+            row.color_hex = color_hex
+        if display_label is not None:
+            row.display_label = display_label
+        if is_visible_on_timeline is not None:
+            row.is_visible_on_timeline = is_visible_on_timeline
+        row.updated_by = user_id
+        row.updated_at = datetime.now(UTC)
+
+    db.commit()
+    db.refresh(row)
+    return {
+        "dag_id": row.dag_id,
+        "color_hex": row.color_hex,
+        "display_label": row.display_label,
+        "is_visible_on_timeline": row.is_visible_on_timeline,
+    }
+
+
+async def get_workspace_timeline(
+    workspace_slug: str,
+    workspace_id: uuid.UUID | None,
+    target_date_str: str | None = None,
+    tz_str: str = "UTC",
+    is_superadmin: bool = False,
+    db: Session | None = None,
+) -> dict[str, Any]:
+    """Calculate 24-hour visual schedule timeline merging actual runs and projected future runs."""
+    try:
+        user_tz = zoneinfo.ZoneInfo(tz_str)
+    except Exception:
+        user_tz = zoneinfo.ZoneInfo("UTC")
+
+    now_tz = datetime.now(user_tz)
+    if target_date_str:
+        try:
+            parsed_d = datetime.strptime(target_date_str, "%Y-%m-%d").date()
+        except Exception:
+            parsed_d = now_tz.date()
+    else:
+        parsed_d = now_tz.date()
+
+    day_start = datetime(parsed_d.year, parsed_d.month, parsed_d.day, 0, 0, 0, tzinfo=user_tz)
+    day_end = datetime(parsed_d.year, parsed_d.month, parsed_d.day, 23, 59, 59, 999999, tzinfo=user_tz)
+    day_start_utc = day_start.astimezone(UTC)
+    day_end_utc = day_end.astimezone(UTC)
+
+    is_today = parsed_d == now_tz.date()
+
+    # 1. Fetch pipelines and metadata
+    pipelines = await list_workspace_dags(workspace_slug, is_superadmin)
+    meta_map = get_pipeline_metadata_map(workspace_id, db)
+
+    api_base = get_airflow_api_base()
+    auth = get_airflow_auth()
+
+    timeline_pipelines: list[dict[str, Any]] = []
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        for p in pipelines:
+            dag_id = p["dag_id"]
+            meta = meta_map.get(dag_id)
+            color_hex = meta.color_hex if meta and meta.color_hex else get_default_color_for_dag(dag_id)
+            display_label = (
+                meta.display_label
+                if meta and meta.display_label
+                else p.get("description") or dag_id.replace("_", " ").title()
+            )
+            is_visible = meta.is_visible_on_timeline if meta else True
+
+            actual_runs: list[dict[str, Any]] = []
+            try:
+                url = f"{api_base}/dags/{sanitize_dag_id(dag_id)}/dagRuns"
+                resp = await client.get(
+                    url,
+                    params={
+                        "execution_date_gte": day_start_utc.isoformat(),
+                        "execution_date_lte": day_end_utc.isoformat(),
+                        "limit": 100,
+                    },
+                    auth=auth,
+                )
+                if resp.status_code == 200:
+                    runs_data = resp.json().get("dag_runs", [])
+                    for r in runs_data:
+                        start = r.get("start_date")
+                        end = r.get("end_date")
+                        state = r.get("state")
+                        duration = _calculate_duration(start, end, state)
+                        actual_runs.append(
+                            {
+                                "type": "actual",
+                                "dag_run_id": r.get("dag_run_id"),
+                                "state": state,
+                                "scheduled_time": r.get("execution_date"),
+                                "start_time": start or r.get("execution_date"),
+                                "end_time": end,
+                                "duration_seconds": duration,
+                                "conf": r.get("conf", {}),
+                            }
+                        )
+            except Exception as exc:
+                logger.debug("Failed fetching runs for timeline DAG %s: %s", dag_id, exc)
+
+            # 2. Compute projected runs if pipeline is active and has schedule
+            projected_runs: list[dict[str, Any]] = []
+            if not p.get("is_paused") and p.get("schedule_interval"):
+                raw_projected = compute_projected_runs_for_day(
+                    p["schedule_interval"], day_start, day_end
+                )
+                # Filter out projected runs that match an actual run or are in the past when viewing today
+                for proj in raw_projected:
+                    proj_dt = datetime.fromisoformat(proj["scheduled_time"])
+                    if is_today and proj_dt < now_tz:
+                        continue
+                    # Check if actual run exists within 60s
+                    already_ran = any(
+                        abs(
+                            (
+                                datetime.fromisoformat(
+                                    act["scheduled_time"].replace("Z", "+00:00")
+                                )
+                                - proj_dt.astimezone(UTC)
+                            ).total_seconds()
+                        )
+                        < 60
+                        for act in actual_runs
+                    )
+                    if not already_ran:
+                        projected_runs.append(proj)
+
+            combined_runs = sorted(
+                actual_runs + projected_runs,
+                key=lambda x: x.get("start_time") or x.get("scheduled_time") or "",
+            )
+
+            timeline_pipelines.append(
+                {
+                    "dag_id": dag_id,
+                    "display_label": display_label,
+                    "color_hex": color_hex,
+                    "is_visible_on_timeline": is_visible,
+                    "schedule_interval": p.get("schedule_interval"),
+                    "is_paused": p.get("is_paused", False),
+                    "runs": combined_runs,
+                }
+            )
+
+    return {
+        "date": parsed_d.strftime("%Y-%m-%d"),
+        "timezone": str(user_tz),
+        "window_start": day_start.isoformat(),
+        "window_end": day_end.isoformat(),
+        "current_time": now_tz.isoformat(),
+        "is_today": is_today,
+        "palette": DEFAULT_PALETTE,
+        "pipelines": timeline_pipelines,
+    }
+

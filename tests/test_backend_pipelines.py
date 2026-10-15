@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -496,3 +497,215 @@ def test_pipelines_airflow_unreachable_error_handling():
             assert "Airflow service unavailable" in res.text
     finally:
         backend_main.app.dependency_overrides.clear()
+
+
+# ── Timeline & Pipeline Color Settings Tests ─────────────────────────────────
+
+
+def test_get_default_color_for_dag():
+    color1 = pipeline_service.get_default_color_for_dag("ws_analytics_etl")
+    color2 = pipeline_service.get_default_color_for_dag("ws_analytics_etl")
+    assert color1 == color2
+    assert color1 in pipeline_service.DEFAULT_PALETTE
+    assert color1.startswith("#")
+
+
+def test_compute_projected_runs_for_day():
+
+    start = datetime(2026, 10, 14, 0, 0, 0, tzinfo=UTC)
+    end = datetime(2026, 10, 14, 23, 59, 59, tzinfo=UTC)
+
+    # 1. Hourly cron: 0 * * * * should produce 24 projected runs
+    runs_hourly = pipeline_service.compute_projected_runs_for_day("0 * * * *", start, end)
+    assert len(runs_hourly) == 24
+    assert runs_hourly[0]["type"] == "projected"
+    assert "scheduled_time" in runs_hourly[0]
+
+    # 2. Daily cron: @daily should produce 1 projected run at midnight
+    runs_daily = pipeline_service.compute_projected_runs_for_day("@daily", start, end)
+    assert len(runs_daily) == 1
+    assert "00:00:00" in runs_daily[0]["scheduled_time"]
+
+    # 3. Non-standard or none interval produces empty list
+    assert pipeline_service.compute_projected_runs_for_day(None, start, end) == []
+    assert pipeline_service.compute_projected_runs_for_day("invalid-cron", start, end) == []
+
+
+def test_pipeline_metadata_db_crud():
+    from models import PipelineMetadata
+
+    mock_db = MagicMock()
+    ws_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+
+    mock_query = mock_db.query.return_value
+    mock_query.filter.return_value.first.return_value = None
+
+    created = pipeline_service.upsert_pipeline_metadata(
+        workspace_id=ws_id,
+        dag_id="dag_1",
+        color_hex="#10B981",
+        display_label="Customer Ingestion",
+        is_visible_on_timeline=True,
+        user_id=user_id,
+        db=mock_db,
+    )
+    assert created["color_hex"] == "#10B981"
+    assert created["display_label"] == "Customer Ingestion"
+    assert mock_db.add.called
+    assert mock_db.commit.called
+
+    existing_meta = PipelineMetadata(
+        id=uuid.uuid4(),
+        workspace_id=ws_id,
+        dag_id="dag_1",
+        color_hex="#10B981",
+        display_label="Customer Ingestion",
+        is_visible_on_timeline=True,
+    )
+    mock_query.filter.return_value.all.return_value = [existing_meta]
+    meta_map = pipeline_service.get_pipeline_metadata_map(ws_id, mock_db)
+    assert "dag_1" in meta_map
+    assert meta_map["dag_1"].color_hex == "#10B981"
+
+
+def test_pipeline_timeline_rest_endpoint():
+    user, workspace, member, token = _generate_test_user_and_token(role="viewer")
+    mock_db = MagicMock()
+
+    backend_main.app.dependency_overrides[database.get_db] = lambda: mock_db
+    backend_main.app.dependency_overrides[auth.get_current_user] = lambda: user
+
+    try:
+        with (
+            patch(
+                "pipelines_router.get_pipeline_workspace_and_role",
+                return_value=(workspace, "viewer"),
+            ),
+            patch.object(
+                pipeline_service,
+                "get_workspace_timeline",
+                new_callable=AsyncMock,
+                return_value={
+                    "date": "2026-10-14",
+                    "timezone": "UTC",
+                    "window_start": "2026-10-14T00:00:00+00:00",
+                    "window_end": "2026-10-14T23:59:59.999999+00:00",
+                    "current_time": "2026-10-14T12:00:00+00:00",
+                    "is_today": True,
+                    "palette": pipeline_service.DEFAULT_PALETTE,
+                    "pipelines": [
+                        {
+                            "dag_id": "ws_analytics_daily_etl",
+                            "display_label": "Daily Analytics ETL",
+                            "color_hex": "#3B82F6",
+                            "is_visible_on_timeline": True,
+                            "schedule_interval": "@daily",
+                            "is_paused": False,
+                            "runs": [
+                                {
+                                    "type": "actual",
+                                    "dag_run_id": "manual__1",
+                                    "state": "success",
+                                    "scheduled_time": "2026-10-14T02:00:00Z",
+                                    "duration_seconds": 95.0,
+                                }
+                            ],
+                        }
+                    ],
+                },
+            ),
+        ):
+            headers = {"Authorization": f"Bearer {token}"}
+            res = client.get("/api/v1/pipelines/timeline?date=2026-10-14&tz=UTC", headers=headers)
+            assert res.status_code == 200
+            data = res.json()
+            assert data["date"] == "2026-10-14"
+            assert data["timezone"] == "UTC"
+            assert len(data["pipelines"]) == 1
+            assert data["pipelines"][0]["color_hex"] == "#3B82F6"
+            assert len(data["pipelines"][0]["runs"]) == 1
+    finally:
+        backend_main.app.dependency_overrides.clear()
+
+
+def test_pipeline_settings_get_and_patch_endpoints():
+    user_editor, workspace, member, token_editor = _generate_test_user_and_token(role="editor")
+    mock_db = MagicMock()
+
+    backend_main.app.dependency_overrides[database.get_db] = lambda: mock_db
+    backend_main.app.dependency_overrides[auth.get_current_user] = lambda: user_editor
+
+    try:
+        with (
+            patch(
+                "pipelines_router.get_pipeline_workspace_and_role",
+                return_value=(workspace, "editor"),
+            ),
+            patch.object(
+                pipeline_service,
+                "get_pipeline_metadata_map",
+                return_value={},
+            ),
+            patch.object(
+                pipeline_service,
+                "upsert_pipeline_metadata",
+                return_value={
+                    "workspace_id": str(workspace.id),
+                    "dag_id": "ws_analytics_daily_etl",
+                    "color_hex": "#10B981",
+                    "display_label": "Renamed ETL",
+                    "is_visible_on_timeline": True,
+                    "updated_at": "2026-10-14T12:00:00Z",
+                },
+            ),
+        ):
+            headers = {"Authorization": f"Bearer {token_editor}"}
+
+            # 1. GET settings (falls back to default color)
+            r_get = client.get("/api/v1/pipelines/ws_analytics_daily_etl/settings", headers=headers)
+            assert r_get.status_code == 200
+            data_get = r_get.json()
+            assert data_get["dag_id"] == "ws_analytics_daily_etl"
+            assert "color_hex" in data_get
+            assert "palette" in data_get
+
+            # 2. PATCH settings as editor
+            r_patch = client.patch(
+                "/api/v1/pipelines/ws_analytics_daily_etl/settings",
+                json={"color_hex": "#10B981", "display_label": "Renamed ETL"},
+                headers=headers,
+            )
+            assert r_patch.status_code == 200
+            data_patch = r_patch.json()
+            assert data_patch["color_hex"] == "#10B981"
+            assert data_patch["display_label"] == "Renamed ETL"
+    finally:
+        backend_main.app.dependency_overrides.clear()
+
+
+def test_pipeline_settings_patch_viewer_forbidden():
+    user_viewer, workspace, member, token_viewer = _generate_test_user_and_token(role="viewer")
+    mock_db = MagicMock()
+
+    backend_main.app.dependency_overrides[database.get_db] = lambda: mock_db
+    backend_main.app.dependency_overrides[auth.get_current_user] = lambda: user_viewer
+
+    try:
+        with patch(
+            "pipelines_router.get_pipeline_workspace_and_role",
+            side_effect=backend_main.HTTPException(
+                403, "Workspace viewer role is read-only. Cannot modify or trigger pipelines."
+            ),
+        ):
+            headers = {"Authorization": f"Bearer {token_viewer}"}
+            r_patch = client.patch(
+                "/api/v1/pipelines/ws_analytics_daily_etl/settings",
+                json={"color_hex": "#EF4444"},
+                headers=headers,
+            )
+            assert r_patch.status_code == 403
+            assert "Workspace viewer role is read-only" in r_patch.text
+    finally:
+        backend_main.app.dependency_overrides.clear()
+

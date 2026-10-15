@@ -266,3 +266,102 @@ async def test_ui_pipeline_proxy_runs_tasks_logs():
         )
         assert r_logs.status_code == 200
         assert "Sample log line" in r_logs.json()["content"]
+
+
+def test_get_pipelines_page_renders_timeline_container_and_controls():
+    token, mock_workspaces = _create_auth_cookie(role="member")
+
+    with patch.object(main, "_fetch_workspaces", return_value=mock_workspaces):
+        response = client.get(
+            "/pipelines",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
+        )
+        assert response.status_code == 200
+
+        # Verify 24-hour visual schedule timeline elements
+        assert 'id="timeline-banner"' in response.text
+        assert 'id="timeline-date-nav"' in response.text
+        assert 'id="btn-timeline-today"' in response.text
+        assert 'id="timeline-datepicker"' in response.text
+        assert 'id="timeline-current-date-label"' in response.text
+        assert 'id="timeline-zoom-controls"' in response.text
+        assert 'id="btn-zoom-24h"' in response.text
+        assert 'id="btn-zoom-12h"' in response.text
+        assert 'id="btn-zoom-6h"' in response.text
+        assert 'id="btn-zoom-1h"' in response.text
+        assert 'id="timeline-viewport"' in response.text
+        assert 'id="timeline-canvas"' in response.text
+        assert 'id="timeline-ruler"' in response.text
+        assert 'id="timeline-grid-overlay"' in response.text
+        assert 'id="timeline-swimlanes"' in response.text
+        assert 'id="color-picker-popover"' in response.text
+
+
+@pytest.mark.anyio
+async def test_ui_timeline_proxy():
+    token, mock_workspaces = _create_auth_cookie(role="member")
+
+    mock_resp = httpx.Response(
+        200,
+        json={
+            "date": "2026-10-14",
+            "timezone": "UTC",
+            "window_start": "2026-10-14T00:00:00+00:00",
+            "window_end": "2026-10-14T23:59:59.999999+00:00",
+            "pipelines": [],
+        },
+        request=httpx.Request("GET", "http://backend:8000/api/v1/pipelines/timeline"),
+    )
+
+    with (
+        patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
+        patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp) as mock_get,
+    ):
+        res = client.get(
+            "/api/pipelines/timeline?date=2026-10-14&tz=America/New_York",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["date"] == "2026-10-14"
+        assert mock_get.called
+
+
+@pytest.mark.anyio
+async def test_ui_pipeline_settings_proxy():
+    token, mock_workspaces = _create_auth_cookie(role="editor")
+
+    mock_get_resp = httpx.Response(
+        200,
+        json={"dag_id": "ws_analytics_etl", "color_hex": "#3B82F6", "palette": ["#3B82F6"]},
+        request=httpx.Request("GET", "http://backend:8000/api/v1/pipelines/ws_analytics_etl/settings"),
+    )
+    mock_patch_resp = httpx.Response(
+        200,
+        json={"dag_id": "ws_analytics_etl", "color_hex": "#10B981"},
+        request=httpx.Request("PATCH", "http://backend:8000/api/v1/pipelines/ws_analytics_etl/settings"),
+    )
+
+    with (
+        patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
+        patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_get_resp) as mock_get,
+        patch("httpx.AsyncClient.patch", new_callable=AsyncMock, return_value=mock_patch_resp) as mock_patch,
+    ):
+        cookies = {"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"}
+
+        # 1. GET settings
+        r_get = client.get("/api/pipelines/ws_analytics_etl/settings", cookies=cookies)
+        assert r_get.status_code == 200
+        assert r_get.json()["color_hex"] == "#3B82F6"
+        assert mock_get.called
+
+        # 2. PATCH settings
+        r_patch = client.patch(
+            "/api/pipelines/ws_analytics_etl/settings",
+            json={"color_hex": "#10B981"},
+            cookies=cookies,
+        )
+        assert r_patch.status_code == 200
+        assert r_patch.json()["color_hex"] == "#10B981"
+        assert mock_patch.called
+

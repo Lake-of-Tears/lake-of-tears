@@ -1806,6 +1806,89 @@ async def ui_delete_schedule_notebook(request: Request, dag_id: str):
         return JSONResponse({"error": str(exc)}, status_code=502)
 
 
+@app.get("/api/pipelines/timeline")
+@app.get("/api/v1/pipelines/timeline")
+async def ui_get_pipelines_timeline(
+    request: Request,
+    date: str | None = None,
+    tz: str = "UTC",
+):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params = {"tz": tz}
+    if date:
+        params["date"] = date
+    if ws and ws.get("slug"):
+        params["workspace_slug"] = ws["slug"]
+    if request.query_params.get("workspace_slug"):
+        params["workspace_slug"] = request.query_params["workspace_slug"]
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{BACKEND_URL}/api/v1/pipelines/timeline",
+                headers=headers,
+                params=params,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        logger.error("Failed to proxy pipelines timeline to backend: %s", exc)
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@app.get("/api/pipelines/{dag_id}/settings")
+@app.get("/api/v1/pipelines/{dag_id}/settings")
+async def ui_get_pipeline_settings(request: Request, dag_id: str):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params = {}
+    if ws and ws.get("slug"):
+        params["workspace_slug"] = ws["slug"]
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{BACKEND_URL}/api/v1/pipelines/{dag_id}/settings",
+                headers=headers,
+                params=params,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@app.patch("/api/pipelines/{dag_id}/settings")
+@app.patch("/api/v1/pipelines/{dag_id}/settings")
+async def ui_patch_pipeline_settings(request: Request, dag_id: str):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    ws = getattr(request.state, "workspace", None)
+    params = {}
+    if ws and ws.get("slug"):
+        params["workspace_slug"] = ws["slug"]
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.patch(
+                f"{BACKEND_URL}/api/v1/pipelines/{dag_id}/settings",
+                headers=headers,
+                params=params,
+                json=body,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
 @app.get("/api/pipelines/{dag_id}")
 @app.get("/api/v1/pipelines/{dag_id}")
 async def ui_get_pipeline(request: Request, dag_id: str):

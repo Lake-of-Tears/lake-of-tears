@@ -81,8 +81,9 @@ app = FastAPI(title="Lake of Tears Auth API", docs_url=None, redoc_url=None)
 
 @app.on_event("startup")
 def on_startup():
-    from database import SessionLocal
+    from database import Base, SessionLocal, engine
 
+    Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
         _backfill_default_catalogs(db)
