@@ -1,5 +1,6 @@
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from database import Base
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
@@ -258,13 +259,14 @@ class WorkspaceDashboard(Base):
         nullable=False,
         index=True,
     )
-    superset_dashboard_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    embedded_uuid: Mapped[str] = mapped_column(String(64), nullable=False)
+    superset_dashboard_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    embedded_uuid: Mapped[str | None] = mapped_column(String(64), nullable=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     charts_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     is_published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    layout_config: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
@@ -279,3 +281,4 @@ class WorkspaceDashboard(Base):
 
     workspace: Mapped["Workspace"] = relationship(foreign_keys=[workspace_id])
     creator: Mapped["User | None"] = relationship(foreign_keys=[created_by])
+

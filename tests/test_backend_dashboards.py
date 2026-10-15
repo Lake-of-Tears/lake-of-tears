@@ -76,20 +76,18 @@ def test_get_dashboard_stats():
         WorkspaceDashboard(
             id=uuid.uuid4(),
             workspace_id=workspace.id,
-            superset_dashboard_id=1,
-            embedded_uuid="uuid-1",
             title="Sales Overview",
             slug="sales-overview",
+            layout_config=[{"id": "w1"}, {"id": "w2"}, {"id": "w3"}, {"id": "w4"}],
             charts_count=4,
             is_published=True,
         ),
         WorkspaceDashboard(
             id=uuid.uuid4(),
             workspace_id=workspace.id,
-            superset_dashboard_id=2,
-            embedded_uuid="uuid-2",
             title="Draft KPIs",
             slug="draft-kpis",
+            layout_config=[{"id": "w5"}, {"id": "w6"}],
             charts_count=2,
             is_published=False,
         ),
@@ -101,7 +99,7 @@ def test_get_dashboard_stats():
         patch(
             "dashboards_router.get_dashboard_workspace_and_role", return_value=(workspace, "viewer")
         ),
-        patch.object(superset_service.superset_gateway, "is_healthy", return_value=True),
+        patch.object(superset_service.headless_superset, "is_healthy", return_value=True),
     ):
         resp = client.get(
             "/api/v1/dashboards/stats",
@@ -126,12 +124,11 @@ def test_list_dashboards():
     mock_dash = WorkspaceDashboard(
         id=dash_id,
         workspace_id=workspace.id,
-        superset_dashboard_id=10,
-        embedded_uuid="embed-uuid-10",
         title="Revenue Trends",
         slug="revenue-trends",
         description="Monthly revenue chart",
-        charts_count=5,
+        layout_config=[{"id": "w1", "type": "line"}],
+        charts_count=1,
         is_published=True,
         created_by=user.id,
     )
@@ -152,11 +149,11 @@ def test_list_dashboards():
         assert len(dashboards) == 1
         assert dashboards[0]["title"] == "Revenue Trends"
         assert dashboards[0]["slug"] == "revenue-trends"
-        assert dashboards[0]["charts_count"] == 5
-        assert dashboards[0]["embedded_uuid"] == "embed-uuid-10"
+        assert dashboards[0]["charts_count"] == 1
+        assert len(dashboards[0]["layout_config"]) == 1
 
 
-def test_create_dashboard_as_editor():
+def test_create_dashboard_with_executive_template():
     user, workspace, member, token = _generate_test_user_and_token(role="editor")
     mock_db = MagicMock()
 
@@ -166,18 +163,14 @@ def test_create_dashboard_as_editor():
     # Slug conflict check: None
     mock_db.query.return_value.filter.return_value.first.return_value = None
 
-    with (
-        patch(
-            "dashboards_router.get_dashboard_workspace_and_role", return_value=(workspace, "editor")
-        ),
-        patch.object(
-            superset_service.superset_gateway, "create_dashboard", return_value=(42, "embed-42")
-        ),
+    with patch(
+        "dashboards_router.get_dashboard_workspace_and_role", return_value=(workspace, "editor")
     ):
         payload = {
-            "title": "Marketing Funnel",
-            "description": "Weekly lead attribution",
+            "title": "Executive KPI Overview",
+            "description": "Weekly executive summary",
             "is_published": True,
+            "template": "executive",
         }
         resp = client.post(
             "/api/v1/dashboards",
@@ -186,10 +179,10 @@ def test_create_dashboard_as_editor():
         )
         assert resp.status_code == 201
         data = resp.json()
-        assert data["title"] == "Marketing Funnel"
-        assert data["slug"] == "marketing-funnel"
-        assert data["superset_dashboard_id"] == 42
-        assert data["embedded_uuid"] == "embed-42"
+        assert data["title"] == "Executive KPI Overview"
+        assert data["slug"] == "executive-kpi-overview"
+        assert data["charts_count"] == 5
+        assert len(data["layout_config"]) == 5
         assert mock_db.add.called
         assert mock_db.commit.called
 
@@ -201,7 +194,6 @@ def test_create_dashboard_denied_for_viewer():
     backend_main.app.dependency_overrides[database.get_db] = lambda: mock_db
     backend_main.app.dependency_overrides[auth.get_current_user] = lambda: user
 
-    # Simulating auth check raising 403 for viewer
     from fastapi import HTTPException
 
     with patch(
@@ -221,81 +213,70 @@ def test_create_dashboard_denied_for_viewer():
         assert "viewer role is read-only" in resp.json()["detail"]
 
 
-def test_link_existing_superset_dashboard():
+def test_widget_crud_lifecycle():
     user, workspace, member, token = _generate_test_user_and_token(role="editor")
     mock_db = MagicMock()
 
     backend_main.app.dependency_overrides[database.get_db] = lambda: mock_db
     backend_main.app.dependency_overrides[auth.get_current_user] = lambda: user
 
-    # 1. Existing link check -> None (not linked)
-    # 2. Slug check -> None (slug free)
-    mock_db.query.return_value.filter.return_value.first.side_effect = [None, None]
-
-    mock_superset_info = {
-        "dashboard_title": "Imported Logistics",
-        "position_json": '{"CHART-1": {"type": "CHART"}, "CHART-2": {"type": "CHART"}}',
-    }
-
-    with (
-        patch(
-            "dashboards_router.get_dashboard_workspace_and_role", return_value=(workspace, "editor")
-        ),
-        patch.object(
-            superset_service.superset_gateway, "get_dashboard", return_value=mock_superset_info
-        ),
-        patch.object(
-            superset_service.superset_gateway,
-            "get_or_create_embedded_config",
-            return_value="embed-logistics",
-        ),
-    ):
-        payload = {
-            "superset_dashboard_id": 99,
-        }
-        resp = client.post(
-            "/api/v1/dashboards/link",
-            headers={"Authorization": f"Bearer {token}", "X-Workspace-Slug": workspace.slug},
-            json=payload,
-        )
-        assert resp.status_code == 201
-        data = resp.json()
-        assert data["title"] == "Imported Logistics"
-        assert data["superset_dashboard_id"] == 99
-        assert data["embedded_uuid"] == "embed-logistics"
-        assert data["charts_count"] == 2
-
-
-def test_link_duplicate_dashboard_rejected():
-    user, workspace, member, token = _generate_test_user_and_token(role="editor")
-    mock_db = MagicMock()
-
-    backend_main.app.dependency_overrides[database.get_db] = lambda: mock_db
-    backend_main.app.dependency_overrides[auth.get_current_user] = lambda: user
-
-    existing_dash = WorkspaceDashboard(
-        id=uuid.uuid4(),
+    dash_id = uuid.uuid4()
+    mock_dash = WorkspaceDashboard(
+        id=dash_id,
         workspace_id=workspace.id,
-        superset_dashboard_id=99,
-        embedded_uuid="existing-uuid",
-        title="Already Linked",
-        slug="already-linked",
+        title="Custom Dashboard",
+        slug="custom-dashboard",
+        layout_config=[],
+        charts_count=0,
+        is_published=True,
     )
-    mock_db.query.return_value.filter.return_value.first.return_value = existing_dash
+    mock_db.query.return_value.filter.return_value.first.return_value = mock_dash
 
     with patch(
         "dashboards_router.get_dashboard_workspace_and_role", return_value=(workspace, "editor")
     ):
+        # 1. Add Widget
+        add_payload = {
+            "id": "w_test_bar",
+            "title": "Throughput Bar Chart",
+            "type": "bar",
+            "dataset_id": "ds_datalake_storage",
+            "metric": "bytes",
+            "width": "half",
+        }
         resp = client.post(
-            "/api/v1/dashboards/link",
+            f"/api/v1/dashboards/{dash_id}/widgets",
             headers={"Authorization": f"Bearer {token}", "X-Workspace-Slug": workspace.slug},
-            json={"superset_dashboard_id": 99},
+            json=add_payload,
         )
-        assert resp.status_code == 400
-        assert "already linked" in resp.json()["detail"]
+        assert resp.status_code == 201
+        data = resp.json()
+        assert len(data["layout_config"]) == 1
+        assert data["layout_config"][0]["id"] == "w_test_bar"
+
+        # 2. Update Widget
+        update_payload = {"title": "Updated Bar Chart", "width": "full"}
+        resp = client.patch(
+            f"/api/v1/dashboards/{dash_id}/widgets/w_test_bar",
+            headers={"Authorization": f"Bearer {token}", "X-Workspace-Slug": workspace.slug},
+            json=update_payload,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["layout_config"][0]["title"] == "Updated Bar Chart"
+        assert data["layout_config"][0]["width"] == "full"
+
+        # 3. Delete Widget
+        resp = client.delete(
+            f"/api/v1/dashboards/{dash_id}/widgets/w_test_bar",
+            headers={"Authorization": f"Bearer {token}", "X-Workspace-Slug": workspace.slug},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["layout_config"]) == 0
 
 
-def test_get_dashboard_guest_token():
+def test_get_widget_data_series():
     user, workspace, member, token = _generate_test_user_and_token(role="viewer")
     mock_db = MagicMock()
 
@@ -306,38 +287,37 @@ def test_get_dashboard_guest_token():
     mock_dash = WorkspaceDashboard(
         id=dash_id,
         workspace_id=workspace.id,
-        superset_dashboard_id=12,
-        embedded_uuid="uuid-guest-12",
         title="Live Traffic",
         slug="live-traffic",
-        charts_count=3,
+        layout_config=[
+            {
+                "id": "w_kpi_1",
+                "title": "Active Objects",
+                "type": "kpi",
+                "metric": "total_rows",
+            }
+        ],
+        charts_count=1,
         is_published=True,
     )
-
     mock_db.query.return_value.filter.return_value.first.return_value = mock_dash
 
-    with (
-        patch(
-            "dashboards_router.get_dashboard_workspace_and_role", return_value=(workspace, "viewer")
-        ),
-        patch.object(
-            superset_service.superset_gateway,
-            "mint_guest_token",
-            return_value="signed-guest-token-xyz",
-        ),
+    with patch(
+        "dashboards_router.get_dashboard_workspace_and_role", return_value=(workspace, "viewer")
     ):
         resp = client.get(
-            f"/api/v1/dashboards/{dash_id}/guest-token",
+            f"/api/v1/dashboards/{dash_id}/widgets/w_kpi_1/data",
             headers={"Authorization": f"Bearer {token}", "X-Workspace-Slug": workspace.slug},
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["token"] == "signed-guest-token-xyz"
-        assert data["embedded_uuid"] == "uuid-guest-12"
-        assert data["superset_dashboard_id"] == 12
+        assert data["widget_id"] == "w_kpi_1"
+        assert data["type"] == "kpi"
+        assert "value" in data["data"]
+        assert "sparkline" in data["data"]
 
 
-def test_delete_dashboard_with_purge_superset():
+def test_delete_dashboard():
     user, workspace, member, token = _generate_test_user_and_token(role="admin")
     mock_db = MagicMock()
 
@@ -348,29 +328,40 @@ def test_delete_dashboard_with_purge_superset():
     mock_dash = WorkspaceDashboard(
         id=dash_id,
         workspace_id=workspace.id,
-        superset_dashboard_id=55,
-        embedded_uuid="embed-55",
-        title="Old Quarterly",
-        slug="old-quarterly",
+        title="Old Dashboard",
+        slug="old-dashboard",
     )
-
     mock_db.query.return_value.filter.return_value.first.return_value = mock_dash
 
-    with (
-        patch(
-            "dashboards_router.get_dashboard_workspace_and_role", return_value=(workspace, "admin")
-        ),
-        patch.object(
-            superset_service.superset_gateway, "delete_dashboard", return_value=True
-        ) as mock_delete_superset,
+    with patch(
+        "dashboards_router.get_dashboard_workspace_and_role", return_value=(workspace, "admin")
     ):
         resp = client.delete(
-            f"/api/v1/dashboards/{dash_id}?purge_superset=true",
+            f"/api/v1/dashboards/{dash_id}",
             headers={"Authorization": f"Bearer {token}", "X-Workspace-Slug": workspace.slug},
         )
         assert resp.status_code == 200
         data = resp.json()
         assert data["ok"] is True
-        assert data["purged_from_superset"] is True
-        assert mock_delete_superset.called
         assert mock_db.delete.called
+
+
+def test_list_datasets():
+    user, workspace, member, token = _generate_test_user_and_token(role="viewer")
+    mock_db = MagicMock()
+
+    backend_main.app.dependency_overrides[database.get_db] = lambda: mock_db
+    backend_main.app.dependency_overrides[auth.get_current_user] = lambda: user
+
+    with patch(
+        "dashboards_router.get_dashboard_workspace_and_role", return_value=(workspace, "viewer")
+    ):
+        resp = client.get(
+            "/api/v1/dashboards/datasets",
+            headers={"Authorization": f"Bearer {token}", "X-Workspace-Slug": workspace.slug},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data, list)
+        assert len(data) >= 1
+        assert "name" in data[0]

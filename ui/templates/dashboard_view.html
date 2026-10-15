@@ -3,17 +3,10 @@
 {% block content_class %}p-0 h-full overflow-hidden flex flex-col{% endblock %}
 
 {% block head %}
-<!-- Official Apache Superset Embedded SDK -->
-<script src="https://unpkg.com/@superset-ui/embedded-sdk@0.1.0-alpha.11/bundle/index.js"></script>
+<!-- Apache ECharts for 100% Native Visual Charts -->
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
 
 <style>
-  #dashboard-mount-point iframe {
-    width: 100% !important;
-    height: 100% !important;
-    border: none !important;
-    display: block;
-    background-color: transparent;
-  }
   .fullscreen-mode {
     position: fixed !important;
     inset: 0 !important;
@@ -22,11 +15,22 @@
     height: 100vh !important;
     background: var(--c-content-bg, #111111);
   }
+  .echarts-tooltip-custom {
+    background: #18181b !important;
+    border: 1px solid #27272a !important;
+    border-radius: 8px !important;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5) !important;
+    color: #e4e4e7 !important;
+    font-size: 11px !important;
+  }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="h-full flex flex-col flex-1 overflow-hidden" id="dashboard-view-container">
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="fixed top-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
 
   <!-- Top Action Toolbar -->
   <header class="px-5 py-3 border-b border-white/[0.08] bg-black/20 flex flex-wrap items-center justify-between gap-3 shrink-0">
@@ -42,15 +46,39 @@
 
       <span class="text-gray-600">/</span>
 
-      <h1 class="text-sm font-semibold text-gray-100 flex items-center gap-2" id="dash-title">
-        <span class="inline-block w-24 h-4 bg-gray-800 rounded animate-pulse"></span>
-      </h1>
+      <div class="flex items-center gap-2">
+        <h1 class="text-sm font-semibold text-gray-100 flex items-center gap-2" id="dash-title">
+          <span class="inline-block w-28 h-4 bg-gray-800 rounded animate-pulse"></span>
+        </h1>
+        <button id="btn-edit-title" onclick="openTitleEditModal()" class="hidden text-gray-500 hover:text-gray-300 p-0.5" title="Rename Dashboard">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125"/></svg>
+        </button>
+      </div>
 
       <span id="dash-pub-pill" class="hidden text-[10px] font-medium px-2 py-0.5 rounded"></span>
+      <span id="edit-mode-pill" class="hidden text-[10px] font-medium px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
+        Editing Mode
+      </span>
     </div>
 
-    <!-- Right: Viewer Controls -->
+    <!-- Right: Viewer & Editor Controls -->
     <div class="flex items-center gap-2">
+      <!-- Time Range Selector -->
+      <div class="flex items-center bg-gray-900 border border-gray-800 rounded p-0.5 text-xs">
+        <button onclick="setTimeRange('all')" id="timerange-all" class="px-2 py-0.5 rounded text-[11px] font-medium bg-white/10 text-white">All</button>
+        <button onclick="setTimeRange('30d')" id="timerange-30d" class="px-2 py-0.5 rounded text-[11px] font-medium text-gray-400 hover:text-white">30d</button>
+        <button onclick="setTimeRange('7d')" id="timerange-7d" class="px-2 py-0.5 rounded text-[11px] font-medium text-gray-400 hover:text-white">7d</button>
+        <button onclick="setTimeRange('24h')" id="timerange-24h" class="px-2 py-0.5 rounded text-[11px] font-medium text-gray-400 hover:text-white">24h</button>
+      </div>
+
+      <!-- Reload / Refresh Dashboard Data -->
+      <button onclick="refreshDashboard()" id="btn-refresh" class="btn-ghost text-xs py-1.5 px-2.5 flex items-center gap-1.5" title="Refresh all widgets">
+        <svg id="refresh-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        <span class="hidden sm:inline">Refresh</span>
+      </button>
+
       <!-- Fullscreen Toggle -->
       <button onclick="toggleFullscreen()" id="btn-fullscreen" class="btn-ghost text-xs py-1.5 px-2.5 flex items-center gap-1.5" title="Toggle Fullscreen">
         <svg id="fullscreen-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -59,34 +87,40 @@
         <span class="hidden sm:inline" id="fullscreen-label">Fullscreen</span>
       </button>
 
-      <!-- Reload / Refresh Dashboard Data -->
-      <button onclick="refreshDashboard()" id="btn-refresh" class="btn-ghost text-xs py-1.5 px-2.5 flex items-center gap-1.5" title="Re-fetch and reload dashboard">
-        <svg id="refresh-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-        </svg>
-        <span class="hidden sm:inline">Refresh</span>
-      </button>
-
       {% if my_role != 'viewer' %}
-      <!-- Open in Superset Studio for authoring/layout editing -->
-      <a id="btn-edit-studio" href="#" target="_blank" rel="noopener" class="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5" title="Launch Superset layout designer in a new tab">
+      <!-- Edit Mode Action Buttons -->
+      <div id="edit-actions-container" class="hidden flex items-center gap-2">
+        <button onclick="openAddWidgetModal()" class="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+          </svg>
+          <span>Add Widget</span>
+        </button>
+
+        <button onclick="togglePublishStatus()" id="btn-publish-toggle" class="btn-ghost text-xs py-1.5 px-2.5 flex items-center gap-1.5 text-gray-300">
+          <span>Toggle Publish</span>
+        </button>
+      </div>
+
+      <!-- Mode Toggle Button -->
+      <button onclick="toggleEditMode()" id="btn-toggle-edit" class="btn-ghost text-xs py-1.5 px-3 flex items-center gap-1.5 text-blue-400 hover:text-blue-300">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10"/>
         </svg>
-        <span>Edit in Superset</span>
-      </a>
+        <span id="edit-toggle-label">Edit Dashboard</span>
+      </button>
       {% endif %}
     </div>
 
   </header>
 
-  <!-- Embedded Dashboard Mount Point Viewport -->
-  <main class="flex-1 w-full h-full relative overflow-hidden bg-black/10" id="viewer-viewport">
+  <!-- Dashboard Canvas Viewport -->
+  <main class="flex-1 w-full h-full relative overflow-y-auto bg-black/10 p-5 lg:p-6" id="viewer-viewport">
     
     <!-- Loading Spinner & State -->
     <div id="loader-overlay" class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/40 backdrop-blur-[2px]">
       <div class="w-9 h-9 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mb-3"></div>
-      <p class="text-xs text-gray-300 font-medium">Authorizing guest token & mounting Superset dashboard...</p>
+      <p class="text-xs text-gray-300 font-medium">Loading dashboard and widget metrics...</p>
     </div>
 
     <!-- Error State Container (hidden by default) -->
@@ -97,28 +131,183 @@
         </svg>
       </div>
       <h3 class="text-sm font-semibold text-gray-200" id="error-msg">Failed to load dashboard</h3>
-      <p class="text-xs text-gray-400 max-w-md mt-1 mb-4" id="error-desc">Ensure Superset is running and guest tokens are enabled.</p>
+      <p class="text-xs text-gray-400 max-w-md mt-1 mb-4" id="error-desc">Ensure the dashboard exists and you have access.</p>
       <button onclick="refreshDashboard()" class="btn-primary text-xs py-1.5 px-3">Try Again</button>
     </div>
 
-    <!-- Mount Point for SDK -->
-    <div id="dashboard-mount-point" class="w-full h-full relative"></div>
+    <!-- Empty Canvas State (when no widgets) -->
+    <div id="empty-canvas" class="hidden py-24 flex flex-col items-center justify-center text-center">
+      <div class="w-14 h-14 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center mb-4 text-blue-400">
+        <svg class="w-7 h-7" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5M9 11.25v1.5M12 9v3.75m3-6v6"/>
+        </svg>
+      </div>
+      <h3 class="text-sm font-semibold text-gray-200">No widgets on this dashboard</h3>
+      <p class="text-xs text-gray-400 max-w-sm mt-1 mb-5">Click "Add Widget" to add visual charts, KPI metric cards, or data tables.</p>
+      {% if my_role != 'viewer' %}
+      <button onclick="openAddWidgetModal()" class="btn-primary text-xs py-2 px-4 flex items-center gap-1.5">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+        </svg>
+        <span>Add Your First Widget</span>
+      </button>
+      {% endif %}
+    </div>
+
+    <!-- Responsive Native Grid Mount Point -->
+    <div id="widgets-grid" class="grid grid-cols-12 gap-5 max-w-7xl mx-auto"></div>
 
   </main>
 
 </div>
 
+<!-- Add Widget Modal -->
+<div id="add-widget-modal" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm hidden flex items-center justify-center p-4">
+  <div class="card w-full max-w-lg overflow-hidden border border-gray-700 shadow-2xl">
+    <div class="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
+      <h3 class="text-sm font-semibold text-gray-100">Add Visual Widget</h3>
+      <button onclick="closeAddWidgetModal()" class="text-gray-400 hover:text-white transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+
+    <form id="form-add-widget" onsubmit="handleAddWidget(event)" class="p-5 space-y-4">
+      <div>
+        <label class="block text-xs font-medium text-gray-300 mb-1">Widget Title</label>
+        <input type="text" id="widget-title" required placeholder="e.g. Daily Ingestion Volume" class="input-dark text-xs w-full py-2 px-3"/>
+      </div>
+
+      <!-- Chart Type Selection -->
+      <div>
+        <label class="block text-xs font-medium text-gray-300 mb-1.5">Visualization Type</label>
+        <div class="grid grid-cols-3 gap-2">
+          <label class="flex flex-col p-2 rounded border border-gray-700 bg-gray-900/60 cursor-pointer hover:border-blue-500/50 has-[:checked]:border-blue-500 has-[:checked]:bg-blue-500/10">
+            <input type="radio" name="widget-type" value="kpi" checked class="sr-only"/>
+            <span class="text-xs font-semibold text-gray-200">KPI Card</span>
+            <span class="text-[10px] text-gray-400">Headline stat</span>
+          </label>
+          <label class="flex flex-col p-2 rounded border border-gray-700 bg-gray-900/60 cursor-pointer hover:border-blue-500/50 has-[:checked]:border-blue-500 has-[:checked]:bg-blue-500/10">
+            <input type="radio" name="widget-type" value="line" class="sr-only"/>
+            <span class="text-xs font-semibold text-gray-200">Line Chart</span>
+            <span class="text-[10px] text-gray-400">Trends over time</span>
+          </label>
+          <label class="flex flex-col p-2 rounded border border-gray-700 bg-gray-900/60 cursor-pointer hover:border-blue-500/50 has-[:checked]:border-blue-500 has-[:checked]:bg-blue-500/10">
+            <input type="radio" name="widget-type" value="bar" class="sr-only"/>
+            <span class="text-xs font-semibold text-gray-200">Bar Chart</span>
+            <span class="text-[10px] text-gray-400">Category breakdown</span>
+          </label>
+          <label class="flex flex-col p-2 rounded border border-gray-700 bg-gray-900/60 cursor-pointer hover:border-blue-500/50 has-[:checked]:border-blue-500 has-[:checked]:bg-blue-500/10">
+            <input type="radio" name="widget-type" value="area" class="sr-only"/>
+            <span class="text-xs font-semibold text-gray-200">Area Chart</span>
+            <span class="text-[10px] text-gray-400">Volume & throughput</span>
+          </label>
+          <label class="flex flex-col p-2 rounded border border-gray-700 bg-gray-900/60 cursor-pointer hover:border-blue-500/50 has-[:checked]:border-blue-500 has-[:checked]:bg-blue-500/10">
+            <input type="radio" name="widget-type" value="pie" class="sr-only"/>
+            <span class="text-xs font-semibold text-gray-200">Donut / Pie</span>
+            <span class="text-[10px] text-gray-400">Proportions</span>
+          </label>
+          <label class="flex flex-col p-2 rounded border border-gray-700 bg-gray-900/60 cursor-pointer hover:border-blue-500/50 has-[:checked]:border-blue-500 has-[:checked]:bg-blue-500/10">
+            <input type="radio" name="widget-type" value="table" class="sr-only"/>
+            <span class="text-xs font-semibold text-gray-200">Data Table</span>
+            <span class="text-[10px] text-gray-400">Tabular records</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Dataset & Metric -->
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-medium text-gray-300 mb-1">Dataset</label>
+          <select id="widget-dataset" class="input-dark text-xs w-full py-2 px-3">
+            <option value="ds_datalake_storage">MinIO Data Lake</option>
+            <option value="ds_query_history">Query Execution</option>
+            <option value="ds_pipeline_runs">Pipeline Runs</option>
+            <option value="ds_ingestion_events">Ingestion Events</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-300 mb-1">Metric Key</label>
+          <input type="text" id="widget-metric" placeholder="e.g. total_objects" class="input-dark text-xs w-full py-2 px-3"/>
+        </div>
+      </div>
+
+      <!-- Width Layout -->
+      <div>
+        <label class="block text-xs font-medium text-gray-300 mb-1">Card Width</label>
+        <div class="grid grid-cols-2 gap-2">
+          <label class="flex items-center gap-2 p-2 rounded border border-gray-700 bg-gray-900/60 cursor-pointer hover:border-blue-500/50 has-[:checked]:border-blue-500 has-[:checked]:bg-blue-500/10">
+            <input type="radio" name="widget-width" value="half" checked class="text-blue-500"/>
+            <span class="text-xs text-gray-200">Half Width (6 Cols)</span>
+          </label>
+          <label class="flex items-center gap-2 p-2 rounded border border-gray-700 bg-gray-900/60 cursor-pointer hover:border-blue-500/50 has-[:checked]:border-blue-500 has-[:checked]:bg-blue-500/10">
+            <input type="radio" name="widget-width" value="full" class="text-blue-500"/>
+            <span class="text-xs text-gray-200">Full Width (12 Cols)</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end gap-2.5 pt-3 border-t border-gray-800">
+        <button type="button" onclick="closeAddWidgetModal()" class="btn-ghost text-xs px-3 py-1.5">Cancel</button>
+        <button type="submit" id="btn-submit-widget" class="btn-primary text-xs px-4 py-1.5 flex items-center gap-1.5">
+          <span>Add Widget</span>
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Rename Title Modal -->
+<div id="title-modal" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm hidden flex items-center justify-center p-4">
+  <div class="card w-full max-w-sm p-5 border border-gray-700 shadow-2xl space-y-4">
+    <h3 class="text-sm font-semibold text-gray-100">Rename Dashboard</h3>
+    <div>
+      <label class="block text-xs font-medium text-gray-300 mb-1">New Title</label>
+      <input type="text" id="rename-title-input" class="input-dark text-xs w-full py-2 px-3"/>
+    </div>
+    <div class="flex items-center justify-end gap-2 pt-2">
+      <button type="button" onclick="closeTitleEditModal()" class="btn-ghost text-xs px-3 py-1.5">Cancel</button>
+      <button type="button" onclick="submitTitleRename()" class="btn-primary text-xs px-4 py-1.5">Save Title</button>
+    </div>
+  </div>
+</div>
+
 <script>
   const dashboardId = '{{ dashboard_id }}';
-  const supersetFallbackUrl = '{{ superset_url }}';
+  const userRole = '{{ my_role }}';
   let dashboardMeta = null;
+  let isEditMode = false;
   let isFullscreen = false;
+  let currentTimeRange = 'all';
+  const echartsInstances = {};
+
+  function showToast(message, type = 'info') {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    const isError = type === 'error';
+    const isSuccess = type === 'success';
+    const bgClass = isError ? 'bg-red-950/90 border-red-800 text-red-200' : (isSuccess ? 'bg-emerald-950/90 border-emerald-800 text-emerald-200' : 'bg-gray-900/90 border-gray-700 text-gray-200');
+    toast.className = `px-4 py-2.5 rounded-lg border text-xs shadow-lg flex items-center gap-2 pointer-events-auto transition-all duration-300 transform translate-y-2 opacity-0 ${bgClass}`;
+    toast.innerHTML = `<span>${message}</span>`;
+    container.appendChild(toast);
+    requestAnimationFrame(() => {
+      toast.classList.remove('translate-y-2', 'opacity-0');
+    });
+    setTimeout(() => {
+      toast.classList.add('opacity-0', 'translate-y-2');
+      setTimeout(() => toast.remove(), 300);
+    }, 4000);
+  }
+
+  // Theme palettes and options for ECharts
+  const ECHARTS_THEME_COLORS = ['#3b82f6', '#10b981', '#8b5cf6', '#f59e0b', '#06b6d4', '#ec4899', '#6366f1'];
 
   async function fetchDashboardMetadata() {
     try {
       const resp = await fetch(`/api/dashboards/${dashboardId}`);
       if (!resp.ok) {
-        throw new Error('Dashboard not found in workspace');
+        throw new Error('Dashboard not found in active workspace');
       }
       dashboardMeta = await resp.json();
       document.getElementById('dash-title').textContent = dashboardMeta.title;
@@ -134,12 +323,6 @@
         pubPill.textContent = 'Draft';
       }
 
-      // Update Superset Studio button link
-      const editBtn = document.getElementById('btn-edit-studio');
-      if (editBtn) {
-        editBtn.href = dashboardMeta.superset_url || `${supersetFallbackUrl}/superset/dashboard/${dashboardMeta.superset_dashboard_id}/`;
-      }
-
       return dashboardMeta;
     } catch (err) {
       console.error(err);
@@ -148,68 +331,276 @@
     }
   }
 
-  async function fetchGuestToken() {
-    const resp = await fetch(`/api/dashboards/${dashboardId}/guest-token`);
-    if (!resp.ok) {
-      throw new Error(`Failed to mint guest token: status ${resp.status}`);
-    }
-    const data = await resp.json();
-    return data.token;
-  }
-
-  async function mountSupersetDashboard() {
+  async function renderDashboard() {
     const meta = await fetchDashboardMetadata();
     if (!meta) return;
 
-    const mountPoint = document.getElementById('dashboard-mount-point');
-    mountPoint.innerHTML = ''; // clear any existing frame
+    const loader = document.getElementById('loader-overlay');
+    const emptyCanvas = document.getElementById('empty-canvas');
+    const grid = document.getElementById('widgets-grid');
 
-    // Determine target Superset domain from current location or configured URL
-    let domain = window.location.origin;
-    if (meta.superset_url && meta.superset_url.startsWith('http')) {
+    // Clean up any existing ECharts instances
+    Object.keys(echartsInstances).forEach(id => {
       try {
-        const u = new URL(meta.superset_url);
-        domain = u.origin;
+        echartsInstances[id].dispose();
       } catch (e) {}
+    });
+    for (const key in echartsInstances) delete echartsInstances[key];
+
+    const widgets = meta.layout_config || [];
+    if (widgets.length === 0) {
+      grid.innerHTML = '';
+      emptyCanvas.classList.remove('hidden');
+      if (loader) loader.classList.add('hidden');
+      return;
     }
+
+    emptyCanvas.classList.add('hidden');
+    grid.innerHTML = widgets.map((w, index) => {
+      const spanClass = w.width === 'full' ? 'col-span-12' : 'col-span-12 md:col-span-6';
+      
+      const editControls = isEditMode ? `
+        <div class="flex items-center gap-1">
+          <button onclick="toggleWidgetWidth('${w.id}')" class="btn-ghost text-[10px] py-0.5 px-1.5 text-gray-400 hover:text-white" title="Toggle full/half width">
+            ${w.width === 'full' ? 'Half' : 'Full'}
+          </button>
+          <button onclick="moveWidget('${w.id}', -1)" ${index === 0 ? 'disabled' : ''} class="btn-ghost text-[10px] py-0.5 px-1.5 text-gray-400 hover:text-white disabled:opacity-30" title="Move earlier">
+            &larr;
+          </button>
+          <button onclick="moveWidget('${w.id}', 1)" ${index === widgets.length - 1 ? 'disabled' : ''} class="btn-ghost text-[10px] py-0.5 px-1.5 text-gray-400 hover:text-white disabled:opacity-30" title="Move later">
+            &rarr;
+          </button>
+          <button onclick="deleteWidget('${w.id}')" class="btn-ghost text-[10px] py-0.5 px-1.5 text-red-400 hover:text-red-300" title="Remove widget">
+            &times;
+          </button>
+        </div>
+      ` : '';
+
+      return `
+        <div class="card p-5 flex flex-col justify-between ${spanClass} transition-all duration-200" id="card-${w.id}">
+          <div class="flex items-center justify-between gap-3 pb-3 border-b border-white/[0.06] mb-3">
+            <div>
+              <h3 class="text-xs font-semibold text-gray-200 tracking-wide">${escapeHtml(w.title)}</h3>
+              <span class="text-[10px] text-gray-500 font-mono">${escapeHtml(w.type.toUpperCase())}${w.metric ? ' · ' + escapeHtml(w.metric) : ''}</span>
+            </div>
+            ${editControls}
+          </div>
+
+          <div id="content-${w.id}" class="w-full flex-1 flex flex-col justify-center min-h-[220px]">
+            <div class="flex items-center justify-center py-10">
+              <div class="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    if (loader) loader.classList.add('hidden');
+
+    // Fetch and render data for each widget asynchronously
+    widgets.forEach(w => loadWidgetData(w));
+  }
+
+  async function loadWidgetData(widget) {
+    const container = document.getElementById(`content-${widget.id}`);
+    if (!container) return;
 
     try {
-      // Check if SDK loaded
-      if (typeof supersetEmbeddedSdk !== 'undefined' && supersetEmbeddedSdk.embedDashboard) {
-        await supersetEmbeddedSdk.embedDashboard({
-          id: meta.embedded_uuid,
-          supersetDomain: domain,
-          mountPoint: mountPoint,
-          fetchGuestToken: () => fetchGuestToken(),
-          dashboardUiConfig: {
-            hideTitle: true,
-            hideTab: false,
-            hideChartControls: false,
-            filters: {
-              expanded: false,
-            },
-          },
-        });
-      } else {
-        // Fallback standard iframe embed if SDK unpkg is blocked or fails
-        console.warn('supersetEmbeddedSdk not detected, falling back to direct iframe');
-        const token = await fetchGuestToken();
-        const iframe = document.createElement('iframe');
-        iframe.src = `${domain}/superset/dashboard/${meta.superset_dashboard_id}/?standalone=true&guest_token=${encodeURIComponent(token)}`;
-        iframe.className = 'w-full h-full border-0 block';
-        mountPoint.appendChild(iframe);
+      const url = `/api/dashboards/${dashboardId}/widgets/${widget.id}/data?time_range=${encodeURIComponent(currentTimeRange)}`;
+      const resp = await fetch(url);
+      if (!resp.ok) {
+        throw new Error('Failed to load widget data');
       }
-
-      // Hide loader overlay after mount
-      setTimeout(() => {
-        const loader = document.getElementById('loader-overlay');
-        if (loader) loader.classList.add('hidden');
-      }, 700);
-
+      const dataResp = await resp.json();
+      renderWidgetContent(widget, dataResp.data, container);
     } catch (err) {
-      console.error('Error mounting embedded dashboard:', err);
-      showError('Failed to load dashboard', 'Could not establish guest session with Superset. ' + err.message);
+      console.error(`Error loading widget ${widget.id}:`, err);
+      container.innerHTML = `
+        <div class="py-8 text-center text-xs text-red-400/80">
+          <p>Failed to load data series</p>
+        </div>
+      `;
     }
+  }
+
+  function renderWidgetContent(widget, data, container) {
+    container.innerHTML = '';
+
+    // 1. KPI Card
+    if (widget.type === 'kpi') {
+      const isPositive = data.is_positive !== false;
+      const trendColor = isPositive ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' : 'text-red-400 bg-red-500/10 border-red-500/20';
+      const trendIcon = isPositive ? '&uarr;' : '&darr;';
+
+      container.innerHTML = `
+        <div class="flex flex-col justify-between h-full py-2">
+          <div>
+            <div class="flex items-baseline justify-between gap-3">
+              <span class="text-3xl font-extrabold tracking-tight text-white font-mono">${escapeHtml(data.value || '0')}</span>
+              ${data.trend ? `<span class="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded border ${trendColor}">${trendIcon} ${escapeHtml(data.trend)}</span>` : ''}
+            </div>
+            <p class="text-xs text-gray-400 mt-1">${escapeHtml(data.subtext || '')}</p>
+          </div>
+          ${data.sparkline && data.sparkline.length ? `
+            <div id="spark-${widget.id}" class="w-full h-12 mt-4"></div>
+          ` : ''}
+        </div>
+      `;
+
+      if (data.sparkline && data.sparkline.length) {
+        const sparkEl = document.getElementById(`spark-${widget.id}`);
+        if (sparkEl) {
+          const chart = echarts.init(sparkEl);
+          echartsInstances[`spark_${widget.id}`] = chart;
+          chart.setOption({
+            grid: { left: 0, right: 0, top: 2, bottom: 2 },
+            xAxis: { type: 'category', show: false, data: data.sparkline.map((_, i) => i) },
+            yAxis: { type: 'value', show: false, min: 'dataMin' },
+            series: [{
+              data: data.sparkline,
+              type: 'line',
+              smooth: true,
+              showSymbol: false,
+              lineStyle: { color: '#3b82f6', width: 2 },
+              areaStyle: {
+                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                  { offset: 0, color: 'rgba(59, 130, 246, 0.3)' },
+                  { offset: 1, color: 'rgba(59, 130, 246, 0.0)' }
+                ])
+              }
+            }]
+          });
+        }
+      }
+      return;
+    }
+
+    // 2. Data Table
+    if (widget.type === 'table') {
+      const columns = data.columns || [];
+      const rows = data.rows || [];
+      container.innerHTML = `
+        <div class="overflow-x-auto w-full max-h-[280px]">
+          <table class="w-full text-xs text-left text-gray-300">
+            <thead class="text-[11px] uppercase tracking-wider text-gray-400 bg-white/[0.03] sticky top-0 border-b border-white/[0.08]">
+              <tr>
+                ${columns.map(c => `<th class="py-2 px-3 font-semibold">${escapeHtml(c)}</th>`).join('')}
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-white/[0.04]">
+              ${rows.map(r => `
+                <tr class="hover:bg-white/[0.02] transition-colors">
+                  ${r.map((cell, ci) => `<td class="py-2 px-3 ${ci === 0 ? 'font-medium text-white' : 'font-mono text-gray-300'}">${escapeHtml(cell)}</td>`).join('')}
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+      return;
+    }
+
+    // 3. ECharts Visualizations: Line, Bar, Area, Pie
+    const chartDiv = document.createElement('div');
+    chartDiv.className = 'w-full h-64';
+    container.appendChild(chartDiv);
+
+    const chart = echarts.init(chartDiv);
+    echartsInstances[widget.id] = chart;
+
+    let option = {
+      color: ECHARTS_THEME_COLORS,
+      tooltip: {
+        trigger: widget.type === 'pie' ? 'item' : 'axis',
+        className: 'echarts-tooltip-custom',
+        backgroundColor: '#18181b',
+        borderColor: '#27272a',
+        textStyle: { color: '#f4f4f5', fontSize: 11 },
+      },
+    };
+
+    if (widget.type === 'line' || widget.type === 'area') {
+      const isArea = widget.type === 'area';
+      option = {
+        ...option,
+        grid: { left: 40, right: 16, top: 20, bottom: 25 },
+        xAxis: {
+          type: 'category',
+          data: data.categories || [],
+          axisLine: { lineStyle: { color: '#3f3f46' } },
+          axisLabel: { color: '#a1a1aa', fontSize: 10 },
+        },
+        yAxis: {
+          type: 'value',
+          splitLine: { lineStyle: { color: '#27272a', type: 'dashed' } },
+          axisLabel: { color: '#a1a1aa', fontSize: 10 },
+        },
+        series: (data.series || []).map(s => ({
+          name: s.name,
+          type: 'line',
+          smooth: true,
+          data: s.data,
+          symbolSize: 4,
+          lineStyle: { width: 2.5 },
+          areaStyle: isArea ? {
+            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+              { offset: 0, color: 'rgba(59, 130, 246, 0.35)' },
+              { offset: 1, color: 'rgba(59, 130, 246, 0.02)' }
+            ])
+          } : undefined,
+        })),
+      };
+    } else if (widget.type === 'bar') {
+      option = {
+        ...option,
+        grid: { left: 40, right: 16, top: 20, bottom: 25 },
+        xAxis: {
+          type: 'category',
+          data: data.categories || [],
+          axisLine: { lineStyle: { color: '#3f3f46' } },
+          axisLabel: { color: '#a1a1aa', fontSize: 10 },
+        },
+        yAxis: {
+          type: 'value',
+          splitLine: { lineStyle: { color: '#27272a', type: 'dashed' } },
+          axisLabel: { color: '#a1a1aa', fontSize: 10 },
+        },
+        series: (data.series || []).map(s => ({
+          name: s.name,
+          type: 'bar',
+          data: s.data,
+          itemStyle: { borderRadius: [4, 4, 0, 0] },
+          barMaxWidth: 38,
+        })),
+      };
+    } else if (widget.type === 'pie') {
+      option = {
+        ...option,
+        legend: {
+          bottom: 0,
+          textStyle: { color: '#a1a1aa', fontSize: 10 },
+          itemWidth: 10,
+          itemHeight: 10,
+        },
+        series: [{
+          type: 'pie',
+          radius: ['45%', '70%'],
+          avoidLabelOverlap: true,
+          itemStyle: {
+            borderRadius: 6,
+            borderColor: '#18181b',
+            borderWidth: 2,
+          },
+          label: { show: false },
+          emphasis: {
+            label: { show: true, fontSize: 12, fontWeight: 'bold', color: '#fff' }
+          },
+          data: data.series || [],
+        }],
+      };
+    }
+
+    chart.setOption(option);
   }
 
   function showError(msg, desc) {
@@ -225,9 +616,234 @@
     document.getElementById('error-overlay').classList.add('hidden');
     document.getElementById('loader-overlay').classList.remove('hidden');
 
-    mountSupersetDashboard().finally(() => {
+    renderDashboard().finally(() => {
       if (refreshIcon) refreshIcon.classList.remove('animate-spin');
     });
+  }
+
+  function setTimeRange(range) {
+    currentTimeRange = range;
+    ['all', '30d', '7d', '24h'].forEach(r => {
+      const btn = document.getElementById(`timerange-${r}`);
+      if (r === range) {
+        btn.className = 'px-2 py-0.5 rounded text-[11px] font-medium bg-white/10 text-white';
+      } else {
+        btn.className = 'px-2 py-0.5 rounded text-[11px] font-medium text-gray-400 hover:text-white';
+      }
+    });
+    // Re-fetch all widgets with new time range
+    if (dashboardMeta && dashboardMeta.layout_config) {
+      dashboardMeta.layout_config.forEach(w => loadWidgetData(w));
+    }
+  }
+
+  function toggleEditMode() {
+    isEditMode = !isEditMode;
+    const editActions = document.getElementById('edit-actions-container');
+    const editModePill = document.getElementById('edit-mode-pill');
+    const editTitleBtn = document.getElementById('btn-edit-title');
+    const label = document.getElementById('edit-toggle-label');
+
+    if (isEditMode) {
+      editActions?.classList.remove('hidden');
+      editModePill?.classList.remove('hidden');
+      editTitleBtn?.classList.remove('hidden');
+      if (label) label.textContent = 'Done Editing';
+    } else {
+      editActions?.classList.add('hidden');
+      editModePill?.classList.add('hidden');
+      editTitleBtn?.classList.add('hidden');
+      if (label) label.textContent = 'Edit Dashboard';
+    }
+
+    renderDashboard();
+  }
+
+  async function togglePublishStatus() {
+    if (!dashboardMeta) return;
+    const newStatus = !dashboardMeta.is_published;
+    try {
+      const resp = await fetch(`/api/dashboards/${dashboardId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_published: newStatus }),
+      });
+      if (resp.ok) {
+        dashboardMeta = await resp.json();
+        showToast(newStatus ? 'Dashboard published!' : 'Dashboard set to draft', 'success');
+        const pubPill = document.getElementById('dash-pub-pill');
+        if (newStatus) {
+          pubPill.className = 'text-[10px] font-medium px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+          pubPill.textContent = 'Published';
+        } else {
+          pubPill.className = 'text-[10px] font-medium px-2 py-0.5 rounded bg-gray-500/10 text-gray-400 border border-gray-500/20';
+          pubPill.textContent = 'Draft';
+        }
+      } else {
+        showToast('Failed to update status', 'error');
+      }
+    } catch (e) {
+      showToast('Error updating status', 'error');
+    }
+  }
+
+  function openTitleEditModal() {
+    if (!dashboardMeta) return;
+    document.getElementById('rename-title-input').value = dashboardMeta.title;
+    document.getElementById('title-modal').classList.remove('hidden');
+  }
+
+  function closeTitleEditModal() {
+    document.getElementById('title-modal').classList.add('hidden');
+  }
+
+  async function submitTitleRename() {
+    const newTitle = document.getElementById('rename-title-input').value.trim();
+    if (!newTitle) return;
+
+    try {
+      const resp = await fetch(`/api/dashboards/${dashboardId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: newTitle }),
+      });
+      if (resp.ok) {
+        dashboardMeta = await resp.json();
+        document.getElementById('dash-title').textContent = dashboardMeta.title;
+        showToast('Dashboard title updated', 'success');
+        closeTitleEditModal();
+      } else {
+        showToast('Failed to rename dashboard', 'error');
+      }
+    } catch (e) {
+      showToast('Error renaming dashboard', 'error');
+    }
+  }
+
+  // Widget Actions: Toggle Width, Move, Delete
+  async function toggleWidgetWidth(widgetId) {
+    if (!dashboardMeta) return;
+    const layout = [...(dashboardMeta.layout_config || [])];
+    const target = layout.find(w => w.id === widgetId);
+    if (!target) return;
+
+    target.width = target.width === 'full' ? 'half' : 'full';
+    await saveLayout(layout);
+  }
+
+  async function moveWidget(widgetId, delta) {
+    if (!dashboardMeta) return;
+    const layout = [...(dashboardMeta.layout_config || [])];
+    const idx = layout.findIndex(w => w.id === widgetId);
+    if (idx === -1) return;
+
+    const newIdx = idx + delta;
+    if (newIdx < 0 || newIdx >= layout.length) return;
+
+    const [moved] = layout.splice(idx, 1);
+    layout.splice(newIdx, 0, moved);
+    await saveLayout(layout);
+  }
+
+  async function deleteWidget(widgetId) {
+    if (!confirm('Remove this widget from the dashboard?')) return;
+    try {
+      const resp = await fetch(`/api/dashboards/${dashboardId}/widgets/${widgetId}`, {
+        method: 'DELETE',
+      });
+      if (resp.ok) {
+        dashboardMeta = await resp.json();
+        showToast('Widget removed', 'success');
+        renderDashboard();
+      } else {
+        showToast('Failed to delete widget', 'error');
+      }
+    } catch (e) {
+      showToast('Error removing widget', 'error');
+    }
+  }
+
+  async function saveLayout(newLayout) {
+    try {
+      const resp = await fetch(`/api/dashboards/${dashboardId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ layout_config: newLayout }),
+      });
+      if (resp.ok) {
+        dashboardMeta = await resp.json();
+        renderDashboard();
+      } else {
+        showToast('Failed to update layout', 'error');
+      }
+    } catch (e) {
+      showToast('Error saving layout', 'error');
+    }
+  }
+
+  // Add Widget Modal Handlers
+  function openAddWidgetModal() {
+    document.getElementById('add-widget-modal').classList.remove('hidden');
+    loadAvailableDatasets();
+  }
+
+  function closeAddWidgetModal() {
+    document.getElementById('add-widget-modal').classList.add('hidden');
+  }
+
+  async function loadAvailableDatasets() {
+    const select = document.getElementById('widget-dataset');
+    try {
+      const resp = await fetch('/api/dashboards/datasets');
+      if (resp.ok) {
+        const datasets = await resp.json();
+        if (datasets.length > 0) {
+          select.innerHTML = datasets.map(d => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('');
+        }
+      }
+    } catch (e) {
+      console.warn('Could not load custom datasets, using defaults', e);
+    }
+  }
+
+  async function handleAddWidget(e) {
+    e.preventDefault();
+    const btn = document.getElementById('btn-submit-widget');
+    btn.disabled = true;
+
+    const title = document.getElementById('widget-title').value.trim();
+    const type = document.querySelector('input[name="widget-type"]:checked')?.value || 'kpi';
+    const dataset = document.getElementById('widget-dataset').value;
+    const metric = document.getElementById('widget-metric').value.trim() || 'value';
+    const width = document.querySelector('input[name="widget-width"]:checked')?.value || 'half';
+
+    try {
+      const resp = await fetch(`/api/dashboards/${dashboardId}/widgets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          type,
+          dataset_id: dataset,
+          metric,
+          width,
+        }),
+      });
+
+      if (resp.ok) {
+        dashboardMeta = await resp.json();
+        showToast(`Widget "${title}" added!`, 'success');
+        closeAddWidgetModal();
+        renderDashboard();
+      } else {
+        const err = await resp.json();
+        showToast(err.detail || 'Failed to add widget', 'error');
+      }
+    } catch (err) {
+      showToast('Error adding widget', 'error');
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   function toggleFullscreen() {
@@ -248,33 +864,39 @@
         document.exitFullscreen().catch(() => {});
       }
     }
+
+    // Trigger chart resize after layout transition
+    setTimeout(() => {
+      Object.values(echartsInstances).forEach(chart => {
+        try { chart.resize(); } catch (e) {}
+      });
+    }, 200);
   }
 
-  // Handle escape key for fullscreen
-  document.addEventListener('fullscreenchange', () => {
-    if (!document.fullscreenElement && isFullscreen) {
-      toggleFullscreen();
-    }
-  });
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
 
-  // Theme change observer
-  const observer = new MutationObserver((mutations) => {
-    mutations.forEach((mutation) => {
-      if (mutation.type === 'attributes' && mutation.attributeName === 'data-theme') {
-        const currentTheme = document.documentElement.getAttribute('data-theme');
-        // Iframe background syncing
-        const mount = document.getElementById('dashboard-mount-point');
-        if (mount) {
-          mount.style.backgroundColor = currentTheme === 'light' ? '#f5f5f5' : '#111111';
-        }
-      }
+  // Handle window resizing
+  window.addEventListener('resize', () => {
+    Object.values(echartsInstances).forEach(chart => {
+      try { chart.resize(); } catch (e) {}
     });
   });
-  observer.observe(document.documentElement, { attributes: true });
 
   // Initialize
   document.addEventListener('DOMContentLoaded', () => {
-    mountSupersetDashboard();
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('edit') === 'true' && userRole !== 'viewer') {
+      isEditMode = true;
+      document.getElementById('edit-actions-container')?.classList.remove('hidden');
+      document.getElementById('edit-mode-pill')?.classList.remove('hidden');
+      document.getElementById('btn-edit-title')?.classList.remove('hidden');
+      const label = document.getElementById('edit-toggle-label');
+      if (label) label.textContent = 'Done Editing';
+    }
+    renderDashboard();
   });
 </script>
 {% endblock %}

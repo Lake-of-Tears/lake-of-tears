@@ -38,7 +38,7 @@ def test_get_dashboards_gallery_renders_native_template():
         )
         assert response.status_code == 200
 
-        # Verify NO legacy raw iframe on gallery page
+        # Verify NO raw iframe on gallery page
         assert "<iframe" not in response.text
 
         # Verify native gallery components
@@ -50,7 +50,7 @@ def test_get_dashboards_gallery_renders_native_template():
         assert "New Dashboard" in response.text
 
 
-def test_get_dashboard_view_renders_in_app_viewer():
+def test_get_dashboard_view_renders_native_viewer():
     token, mock_workspaces = _create_auth_cookie(role="viewer")
     dash_id = str(uuid.uuid4())
 
@@ -61,12 +61,14 @@ def test_get_dashboard_view_renders_in_app_viewer():
         )
         assert response.status_code == 200
 
-        # Verify native toolbar & SDK mount point
+        # Verify native canvas & Apache ECharts (zero superset iframes/embedded-sdk)
         assert 'id="dashboard-view-container"' in response.text
-        assert 'id="dashboard-mount-point"' in response.text
+        assert 'id="widgets-grid"' in response.text
         assert 'id="btn-fullscreen"' in response.text
         assert 'id="btn-refresh"' in response.text
-        assert "embedded-sdk" in response.text
+        assert "echarts.min.js" in response.text
+        assert "embedded-sdk" not in response.text
+        assert "<iframe" not in response.text
 
 
 def test_ui_proxy_get_dashboards():
@@ -78,6 +80,7 @@ def test_ui_proxy_get_dashboards():
             "title": "Ops Metrics",
             "slug": "ops-metrics",
             "charts_count": 3,
+            "layout_config": [{"id": "w1"}],
             "is_published": True,
         }
     ]
@@ -105,22 +108,28 @@ def test_ui_proxy_get_dashboards():
         assert mock_get.called
 
 
-def test_ui_proxy_get_guest_token():
+def test_ui_proxy_get_widget_data():
     token, mock_workspaces = _create_auth_cookie(role="member")
     dash_id = "test-uuid"
+    widget_id = "w-kpi-1"
 
-    mock_token_data = {
-        "token": "valid-guest-jwt-token",
-        "embedded_uuid": "embed-uuid-1",
-        "dashboard_id": dash_id,
-        "superset_dashboard_id": 42,
-        "superset_domain": "/superset",
+    mock_widget_data = {
+        "widget_id": widget_id,
+        "type": "kpi",
+        "title": "Total Rows",
+        "data": {
+            "value": "128,450",
+            "trend": "+12%",
+            "sparkline": [10, 20, 30],
+        },
     }
 
     mock_httpx_resp = httpx.Response(
         status_code=200,
-        json=mock_token_data,
-        request=httpx.Request("GET", f"http://backend/api/v1/dashboards/{dash_id}/guest-token"),
+        json=mock_widget_data,
+        request=httpx.Request(
+            "GET", f"http://backend/api/v1/dashboards/{dash_id}/widgets/{widget_id}/data"
+        ),
     )
 
     with (
@@ -128,11 +137,12 @@ def test_ui_proxy_get_guest_token():
         patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_httpx_resp),
     ):
         response = client.get(
-            f"/api/dashboards/{dash_id}/guest-token",
+            f"/api/dashboards/{dash_id}/widgets/{widget_id}/data",
             cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
         )
         assert response.status_code == 200
-        assert response.json()["token"] == "valid-guest-jwt-token"
+        assert response.json()["widget_id"] == widget_id
+        assert response.json()["data"]["value"] == "128,450"
 
 
 def test_ui_proxy_create_dashboard():
@@ -142,8 +152,8 @@ def test_ui_proxy_create_dashboard():
         "id": "dash-new",
         "title": "Finance Review",
         "slug": "finance-review",
-        "superset_dashboard_id": 101,
-        "embedded_uuid": "embed-101",
+        "charts_count": 0,
+        "layout_config": [],
     }
 
     mock_httpx_resp = httpx.Response(
@@ -161,8 +171,41 @@ def test_ui_proxy_create_dashboard():
         response = client.post(
             "/api/dashboards",
             cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
-            json={"title": "Finance Review"},
+            json={"title": "Finance Review", "template": "blank"},
         )
         assert response.status_code == 201
         assert response.json()["title"] == "Finance Review"
+        assert mock_post.called
+
+
+def test_ui_proxy_add_widget():
+    token, mock_workspaces = _create_auth_cookie(role="admin")
+    dash_id = "dash-new"
+
+    mock_updated_dash = {
+        "id": dash_id,
+        "title": "Finance Review",
+        "charts_count": 1,
+        "layout_config": [{"id": "w1", "type": "kpi", "title": "Processed"}],
+    }
+
+    mock_httpx_resp = httpx.Response(
+        status_code=201,
+        json=mock_updated_dash,
+        request=httpx.Request("POST", f"http://backend/api/v1/dashboards/{dash_id}/widgets"),
+    )
+
+    with (
+        patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
+        patch(
+            "httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_httpx_resp
+        ) as mock_post,
+    ):
+        response = client.post(
+            f"/api/dashboards/{dash_id}/widgets",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
+            json={"title": "Processed", "type": "kpi"},
+        )
+        assert response.status_code == 201
+        assert response.json()["charts_count"] == 1
         assert mock_post.called

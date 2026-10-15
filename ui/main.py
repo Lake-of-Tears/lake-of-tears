@@ -2423,9 +2423,9 @@ async def ui_get_dashboard_stats(request: Request):
         return JSONResponse({"error": str(exc)}, status_code=502)
 
 
-@app.get("/api/dashboards/superset-available")
-@app.get("/api/v1/dashboards/superset-available")
-async def ui_get_available_superset_dashboards(request: Request):
+@app.get("/api/dashboards/datasets")
+@app.get("/api/v1/dashboards/datasets")
+async def ui_get_dashboard_datasets(request: Request):
     token = _get_request_token(request)
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     ws = getattr(request.state, "workspace", None)
@@ -2436,7 +2436,7 @@ async def ui_get_available_superset_dashboards(request: Request):
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
-                f"{BACKEND_URL}/api/v1/dashboards/superset-available",
+                f"{BACKEND_URL}/api/v1/dashboards/datasets",
                 headers=headers,
                 params=params,
                 cookies=request.cookies,
@@ -2494,31 +2494,6 @@ async def ui_create_dashboard(request: Request):
         return JSONResponse({"error": str(exc)}, status_code=502)
 
 
-@app.post("/api/dashboards/link")
-@app.post("/api/v1/dashboards/link")
-async def ui_link_dashboard(request: Request):
-    token = _get_request_token(request)
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
-    ws = getattr(request.state, "workspace", None)
-    params = {}
-    if ws and ws.get("slug"):
-        params["workspace_slug"] = ws["slug"]
-
-    try:
-        body = await request.json()
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                f"{BACKEND_URL}/api/v1/dashboards/link",
-                headers=headers,
-                params=params,
-                json=body,
-                cookies=request.cookies,
-            )
-            return JSONResponse(resp.json(), status_code=resp.status_code)
-    except Exception as exc:
-        return JSONResponse({"error": str(exc)}, status_code=502)
-
-
 @app.get("/api/dashboards/{dashboard_id}")
 @app.get("/api/v1/dashboards/{dashboard_id}")
 async def ui_get_dashboard(request: Request, dashboard_id: str):
@@ -2533,29 +2508,6 @@ async def ui_get_dashboard(request: Request, dashboard_id: str):
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
                 f"{BACKEND_URL}/api/v1/dashboards/{dashboard_id}",
-                headers=headers,
-                params=params,
-                cookies=request.cookies,
-            )
-            return JSONResponse(resp.json(), status_code=resp.status_code)
-    except Exception as exc:
-        return JSONResponse({"error": str(exc)}, status_code=502)
-
-
-@app.get("/api/dashboards/{dashboard_id}/guest-token")
-@app.get("/api/v1/dashboards/{dashboard_id}/guest-token")
-async def ui_get_dashboard_guest_token(request: Request, dashboard_id: str):
-    token = _get_request_token(request)
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
-    ws = getattr(request.state, "workspace", None)
-    params = {}
-    if ws and ws.get("slug"):
-        params["workspace_slug"] = ws["slug"]
-
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                f"{BACKEND_URL}/api/v1/dashboards/{dashboard_id}/guest-token",
                 headers=headers,
                 params=params,
                 cookies=request.cookies,
@@ -2590,13 +2542,111 @@ async def ui_patch_dashboard(request: Request, dashboard_id: str):
         return JSONResponse({"error": str(exc)}, status_code=502)
 
 
-@app.delete("/api/dashboards/{dashboard_id}")
-@app.delete("/api/v1/dashboards/{dashboard_id}")
-async def ui_delete_dashboard(request: Request, dashboard_id: str, purge_superset: bool = False):
+@app.post("/api/dashboards/{dashboard_id}/widgets")
+@app.post("/api/v1/dashboards/{dashboard_id}/widgets")
+async def ui_add_widget(request: Request, dashboard_id: str):
     token = _get_request_token(request)
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     ws = getattr(request.state, "workspace", None)
-    params: dict[str, Any] = {"purge_superset": purge_superset}
+    params = {}
+    if ws and ws.get("slug"):
+        params["workspace_slug"] = ws["slug"]
+
+    try:
+        body = await request.json()
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{BACKEND_URL}/api/v1/dashboards/{dashboard_id}/widgets",
+                headers=headers,
+                params=params,
+                json=body,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@app.patch("/api/dashboards/{dashboard_id}/widgets/{widget_id}")
+@app.patch("/api/v1/dashboards/{dashboard_id}/widgets/{widget_id}")
+async def ui_update_widget(request: Request, dashboard_id: str, widget_id: str):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params = {}
+    if ws and ws.get("slug"):
+        params["workspace_slug"] = ws["slug"]
+
+    try:
+        body = await request.json()
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.patch(
+                f"{BACKEND_URL}/api/v1/dashboards/{dashboard_id}/widgets/{widget_id}",
+                headers=headers,
+                params=params,
+                json=body,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@app.delete("/api/dashboards/{dashboard_id}/widgets/{widget_id}")
+@app.delete("/api/v1/dashboards/{dashboard_id}/widgets/{widget_id}")
+async def ui_delete_widget(request: Request, dashboard_id: str, widget_id: str):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params = {}
+    if ws and ws.get("slug"):
+        params["workspace_slug"] = ws["slug"]
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.delete(
+                f"{BACKEND_URL}/api/v1/dashboards/{dashboard_id}/widgets/{widget_id}",
+                headers=headers,
+                params=params,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@app.get("/api/dashboards/{dashboard_id}/widgets/{widget_id}/data")
+@app.get("/api/v1/dashboards/{dashboard_id}/widgets/{widget_id}/data")
+async def ui_get_widget_data(request: Request, dashboard_id: str, widget_id: str, time_range: str | None = None):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params = {}
+    if ws and ws.get("slug"):
+        params["workspace_slug"] = ws["slug"]
+    if time_range:
+        params["time_range"] = time_range
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{BACKEND_URL}/api/v1/dashboards/{dashboard_id}/widgets/{widget_id}/data",
+                headers=headers,
+                params=params,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@app.delete("/api/dashboards/{dashboard_id}")
+@app.delete("/api/v1/dashboards/{dashboard_id}")
+async def ui_delete_dashboard(request: Request, dashboard_id: str):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params = {}
     if ws and ws.get("slug"):
         params["workspace_slug"] = ws["slug"]
 
@@ -2611,3 +2661,4 @@ async def ui_delete_dashboard(request: Request, dashboard_id: str, purge_superse
             return JSONResponse(resp.json(), status_code=resp.status_code)
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=502)
+
