@@ -33,6 +33,7 @@ from models import (
 )
 from notebooks_router import router as notebooks_router
 from oauth import enabled_providers, get_oauth_redirect, handle_oauth_callback
+from pipelines_router import router as pipelines_router
 from schemas import (
     AddMemberRequest,
     CatalogAccessResponse,
@@ -80,8 +81,9 @@ app = FastAPI(title="Lake of Tears Auth API", docs_url=None, redoc_url=None)
 
 @app.on_event("startup")
 def on_startup():
-    from database import SessionLocal
+    from database import Base, SessionLocal, engine
 
+    Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
         _backfill_default_catalogs(db)
@@ -100,6 +102,8 @@ app.add_middleware(
 
 app.include_router(notebooks_router, prefix="/api/v1/notebooks", tags=["notebooks"])
 app.include_router(notebooks_router, prefix="/api/notebooks", tags=["notebooks"])
+app.include_router(pipelines_router, prefix="/api/v1/pipelines", tags=["pipelines"])
+app.include_router(pipelines_router, prefix="/api/pipelines", tags=["pipelines"])
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

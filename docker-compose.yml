@@ -102,6 +102,12 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       MINIO_BUCKET: datalake
+      AIRFLOW_URL: http://airflow:8080/airflow
+      AIRFLOW_ADMIN_USER: admin
+      AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_PASSWORD}
+      AIRFLOW_DAGS_DIR: /opt/airflow/dags
+    volumes:
+      - ${DATALAKE_DATA_DIR:-~}/airflow/dags:/opt/airflow/dags
     depends_on:
       postgres:
         condition: service_healthy
@@ -175,6 +181,8 @@ services:
       JUPYTER_BASE_URL: /jupyter
       JUPYTER_TOKEN: ${JUPYTER_TOKEN}
       AIRFLOW_URL: http://airflow:8080/airflow
+      AIRFLOW_ADMIN_USER: ${AIRFLOW_ADMIN_USER:-admin}
+      AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_PASSWORD:-airflowadminpassword}
     depends_on:
       minio:
         condition: service_healthy
@@ -272,11 +280,15 @@ services:
       AIRFLOW__CORE__EXECUTOR: SequentialExecutor
       AIRFLOW__CORE__LOAD_EXAMPLES: "False"
       AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session"
       AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:-please_change_me}
       # base_url tells Airflow to generate links prefixed with /airflow/
       AIRFLOW__WEBSERVER__BASE_URL: http://localhost/airflow/
       _AIRFLOW_WWW_USER_USERNAME: admin
       _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_PASSWORD}
+      JUPYTER_SERVER_URL: http://jupyter:8888
+      JUPYTER_BASE_URL: /jupyter
+      JUPYTER_TOKEN: ${JUPYTER_TOKEN}
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}

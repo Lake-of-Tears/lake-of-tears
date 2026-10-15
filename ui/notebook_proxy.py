@@ -17,7 +17,7 @@ JUPYTER_TOKEN = os.getenv("JUPYTER_TOKEN", "")
 
 AIRFLOW_URL = os.getenv("AIRFLOW_URL", "http://airflow:8080/airflow").rstrip("/")
 AIRFLOW_ADMIN_USER = os.getenv("AIRFLOW_ADMIN_USER", "admin")
-AIRFLOW_ADMIN_PASSWORD = os.getenv("AIRFLOW_ADMIN_PASSWORD", "")
+AIRFLOW_ADMIN_PASSWORD = os.getenv("AIRFLOW_ADMIN_PASSWORD") or "airflowadminpassword"
 
 BACKEND_URL = os.getenv("BACKEND_URL", "http://backend:8000").rstrip("/")
 USE_BACKEND_NOTEBOOKS = os.getenv("USE_BACKEND_NOTEBOOKS", "true").lower() in ("true", "1", "yes")
@@ -599,7 +599,10 @@ async def trigger_airflow_notebook_run(
 ) -> tuple[int, dict[str, Any]]:
     """Trigger on-demand execution of a notebook via Airflow REST API."""
     url = f"{AIRFLOW_URL}/api/v1/dags/run_notebook/dagRuns"
-    run_id = f"manual__{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}__{sanitize_notebook_path(notebook_path)}"
+    clean_nb = re.sub(r"[^a-zA-Z0-9._-]", "_", sanitize_notebook_path(notebook_path))
+    clean_user = re.sub(r"[^a-zA-Z0-9._-]", "_", user_email)
+    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    run_id = f"manual__{ts}__{clean_user}__{clean_nb}"
     payload = {
         "dag_run_id": run_id,
         "conf": {
@@ -612,6 +615,17 @@ async def trigger_airflow_notebook_run(
     auth = (AIRFLOW_ADMIN_USER, AIRFLOW_ADMIN_PASSWORD) if AIRFLOW_ADMIN_PASSWORD else None
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
+            if auth:
+                try:
+                    await client.patch(
+                        f"{AIRFLOW_URL}/api/v1/dags/run_notebook",
+                        json={"is_paused": False},
+                        auth=auth,
+                        timeout=5.0,
+                    )
+                except Exception:
+                    pass
+
             resp = await client.post(url, json=payload, auth=auth)
             try:
                 data = resp.json()

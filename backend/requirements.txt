@@ -12,3 +12,4 @@ python-dotenv==1.2.2
 email-validator==2.2.0
 boto3==1.43.16
 websockets==14.2
+croniter>=3.0.0

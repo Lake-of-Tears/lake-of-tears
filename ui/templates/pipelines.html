@@ -1,0 +1,2052 @@
+{% extends "base.html" %}
+{% block title %}Pipelines · Lake of Tears{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto space-y-6" id="pipelines-container">
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="fixed top-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+  <!-- Page Header -->
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-white/[0.07]">
+    <div>
+      <div class="flex items-center gap-3">
+        <h1 class="text-xl font-bold tracking-tight text-gray-100">Pipelines</h1>
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">
+          <span class="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
+          {{ workspace.name if workspace else 'All Workspaces' }}
+        </span>
+        {% if my_role == 'viewer' %}
+        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-gray-500/10 text-gray-400 border border-gray-500/20">
+          Read-Only Viewer
+        </span>
+        {% endif %}
+      </div>
+      <p class="text-xs text-gray-500 mt-1">Native workspace pipeline orchestration and headless Airflow execution</p>
+    </div>
+
+    <!-- Top Action Controls -->
+    <div class="flex items-center gap-2">
+      <button onclick="fetchPipelines()" id="btn-refresh" class="btn-ghost text-xs flex items-center gap-1.5 py-1.5 px-3">
+        <svg id="refresh-icon" class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        <span>Refresh</span>
+        <span id="last-updated-ts" class="text-[10px] text-gray-500 font-mono ml-1"></span>
+      </button>
+
+      {% if my_role != 'viewer' %}
+      <a href="/notebooks" class="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+        </svg>
+        <span>Schedule Notebook</span>
+      </a>
+      {% endif %}
+    </div>
+  </div>
+
+  <style>
+    .timeline-scrollbar::-webkit-scrollbar {
+      height: 6px;
+    }
+    .timeline-scrollbar::-webkit-scrollbar-track {
+      background: rgba(0, 0, 0, 0.25);
+    }
+    .timeline-scrollbar::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 9999px;
+    }
+    .timeline-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.3);
+    }
+
+    /* Grab to Pan cursors */
+    #timeline-viewport.cursor-grab {
+      cursor: grab;
+    }
+    #timeline-viewport.cursor-grabbing {
+      cursor: grabbing;
+      user-select: none;
+    }
+
+    /* ── Light Theme Overrides ─────────────────────────────────────── */
+    html[data-theme="light"] #timeline-banner {
+      background-color: #ffffff !important;
+      border-color: #e5e7eb !important;
+      box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
+    }
+    html[data-theme="light"] #timeline-banner .timeline-toolbar {
+      background-color: #f9fafb !important;
+      border-bottom-color: #e5e7eb !important;
+    }
+    html[data-theme="light"] #timeline-banner .timeline-title {
+      color: #111827 !important;
+    }
+    html[data-theme="light"] #timeline-date-nav {
+      background-color: #ffffff !important;
+      border-color: #d1d5db !important;
+      color: #374151 !important;
+    }
+    html[data-theme="light"] #timeline-current-date-label {
+      color: #111827 !important;
+    }
+    html[data-theme="light"] #timeline-tz-badge,
+    html[data-theme="light"] .timeline-legend-pill {
+      background-color: #ffffff !important;
+      border-color: #e5e7eb !important;
+      color: #4b5563 !important;
+    }
+    html[data-theme="light"] #timeline-zoom-controls {
+      background-color: #f3f4f6 !important;
+      border-color: #e5e7eb !important;
+      color: #6b7280 !important;
+    }
+    html[data-theme="light"] #timeline-zoom-controls .zoom-btn.active {
+      background-color: #ffffff !important;
+      color: #111827 !important;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08) !important;
+      border: 1px solid #d1d5db !important;
+    }
+    html[data-theme="light"] #timeline-ruler-header {
+      background-color: #f9fafb !important;
+      border-bottom-color: #e5e7eb !important;
+    }
+    html[data-theme="light"] .timeline-sticky-pipeline-col {
+      background-color: #ffffff !important;
+      border-right-color: #e5e7eb !important;
+    }
+    html[data-theme="light"] .timeline-sticky-corner-header {
+      background-color: #f9fafb !important;
+      border-right-color: #e5e7eb !important;
+      color: #6b7280 !important;
+    }
+    html[data-theme="light"] .timeline-pipeline-label {
+      color: #111827 !important;
+    }
+    html[data-theme="light"] .timeline-schedule-badge {
+      background-color: #f3f4f6 !important;
+      border-color: #e5e7eb !important;
+      color: #4b5563 !important;
+    }
+    html[data-theme="light"] .timeline-grid-line {
+      background-color: rgba(0, 0, 0, 0.06) !important;
+    }
+    html[data-theme="light"] .timeline-ruler-tick {
+      background-color: #d1d5db !important;
+    }
+    html[data-theme="light"] .timeline-ruler-tick-label {
+      color: #6b7280 !important;
+    }
+    html[data-theme="light"] .timeline-swimlane-row {
+      border-bottom-color: #f3f4f6 !important;
+    }
+    html[data-theme="light"] .timeline-swimlane-row:hover {
+      background-color: #f9fafb !important;
+    }
+    html[data-theme="light"] .timeline-scrollbar::-webkit-scrollbar-track {
+      background: rgba(0, 0, 0, 0.05) !important;
+    }
+    html[data-theme="light"] .timeline-scrollbar::-webkit-scrollbar-thumb {
+      background: rgba(0, 0, 0, 0.2) !important;
+    }
+    html[data-theme="light"] .timeline-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: rgba(0, 0, 0, 0.35) !important;
+    }
+    html[data-theme="light"] #color-picker-popover,
+    html[data-theme="light"] #calendar-popover {
+      background-color: #ffffff !important;
+      border-color: #e5e7eb !important;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.08) !important;
+      color: #111827 !important;
+    }
+    html[data-theme="light"] #calendar-popover .calendar-day-btn {
+      color: #374151;
+    }
+    html[data-theme="light"] #calendar-popover .calendar-day-btn:hover {
+      background-color: #f3f4f6;
+      color: #111827;
+    }
+    html[data-theme="light"] #calendar-popover .calendar-day-dimmed {
+      color: #9ca3af !important;
+    }
+    html[data-theme="light"] #inspector-drawer-panel {
+      background-color: #ffffff !important;
+      border-left-color: #e5e7eb !important;
+      color: #111827 !important;
+      box-shadow: -4px 0 24px rgba(0, 0, 0, 0.08) !important;
+    }
+    html[data-theme="light"] #inspector-drawer-header {
+      background-color: #f9fafb !important;
+      border-bottom-color: #e5e7eb !important;
+    }
+    html[data-theme="light"] #drawer-metadata-section {
+      background-color: #f9fafb !important;
+      border-bottom-color: #e5e7eb !important;
+    }
+    html[data-theme="light"] #drawer-metadata-section .bg-black\/20 {
+      background-color: #ffffff !important;
+      border-color: #e5e7eb !important;
+    }
+    html[data-theme="light"] #drawer-metadata-section .text-gray-200 {
+      color: #111827 !important;
+    }
+    html[data-theme="light"] #drawer-tabs-bar {
+      background-color: #f3f4f6 !important;
+      border-bottom-color: #e5e7eb !important;
+    }
+    html[data-theme="light"] #inspector-drawer-panel .bg-white\/\[0\.02\] {
+      background-color: #f9fafb !important;
+    }
+    html[data-theme="light"] #inspector-drawer-panel .border-white\/\[0\.06\],
+    html[data-theme="light"] #inspector-drawer-panel .border-white\/\[0\.08\] {
+      border-color: #e5e7eb !important;
+    }
+    html[data-theme="light"] #inspector-drawer-panel input,
+    html[data-theme="light"] #inspector-drawer-panel textarea {
+      background-color: #ffffff !important;
+      border-color: #d1d5db !important;
+      color: #111827 !important;
+    }
+    html[data-theme="light"] .filter-pill-container {
+      background-color: #ffffff !important;
+      border-color: #e5e7eb !important;
+    }
+    html[data-theme="light"] .pipelines-table-card {
+      background-color: #ffffff !important;
+      border-color: #e5e7eb !important;
+    }
+    html[data-theme="light"] .pipelines-table thead {
+      background-color: #f9fafb !important;
+      border-bottom-color: #e5e7eb !important;
+      color: #6b7280 !important;
+    }
+    html[data-theme="light"] .pipelines-table tbody {
+      divide-color: #f3f4f6 !important;
+      color: #374151 !important;
+    }
+    html[data-theme="light"] .pipelines-table tbody tr:hover {
+      background-color: #f9fafb !important;
+    }
+  </style>
+
+  <!-- ── 24-Hour Visual Schedule Timeline ─────────────────────────────────── -->
+  <div id="timeline-banner" class="card overflow-hidden border border-white/[0.08] bg-[#141414] transition-all duration-200">
+    <!-- Banner Header Toolbar -->
+    <div class="timeline-toolbar px-4 py-2.5 bg-white/[0.02] border-b border-white/[0.06] flex flex-wrap items-center justify-between gap-3 select-none">
+      <!-- Left Title & Date Navigator -->
+      <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2">
+          <div class="w-6 h-6 rounded bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+          </div>
+          <span class="timeline-title text-xs font-semibold text-gray-200">24-Hour Schedule Timeline</span>
+        </div>
+
+        <!-- Date Navigation Pill -->
+        <div id="timeline-date-nav" class="flex items-center bg-black/40 border border-white/[0.08] rounded-md p-0.5 text-xs text-gray-300">
+          <button onclick="navigateTimelineDay(-1)" title="Previous Day" class="px-2 py-1 hover:text-white hover:bg-white/[0.08] rounded transition-colors">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+          </button>
+          <button onclick="navigateTimelineToday()" id="btn-timeline-today" class="px-2.5 py-1 text-xs font-medium text-blue-400 hover:text-blue-300 transition-colors">
+            Today
+          </button>
+          <button onclick="navigateTimelineDay(1)" title="Next Day" class="px-2 py-1 hover:text-white hover:bg-white/[0.08] rounded transition-colors">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+          </button>
+          <div class="h-3.5 w-px bg-white/[0.1] mx-1"></div>
+          <button onclick="toggleCalendarPopover(event)" id="btn-open-calendar" class="flex items-center gap-1.5 px-2 py-0.5 rounded hover:bg-white/[0.08] text-xs font-mono text-gray-200 hover:text-white transition-colors cursor-pointer" title="Pick Date">
+            <span id="timeline-current-date-label">Loading...</span>
+            <svg class="w-3.5 h-3.5 text-gray-400 hover:text-gray-200 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+            </svg>
+          </button>
+          <input type="date" id="timeline-datepicker" onchange="onTimelineDatePicked(this.value)" class="opacity-0 absolute pointer-events-none w-0 h-0" />
+        </div>
+
+        <!-- Timezone badge -->
+        <span id="timeline-tz-badge" class="hidden sm:inline-flex px-2 py-0.5 rounded text-[10px] font-mono text-gray-400 bg-white/[0.03] border border-white/[0.06]">
+          UTC
+        </span>
+
+        <!-- Run Status Legend -->
+        <div class="timeline-legend-pill hidden lg:flex items-center gap-3 text-[10px] text-gray-400 bg-black/40 border border-white/[0.06] rounded-md px-2.5 py-1">
+          <span class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>Success</span>
+          <span class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-rose-400"></span>Failed</span>
+          <span class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></span>Running</span>
+          <span class="flex items-center gap-1.5"><svg class="w-2.5 h-2.5 text-gray-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>Scheduled</span>
+        </div>
+      </div>
+
+      <!-- Right Controls: Zoom & Collapse -->
+      <div class="flex items-center gap-2">
+        <!-- Zoom Buttons -->
+        <div id="timeline-zoom-controls" class="flex items-center bg-black/40 border border-white/[0.08] rounded-md p-0.5 text-xs text-gray-400">
+          <button onclick="setTimelineZoom('24h')" id="btn-zoom-24h" class="zoom-btn active px-2.5 py-1 rounded text-xs font-medium transition-colors bg-white/[0.08] text-white">
+            24h
+          </button>
+
+          <button onclick="setTimelineZoom('12h')" id="btn-zoom-12h" class="zoom-btn px-2.5 py-1 rounded text-xs font-medium hover:text-white transition-colors">
+            12h
+          </button>
+          <button onclick="setTimelineZoom('6h')" id="btn-zoom-6h" class="zoom-btn px-2.5 py-1 rounded text-xs font-medium hover:text-white transition-colors">
+            6h
+          </button>
+          <button onclick="setTimelineZoom('1h')" id="btn-zoom-1h" class="zoom-btn px-2.5 py-1 rounded text-xs font-medium hover:text-white transition-colors">
+            1h
+          </button>
+        </div>
+
+        <!-- Collapse Toggle -->
+        <button onclick="toggleTimelineCollapse()" id="btn-toggle-timeline" class="btn-ghost py-1 px-2 text-xs flex items-center gap-1 text-gray-400 hover:text-white" title="Toggle Timeline">
+          <svg id="timeline-collapse-icon" class="w-4 h-4 transform transition-transform duration-200" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Banner Content Area (Collapsible) -->
+    <div id="timeline-content-body" class="relative">
+      <!-- Loading overlay -->
+      <div id="timeline-loading" class="py-12 flex flex-col items-center justify-center gap-2 text-gray-500">
+        <svg class="w-5 h-5 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+        </svg>
+        <span class="text-xs">Loading 24h schedule timeline...</span>
+      </div>
+
+      <!-- Empty state -->
+      <div id="timeline-empty" class="hidden py-10 text-center text-xs text-gray-500">
+        No scheduled pipelines in this workspace.
+      </div>
+
+      <!-- Scrollable Viewport -->
+      <div id="timeline-viewport" class="hidden overflow-x-auto overflow-y-hidden select-none relative timeline-scrollbar">
+        <div id="timeline-canvas" class="min-w-full flex flex-col relative" style="width: 100%; min-width: 900px;">
+          <!-- Time Axis Header -->
+          <div class="flex items-center border-b border-white/[0.06] bg-black/30 sticky top-0 z-20" id="timeline-ruler-header">
+            <!-- Fixed Left Column Header -->
+            <div class="timeline-sticky-corner-header w-48 sm:w-60 shrink-0 px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wider border-r border-white/[0.06] bg-[#141414] sticky left-0 z-30">
+              Pipeline
+            </div>
+            <!-- Time Ticks Ruler -->
+            <div id="timeline-ruler" class="flex-1 relative h-7 overflow-visible">
+              <!-- Generated 24h Ticks -->
+            </div>
+          </div>
+
+          <!-- Swimlanes Wrapper with Grid Overlay -->
+          <div id="timeline-swimlanes-wrapper" class="relative">
+            <!-- Grid overlay across the swimlane track area -->
+            <div id="timeline-grid-overlay" class="absolute top-0 bottom-0 right-0 left-48 sm:left-60 pointer-events-none z-0">
+              <!-- Vertical hour grid lines & NOW indicator line -->
+            </div>
+            <!-- Swimlanes Container -->
+            <div id="timeline-swimlanes" class="relative divide-y divide-white/[0.04] z-10">
+              <!-- Dynamic Pipeline Swimlane Rows -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Filter & Search Toolbar -->
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    <!-- Filter Pills -->
+    <div class="filter-pill-container flex items-center gap-1 bg-white/[0.04] p-1 rounded-lg border border-white/[0.06] text-xs">
+      <button onclick="setFilter('all')" id="filter-all" class="filter-pill active px-3 py-1 rounded-md font-medium transition-colors">
+        All <span id="count-all" class="text-gray-500 ml-1 font-mono">0</span>
+      </button>
+      <button onclick="setFilter('active')" id="filter-active" class="filter-pill px-3 py-1 rounded-md text-gray-400 hover:text-gray-200 transition-colors">
+        Active <span id="count-active" class="text-gray-500 ml-1 font-mono">0</span>
+      </button>
+      <button onclick="setFilter('paused')" id="filter-paused" class="filter-pill px-3 py-1 rounded-md text-gray-400 hover:text-gray-200 transition-colors">
+        Paused <span id="count-paused" class="text-gray-500 ml-1 font-mono">0</span>
+      </button>
+      <button onclick="setFilter('running')" id="filter-running" class="filter-pill px-3 py-1 rounded-md text-gray-400 hover:text-gray-200 transition-colors">
+        Running <span id="count-running" class="text-gray-500 ml-1 font-mono">0</span>
+      </button>
+      <button onclick="setFilter('failed')" id="filter-failed" class="filter-pill px-3 py-1 rounded-md text-gray-400 hover:text-gray-200 transition-colors">
+        Failed <span id="count-failed" class="text-gray-500 ml-1 font-mono">0</span>
+      </button>
+    </div>
+
+    <!-- Search input -->
+    <div class="relative w-full sm:w-72">
+      <svg class="w-3.5 h-3.5 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+      </svg>
+      <input type="text" id="pipeline-search" oninput="applyFilters()" placeholder="Filter by name, ID, or tag..."
+             class="input-dark pl-9 py-1.5 text-xs w-full"/>
+    </div>
+  </div>
+
+  <!-- Pipelines Table Card -->
+  <div class="card pipelines-table-card overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="pipelines-table w-full text-left text-xs text-gray-300">
+        <thead class="bg-white/[0.02] border-b border-white/[0.07] text-[11px] font-medium text-gray-500 uppercase tracking-wider">
+          <tr>
+            <th class="py-3 px-4 w-12 text-center">Status</th>
+            <th class="py-3 px-4">Pipeline</th>
+            <th class="py-3 px-4">Schedule</th>
+            <th class="py-3 px-4">Last Run</th>
+            <th class="py-3 px-4">Duration</th>
+            <th class="py-3 px-4">Next Run</th>
+            <th class="py-3 px-4 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="pipelines-table-body" class="divide-y divide-white/[0.04]">
+          <!-- Skeleton Loader -->
+          <tr>
+            <td colspan="7" class="py-12 text-center text-gray-500">
+              <div class="flex flex-col items-center justify-center gap-2">
+                <svg class="w-6 h-6 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                </svg>
+                <span>Loading pipelines...</span>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Empty State (Hidden by default) -->
+  <div id="pipelines-empty-state" class="hidden card p-12 text-center flex flex-col items-center justify-center gap-3">
+    <div class="w-12 h-12 rounded-xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center text-gray-500">
+      <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/>
+      </svg>
+    </div>
+    <h3 class="text-sm font-medium text-gray-200">No pipelines found</h3>
+    <p class="text-xs text-gray-500 max-w-sm">No Airflow DAGs match the current workspace or filter criteria.</p>
+    {% if my_role != 'viewer' %}
+    <a href="/notebooks" class="btn-primary text-xs mt-2">+ Create from Notebook</a>
+    {% endif %}
+  </div>
+
+</div>
+
+<!-- ── Slide-Over Inspector Drawer ─────────────────────────────────────────── -->
+<div id="inspector-drawer" class="fixed inset-0 z-50 overflow-hidden hidden" aria-labelledby="drawer-title" role="dialog" aria-modal="true">
+  <div class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onclick="closeInspector()"></div>
+
+  <div class="fixed inset-y-0 right-0 max-w-full flex pl-10">
+    <div id="inspector-drawer-panel" class="w-screen max-w-2xl bg-[#161616] border-l border-white/[0.08] shadow-2xl flex flex-col h-full">
+
+      <!-- Drawer Header -->
+      <div id="inspector-drawer-header" class="p-4 border-b border-white/[0.08] flex items-center justify-between shrink-0 bg-[#1a1a1a]">
+        <div class="flex items-center gap-3 min-w-0 flex-1">
+          <button id="drawer-color-swatch" onclick="openColorPicker(currentDrawerDagId, event)"
+                  class="w-7 h-7 rounded-lg border border-white/20 flex items-center justify-center shrink-0 cursor-pointer hover:scale-110 transition-transform shadow"
+                  title="Change Pipeline Color">
+          </button>
+          <div class="min-w-0 flex-1 pr-2">
+            <div class="flex items-center gap-2">
+              <span id="drawer-dag-id" class="text-xs text-gray-400 font-mono">pipeline_id</span>
+              <span id="drawer-status-badge"></span>
+            </div>
+            <div class="flex items-center gap-2 mt-0.5">
+              <input id="drawer-name-input" type="text"
+                     placeholder="Pipeline Display Name"
+                     class="text-sm font-semibold text-gray-100 bg-transparent border-b border-dashed border-gray-600 focus:border-blue-400 focus:outline-none w-full max-w-xs px-0.5 py-0.5 transition-colors"/>
+            </div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          {% if my_role != 'viewer' %}
+          <button onclick="savePipelineMetadata(currentDrawerDagId)" id="btn-save-drawer-meta"
+                  class="btn-primary text-xs py-1.5 px-3 flex items-center gap-1">
+            <span>Save</span>
+          </button>
+          {% endif %}
+          <button onclick="closeInspector()" class="p-1.5 text-gray-400 hover:text-gray-200 rounded-lg hover:bg-white/[0.06] transition-colors" title="Close Drawer">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Pipeline Details & Metadata Card -->
+      <div class="p-4 bg-white/[0.02] border-b border-white/[0.06] space-y-3 shrink-0" id="drawer-metadata-section">
+        <!-- Editable Description -->
+        <div>
+          <label class="block text-[10px] font-medium text-gray-400 uppercase tracking-wider mb-1">Description</label>
+          <textarea id="drawer-desc-input" rows="2" placeholder="Add a description for this pipeline..."
+                    class="input-dark text-xs w-full resize-none"></textarea>
+        </div>
+
+        <!-- Notebook Job Link (Dynamic) -->
+        <div id="drawer-notebook-link-wrap" class="hidden"></div>
+
+        <!-- Stuck / Running Active Run Alert with Cancel Button (Dynamic) -->
+        <div id="drawer-active-run-alert" class="hidden"></div>
+
+        <!-- Metadata Grid (Row Data from Table) -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-xs">
+          <!-- Status & Toggle -->
+          <div class="p-2.5 rounded-lg bg-black/20 border border-white/[0.06]">
+            <div class="text-[10px] text-gray-400 uppercase font-medium">Status</div>
+            <div class="flex items-center justify-between mt-1">
+              <span id="drawer-meta-status" class="font-medium text-gray-200 text-xs">Active</span>
+              <button id="drawer-pause-btn" onclick="togglePipelinePauseFromDrawer()"
+                      title="Toggle Pipeline Pause/Resume"
+                      class="relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none bg-blue-600">
+                <span id="drawer-pause-dot" class="pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out translate-x-3"></span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Schedule Interval -->
+          <div class="p-2.5 rounded-lg bg-black/20 border border-white/[0.06]">
+            <div class="text-[10px] text-gray-400 uppercase font-medium">Schedule</div>
+            <div id="drawer-meta-schedule" class="font-mono text-xs text-gray-200 truncate mt-1" title="Schedule">None</div>
+          </div>
+
+          <!-- Last Run & Duration -->
+          <div class="p-2.5 rounded-lg bg-black/20 border border-white/[0.06]">
+            <div class="text-[10px] text-gray-400 uppercase font-medium">Last Run / Duration</div>
+            <div class="flex items-center gap-1.5 mt-1 truncate">
+              <span id="drawer-meta-last-run-badge"></span>
+              <span id="drawer-meta-duration" class="font-mono text-xs text-gray-400"></span>
+            </div>
+          </div>
+
+          <!-- Next Scheduled Run -->
+          <div class="p-2.5 rounded-lg bg-black/20 border border-white/[0.06]">
+            <div class="text-[10px] text-gray-400 uppercase font-medium">Next Run</div>
+            <div id="drawer-meta-next-run" class="font-mono text-xs text-gray-200 truncate mt-1">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Drawer Tabs -->
+      <div id="drawer-tabs-bar" class="flex items-center px-4 border-b border-white/[0.08] bg-black/20 text-xs shrink-0">
+        <button onclick="setDrawerTab('runs')" id="drawer-tab-runs" class="px-3 py-2.5 border-b-2 border-blue-500 text-blue-400 font-medium">
+          Execution Runs (<span id="drawer-runs-count">0</span>)
+        </button>
+        <button onclick="setDrawerTab('logs')" id="drawer-tab-logs" class="px-3 py-2.5 border-b-2 border-transparent text-gray-400 hover:text-gray-200 font-medium">
+          Task Execution Log
+        </button>
+      </div>
+
+      <!-- Drawer Content -->
+      <div class="flex-1 overflow-y-auto p-4 space-y-4">
+
+        <!-- Runs Tab Pane -->
+        <div id="drawer-pane-runs" class="space-y-4">
+          <div class="flex items-center justify-between text-xs text-gray-400">
+            <span>Historical runs for this pipeline</span>
+            <button onclick="loadDrawerRuns(currentDrawerDagId)" class="hover:text-gray-200 flex items-center gap-1">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+              Refresh
+            </button>
+          </div>
+
+          <div id="drawer-runs-list" class="space-y-2">
+            <!-- Dynamic run cards -->
+          </div>
+        </div>
+
+        <!-- Logs Tab Pane -->
+        <div id="drawer-pane-logs" class="hidden flex flex-col h-full space-y-3">
+          <div class="flex items-center justify-between text-xs text-gray-400 shrink-0">
+            <div class="flex items-center gap-2">
+              <span id="log-target-task" class="font-mono text-gray-300">task: execute_and_archive_notebook</span>
+              <span id="log-polling-indicator" class="hidden items-center gap-1 text-[11px] text-blue-400">
+                <span class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></span> Streaming
+              </span>
+            </div>
+            <div class="flex items-center gap-2">
+              <button onclick="scrollLogsToBottom()" class="btn-ghost py-1 px-2 text-[11px]">Scroll to Bottom</button>
+              <button onclick="refreshCurrentTaskLogs()" class="btn-ghost py-1 px-2 text-[11px]">Refresh</button>
+            </div>
+          </div>
+
+          <!-- Log Viewer Terminal -->
+          <div class="flex-1 bg-black/60 border border-white/[0.08] rounded-lg p-3 font-mono text-[11px] leading-relaxed overflow-y-auto max-h-[500px]" id="log-terminal">
+            <pre id="log-pre" class="whitespace-pre-wrap break-all text-gray-300">Select a run and task to inspect logs.</pre>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ── Trigger Pipeline Run Modal ─────────────────────────────────────────── -->
+<div id="trigger-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+  <div class="bg-[#1c1c1c] border border-white/[0.1] rounded-xl shadow-2xl w-full max-w-md p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-sm font-semibold text-gray-100 flex items-center gap-2">
+        <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        Trigger Pipeline Run
+      </h3>
+      <button onclick="closeTriggerModal()" class="text-gray-500 hover:text-gray-300">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    <p class="text-xs text-gray-400 mb-4">Trigger an immediate execution of <code id="trigger-dag-id" class="text-blue-300">dag_id</code>. Custom JSON parameters are passed to runtime tasks.</p>
+
+    <div class="space-y-3 mb-6">
+      <div>
+        <label class="block text-[11px] font-medium text-gray-400 uppercase mb-1">Runtime Parameters (JSON)</label>
+        <textarea id="trigger-params" rows="4" placeholder='{"batch_id": 101, "mode": "full"}'
+                  class="input-dark font-mono text-xs"></textarea>
+      </div>
+    </div>
+
+    <div class="flex items-center justify-end gap-3">
+      <button onclick="closeTriggerModal()" class="btn-ghost text-xs">Cancel</button>
+      <button onclick="submitPipelineTrigger()" id="btn-submit-trigger" class="btn-primary text-xs">
+        Trigger Run
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Color Picker Popover ─────────────────────────────────────────────── -->
+<div id="color-picker-popover" class="hidden fixed z-50 bg-[#1c1c1c] border border-white/[0.12] rounded-xl shadow-2xl p-3 w-64 space-y-3 select-none">
+  <div class="flex items-center justify-between">
+    <span class="text-xs font-semibold text-gray-200">Pipeline Color</span>
+    <button onclick="closeColorPicker()" class="text-gray-400 hover:text-white p-0.5">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+    </button>
+  </div>
+  <p class="text-[11px] text-gray-400">Assigned workspace color on the 24-hour schedule timeline.</p>
+  <div id="color-palette-grid" class="grid grid-cols-6 gap-2">
+    <!-- 12 palette swatches -->
+  </div>
+  <div class="flex items-center gap-2 pt-2 border-t border-white/[0.06]">
+    <label class="text-[11px] text-gray-400">Custom:</label>
+    <input type="color" id="custom-color-input" onchange="applyCustomColor(this.value)" class="w-6 h-6 rounded border border-white/[0.1] bg-transparent cursor-pointer" />
+    <input type="text" id="custom-color-hex" maxlength="7" placeholder="#3B82F6" class="input-dark text-xs py-1 px-2 font-mono flex-1" onchange="applyCustomColor(this.value)" />
+  </div>
+</div>
+
+<!-- ── Custom Calendar Popover ─────────────────────────────────────────── -->
+<div id="calendar-popover" class="hidden fixed z-50 bg-[#1c1c1c] border border-white/[0.12] rounded-xl shadow-2xl p-3.5 w-72 space-y-3 select-none text-xs">
+  <div class="flex items-center justify-between pb-1 border-b border-white/[0.06]">
+    <button onclick="changeCalendarMonth(-1)" class="p-1 rounded-md text-gray-400 hover:text-white hover:bg-white/[0.08] transition-colors" title="Previous Month">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+    </button>
+    <span id="calendar-month-year-label" class="font-semibold text-gray-200 text-xs tracking-wide"></span>
+    <button onclick="changeCalendarMonth(1)" class="p-1 rounded-md text-gray-400 hover:text-white hover:bg-white/[0.08] transition-colors" title="Next Month">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+    </button>
+  </div>
+
+  <div class="grid grid-cols-7 gap-1 text-center font-medium text-[10px] text-gray-500 uppercase">
+    <span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span>
+  </div>
+
+  <div id="calendar-days-grid" class="grid grid-cols-7 gap-1 text-center font-mono">
+    <!-- Dynamically Rendered Day Buttons -->
+  </div>
+
+  <div class="flex items-center justify-between pt-2 border-t border-white/[0.06] text-[11px]">
+    <button onclick="selectCalendarShortcut(-1)" class="px-2 py-1 rounded hover:bg-white/[0.06] text-gray-400 hover:text-gray-200 transition-colors">Yesterday</button>
+    <button onclick="selectCalendarShortcut(0)" class="px-2.5 py-1 rounded bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 font-medium transition-colors">Today</button>
+    <button onclick="selectCalendarShortcut(1)" class="px-2 py-1 rounded hover:bg-white/[0.06] text-gray-400 hover:text-gray-200 transition-colors">Tomorrow</button>
+  </div>
+</div>
+
+
+<script>
+  let allPipelines = [];
+  let currentFilter = 'all';
+  let currentDrawerDagId = null;
+  let activeLogPollingTimer = null;
+  let currentSelectedRunId = null;
+  let currentSelectedTaskId = null;
+  const userRole = "{{ my_role }}";
+
+  // ── Timeline & Palette State ───────────────────────────────────────────────
+  const DEFAULT_PALETTE = [
+    '#3B82F6', '#10B981', '#8B5CF6', '#F59E0B',
+    '#EC4899', '#06B6D4', '#F97316', '#14B8A6',
+    '#6366F1', '#84CC16', '#E11D48', '#A855F7'
+  ];
+  let currentTimelineDate = new Date().toISOString().split('T')[0];
+  let timelineZoom = '24h';
+  let timelineData = null;
+  let activeColorPickerDagId = null;
+  const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+
+  // ── Toast Utility ──────────────────────────────────────────────────────────
+  function showToast(message, type = 'info') {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = `px-4 py-2.5 rounded-lg shadow-lg text-xs font-medium border flex items-center gap-2 pointer-events-auto transition-all duration-200 transform translate-y-2 opacity-0 ${
+      type === 'success' ? 'bg-emerald-950/90 text-emerald-300 border-emerald-800' :
+      type === 'error'   ? 'bg-rose-950/90 text-rose-300 border-rose-800' :
+                           'bg-gray-900/90 text-gray-200 border-white/[0.1]'
+    }`;
+    toast.innerHTML = `<span>${message}</span>`;
+    container.appendChild(toast);
+
+    requestAnimationFrame(() => {
+      toast.classList.remove('translate-y-2', 'opacity-0');
+    });
+
+    setTimeout(() => {
+      toast.classList.add('opacity-0', 'translate-y-2');
+      setTimeout(() => toast.remove(), 200);
+    }, 3500);
+  }
+
+  // ── Color Utilities ────────────────────────────────────────────────────────
+  function getPipelineColor(dagId) {
+    if (timelineData && timelineData.pipelines) {
+      const found = timelineData.pipelines.find(item => item.dag_id === dagId);
+      if (found && found.color_hex) return found.color_hex;
+    }
+    const foundAll = allPipelines.find(item => item.dag_id === dagId);
+    if (foundAll && foundAll.color_hex) return foundAll.color_hex;
+
+    // Fallback deterministic palette hash
+    let hash = 0;
+    for (let i = 0; i < dagId.length; i++) {
+      hash = (hash << 5) - hash + dagId.charCodeAt(i);
+      hash |= 0;
+    }
+    const idx = Math.abs(hash) % DEFAULT_PALETTE.length;
+    return DEFAULT_PALETTE[idx];
+  }
+
+  function openColorPicker(dagId, event) {
+    if (userRole === 'viewer') return;
+    event.stopPropagation();
+    activeColorPickerDagId = dagId;
+
+    const currentColor = getPipelineColor(dagId);
+    const pop = document.getElementById('color-picker-popover');
+    const grid = document.getElementById('color-palette-grid');
+
+    grid.innerHTML = DEFAULT_PALETTE.map(hex => {
+      const isSelected = (hex.toLowerCase() === currentColor.toLowerCase());
+      return `
+        <button onclick="selectTimelineColor('${dagId}', '${hex}')"
+                class="w-7 h-7 rounded-lg border flex items-center justify-center transition-transform hover:scale-110 ${
+                  isSelected ? 'border-white ring-2 ring-white/50' : 'border-transparent hover:border-white/30'
+                }"
+                style="background-color: ${hex};"
+                title="${hex}">
+          ${isSelected ? '<svg class="w-3.5 h-3.5 text-white filter drop-shadow" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>' : ''}
+        </button>
+      `;
+    }).join('');
+
+    document.getElementById('custom-color-input').value = currentColor;
+    document.getElementById('custom-color-hex').value = currentColor;
+
+    const rect = event.target.getBoundingClientRect();
+    pop.style.top = `${Math.min(window.innerHeight - 260, rect.bottom + 6)}px`;
+    pop.style.left = `${Math.min(window.innerWidth - 280, Math.max(10, rect.left - 100))}px`;
+    pop.classList.remove('hidden');
+  }
+
+  function closeColorPicker() {
+    const pop = document.getElementById('color-picker-popover');
+    if (pop) pop.classList.add('hidden');
+    activeColorPickerDagId = null;
+  }
+
+  async function selectTimelineColor(dagId, colorHex) {
+    if (userRole === 'viewer') return;
+    try {
+      const res = await fetch(`/api/pipelines/${dagId}/settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ color_hex: colorHex }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Failed to update pipeline settings');
+      }
+      showToast(`Updated timeline color for ${dagId}`, 'success');
+      closeColorPicker();
+
+      // Update in local timelineData
+      if (timelineData && timelineData.pipelines) {
+        const p = timelineData.pipelines.find(item => item.dag_id === dagId);
+        if (p) p.color_hex = colorHex;
+      }
+      const pInAll = allPipelines.find(item => item.dag_id === dagId);
+      if (pInAll) pInAll.color_hex = colorHex;
+
+      if (currentDrawerDagId === dagId) {
+        const swatch = document.getElementById('drawer-color-swatch');
+        if (swatch) swatch.style.backgroundColor = colorHex;
+      }
+
+      renderTimelineSwimlanes();
+      applyFilters(); // refresh table color dot
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+
+  function applyCustomColor(hexVal) {
+    if (!activeColorPickerDagId) return;
+    let clean = hexVal.trim();
+    if (!clean.startsWith('#')) clean = '#' + clean;
+    if (/^#[0-9A-Fa-f]{6}$/.test(clean)) {
+      selectTimelineColor(activeColorPickerDagId, clean);
+    }
+  }
+
+  // ── Custom Calendar Popover Logic ─────────────────────────────────────────
+  let calendarPopoverOpen = false;
+  let calendarViewYear = 2026;
+  let calendarViewMonth = 9; // 0-based
+
+  function toggleCalendarPopover(event) {
+    if (event) event.stopPropagation();
+    const pop = document.getElementById('calendar-popover');
+    if (!pop) return;
+
+    if (calendarPopoverOpen) {
+      closeCalendarPopover();
+      return;
+    }
+
+    // Initialize calendar view from currentTimelineDate
+    const parts = (currentTimelineDate || new Date().toISOString().split('T')[0]).split('-');
+    calendarViewYear = parseInt(parts[0], 10);
+    calendarViewMonth = parseInt(parts[1], 10) - 1;
+
+    renderCalendarPopover();
+
+    const triggerEl = document.getElementById('btn-open-calendar') || document.getElementById('timeline-date-nav');
+    if (triggerEl) {
+      const rect = triggerEl.getBoundingClientRect();
+      pop.style.top = `${Math.min(window.innerHeight - 340, rect.bottom + 6)}px`;
+      pop.style.left = `${Math.min(window.innerWidth - 300, Math.max(10, rect.left))}px`;
+    }
+
+    pop.classList.remove('hidden');
+    calendarPopoverOpen = true;
+  }
+
+  function closeCalendarPopover() {
+    const pop = document.getElementById('calendar-popover');
+    if (pop) pop.classList.add('hidden');
+    calendarPopoverOpen = false;
+  }
+
+  function changeCalendarMonth(delta) {
+    calendarViewMonth += delta;
+    if (calendarViewMonth < 0) {
+      calendarViewMonth = 11;
+      calendarViewYear -= 1;
+    } else if (calendarViewMonth > 11) {
+      calendarViewMonth = 0;
+      calendarViewYear += 1;
+    }
+    renderCalendarPopover();
+  }
+
+  function renderCalendarPopover() {
+    const labelEl = document.getElementById('calendar-month-year-label');
+    const gridEl = document.getElementById('calendar-days-grid');
+    if (!labelEl || !gridEl) return;
+
+    const monthNames = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    labelEl.textContent = `${monthNames[calendarViewMonth]} ${calendarViewYear}`;
+
+    const firstDay = new Date(calendarViewYear, calendarViewMonth, 1).getDay();
+    const daysInMonth = new Date(calendarViewYear, calendarViewMonth + 1, 0).getDate();
+    const daysInPrevMonth = new Date(calendarViewYear, calendarViewMonth, 0).getDate();
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const selectedStr = currentTimelineDate;
+
+    let html = '';
+
+    // Leading days from previous month
+    for (let i = firstDay - 1; i >= 0; i--) {
+      const d = daysInPrevMonth - i;
+      const prevM = calendarViewMonth === 0 ? 11 : calendarViewMonth - 1;
+      const prevY = calendarViewMonth === 0 ? calendarViewYear - 1 : calendarViewYear;
+      const dateStr = `${prevY}-${String(prevM + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      html += `<button onclick="onCalendarDateSelected('${dateStr}')" class="h-7 w-7 mx-auto flex items-center justify-center rounded-md calendar-day-dimmed text-gray-500 hover:bg-white/[0.06] hover:text-gray-300 text-xs">${d}</button>`;
+    }
+
+    // Days in current month
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = `${calendarViewYear}-${String(calendarViewMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const isSelected = (dateStr === selectedStr);
+      const isToday = (dateStr === todayStr);
+
+      let btnClass = 'h-7 w-7 mx-auto flex items-center justify-center rounded-md text-xs transition-colors calendar-day-btn ';
+      if (isSelected) {
+        btnClass += 'bg-blue-600 text-white font-bold shadow-md shadow-blue-600/30';
+      } else if (isToday) {
+        btnClass += 'text-blue-400 font-bold ring-1 ring-blue-500/50 hover:bg-blue-600/20';
+      } else {
+        btnClass += 'text-gray-300 hover:bg-white/[0.08] hover:text-white';
+      }
+
+      html += `<button onclick="onCalendarDateSelected('${dateStr}')" class="${btnClass}">${d}</button>`;
+    }
+
+    // Trailing days from next month
+    const totalRendered = firstDay + daysInMonth;
+    const remaining = (7 - (totalRendered % 7)) % 7;
+    for (let d = 1; d <= remaining; d++) {
+      const nextM = calendarViewMonth === 11 ? 0 : calendarViewMonth + 1;
+      const nextY = calendarViewMonth === 11 ? calendarViewYear + 1 : calendarViewYear;
+      const dateStr = `${nextY}-${String(nextM + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      html += `<button onclick="onCalendarDateSelected('${dateStr}')" class="h-7 w-7 mx-auto flex items-center justify-center rounded-md calendar-day-dimmed text-gray-500 hover:bg-white/[0.06] hover:text-gray-300 text-xs">${d}</button>`;
+    }
+
+    gridEl.innerHTML = html;
+  }
+
+  function onCalendarDateSelected(dateStr) {
+    currentTimelineDate = dateStr;
+    const pickerInput = document.getElementById('timeline-datepicker');
+    if (pickerInput) pickerInput.value = dateStr;
+    closeCalendarPopover();
+    fetchTimeline();
+  }
+
+  function selectCalendarShortcut(deltaDays) {
+    const dt = new Date();
+    dt.setDate(dt.getDate() + deltaDays);
+    const dateStr = dt.toISOString().split('T')[0];
+    onCalendarDateSelected(dateStr);
+  }
+
+  // Click outside listener for color picker & calendar popovers
+  document.addEventListener('click', (e) => {
+    const popColor = document.getElementById('color-picker-popover');
+    if (popColor && !popColor.classList.contains('hidden') && !popColor.contains(e.target)) {
+      closeColorPicker();
+    }
+    const popCal = document.getElementById('calendar-popover');
+    if (popCal && !popCal.classList.contains('hidden') && !popCal.contains(e.target) && !e.target.closest('#btn-open-calendar')) {
+      closeCalendarPopover();
+    }
+  });
+
+  // ── Timeline Collapse & Date Navigation ────────────────────────────────────
+  function initTimelineCollapseState() {
+    const collapsed = localStorage.getItem('timeline_collapsed') === 'true';
+    const content = document.getElementById('timeline-content-body');
+    const icon = document.getElementById('timeline-collapse-icon');
+    if (collapsed) {
+      content.classList.add('hidden');
+      icon.classList.add('-rotate-90');
+    } else {
+      content.classList.remove('hidden');
+      icon.classList.remove('-rotate-90');
+    }
+  }
+
+  function toggleTimelineCollapse() {
+    const content = document.getElementById('timeline-content-body');
+    const icon = document.getElementById('timeline-collapse-icon');
+    const isHidden = content.classList.contains('hidden');
+    if (isHidden) {
+      content.classList.remove('hidden');
+      icon.classList.remove('-rotate-90');
+      localStorage.setItem('timeline_collapsed', 'false');
+      // If we uncollapse and timeline is loaded, center view
+      setTimeout(() => centerTimelineOnNowOrFirstRun(), 100);
+    } else {
+      content.classList.add('hidden');
+      icon.classList.add('-rotate-90');
+      localStorage.setItem('timeline_collapsed', 'true');
+    }
+  }
+
+  function formatTimelineDateLabel(dateStr) {
+    const parts = dateStr.split('-');
+    const dt = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    const todayStr = new Date().toISOString().split('T')[0];
+    const isToday = (dateStr === todayStr);
+    const formatted = dt.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+    return isToday ? `Today (${formatted})` : formatted;
+  }
+
+  function navigateTimelineDay(delta) {
+    const parts = currentTimelineDate.split('-');
+    const dt = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    dt.setDate(dt.getDate() + delta);
+    currentTimelineDate = dt.toISOString().split('T')[0];
+    document.getElementById('timeline-datepicker').value = currentTimelineDate;
+    fetchTimeline();
+  }
+
+  function navigateTimelineToday() {
+    currentTimelineDate = new Date().toISOString().split('T')[0];
+    document.getElementById('timeline-datepicker').value = currentTimelineDate;
+    fetchTimeline();
+  }
+
+  function onTimelineDatePicked(val) {
+    if (val) {
+      currentTimelineDate = val;
+      fetchTimeline();
+    }
+  }
+
+  // ── Timeline Zoom & Centering ──────────────────────────────────────────────
+  function setTimelineZoom(level) {
+    timelineZoom = level;
+    document.querySelectorAll('.zoom-btn').forEach(b => {
+      b.classList.remove('active', 'bg-white/[0.08]', 'text-white');
+      b.classList.add('text-gray-400');
+    });
+    const btn = document.getElementById(`btn-zoom-${level}`);
+    if (btn) {
+      btn.classList.add('active', 'bg-white/[0.08]', 'text-white');
+      btn.classList.remove('text-gray-400');
+    }
+
+    const canvas = document.getElementById('timeline-canvas');
+    if (!canvas) return;
+
+    if (level === '24h') {
+      canvas.style.width = '100%';
+      canvas.style.minWidth = '900px';
+    } else if (level === '12h') {
+      canvas.style.width = '200%';
+      canvas.style.minWidth = '1800px';
+    } else if (level === '6h') {
+      canvas.style.width = '400%';
+      canvas.style.minWidth = '3600px';
+    } else if (level === '1h') {
+      canvas.style.width = '2400%';
+      canvas.style.minWidth = '21600px';
+    }
+
+    renderTimelineRuler();
+    renderTimelineGridOverlay();
+    setTimeout(() => {
+      centerTimelineOnNowOrFirstRun();
+    }, 50);
+  }
+
+  function centerTimelineOnNowOrFirstRun() {
+    const viewport = document.getElementById('timeline-viewport');
+    if (!viewport) return;
+    const nowIndicator = document.getElementById('timeline-now-line');
+    if (nowIndicator) {
+      const left = nowIndicator.offsetLeft;
+      viewport.scrollLeft = Math.max(0, left - (viewport.clientWidth / 2));
+    } else {
+      const firstRun = document.querySelector('.timeline-run-block');
+      if (firstRun) {
+        viewport.scrollLeft = Math.max(0, firstRun.offsetLeft - (viewport.clientWidth / 3));
+      } else {
+        viewport.scrollLeft = 0;
+      }
+    }
+  }
+
+  // ── Fetch & Render Timeline ────────────────────────────────────────────────
+  async function fetchTimeline() {
+    const loadingEl = document.getElementById('timeline-loading');
+    const emptyEl = document.getElementById('timeline-empty');
+    const viewportEl = document.getElementById('timeline-viewport');
+
+    loadingEl.classList.remove('hidden');
+    emptyEl.classList.add('hidden');
+    viewportEl.classList.add('hidden');
+
+    document.getElementById('timeline-current-date-label').textContent = formatTimelineDateLabel(currentTimelineDate);
+    document.getElementById('timeline-tz-badge').textContent = userTimezone;
+
+    try {
+      const res = await fetch(`/api/pipelines/timeline?date=${encodeURIComponent(currentTimelineDate)}&tz=${encodeURIComponent(userTimezone)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      timelineData = await res.json();
+
+      loadingEl.classList.add('hidden');
+
+      if (!timelineData.pipelines || timelineData.pipelines.length === 0) {
+        emptyEl.classList.remove('hidden');
+        return;
+      }
+
+      viewportEl.classList.remove('hidden');
+      renderTimelineRuler();
+      renderTimelineGridOverlay();
+      renderTimelineSwimlanes();
+      setupTimelineMouseInteractions();
+
+      setTimeout(() => centerTimelineOnNowOrFirstRun(), 80);
+    } catch (err) {
+      loadingEl.innerHTML = `<span class="text-xs text-rose-400">Failed to load timeline: ${err.message}</span>`;
+    }
+  }
+
+  // ── Mouse Wheel & Pan Interactions ─────────────────────────────────────────
+  let mouseInteractionsInitialized = false;
+  function setupTimelineMouseInteractions() {
+    const viewport = document.getElementById('timeline-viewport');
+    if (!viewport || mouseInteractionsInitialized) return;
+    mouseInteractionsInitialized = true;
+
+    // 1. Mouse wheel horizontal scrolling
+    viewport.addEventListener('wheel', (e) => {
+      // If mostly vertical scroll delta and Shift not already held, convert to horizontal scroll
+      if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+        e.preventDefault();
+        viewport.scrollLeft += e.deltaY;
+      }
+    }, { passive: false });
+
+    // 2. Click-and-drag panning
+    let isDown = false;
+    let startX = 0;
+    let scrollLeft = 0;
+
+    viewport.classList.add('cursor-grab');
+
+    viewport.addEventListener('mousedown', (e) => {
+      if (e.target.closest('button, .timeline-run-block, input, a, select')) return;
+      isDown = true;
+      viewport.classList.add('cursor-grabbing');
+      viewport.classList.remove('cursor-grab');
+      startX = e.pageX - viewport.offsetLeft;
+      scrollLeft = viewport.scrollLeft;
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (isDown) {
+        isDown = false;
+        viewport.classList.remove('cursor-grabbing');
+        viewport.classList.add('cursor-grab');
+      }
+    });
+
+    viewport.addEventListener('mouseleave', () => {
+      if (isDown) {
+        isDown = false;
+        viewport.classList.remove('cursor-grabbing');
+        viewport.classList.add('cursor-grab');
+      }
+    });
+
+    viewport.addEventListener('mousemove', (e) => {
+      if (!isDown) return;
+      e.preventDefault();
+      const x = e.pageX - viewport.offsetLeft;
+      const walk = (x - startX) * 1.5;
+      viewport.scrollLeft = scrollLeft - walk;
+    });
+  }
+
+  function renderTimelineRuler() {
+    const rulerEl = document.getElementById('timeline-ruler');
+    if (!rulerEl) return;
+    rulerEl.innerHTML = '';
+
+    for (let h = 0; h <= 24; h++) {
+      const pct = (h / 24) * 100;
+      const hh = String(h % 24).padStart(2, '0') + ':00';
+      const tick = document.createElement('div');
+      tick.className = 'absolute top-0 bottom-0 flex flex-col items-center pointer-events-none';
+      tick.style.left = `${pct}%`;
+      tick.innerHTML = `
+        <span class="timeline-ruler-tick-label text-[10px] font-mono text-gray-500 transform -translate-x-1/2 pt-1 select-none">${hh}</span>
+        <div class="timeline-ruler-tick w-px h-2 bg-white/[0.15] mt-auto"></div>
+      `;
+      rulerEl.appendChild(tick);
+    }
+  }
+
+  function renderTimelineGridOverlay() {
+    const overlay = document.getElementById('timeline-grid-overlay');
+    if (!overlay) return;
+    overlay.innerHTML = '';
+
+    for (let h = 0; h <= 24; h++) {
+      const pct = (h / 24) * 100;
+      const line = document.createElement('div');
+      line.className = 'timeline-grid-line absolute top-0 bottom-0 w-px bg-white/[0.03] pointer-events-none';
+      line.style.left = `${pct}%`;
+      overlay.appendChild(line);
+    }
+
+    if (timelineData && timelineData.is_today) {
+      renderTimelineNowIndicator(timelineData.current_time, timelineData.window_start, timelineData.window_end);
+    }
+  }
+
+  function renderTimelineNowIndicator(nowIso, windowStartIso, windowEndIso) {
+    const overlay = document.getElementById('timeline-grid-overlay');
+    if (!overlay) return;
+
+    const existingNow = document.getElementById('timeline-now-line');
+    if (existingNow) existingNow.remove();
+
+    if (!timelineData || !timelineData.is_today) return;
+
+    const nowDt = new Date(nowIso);
+    const startDt = new Date(windowStartIso);
+    const endDt = new Date(windowEndIso);
+    const totalMs = endDt.getTime() - startDt.getTime();
+    const currentMs = nowDt.getTime() - startDt.getTime();
+    const pct = Math.max(0, Math.min(100, (currentMs / totalMs) * 100));
+
+    const nowEl = document.createElement('div');
+    nowEl.id = 'timeline-now-line';
+    nowEl.className = 'absolute top-0 bottom-0 z-20 pointer-events-none flex flex-col items-center';
+    nowEl.style.left = `${pct}%`;
+    nowEl.innerHTML = `
+      <div class="bg-cyan-400 text-black text-[9px] font-bold font-mono px-1.5 py-0.5 rounded shadow-lg shadow-cyan-500/50 transform -translate-x-1/2 -translate-y-1 flex items-center gap-1 select-none">
+        <span class="w-1.5 h-1.5 rounded-full bg-cyan-900 animate-ping"></span>
+        <span>NOW ${nowDt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
+      </div>
+      <div class="w-0.5 flex-1 bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.8)]"></div>
+    `;
+    overlay.appendChild(nowEl);
+  }
+
+  function renderTimelineSwimlanes() {
+    const container = document.getElementById('timeline-swimlanes');
+    if (!container || !timelineData) return;
+
+    const pipelines = timelineData.pipelines || [];
+    container.innerHTML = pipelines.map(p => {
+      const dagId = p.dag_id;
+      const colorHex = p.color_hex || getPipelineColor(dagId);
+      const label = p.display_label || dagId;
+      const schedule = p.schedule_interval || 'None';
+      const runs = p.runs || [];
+      const isPaused = p.is_paused;
+
+      const runBlocksHtml = runs.map(r => {
+        const isActual = (r.type === 'actual');
+        const timeStr = r.start_time || r.scheduled_time;
+        const runDate = new Date(timeStr);
+        const startDt = new Date(timelineData.window_start);
+        const endDt = new Date(timelineData.window_end);
+        const totalMs = endDt.getTime() - startDt.getTime();
+        const runMs = runDate.getTime() - startDt.getTime();
+        const pct = Math.max(0, Math.min(99.5, (runMs / totalMs) * 100));
+
+        const durationSec = r.duration_seconds || 0;
+        const durationPct = Math.max(1.8, Math.min(25, (durationSec / 86400) * 100));
+        const formattedTime = runDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+
+        if (isActual) {
+          const state = r.state || 'unknown';
+          let bgStyle = `background-color: ${colorHex}25; border-color: ${colorHex}88; color: #fff;`;
+          let dotColor = 'bg-gray-400';
+          let stateBadge = `<span class="text-[9px] opacity-75 truncate uppercase hidden sm:inline">${state}</span>`;
+          let extraClasses = '';
+
+          if (state === 'success') {
+            dotColor = 'bg-emerald-400';
+          } else if (state === 'running') {
+            dotColor = 'bg-blue-400 animate-pulse';
+            extraClasses = 'ring-1 ring-blue-400/50 shadow-[0_0_8px_rgba(59,130,246,0.3)]';
+          } else if (state === 'failed') {
+            dotColor = 'bg-rose-400';
+            bgStyle = 'background-color: rgba(225, 29, 72, 0.22); border-color: rgba(244, 63, 94, 0.85); color: #fecdd3;';
+            extraClasses = 'ring-1 ring-rose-500/60 shadow-[0_0_10px_rgba(244,63,94,0.4)]';
+            stateBadge = '<span class="text-[9px] font-bold text-rose-300 truncate uppercase">FAILED</span>';
+          } else if (state === 'queued') {
+            dotColor = 'bg-amber-400';
+          }
+
+          const runTooltip = `Pipeline: ${dagId}&#10;Run ID: ${r.dag_run_id}&#10;Status: ${state.toUpperCase()}&#10;Time: ${runDate.toLocaleString()}&#10;Duration: ${durationSec > 0 ? Math.round(durationSec) + 's' : 'In Progress'}&#10;Click to inspect run & logs`;
+
+          return `
+            <div onclick="onTimelineRunClick('${dagId}', '${r.dag_run_id}', true)"
+                 title="${runTooltip}"
+                 style="left: ${pct}%; width: ${durationPct}%; min-width: 52px; ${bgStyle}"
+                 class="timeline-run-block absolute top-1.5 bottom-1.5 rounded border shadow-sm px-1.5 flex items-center justify-between gap-1 text-[10px] font-mono cursor-pointer hover:brightness-125 hover:z-30 transition-all select-none group ${extraClasses}">
+              <span class="w-1.5 h-1.5 rounded-full shrink-0 ${dotColor}"></span>
+              <span class="truncate font-semibold">${formattedTime}</span>
+              ${stateBadge}
+            </div>
+          `;
+        } else {
+          // Projected run
+          const isLight = (document.documentElement.getAttribute('data-theme') === 'light');
+          const runTooltip = `Pipeline: ${dagId}&#10;Type: Projected Run&#10;Scheduled Time: ${runDate.toLocaleString()}&#10;Cadence: ${schedule}&#10;Click to view pipeline history`;
+          const projBg = isLight ? `${colorHex}18` : `${colorHex}10`;
+          const projBorder = isLight ? `${colorHex}88` : `${colorHex}66`;
+          const projTextColor = isLight ? 'text-gray-700 hover:text-gray-900' : 'text-gray-300 hover:text-white';
+          return `
+            <div onclick="onTimelineRunClick('${dagId}', null, false)"
+                 title="${runTooltip}"
+                 style="left: ${pct}%; min-width: 44px; border-color: ${projBorder}; background-color: ${projBg};"
+                 class="timeline-run-block timeline-run-projected absolute top-2 bottom-2 rounded border border-dashed ${projTextColor} px-1.5 flex items-center gap-1 text-[10px] font-mono cursor-pointer hover:border-white/[0.6] hover:z-30 transition-all select-none">
+              <svg class="w-2.5 h-2.5 shrink-0 opacity-70" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              <span class="truncate">${formattedTime}</span>
+            </div>
+          `;
+        }
+      }).join('');
+
+      const isViewer = (userRole === 'viewer');
+
+      return `
+        <div class="timeline-swimlane-row flex items-center hover:bg-white/[0.02] transition-colors group relative" id="swimlane-${dagId}">
+          <!-- Sticky Left Pipeline Lane Info -->
+          <div class="timeline-sticky-pipeline-col w-48 sm:w-60 shrink-0 px-3 py-2 flex items-center justify-between border-r border-white/[0.06] bg-[#141414] sticky left-0 z-10">
+            <div class="flex items-center gap-2 min-w-0">
+              <button onclick="openColorPicker('${dagId}', event)"
+                      ${isViewer ? 'disabled title="Viewer cannot edit pipeline color"' : 'title="Change Pipeline Color"'}
+                      class="w-3 h-3 rounded-full shrink-0 shadow-sm cursor-pointer hover:scale-125 transition-transform border border-white/[0.2]"
+                      style="background-color: ${colorHex};">
+              </button>
+              <span onclick="openInspector('${dagId}')"
+                    class="timeline-pipeline-label font-mono text-xs font-medium text-gray-200 hover:text-blue-400 cursor-pointer truncate"
+                    title="${dagId}">
+                ${label}
+              </span>
+            </div>
+            <div class="flex items-center gap-1 shrink-0 ml-2">
+              <span class="timeline-schedule-badge px-1.5 py-0.5 rounded text-[9px] font-mono ${isPaused ? 'bg-gray-800 text-gray-500' : 'bg-white/[0.04] text-gray-400 border border-white/[0.06]'}">
+                ${schedule}
+              </span>
+            </div>
+          </div>
+
+          <!-- Relative Track Area -->
+          <div class="flex-1 relative h-10 overflow-hidden">
+            ${runBlocksHtml}
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function onTimelineRunClick(dagId, runId, isActual) {
+    openInspector(dagId, isActual ? runId : null);
+  }
+
+  // ── Dynamic Theme Observer ─────────────────────────────────────────────────
+  const themeObserver = new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      if (m.type === 'attributes' && m.attributeName === 'data-theme') {
+        renderTimelineSwimlanes();
+        if (calendarPopoverOpen) renderCalendarPopover();
+      }
+    }
+  });
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+
+  // ── Fetch & Render Pipelines (Table) ───────────────────────────────────────
+  async function fetchPipelines() {
+    const icon = document.getElementById('refresh-icon');
+    icon.classList.add('animate-spin');
+
+    try {
+      const res = await fetch('/api/pipelines');
+      if (!res.ok) {
+        throw new Error(`Failed to load pipelines: ${res.statusText}`);
+      }
+      const data = await res.json();
+      allPipelines = data.pipelines || [];
+      document.getElementById('last-updated-ts').textContent = new Date().toLocaleTimeString();
+      applyFilters();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      icon.classList.remove('animate-spin');
+    }
+  }
+
+  // ── Filter & Search Logic ──────────────────────────────────────────────────
+  function setFilter(filter) {
+    currentFilter = filter;
+    document.querySelectorAll('.filter-pill').forEach(btn => {
+      btn.classList.remove('active', 'bg-blue-600/20', 'text-blue-400');
+      btn.classList.add('text-gray-400');
+    });
+    const activeBtn = document.getElementById(`filter-${filter}`);
+    if (activeBtn) {
+      activeBtn.classList.add('active', 'bg-blue-600/20', 'text-blue-400');
+      activeBtn.classList.remove('text-gray-400');
+    }
+    applyFilters();
+  }
+
+  function applyFilters() {
+    const search = document.getElementById('pipeline-search').value.toLowerCase().trim();
+
+    // Update Counts
+    document.getElementById('count-all').textContent = allPipelines.length;
+    document.getElementById('count-active').textContent = allPipelines.filter(p => !p.is_paused).length;
+    document.getElementById('count-paused').textContent = allPipelines.filter(p => p.is_paused).length;
+    document.getElementById('count-running').textContent = allPipelines.filter(p => p.last_run && p.last_run.state === 'running').length;
+    document.getElementById('count-failed').textContent = allPipelines.filter(p => p.last_run && p.last_run.state === 'failed').length;
+
+    const filtered = allPipelines.filter(p => {
+      // Status filter
+      if (currentFilter === 'active' && p.is_paused) return false;
+      if (currentFilter === 'paused' && !p.is_paused) return false;
+      if (currentFilter === 'running' && (!p.last_run || p.last_run.state !== 'running')) return false;
+      if (currentFilter === 'failed' && (!p.last_run || p.last_run.state !== 'failed')) return false;
+
+      // Text search
+      if (search) {
+        const matchName = (p.pipeline_name || '').toLowerCase().includes(search);
+        const matchId = (p.dag_id || '').toLowerCase().includes(search);
+        const matchDesc = (p.description || '').toLowerCase().includes(search);
+        const matchTags = (p.tags || []).some(t => t.toLowerCase().includes(search));
+        if (!matchName && !matchId && !matchDesc && !matchTags) return false;
+      }
+      return true;
+    });
+
+    renderPipelinesTable(filtered);
+  }
+
+  function renderPipelinesTable(pipelines) {
+    const tbody = document.getElementById('pipelines-table-body');
+    const emptyState = document.getElementById('pipelines-empty-state');
+
+    if (pipelines.length === 0) {
+      tbody.innerHTML = '';
+      emptyState.classList.remove('hidden');
+      return;
+    }
+
+    emptyState.classList.add('hidden');
+    tbody.innerHTML = pipelines.map(p => {
+      const isPaused = p.is_paused;
+      const lastRun = p.last_run;
+      const runState = lastRun ? lastRun.state : 'none';
+      const colorHex = getPipelineColor(p.dag_id);
+
+      let stateBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-gray-500/10 text-gray-400 border border-gray-500/20">No Runs</span>`;
+      if (runState === 'success') {
+        stateBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Success
+        </span>`;
+      } else if (runState === 'running') {
+        stateBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20 animate-pulse">
+          <span class="w-1.5 h-1.5 rounded-full bg-blue-400"></span> Running
+        </span>`;
+      } else if (runState === 'failed') {
+        stateBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-rose-500/10 text-rose-400 border border-rose-500/20">
+          <span class="w-1.5 h-1.5 rounded-full bg-rose-400"></span> Failed
+        </span>`;
+      } else if (runState === 'queued') {
+        stateBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> Queued
+        </span>`;
+      }
+
+      const durationStr = lastRun && lastRun.duration_seconds !== null
+        ? `${Math.round(lastRun.duration_seconds)}s`
+        : '—';
+
+      const nextRunStr = p.next_dagrun
+        ? new Date(p.next_dagrun).toLocaleString()
+        : '—';
+
+      const isViewer = (userRole === 'viewer');
+
+      return `
+        <tr class="hover:bg-white/[0.02] transition-colors">
+          <!-- Pause/Resume Toggle -->
+          <td class="py-3 px-4 text-center">
+            <button onclick="togglePipelinePause('${p.dag_id}', ${!isPaused})"
+                    ${isViewer ? 'disabled title="Viewer role cannot pause/resume pipelines"' : `title="${isPaused ? 'Click to Unpause' : 'Click to Pause'}"`}
+                    class="relative inline-flex h-4 w-8 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      isPaused ? 'bg-gray-700' : 'bg-blue-600'
+                    } ${isViewer ? 'opacity-50 cursor-not-allowed' : ''}">
+              <span class="pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                isPaused ? 'translate-x-0' : 'translate-x-4'
+              }"></span>
+            </button>
+          </td>
+
+          <!-- Pipeline Info with Color Swatch -->
+          <td class="py-3 px-4">
+            <div class="flex items-center gap-2">
+              <button onclick="openColorPicker('${p.dag_id}', event)"
+                      ${isViewer ? 'disabled title="Viewer cannot edit pipeline color"' : 'title="Change Pipeline Color"'}
+                      class="w-3 h-3 rounded-full shrink-0 shadow-sm cursor-pointer hover:scale-125 transition-transform border border-white/[0.2]"
+                      style="background-color: ${colorHex};">
+              </button>
+              <span class="font-medium text-gray-200 hover:text-blue-400 cursor-pointer font-mono text-xs" onclick="openInspector('${p.dag_id}')">
+                ${p.display_label || p.pipeline_name || p.dag_id}
+              </span>
+              ${(p.display_label && p.display_label !== p.dag_id) ? `<span class="text-[10px] text-gray-500 font-mono">(${p.dag_id})</span>` : ''}
+              ${p.is_notebook_job ? `<span class="px-1.5 py-0.2 bg-purple-500/10 text-purple-400 border border-purple-500/20 text-[10px] rounded">Notebook</span>` : ''}
+            </div>
+            <p class="text-[11px] text-gray-500 truncate max-w-xs mt-0.5">${p.description || 'No description provided'}</p>
+          </td>
+
+          <!-- Schedule -->
+          <td class="py-3 px-4">
+            <span class="inline-flex items-center gap-1 font-mono text-[11px] text-gray-400 bg-white/[0.03] px-2 py-0.5 rounded border border-white/[0.06]">
+              <svg class="w-3 h-3 text-gray-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              ${p.schedule_interval}
+            </span>
+          </td>
+
+          <!-- Last Run -->
+          <td class="py-3 px-4">
+            ${stateBadge}
+          </td>
+
+          <!-- Duration -->
+          <td class="py-3 px-4 font-mono text-gray-400">
+            ${durationStr}
+          </td>
+
+          <!-- Next Run -->
+          <td class="py-3 px-4 text-gray-400 text-[11px]">
+            ${nextRunStr}
+          </td>
+
+          <!-- Actions -->
+          <td class="py-3 px-4 text-right space-x-1">
+            ${!isViewer ? `
+            <button onclick="openTriggerModal('${p.dag_id}')" title="Trigger Run Now"
+                    class="btn-ghost py-1 px-2 text-xs text-blue-400 hover:text-blue-300">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+              </svg>
+            </button>
+            ` : ''}
+
+            <button onclick="openInspector('${p.dag_id}')" title="Run History & Logs"
+                    class="btn-ghost py-1 px-2 text-xs text-gray-400 hover:text-gray-200">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16m-7 6h7"/>
+              </svg>
+            </button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  // ── Toggle Pause / Resume ──────────────────────────────────────────────────
+  async function togglePipelinePause(dagId, newPausedState) {
+    if (userRole === 'viewer') return;
+
+    try {
+      const res = await fetch(`/api/pipelines/${dagId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_paused: newPausedState }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Failed to update pause state');
+      }
+      showToast(`Pipeline ${newPausedState ? 'paused' : 'unpaused'}`, 'success');
+      const p = allPipelines.find(item => item.dag_id === dagId);
+      if (p) p.is_paused = newPausedState;
+      applyFilters();
+      fetchTimeline(); // refresh projected runs in timeline
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+
+  // ── Trigger Run Modal ──────────────────────────────────────────────────────
+  let targetTriggerDagId = null;
+
+  function openTriggerModal(dagId) {
+    targetTriggerDagId = dagId;
+    document.getElementById('trigger-dag-id').textContent = dagId;
+    document.getElementById('trigger-params').value = '';
+    document.getElementById('trigger-modal').classList.remove('hidden');
+  }
+
+  function closeTriggerModal() {
+    document.getElementById('trigger-modal').classList.add('hidden');
+  }
+
+  async function submitPipelineTrigger() {
+    if (!targetTriggerDagId) return;
+
+    const rawParams = document.getElementById('trigger-params').value.trim();
+    let conf = {};
+    if (rawParams) {
+      try {
+        conf = JSON.parse(rawParams);
+      } catch {
+        showToast('Invalid JSON in parameters field', 'error');
+        return;
+      }
+    }
+
+    const btn = document.getElementById('btn-submit-trigger');
+    btn.disabled = true;
+    btn.textContent = 'Triggering...';
+
+    try {
+      const res = await fetch(`/api/pipelines/${targetTriggerDagId}/trigger`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conf }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || 'Failed to trigger run');
+      }
+      showToast(`Run queued! ID: ${data.dag_run_id}`, 'success');
+      closeTriggerModal();
+      fetchPipelines();
+      fetchTimeline();
+      openInspector(targetTriggerDagId, data.dag_run_id);
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Trigger Run';
+    }
+  }
+
+  // ── Inspector Drawer (Runs & Logs) ─────────────────────────────────────────
+  async function openInspector(dagId, targetRunId = null) {
+    currentDrawerDagId = dagId;
+    let p = allPipelines.find(item => item.dag_id === dagId);
+
+    if (!p) {
+      try {
+        const resp = await fetch(`/api/pipelines/${dagId}`);
+        if (resp.ok) {
+          p = await resp.json();
+        }
+      } catch (e) {}
+    }
+
+    renderDrawerDetails(dagId, p);
+    document.getElementById('inspector-drawer').classList.remove('hidden');
+
+    setDrawerTab('runs');
+    await loadDrawerRuns(dagId, targetRunId);
+  }
+
+  function closeInspector() {
+    document.getElementById('inspector-drawer').classList.add('hidden');
+    stopLogPolling();
+  }
+
+  function setDrawerTab(tab) {
+    const tabRuns = document.getElementById('drawer-tab-runs');
+    const tabLogs = document.getElementById('drawer-tab-logs');
+    const paneRuns = document.getElementById('drawer-pane-runs');
+    const paneLogs = document.getElementById('drawer-pane-logs');
+
+    if (tab === 'runs') {
+      tabRuns.className = 'px-3 py-2.5 border-b-2 border-blue-500 text-blue-400 font-medium';
+      tabLogs.className = 'px-3 py-2.5 border-b-2 border-transparent text-gray-400 hover:text-gray-200 font-medium';
+      paneRuns.classList.remove('hidden');
+      paneLogs.classList.add('hidden');
+      stopLogPolling();
+    } else {
+      tabLogs.className = 'px-3 py-2.5 border-b-2 border-blue-500 text-blue-400 font-medium';
+      tabRuns.className = 'px-3 py-2.5 border-b-2 border-transparent text-gray-400 hover:text-gray-200 font-medium';
+      paneLogs.classList.remove('hidden');
+      paneRuns.classList.add('hidden');
+    }
+  }
+
+  function renderDrawerDetails(dagId, p) {
+    const colorHex = getPipelineColor(dagId);
+    const swatch = document.getElementById('drawer-color-swatch');
+    if (swatch) swatch.style.backgroundColor = colorHex;
+
+    const dagIdEl = document.getElementById('drawer-dag-id');
+    if (dagIdEl) dagIdEl.textContent = dagId;
+
+    const nameInput = document.getElementById('drawer-name-input');
+    if (nameInput) nameInput.value = p ? (p.display_label || p.pipeline_name || dagId) : dagId;
+
+    const descInput = document.getElementById('drawer-desc-input');
+    if (descInput) descInput.value = p ? (p.description || '') : '';
+
+    const isPaused = p ? p.is_paused : false;
+    const statusBadge = document.getElementById('drawer-status-badge');
+    if (statusBadge) {
+      statusBadge.innerHTML = isPaused
+        ? `<span class="px-2 py-0.5 rounded text-[10px] font-medium bg-gray-500/10 text-gray-400 border border-gray-500/20">Paused</span>`
+        : `<span class="px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Active</span>`;
+    }
+
+    const metaStatus = document.getElementById('drawer-meta-status');
+    if (metaStatus) metaStatus.textContent = isPaused ? 'Paused' : 'Active';
+
+    const pauseBtn = document.getElementById('drawer-pause-btn');
+    const pauseDot = document.getElementById('drawer-pause-dot');
+    if (pauseBtn && pauseDot) {
+      pauseBtn.className = `relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${isPaused ? 'bg-gray-700' : 'bg-blue-600'} ${userRole === 'viewer' ? 'opacity-50 cursor-not-allowed' : ''}`;
+      pauseDot.className = `pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${isPaused ? 'translate-x-0' : 'translate-x-3'}`;
+    }
+
+    const schedEl = document.getElementById('drawer-meta-schedule');
+    if (schedEl) {
+      const sched = p ? (p.schedule_interval || 'None') : 'None';
+      schedEl.textContent = sched;
+      schedEl.title = sched;
+    }
+
+    const lastRunBadge = document.getElementById('drawer-meta-last-run-badge');
+    const durationEl = document.getElementById('drawer-meta-duration');
+    const lastRun = p ? p.last_run : null;
+    const runState = lastRun ? lastRun.state : 'none';
+
+    if (lastRunBadge) {
+      if (runState === 'success') {
+        lastRunBadge.innerHTML = `<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Success</span>`;
+      } else if (runState === 'running') {
+        lastRunBadge.innerHTML = `<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20 animate-pulse">Running</span>`;
+      } else if (runState === 'failed') {
+        lastRunBadge.innerHTML = `<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-500/10 text-rose-400 border border-rose-500/20">Failed</span>`;
+      } else if (runState === 'queued') {
+        lastRunBadge.innerHTML = `<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">Queued</span>`;
+      } else {
+        lastRunBadge.innerHTML = `<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-500/10 text-gray-400 border border-gray-500/20">No Runs</span>`;
+      }
+    }
+
+    if (durationEl) {
+      durationEl.textContent = lastRun && lastRun.duration_seconds !== null ? `${Math.round(lastRun.duration_seconds)}s` : '—';
+    }
+
+    const nextRunEl = document.getElementById('drawer-meta-next-run');
+    if (nextRunEl) {
+      nextRunEl.textContent = p && p.next_dagrun ? new Date(p.next_dagrun).toLocaleString() : '—';
+    }
+
+    const nbWrap = document.getElementById('drawer-notebook-link-wrap');
+    if (nbWrap) {
+      if (p && p.notebook_path) {
+        nbWrap.innerHTML = `
+          <div class="flex items-center justify-between text-xs p-2.5 rounded-lg bg-purple-500/10 border border-purple-500/20">
+            <div class="flex items-center gap-2 min-w-0">
+              <svg class="w-4 h-4 text-purple-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
+              <div class="min-w-0">
+                <div class="text-[10px] text-purple-300 uppercase font-medium">Notebook Source</div>
+                <div class="font-mono text-xs text-purple-200 truncate" title="${p.notebook_path}">${p.notebook_path}</div>
+              </div>
+            </div>
+            <a href="/notebooks?path=${encodeURIComponent(p.notebook_path)}" class="px-2.5 py-1 rounded bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-medium transition-colors shrink-0 flex items-center gap-1 shadow-sm">
+              Open Notebook
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+            </a>
+          </div>
+        `;
+        nbWrap.classList.remove('hidden');
+      } else if (p && p.is_notebook_job) {
+        nbWrap.innerHTML = `
+          <div class="flex items-center justify-between text-xs p-2.5 rounded-lg bg-purple-500/10 border border-purple-500/20">
+            <div class="flex items-center gap-2 min-w-0">
+              <svg class="w-4 h-4 text-purple-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
+              <div class="min-w-0">
+                <div class="text-[10px] text-purple-300 uppercase font-medium">Notebook Pipeline</div>
+                <div class="font-mono text-xs text-purple-200 truncate">Configured from workspace notebook</div>
+              </div>
+            </div>
+            <a href="/notebooks" class="px-2.5 py-1 rounded bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-medium transition-colors shrink-0 flex items-center gap-1 shadow-sm">
+              Browse Notebooks
+            </a>
+          </div>
+        `;
+        nbWrap.classList.remove('hidden');
+      } else {
+        nbWrap.innerHTML = '';
+        nbWrap.classList.add('hidden');
+      }
+    }
+  }
+
+  async function togglePipelinePauseFromDrawer() {
+    if (userRole === 'viewer' || !currentDrawerDagId) return;
+    const p = allPipelines.find(item => item.dag_id === currentDrawerDagId);
+    const targetState = p ? !p.is_paused : false;
+    await togglePipelinePause(currentDrawerDagId, targetState);
+    if (p) {
+      renderDrawerDetails(currentDrawerDagId, p);
+    }
+  }
+
+  async function savePipelineMetadata(dagId) {
+    if (userRole === 'viewer' || !dagId) return;
+    const nameInput = document.getElementById('drawer-name-input');
+    const descInput = document.getElementById('drawer-desc-input');
+    const display_label = nameInput ? nameInput.value.trim() : null;
+    const description = descInput ? descInput.value.trim() : null;
+
+    const btn = document.getElementById('btn-save-drawer-meta');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+    }
+
+    try {
+      const res = await fetch(`/api/pipelines/${dagId}/settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ display_label, description }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || 'Failed to update pipeline settings');
+      }
+      showToast('Pipeline name and description updated', 'success');
+
+      // Update locally in allPipelines and timelineData
+      const p = allPipelines.find(item => item.dag_id === dagId);
+      if (p) {
+        if (display_label) {
+          p.display_label = display_label;
+          p.pipeline_name = display_label;
+        }
+        if (description !== null) p.description = description;
+      }
+      if (timelineData && timelineData.pipelines) {
+        const tp = timelineData.pipelines.find(item => item.dag_id === dagId);
+        if (tp && display_label) tp.display_label = display_label;
+      }
+
+      applyFilters();
+      renderTimelineSwimlanes();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Save';
+      }
+    }
+  }
+
+  function updateDrawerActiveRunBanner(dagId, activeRun) {
+    const alertEl = document.getElementById('drawer-active-run-alert');
+    if (!alertEl) return;
+    if (activeRun) {
+      alertEl.innerHTML = `
+        <div class="flex items-center justify-between p-2.5 rounded-lg bg-rose-950/40 border border-rose-500/30 text-xs">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="w-2 h-2 rounded-full bg-rose-400 animate-pulse shrink-0"></span>
+            <span class="text-rose-200 truncate">Run <strong class="font-mono text-rose-100">${activeRun.dag_run_id}</strong> is ${activeRun.state}</span>
+          </div>
+          ${userRole !== 'viewer' ? `
+            <button onclick="cancelPipelineRun('${dagId}', '${activeRun.dag_run_id}')"
+                    class="px-2.5 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white font-medium text-xs flex items-center gap-1 shrink-0 shadow transition-colors ml-2">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+              Cancel Run
+            </button>
+          ` : ''}
+        </div>
+      `;
+      alertEl.classList.remove('hidden');
+    } else {
+      alertEl.innerHTML = '';
+      alertEl.classList.add('hidden');
+    }
+  }
+
+  async function cancelPipelineRun(dagId, runId) {
+    if (userRole === 'viewer') return;
+    if (!confirm(`Are you sure you want to cancel run ${runId}?`)) return;
+
+    try {
+      const res = await fetch(`/api/pipelines/${dagId}/runs/${runId}/cancel`, {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || data.error || 'Failed to cancel DAG run');
+      }
+      showToast(`Run ${runId} cancelled successfully`, 'success');
+      await loadDrawerRuns(dagId);
+      fetchPipelines();
+      fetchTimeline();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+
+  async function loadDrawerRuns(dagId, targetRunId = null) {
+    const listEl = document.getElementById('drawer-runs-list');
+    listEl.innerHTML = '<div class="py-8 text-center text-gray-500">Loading historical runs...</div>';
+
+    try {
+      const res = await fetch(`/api/pipelines/${dagId}/runs`);
+      if (!res.ok) throw new Error('Failed to load runs');
+      const data = await res.json();
+      const runs = data.runs || [];
+      document.getElementById('drawer-runs-count').textContent = runs.length;
+
+      // Update active run alert banner
+      const activeRun = runs.find(r => r.state === 'running' || r.state === 'queued');
+      updateDrawerActiveRunBanner(dagId, activeRun);
+
+      if (runs.length === 0) {
+        listEl.innerHTML = '<div class="py-8 text-center text-gray-500 text-xs">No historical runs recorded for this pipeline.</div>';
+        return;
+      }
+
+      listEl.innerHTML = runs.map(r => {
+        const isRunning = (r.state === 'running');
+        const isTarget = Boolean(targetRunId && r.dag_run_id === targetRunId);
+        return `
+          <div id="drawer-run-${r.dag_run_id}" class="p-3 bg-white/[0.02] border ${isTarget ? 'border-blue-500 ring-2 ring-blue-500/40 bg-blue-500/[0.05]' : 'border-white/[0.06]'} rounded-lg hover:border-white/[0.12] transition-colors space-y-2">
+            <div class="flex items-center justify-between text-xs">
+              <span class="font-mono text-gray-200 font-medium truncate max-w-xs ${isTarget ? 'text-blue-300 font-bold' : ''}">${r.dag_run_id}</span>
+              <span class="px-2 py-0.5 rounded text-[10px] font-medium ${
+                r.state === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                isRunning             ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20 animate-pulse' :
+                r.state === 'failed'  ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
+                                        'bg-gray-500/10 text-gray-400 border border-gray-500/20'
+              }">${r.state}</span>
+            </div>
+
+            <div class="flex items-center justify-between text-[11px] text-gray-500 font-mono">
+              <span>Date: ${r.execution_date ? new Date(r.execution_date).toLocaleString() : '—'}</span>
+              <span>Duration: ${r.duration_seconds !== null ? `${Math.round(r.duration_seconds)}s` : '—'}</span>
+            </div>
+
+            <div class="pt-2 border-t border-white/[0.04] flex items-center justify-between">
+              <button onclick="inspectRunTasks('${dagId}', '${r.dag_run_id}', ${isRunning})"
+                      class="text-xs text-blue-400 hover:text-blue-300 font-medium flex items-center gap-1">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                Inspect Tasks & Logs
+              </button>
+              ${(isRunning || r.state === 'queued') && userRole !== 'viewer' ? `
+                <button onclick="cancelPipelineRun('${dagId}', '${r.dag_run_id}')"
+                        class="text-xs text-rose-400 hover:text-rose-300 font-medium flex items-center gap-1 px-2 py-0.5 rounded bg-rose-500/10 border border-rose-500/20 hover:bg-rose-500/20 transition-colors">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                  Cancel Run
+                </button>
+              ` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      if (targetRunId) {
+        setTimeout(() => {
+          const el = document.getElementById(`drawer-run-${targetRunId}`);
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }, 50);
+      }
+    } catch (err) {
+      listEl.innerHTML = `<div class="py-8 text-center text-rose-400 text-xs">${err.message}</div>`;
+    }
+  }
+
+  async function inspectRunTasks(dagId, runId, isRunning) {
+    currentSelectedRunId = runId;
+    setDrawerTab('logs');
+    document.getElementById('log-pre').textContent = `Loading task instances for ${runId}...`;
+
+    try {
+      const res = await fetch(`/api/pipelines/${dagId}/runs/${runId}/tasks`);
+      if (!res.ok) throw new Error('Failed to load task instances');
+      const data = await res.json();
+      const tasks = data.tasks || [];
+      if (tasks.length === 0) {
+        document.getElementById('log-pre').textContent = 'No task instances found for this run.';
+        return;
+      }
+
+      const primaryTask = tasks[0];
+      currentSelectedTaskId = primaryTask.task_id;
+      document.getElementById('log-target-task').textContent = `task: ${primaryTask.task_id} (try: ${primaryTask.try_number})`;
+
+      await loadTaskLogs(dagId, runId, primaryTask.task_id, primaryTask.try_number);
+
+      if (isRunning || primaryTask.state === 'running') {
+        startLogPolling(dagId, runId, primaryTask.task_id, primaryTask.try_number);
+      } else {
+        stopLogPolling();
+      }
+    } catch (err) {
+      document.getElementById('log-pre').textContent = `Error loading tasks: ${err.message}`;
+    }
+  }
+
+  async function loadTaskLogs(dagId, runId, taskId, tryNum) {
+    try {
+      const res = await fetch(`/api/pipelines/${dagId}/runs/${runId}/tasks/${taskId}/logs?try_number=${tryNum}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const rawContent = data.content || 'No log output.';
+      // Clean ANSI escape codes for display
+      const cleanContent = rawContent.replace(/\\u001b\\[[0-9;]*[mK]/g, '').replace(/\x1b\[[0-9;]*[mK]/g, '');
+      document.getElementById('log-pre').textContent = cleanContent;
+    } catch (err) {
+      document.getElementById('log-pre').textContent = `Failed to stream logs: ${err.message}`;
+    }
+  }
+
+  function startLogPolling(dagId, runId, taskId, tryNum) {
+    stopLogPolling();
+    document.getElementById('log-polling-indicator').classList.remove('hidden');
+    document.getElementById('log-polling-indicator').classList.add('flex');
+
+    activeLogPollingTimer = setInterval(async () => {
+      await loadTaskLogs(dagId, runId, taskId, tryNum);
+    }, 5000);
+  }
+
+  function stopLogPolling() {
+    if (activeLogPollingTimer) {
+      clearInterval(activeLogPollingTimer);
+      activeLogPollingTimer = null;
+    }
+    const indicator = document.getElementById('log-polling-indicator');
+    if (indicator) {
+      indicator.classList.add('hidden');
+      indicator.classList.remove('flex');
+    }
+  }
+
+  function refreshCurrentTaskLogs() {
+    if (currentDrawerDagId && currentSelectedRunId && currentSelectedTaskId) {
+      loadTaskLogs(currentDrawerDagId, currentSelectedRunId, currentSelectedTaskId, 1);
+    }
+  }
+
+  function scrollLogsToBottom() {
+    const term = document.getElementById('log-terminal');
+    if (term) term.scrollTop = term.scrollHeight;
+  }
+
+  // Initial load
+  document.addEventListener('DOMContentLoaded', async () => {
+    initTimelineCollapseState();
+    await fetchPipelines();
+    fetchTimeline();
+
+    // Auto-open pipeline inspector if ?open=<dag_id> is present
+    const urlParams = new URLSearchParams(window.location.search);
+    const openDagId = urlParams.get('open');
+    if (openDagId) {
+      openInspector(openDagId);
+    }
+  });
+</script>
+{% endblock %}
