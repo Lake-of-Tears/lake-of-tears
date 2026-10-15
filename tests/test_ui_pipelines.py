@@ -295,6 +295,11 @@ def test_get_pipelines_page_renders_timeline_container_and_controls():
         assert 'id="timeline-grid-overlay"' in response.text
         assert 'id="timeline-swimlanes"' in response.text
         assert 'id="color-picker-popover"' in response.text
+        assert 'id="btn-open-calendar"' in response.text
+        assert 'id="calendar-popover"' in response.text
+        assert 'id="calendar-month-year-label"' in response.text
+        assert 'id="calendar-days-grid"' in response.text
+        assert 'html[data-theme="light"]' in response.text
 
 
 @pytest.mark.anyio
