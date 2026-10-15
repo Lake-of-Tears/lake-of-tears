@@ -21,15 +21,15 @@ from schemas import (
     CreateDashboardRequest,
     DashboardResponse,
     DashboardStatsResponse,
-    GuestTokenResponse,
-    LinkDashboardRequest,
     UpdateDashboardRequest,
+    WidgetConfig,
+    WidgetDataResponse,
 )
 from sqlalchemy.orm import Session
 from superset_service import (
-    SUPERSET_PUBLIC_URL,
+    TEMPLATES,
+    headless_superset,
     slugify,
-    superset_gateway,
 )
 
 logger = logging.getLogger("lake.backend.dashboards.router")
@@ -100,23 +100,47 @@ def _unique_slug(
 
 
 def _to_response(dash: WorkspaceDashboard) -> DashboardResponse:
-    superset_url = f"{SUPERSET_PUBLIC_URL}/superset/dashboard/{dash.superset_dashboard_id}/"
     now = datetime.now(UTC)
+    layout = list(dash.layout_config) if dash.layout_config else []
     return DashboardResponse(
         id=dash.id or uuid.uuid4(),
         workspace_id=dash.workspace_id,
-        superset_dashboard_id=dash.superset_dashboard_id,
-        embedded_uuid=dash.embedded_uuid,
         title=dash.title,
         slug=dash.slug,
         description=dash.description,
-        charts_count=dash.charts_count or 0,
         is_published=dash.is_published,
+        layout_config=layout,
+        charts_count=len(layout) if layout else (dash.charts_count or 0),
         created_by=dash.created_by,
         created_at=dash.created_at or now,
         updated_at=dash.updated_at or now,
-        superset_url=superset_url,
     )
+
+
+def _find_dashboard(dashboard_id: str, workspace_id: uuid.UUID, db: Session) -> WorkspaceDashboard:
+    dash = None
+    try:
+        dash_uuid = uuid.UUID(dashboard_id)
+        dash = (
+            db.query(WorkspaceDashboard)
+            .filter(
+                WorkspaceDashboard.id == dash_uuid, WorkspaceDashboard.workspace_id == workspace_id
+            )
+            .first()
+        )
+    except ValueError:
+        dash = (
+            db.query(WorkspaceDashboard)
+            .filter(
+                WorkspaceDashboard.slug == dashboard_id,
+                WorkspaceDashboard.workspace_id == workspace_id,
+            )
+            .first()
+        )
+
+    if not dash:
+        raise HTTPException(status_code=404, detail="Dashboard not found in this workspace.")
+    return dash
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -127,13 +151,13 @@ async def get_dashboard_stats(
     ctx: tuple[Workspace, str, User] = Depends(_resolve_dashboard_context),
     db: Session = Depends(get_db),
 ) -> DashboardStatsResponse:
-    """Get aggregated dashboard metrics for the current workspace."""
+    """Get aggregated metrics for workspace native dashboards."""
     ws, _, _ = ctx
     dashboards = db.query(WorkspaceDashboard).filter(WorkspaceDashboard.workspace_id == ws.id).all()
     total = len(dashboards)
     published = sum(1 for d in dashboards if d.is_published)
-    total_charts = sum(d.charts_count for d in dashboards)
-    is_healthy = superset_gateway.is_healthy()
+    total_charts = sum(len(d.layout_config or []) for d in dashboards)
+    is_healthy = headless_superset.is_healthy()
 
     return DashboardStatsResponse(
         total_dashboards=total,
@@ -143,12 +167,20 @@ async def get_dashboard_stats(
     )
 
 
+@router.get("/datasets")
+async def list_available_datasets(
+    ctx: tuple[Workspace, str, User] = Depends(_resolve_dashboard_context),
+) -> list[dict[str, Any]]:
+    """List analytical datasets available for dashboard widget creation."""
+    return headless_superset.get_datasets()
+
+
 @router.get("", response_model=list[DashboardResponse])
 async def list_dashboards(
     ctx: tuple[Workspace, str, User] = Depends(_resolve_dashboard_context),
     db: Session = Depends(get_db),
 ) -> list[DashboardResponse]:
-    """List all dashboards registered in the current workspace."""
+    """List all dashboards in the current workspace."""
     ws, _, _ = ctx
     dashboards = (
         db.query(WorkspaceDashboard)
@@ -159,124 +191,31 @@ async def list_dashboards(
     return [_to_response(d) for d in dashboards]
 
 
-@router.get("/superset-available")
-async def list_available_superset_dashboards(
-    ctx: tuple[Workspace, str, User] = Depends(_dashboard_write_context),
-    db: Session = Depends(get_db),
-) -> list[dict[str, Any]]:
-    """List all raw Superset dashboards and indicate which are already linked in this workspace."""
-    ws, _, _ = ctx
-    linked_superset_ids = {
-        row[0]
-        for row in db.query(WorkspaceDashboard.superset_dashboard_id)
-        .filter(WorkspaceDashboard.workspace_id == ws.id)
-        .all()
-    }
-    raw_dashboards = superset_gateway.list_superset_dashboards()
-    result = []
-    for d in raw_dashboards:
-        sid = d.get("id")
-        result.append(
-            {
-                "id": sid,
-                "title": d.get("dashboard_title") or f"Dashboard #{sid}",
-                "slug": d.get("slug"),
-                "published": d.get("published", True),
-                "is_linked": sid in linked_superset_ids,
-            }
-        )
-    return result
-
-
 @router.post("", response_model=DashboardResponse, status_code=status.HTTP_201_CREATED)
 async def create_dashboard(
     req: CreateDashboardRequest,
     ctx: tuple[Workspace, str, User] = Depends(_dashboard_write_context),
     db: Session = Depends(get_db),
 ) -> DashboardResponse:
-    """Create a new blank dashboard in Superset and link it to the current workspace."""
+    """Create a new native dashboard in the workspace, optionally populated with template widgets."""
     ws, _, user = ctx
-
-    superset_id, embed_uuid = superset_gateway.create_dashboard(
-        title=req.title,
-        description=req.description,
-        is_published=req.is_published,
-    )
 
     slug = _unique_slug(req.title, ws.id, db)
     now = datetime.now(UTC)
+
+    # Initialize layout from template if specified
+    template_key = (req.template or "blank").lower().strip()
+    initial_layout = [dict(w) for w in TEMPLATES.get(template_key, [])]
+
     dash = WorkspaceDashboard(
         id=uuid.uuid4(),
         workspace_id=ws.id,
-        superset_dashboard_id=superset_id,
-        embedded_uuid=embed_uuid,
         title=req.title,
         slug=slug,
         description=req.description,
-        charts_count=0,
         is_published=req.is_published,
-        created_by=user.id,
-        created_at=now,
-        updated_at=now,
-    )
-    db.add(dash)
-    db.commit()
-    db.refresh(dash)
-    return _to_response(dash)
-
-
-@router.post("/link", response_model=DashboardResponse, status_code=status.HTTP_201_CREATED)
-async def link_dashboard(
-    req: LinkDashboardRequest,
-    ctx: tuple[Workspace, str, User] = Depends(_dashboard_write_context),
-    db: Session = Depends(get_db),
-) -> DashboardResponse:
-    """Link an existing Superset dashboard to the current workspace."""
-    ws, _, user = ctx
-
-    # Check if already linked
-    existing = (
-        db.query(WorkspaceDashboard)
-        .filter(
-            WorkspaceDashboard.workspace_id == ws.id,
-            WorkspaceDashboard.superset_dashboard_id == req.superset_dashboard_id,
-        )
-        .first()
-    )
-    if existing:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Dashboard #{req.superset_dashboard_id} is already linked to this workspace.",
-        )
-
-    # Get dashboard info from Superset if title not provided
-    title = req.title
-    charts_count = 0
-    superset_info = superset_gateway.get_dashboard(req.superset_dashboard_id)
-    if superset_info:
-        if not title:
-            title = superset_info.get("dashboard_title")
-        positions = superset_info.get("position_json")
-        if positions and isinstance(positions, str):
-            charts_count = positions.count('"type": "CHART"') or positions.count('"CHART-')
-
-    if not title:
-        title = f"Superset Dashboard #{req.superset_dashboard_id}"
-
-    embed_uuid = superset_gateway.get_or_create_embedded_config(req.superset_dashboard_id)
-    slug = _unique_slug(title, ws.id, db)
-    now = datetime.now(UTC)
-
-    dash = WorkspaceDashboard(
-        id=uuid.uuid4(),
-        workspace_id=ws.id,
-        superset_dashboard_id=req.superset_dashboard_id,
-        embedded_uuid=embed_uuid,
-        title=title,
-        slug=slug,
-        description=req.description,
-        charts_count=charts_count,
-        is_published=req.is_published,
+        layout_config=initial_layout,
+        charts_count=len(initial_layout),
         created_by=user.id,
         created_at=now,
         updated_at=now,
@@ -293,72 +232,10 @@ async def get_dashboard(
     ctx: tuple[Workspace, str, User] = Depends(_resolve_dashboard_context),
     db: Session = Depends(get_db),
 ) -> DashboardResponse:
-    """Get metadata for a specific workspace dashboard by ID or slug."""
+    """Get dashboard details and full native widget layout."""
     ws, _, _ = ctx
-    dash = None
-    try:
-        dash_uuid = uuid.UUID(dashboard_id)
-        dash = (
-            db.query(WorkspaceDashboard)
-            .filter(WorkspaceDashboard.id == dash_uuid, WorkspaceDashboard.workspace_id == ws.id)
-            .first()
-        )
-    except ValueError:
-        dash = (
-            db.query(WorkspaceDashboard)
-            .filter(
-                WorkspaceDashboard.slug == dashboard_id, WorkspaceDashboard.workspace_id == ws.id
-            )
-            .first()
-        )
-
-    if not dash:
-        raise HTTPException(status_code=404, detail="Dashboard not found in this workspace.")
-
+    dash = _find_dashboard(dashboard_id, ws.id, db)
     return _to_response(dash)
-
-
-@router.get("/{dashboard_id}/guest-token", response_model=GuestTokenResponse)
-async def get_dashboard_guest_token(
-    dashboard_id: str,
-    ctx: tuple[Workspace, str, User] = Depends(_resolve_dashboard_context),
-    db: Session = Depends(get_db),
-) -> GuestTokenResponse:
-    """Mint a guest token for the embedded Superset dashboard."""
-    ws, _, user = ctx
-    dash = None
-    try:
-        dash_uuid = uuid.UUID(dashboard_id)
-        dash = (
-            db.query(WorkspaceDashboard)
-            .filter(WorkspaceDashboard.id == dash_uuid, WorkspaceDashboard.workspace_id == ws.id)
-            .first()
-        )
-    except ValueError:
-        dash = (
-            db.query(WorkspaceDashboard)
-            .filter(
-                WorkspaceDashboard.slug == dashboard_id, WorkspaceDashboard.workspace_id == ws.id
-            )
-            .first()
-        )
-
-    if not dash:
-        raise HTTPException(status_code=404, detail="Dashboard not found in this workspace.")
-
-    # Mint official Superset Guest Token scoped to the embedded UUID
-    guest_token = superset_gateway.mint_guest_token(
-        user=user,
-        embedded_uuid=dash.embedded_uuid,
-    )
-
-    return GuestTokenResponse(
-        token=guest_token,
-        embedded_uuid=dash.embedded_uuid,
-        dashboard_id=dash.id,
-        superset_dashboard_id=dash.superset_dashboard_id,
-        superset_domain=SUPERSET_PUBLIC_URL,
-    )
 
 
 @router.patch("/{dashboard_id}", response_model=DashboardResponse)
@@ -368,27 +245,9 @@ async def update_dashboard(
     ctx: tuple[Workspace, str, User] = Depends(_dashboard_write_context),
     db: Session = Depends(get_db),
 ) -> DashboardResponse:
-    """Update dashboard title, description, or published status."""
+    """Update dashboard title, description, published status, or full layout_config."""
     ws, _, _ = ctx
-    dash = None
-    try:
-        dash_uuid = uuid.UUID(dashboard_id)
-        dash = (
-            db.query(WorkspaceDashboard)
-            .filter(WorkspaceDashboard.id == dash_uuid, WorkspaceDashboard.workspace_id == ws.id)
-            .first()
-        )
-    except ValueError:
-        dash = (
-            db.query(WorkspaceDashboard)
-            .filter(
-                WorkspaceDashboard.slug == dashboard_id, WorkspaceDashboard.workspace_id == ws.id
-            )
-            .first()
-        )
-
-    if not dash:
-        raise HTTPException(status_code=404, detail="Dashboard not found in this workspace.")
+    dash = _find_dashboard(dashboard_id, ws.id, db)
 
     if req.title is not None and req.title.strip():
         dash.title = req.title.strip()
@@ -397,51 +256,143 @@ async def update_dashboard(
         dash.description = req.description
     if req.is_published is not None:
         dash.is_published = req.is_published
+    if req.layout_config is not None:
+        dash.layout_config = req.layout_config
+        dash.charts_count = len(req.layout_config)
+
+    dash.updated_at = datetime.now(UTC)
+    db.commit()
+    db.refresh(dash)
+    return _to_response(dash)
+
+
+@router.post(
+    "/{dashboard_id}/widgets", response_model=DashboardResponse, status_code=status.HTTP_201_CREATED
+)
+async def add_widget(
+    dashboard_id: str,
+    widget: WidgetConfig,
+    ctx: tuple[Workspace, str, User] = Depends(_dashboard_write_context),
+    db: Session = Depends(get_db),
+) -> DashboardResponse:
+    """Add a new visual widget to the dashboard canvas."""
+    ws, _, _ = ctx
+    dash = _find_dashboard(dashboard_id, ws.id, db)
+
+    layout = list(dash.layout_config or [])
+    # Generate unique widget ID if not provided
+    w_dict = widget.model_dump()
+    if not w_dict.get("id"):
+        w_dict["id"] = f"w_{uuid.uuid4().hex[:8]}"
+
+    layout.append(w_dict)
+    dash.layout_config = layout
+    dash.charts_count = len(layout)
+    dash.updated_at = datetime.now(UTC)
 
     db.commit()
     db.refresh(dash)
     return _to_response(dash)
 
 
+@router.patch("/{dashboard_id}/widgets/{widget_id}", response_model=DashboardResponse)
+async def update_widget(
+    dashboard_id: str,
+    widget_id: str,
+    widget_update: dict[str, Any],
+    ctx: tuple[Workspace, str, User] = Depends(_dashboard_write_context),
+    db: Session = Depends(get_db),
+) -> DashboardResponse:
+    """Update settings for a specific widget on the dashboard canvas."""
+    ws, _, _ = ctx
+    dash = _find_dashboard(dashboard_id, ws.id, db)
+
+    layout = list(dash.layout_config or [])
+    found = False
+    for i, w in enumerate(layout):
+        if w.get("id") == widget_id:
+            layout[i] = {**w, **widget_update, "id": widget_id}
+            found = True
+            break
+
+    if not found:
+        raise HTTPException(status_code=404, detail="Widget not found in dashboard.")
+
+    dash.layout_config = layout
+    dash.updated_at = datetime.now(UTC)
+    db.commit()
+    db.refresh(dash)
+    return _to_response(dash)
+
+
+@router.delete("/{dashboard_id}/widgets/{widget_id}", response_model=DashboardResponse)
+async def delete_widget(
+    dashboard_id: str,
+    widget_id: str,
+    ctx: tuple[Workspace, str, User] = Depends(_dashboard_write_context),
+    db: Session = Depends(get_db),
+) -> DashboardResponse:
+    """Remove a visual widget from the dashboard canvas."""
+    ws, _, _ = ctx
+    dash = _find_dashboard(dashboard_id, ws.id, db)
+
+    layout = [w for w in (dash.layout_config or []) if w.get("id") != widget_id]
+    dash.layout_config = layout
+    dash.charts_count = len(layout)
+    dash.updated_at = datetime.now(UTC)
+
+    db.commit()
+    db.refresh(dash)
+    return _to_response(dash)
+
+
+@router.get("/{dashboard_id}/widgets/{widget_id}/data", response_model=WidgetDataResponse)
+async def get_widget_data(
+    dashboard_id: str,
+    widget_id: str,
+    time_range: str | None = Query(None),
+    ctx: tuple[Workspace, str, User] = Depends(_resolve_dashboard_context),
+    db: Session = Depends(get_db),
+) -> WidgetDataResponse:
+    """Execute headless analytical query and return chart-ready series data."""
+    ws, _, _ = ctx
+    dash = _find_dashboard(dashboard_id, ws.id, db)
+
+    target_widget = None
+    for w in dash.layout_config or []:
+        if w.get("id") == widget_id:
+            target_widget = dict(w)
+            break
+
+    if not target_widget:
+        raise HTTPException(status_code=404, detail="Widget not found in dashboard.")
+
+    if time_range:
+        target_widget["time_range"] = time_range
+
+    data = headless_superset.execute_widget_query(target_widget)
+    return WidgetDataResponse(
+        widget_id=widget_id,
+        type=target_widget.get("type", "kpi"),
+        title=target_widget.get("title", "Widget"),
+        data=data,
+    )
+
+
 @router.delete("/{dashboard_id}")
 async def delete_dashboard(
     dashboard_id: str,
-    purge_superset: bool = Query(False, description="Permanently delete from Superset"),
     ctx: tuple[Workspace, str, User] = Depends(_dashboard_write_context),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    """Unlink dashboard from workspace, optionally purging from Superset."""
+    """Delete dashboard from workspace."""
     ws, _, _ = ctx
-    dash = None
-    try:
-        dash_uuid = uuid.UUID(dashboard_id)
-        dash = (
-            db.query(WorkspaceDashboard)
-            .filter(WorkspaceDashboard.id == dash_uuid, WorkspaceDashboard.workspace_id == ws.id)
-            .first()
-        )
-    except ValueError:
-        dash = (
-            db.query(WorkspaceDashboard)
-            .filter(
-                WorkspaceDashboard.slug == dashboard_id, WorkspaceDashboard.workspace_id == ws.id
-            )
-            .first()
-        )
+    dash = _find_dashboard(dashboard_id, ws.id, db)
 
-    if not dash:
-        raise HTTPException(status_code=404, detail="Dashboard not found in this workspace.")
-
-    superset_id = dash.superset_dashboard_id
     db.delete(dash)
     db.commit()
 
-    purged = False
-    if purge_superset:
-        purged = superset_gateway.delete_dashboard(superset_id)
-
     return {
         "ok": True,
-        "message": f"Dashboard unlinked from workspace '{ws.slug}'.",
-        "purged_from_superset": purged,
+        "message": f"Dashboard '{dash.title}' deleted from workspace '{ws.slug}'.",
     }

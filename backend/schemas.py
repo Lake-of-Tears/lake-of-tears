@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Literal, Self
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, EmailStr, field_validator, model_validator
 
@@ -392,13 +392,26 @@ class UpdateSystemSettingsRequest(BaseModel):
         return v
 
 
-# ── Dashboards ────────────────────────────────────────────────────────────────
+# ── Dashboards & Native Widgets ───────────────────────────────────────────────
+
+
+class WidgetConfig(BaseModel):
+    id: str | None = None
+    title: str
+    type: str  # 'kpi' | 'line' | 'bar' | 'area' | 'pie' | 'table'
+    dataset_id: str | int | None = None
+    metric: str | None = None
+    metric_agg: str | None = "sum"
+    dimension: str | None = None
+    time_range: str | None = "all"
+    width: str = "half"  # 'half' | 'full'
 
 
 class CreateDashboardRequest(BaseModel):
     title: str
     description: str | None = None
     is_published: bool = True
+    template: str | None = "blank"  # 'blank' | 'executive' | 'traffic'
 
 
 class LinkDashboardRequest(BaseModel):
@@ -412,32 +425,30 @@ class UpdateDashboardRequest(BaseModel):
     title: str | None = None
     description: str | None = None
     is_published: bool | None = None
+    layout_config: list[dict[str, Any]] | None = None
 
 
 class DashboardResponse(BaseModel):
     id: uuid.UUID
     workspace_id: uuid.UUID
-    superset_dashboard_id: int
-    embedded_uuid: str
     title: str
     slug: str
     description: str | None
-    charts_count: int
     is_published: bool
+    layout_config: list[dict[str, Any]] = []
+    charts_count: int = 0
     created_by: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
-    superset_url: str | None = None
 
     model_config = {"from_attributes": True}
 
 
-class GuestTokenResponse(BaseModel):
-    token: str
-    embedded_uuid: str
-    dashboard_id: uuid.UUID
-    superset_dashboard_id: int
-    superset_domain: str
+class WidgetDataResponse(BaseModel):
+    widget_id: str
+    type: str
+    title: str
+    data: dict[str, Any]
 
 
 class DashboardStatsResponse(BaseModel):
