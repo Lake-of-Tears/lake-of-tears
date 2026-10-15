@@ -1,88 +1,792 @@
 {% extends "base.html" %}
-{% block title %}Storage — Lake of Tears{% endblock %}
+{% block title %}Storage Explorer — Lake of Tears{% endblock %}
 {% block content %}
 
-<div class="max-w-5xl mx-auto space-y-6">
+<div class="max-w-7xl mx-auto space-y-6 pb-12">
 
-  <div class="flex items-center justify-between">
+  <!-- Header Section -->
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
     <div>
-      <h1 class="text-xl font-semibold text-gray-100">Storage</h1>
-      <p class="text-sm text-gray-500 mt-1">MinIO S3-compatible object store — bucket <code class="text-xs bg-gray-800 px-1 py-0.5 rounded text-gray-300">datalake</code></p>
+      <div class="flex items-center gap-3">
+        <h1 class="text-xl font-semibold text-gray-100">Storage Explorer</h1>
+        <span class="px-2 py-0.5 rounded text-xs font-mono font-medium bg-blue-900/40 text-blue-400 border border-blue-800/50">
+          s3://{{ minio_bucket|default('datalake') }}
+        </span>
+      </div>
+      <p class="text-sm text-gray-400 mt-1">
+        Native MinIO object lake explorer, Parquet schema inspector, and DuckDB analytical interface.
+      </p>
     </div>
-    <a href="{{ minio_console_url }}" target="_blank"
-       class="btn-ghost text-xs gap-1.5">
-      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
-      Open MinIO Console
-    </a>
+
+    <div class="flex items-center gap-2">
+      <button id="btn-refresh" onclick="refreshCurrentPrefix()" class="btn-ghost text-xs gap-1.5" title="Refresh file listing">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+        Refresh
+      </button>
+
+      {% if is_superadmin and minio_console_url %}
+      <!-- Superadmin-only escape hatch to legacy MinIO Console -->
+      <a href="{{ minio_console_url }}" target="_blank"
+         class="btn-ghost text-xs gap-1.5 text-gray-500 hover:text-gray-300"
+         title="Open external MinIO server console (Superadmin only)">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+        </svg>
+        MinIO Admin Console
+      </a>
+      {% endif %}
+    </div>
   </div>
 
-  {% if stats.ok %}
-
-  <!-- Bucket summary -->
-  <div class="grid grid-cols-3 gap-4">
+  <!-- Summary Stats Overview -->
+  {% if stats and stats.ok %}
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
     <div class="stat-card">
-      <span class="text-xs text-gray-500 uppercase tracking-wide">Total Objects</span>
+      <span class="text-xs text-gray-400 uppercase tracking-wide">Total Objects</span>
       <span class="text-2xl font-bold text-gray-100">{{ stats.total_objects }}</span>
-      <span class="text-xs text-gray-600">{{ stats.total_size }} used</span>
+      <span class="text-xs text-gray-500">{{ stats.total_size }} stored</span>
     </div>
     <div class="stat-card">
-      <span class="text-xs text-gray-500 uppercase tracking-wide">Raw Data</span>
+      <span class="text-xs text-gray-400 uppercase tracking-wide">Raw Ingested Data</span>
       <span class="text-2xl font-bold text-gray-100">{{ stats.raw_objects }}</span>
-      <span class="text-xs text-gray-600">{{ stats.raw_size }}</span>
+      <span class="text-xs text-gray-500">{{ stats.raw_size }}</span>
     </div>
     <div class="stat-card">
-      <span class="text-xs text-gray-500 uppercase tracking-wide">Embeddings</span>
+      <span class="text-xs text-gray-400 uppercase tracking-wide">Embeddings</span>
       <span class="text-2xl font-bold text-gray-100">{{ stats.embeddings_objects }}</span>
-      <span class="text-xs text-gray-600">{{ stats.embeddings_size }}</span>
+      <span class="text-xs text-gray-500">{{ stats.embeddings_size }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="text-xs text-gray-400 uppercase tracking-wide">Primary Format</span>
+      <span class="text-2xl font-bold text-emerald-400">Apache Parquet</span>
+      <span class="text-xs text-gray-500">Hive Partitioned</span>
     </div>
   </div>
+  {% endif %}
 
-  <!-- Prefix breakdown -->
-  {% if stats.prefix_stats %}
+  <!-- Storage File Explorer Card -->
   <div class="card overflow-hidden">
-    <div class="px-5 py-4 border-b border-gray-800">
-      <h2 class="text-sm font-semibold text-gray-200">Top-level prefixes</h2>
-    </div>
-    <table class="w-full text-sm">
-      <thead>
-        <tr class="border-b border-gray-800 text-left">
-          <th class="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Prefix</th>
-          <th class="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-right">Objects</th>
-          <th class="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-right">Size</th>
-          <th class="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-right">Last Modified</th>
-        </tr>
-      </thead>
-      <tbody class="divide-y divide-gray-800/60">
-        {% for prefix, info in stats.prefix_stats.items() %}
-        <tr class="hover:bg-white/[0.02]">
-          <td class="px-5 py-3 font-mono text-xs text-gray-300">{{ prefix }}/</td>
-          <td class="px-5 py-3 text-gray-400 text-right tabular-nums">{{ info.objects }}</td>
-          <td class="px-5 py-3 text-gray-400 text-right tabular-nums">{{ info.size }}</td>
-          <td class="px-5 py-3 text-gray-500 text-right text-xs">{{ info.last_modified_str }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% endif %}
 
-  <!-- S3 endpoint info -->
-  <div class="card p-5">
-    <h2 class="text-sm font-semibold text-gray-300 mb-3">Connection details</h2>
-    <div class="space-y-2 font-mono text-xs text-gray-500">
-      <div class="flex gap-3"><span class="text-gray-600 w-24 shrink-0">S3 API</span><span class="text-gray-400">http://localhost:9000</span></div>
-      <div class="flex gap-3"><span class="text-gray-600 w-24 shrink-0">Bucket</span><span class="text-gray-400">datalake</span></div>
-      <div class="flex gap-3"><span class="text-gray-600 w-24 shrink-0">Region</span><span class="text-gray-400">us-east-1 (virtual)</span></div>
-      <div class="flex gap-3"><span class="text-gray-600 w-24 shrink-0">URL style</span><span class="text-gray-400">path</span></div>
-    </div>
-  </div>
+    <!-- Explorer Navigation & Filter Toolbar -->
+    <div class="px-5 py-3.5 border-b border-gray-800 bg-black/20 flex flex-col md:flex-row md:items-center justify-between gap-3">
+      
+      <!-- Interactive Breadcrumb Trail -->
+      <nav class="flex items-center gap-1.5 text-xs font-mono overflow-x-auto py-1 scrollbar-none" id="breadcrumb-container" aria-label="Breadcrumb">
+        <span class="text-gray-500">Loading directory...</span>
+      </nav>
 
-  {% else %}
-  <div class="card p-8 text-center">
-    <p class="text-gray-500 text-sm">Could not connect to MinIO.</p>
-    <p class="text-gray-600 text-xs mt-1 font-mono">{{ stats.error }}</p>
+      <!-- Action & Search Toolbar -->
+      <div class="flex items-center gap-2.5 shrink-0">
+        <!-- Search filter input -->
+        <div class="relative w-48 sm:w-64">
+          <input
+            id="explorer-search"
+            type="text"
+            placeholder="Filter current view..."
+            oninput="handleSearchFilter(this.value)"
+            class="input-dark text-xs py-1.5 pl-8 pr-2.5 w-full"
+          />
+          <svg class="w-3.5 h-3.5 text-gray-500 absolute left-2.5 top-2.5 pointer-events-none" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+        </div>
+
+        <!-- Copy S3 Prefix URI -->
+        <button onclick="copyCurrentS3URI()" class="btn-ghost text-xs px-2.5 py-1.5" title="Copy S3 URI to clipboard">
+          <svg id="copy-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+          </svg>
+          <span id="copy-text" class="hidden sm:inline">Copy URI</span>
+        </button>
+
+        <!-- Up / Parent directory button -->
+        <button id="btn-parent-dir" onclick="navigateParent()" class="btn-ghost text-xs px-2.5 py-1.5 disabled:opacity-30 disabled:cursor-not-allowed" title="Go up to parent directory">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M5 10l7-7m0 0l7 7m-7-7v18" />
+          </svg>
+          <span class="hidden sm:inline">Up</span>
+        </button>
+      </div>
+
+    </div>
+
+    <!-- Objects Table -->
+    <div class="overflow-x-auto min-h-[320px]">
+      <table class="w-full text-sm text-left">
+        <thead>
+          <tr class="border-b border-gray-800 text-xs font-semibold text-gray-500 uppercase tracking-wider bg-white/[0.01]">
+            <th class="px-5 py-3">Name</th>
+            <th class="px-5 py-3 text-right">Size</th>
+            <th class="px-5 py-3 text-right">Last Modified</th>
+            <th class="px-5 py-3 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="objects-table-body" class="divide-y divide-gray-800/60 font-mono text-xs">
+          <tr>
+            <td colspan="4" class="px-5 py-12 text-center text-gray-500">
+              <div class="inline-flex items-center gap-2">
+                <svg class="animate-spin w-4 h-4 text-blue-500" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                </svg>
+                <span>Loading storage objects...</span>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Explorer Footer / Pagination Toolbar -->
+    <div class="px-5 py-3 border-t border-gray-800 bg-black/20 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-gray-400">
+      <div id="pagination-info">
+        <span>Showing objects in bucket</span>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button
+          id="btn-prev-page"
+          onclick="navigatePrevPage()"
+          disabled
+          class="btn-ghost text-xs px-3 py-1 disabled:opacity-30 disabled:cursor-not-allowed">
+          &larr; Previous
+        </button>
+        <button
+          id="btn-next-page"
+          onclick="navigateNextPage()"
+          disabled
+          class="btn-ghost text-xs px-3 py-1 disabled:opacity-30 disabled:cursor-not-allowed">
+          Next &rarr;
+        </button>
+      </div>
+    </div>
+
   </div>
-  {% endif %}
 
 </div>
+
+<!-- ── Parquet Schema & Metadata Modal ────────────────────────────────────── -->
+<div id="parquet-modal" class="fixed inset-0 z-50 hidden bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+  <div class="card w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border border-gray-700">
+    
+    <!-- Modal Header -->
+    <div class="px-6 py-4 border-b border-gray-800 flex items-center justify-between bg-black/40">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded bg-emerald-950/60 border border-emerald-800/60 flex items-center justify-center text-emerald-400 font-bold text-xs">
+          PQ
+        </div>
+        <div>
+          <h2 id="modal-filename" class="text-sm font-semibold text-gray-100 font-mono">schema.parquet</h2>
+          <p id="modal-key" class="text-[11px] text-gray-500 font-mono truncate max-w-xl">s3://datalake/...</p>
+        </div>
+      </div>
+      <button onclick="closeParquetModal()" class="text-gray-400 hover:text-white p-1 rounded-md hover:bg-white/[0.08]">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
+
+    <!-- Modal Body -->
+    <div class="p-6 overflow-y-auto space-y-6">
+      
+      <!-- Metric Highlights -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div class="p-3 rounded-lg bg-gray-800/50 border border-gray-700/60">
+          <span class="text-[10px] text-gray-400 uppercase tracking-wide block">Total Rows</span>
+          <span id="modal-rows" class="text-lg font-bold text-gray-100 tabular-nums font-mono">—</span>
+        </div>
+        <div class="p-3 rounded-lg bg-gray-800/50 border border-gray-700/60">
+          <span class="text-[10px] text-gray-400 uppercase tracking-wide block">Columns</span>
+          <span id="modal-cols-count" class="text-lg font-bold text-gray-100 tabular-nums font-mono">—</span>
+        </div>
+        <div class="p-3 rounded-lg bg-gray-800/50 border border-gray-700/60">
+          <span class="text-[10px] text-gray-400 uppercase tracking-wide block">Row Groups</span>
+          <span id="modal-row-groups" class="text-lg font-bold text-gray-100 tabular-nums font-mono">—</span>
+        </div>
+        <div class="p-3 rounded-lg bg-gray-800/50 border border-gray-700/60">
+          <span class="text-[10px] text-gray-400 uppercase tracking-wide block">File Size</span>
+          <span id="modal-size" class="text-lg font-bold text-gray-100 tabular-nums font-mono">—</span>
+        </div>
+      </div>
+
+      <!-- Column Schema Table -->
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="text-xs font-semibold text-gray-300 uppercase tracking-wider">Parquet Schema Definition</h3>
+          <span id="modal-created-by" class="text-[11px] text-gray-500 font-mono truncate max-w-sm"></span>
+        </div>
+        <div class="border border-gray-800 rounded-lg overflow-hidden">
+          <div class="max-h-72 overflow-y-auto">
+            <table class="w-full text-left font-mono text-xs">
+              <thead class="sticky top-0 bg-gray-800/90 backdrop-blur border-b border-gray-700 text-gray-400 text-[11px]">
+                <tr>
+                  <th class="px-4 py-2">Column Name</th>
+                  <th class="px-4 py-2">Logical / Arrow Type</th>
+                  <th class="px-4 py-2">Physical Type</th>
+                  <th class="px-4 py-2">Compression</th>
+                  <th class="px-4 py-2 text-center">Nullable</th>
+                </tr>
+              </thead>
+              <tbody id="modal-columns-tbody" class="divide-y divide-gray-800 text-gray-300">
+                <!-- Dynamically populated -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Modal Footer Actions -->
+    <div class="px-6 py-3.5 border-t border-gray-800 bg-black/40 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <button id="modal-btn-copy-uri" onclick="copyModalS3URI()" class="btn-ghost text-xs">
+          Copy S3 Path
+        </button>
+      </div>
+
+      <div class="flex items-center gap-2.5">
+        <button id="modal-btn-download" onclick="downloadModalObject()" class="btn-ghost text-xs gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+          </svg>
+          Download
+        </button>
+        <a id="modal-btn-query" href="#" class="btn-primary text-xs gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+          Query in DuckDB
+        </a>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Delete Confirmation Modal ──────────────────────────────────────────── -->
+<div id="delete-modal" class="fixed inset-0 z-50 hidden bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+  <div class="card w-full max-w-md p-6 shadow-2xl border border-red-900/60 space-y-4">
+    <div class="flex items-center gap-3 text-red-400">
+      <div class="w-10 h-10 rounded-full bg-red-900/30 border border-red-800/60 flex items-center justify-center shrink-0">
+        <svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+        </svg>
+      </div>
+      <div>
+        <h3 class="text-base font-semibold text-gray-100">Delete Object</h3>
+        <p class="text-xs text-gray-400 mt-0.5">Are you sure you want to permanently delete this object?</p>
+      </div>
+    </div>
+
+    <div class="bg-gray-800/70 p-3 rounded border border-gray-700/80 font-mono text-xs text-gray-300 break-all" id="delete-modal-key">
+      s3://datalake/...
+    </div>
+
+    <p class="text-xs text-gray-500">
+      This action is irreversible. The object will be permanently removed from MinIO storage.
+    </p>
+
+    <div class="flex items-center justify-end gap-3 pt-2 border-t border-gray-800">
+      <button onclick="closeDeleteModal()" class="btn-ghost text-xs">Cancel</button>
+      <button id="btn-confirm-delete" onclick="executeDelete()" class="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-medium rounded-md transition-colors">
+        Delete Object
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Client-Side Storage Explorer Script ────────────────────────────────── -->
+<script>
+  const BUCKET_NAME = "{{ minio_bucket|default('datalake') }}";
+  const CAN_DELETE = {{ 'true' if can_delete else 'false' }};
+  const IS_SUPERADMIN = {{ 'true' if is_superadmin else 'false' }};
+
+  let currentPrefix = "";
+  let currentContinuationToken = null;
+  let tokenHistory = []; // Stack for Previous pagination: [{prefix, token}]
+  let currentItems = { folders: [], files: [] };
+  let activeModalObject = null;
+  let keyPendingDelete = null;
+
+  document.addEventListener('DOMContentLoaded', () => {
+    // Check URL query param or hash for deep linking
+    const urlParams = new URLSearchParams(window.location.search);
+    const initialPrefix = urlParams.get('prefix') || "";
+    loadPrefix(initialPrefix);
+  });
+
+  async function loadPrefix(prefix, continuationToken = null, pushHistory = false) {
+    const tableBody = document.getElementById('objects-table-body');
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="4" class="px-5 py-12 text-center text-gray-500">
+          <div class="inline-flex items-center gap-2">
+            <svg class="animate-spin w-4 h-4 text-blue-500" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+            </svg>
+            <span>Loading storage objects...</span>
+          </div>
+        </td>
+      </tr>
+    `;
+
+    try {
+      let url = `/api/v1/storage/browse?prefix=${encodeURIComponent(prefix)}&limit=100`;
+      if (continuationToken) {
+        url += `&continuation_token=${encodeURIComponent(continuationToken)}`;
+      }
+
+      const res = await fetch(url);
+      if (!res.ok) {
+        throw new Error(`Failed to load prefix: HTTP ${res.status}`);
+      }
+
+      const data = await res.json();
+      currentPrefix = data.prefix || "";
+      currentContinuationToken = data.next_continuation_token || null;
+      currentItems = { folders: data.folders || [], files: data.files || [] };
+
+      // Update URL without full reload for deep-linking
+      const newUrl = new URL(window.location);
+      if (currentPrefix) {
+        newUrl.searchParams.set('prefix', currentPrefix);
+      } else {
+        newUrl.searchParams.delete('prefix');
+      }
+      window.history.replaceState({}, '', newUrl);
+
+      // Render components
+      renderBreadcrumbs(data.breadcrumbs || []);
+      renderItems(currentItems.folders, currentItems.files);
+      updatePaginationControls(data);
+
+      // Clear search input
+      const searchInput = document.getElementById('explorer-search');
+      if (searchInput) searchInput.value = "";
+
+    } catch (err) {
+      console.error(err);
+      tableBody.innerHTML = `
+        <tr>
+          <td colspan="4" class="px-5 py-12 text-center text-red-400">
+            <p class="text-sm font-semibold">Error browsing prefix</p>
+            <p class="text-xs text-gray-500 mt-1">${escapeHtml(err.message)}</p>
+            <button onclick="loadPrefix('${escapeHtml(prefix)}')" class="btn-ghost text-xs mt-3">Try Again</button>
+          </td>
+        </tr>
+      `;
+    }
+  }
+
+  function renderBreadcrumbs(crumbs) {
+    const container = document.getElementById('breadcrumb-container');
+    const parentBtn = document.getElementById('btn-parent-dir');
+
+    if (!crumbs || crumbs.length === 0) {
+      crumbs = [{ name: 'datalake', prefix: '' }];
+    }
+
+    let html = '';
+    crumbs.forEach((crumb, idx) => {
+      const isLast = idx === crumbs.length - 1;
+      const isRoot = idx === 0;
+
+      if (isRoot) {
+        html += `
+          <button onclick="navigateToPrefix('')" class="flex items-center gap-1.5 hover:text-white transition-colors ${isLast ? 'text-blue-400 font-semibold' : 'text-gray-400'}">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+            </svg>
+            <span>${escapeHtml(crumb.name)}</span>
+          </button>
+        `;
+      } else {
+        html += `<span class="text-gray-600">/</span>`;
+        if (isLast) {
+          html += `<span class="text-blue-400 font-semibold truncate max-w-[200px]">${escapeHtml(crumb.name)}</span>`;
+        } else {
+          html += `<button onclick="navigateToPrefix('${escapeHtml(crumb.prefix)}')" class="text-gray-400 hover:text-white transition-colors truncate max-w-[150px]">${escapeHtml(crumb.name)}</button>`;
+        }
+      }
+    });
+
+    container.innerHTML = html;
+
+    // Enable/disable parent button
+    if (parentBtn) {
+      parentBtn.disabled = crumbs.length <= 1;
+    }
+  }
+
+  function renderItems(folders, files) {
+    const tbody = document.getElementById('objects-table-body');
+    const totalCount = folders.length + files.length;
+
+    if (totalCount === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="4" class="px-5 py-12 text-center text-gray-500">
+            <svg class="w-8 h-8 mx-auto text-gray-600 mb-2" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+            </svg>
+            <p class="text-sm">This prefix is empty.</p>
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    let rowsHtml = '';
+
+    // Folders
+    folders.forEach(f => {
+      const folderQuerySql = encodeURIComponent(`SELECT * FROM read_parquet('s3://${BUCKET_NAME}/${f.prefix}**/*.parquet') LIMIT 50`);
+      rowsHtml += `
+        <tr class="hover:bg-white/[0.02] transition-colors group">
+          <td class="px-5 py-3 text-gray-200">
+            <button onclick="navigateToPrefix('${escapeHtml(f.prefix)}')" class="flex items-center gap-2.5 text-left hover:text-blue-400 transition-colors w-full">
+              <svg class="w-4 h-4 text-amber-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
+              </svg>
+              <span class="font-medium">${escapeHtml(f.name)}/</span>
+            </button>
+          </td>
+          <td class="px-5 py-3 text-right text-gray-500 tabular-nums">—</td>
+          <td class="px-5 py-3 text-right text-gray-500 tabular-nums">—</td>
+          <td class="px-5 py-3 text-right">
+            <div class="flex items-center justify-end gap-1.5 opacity-80 group-hover:opacity-100 transition-opacity">
+              <a href="/sql?q=${folderQuerySql}" class="btn-ghost text-[11px] py-1 px-2 text-blue-400 hover:text-blue-300" title="Query all Parquet files in folder with DuckDB">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                <span class="hidden md:inline">Query</span>
+              </a>
+              <button onclick="navigateToPrefix('${escapeHtml(f.prefix)}')" class="btn-ghost text-[11px] py-1 px-2 text-gray-400 hover:text-white" title="Open directory">
+                Open &rarr;
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    });
+
+    // Files
+    files.forEach(f => {
+      let icon = `
+        <svg class="w-4 h-4 text-gray-500 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+        </svg>
+      `;
+      let badge = '';
+
+      if (f.is_parquet) {
+        icon = `
+          <div class="w-4 h-4 rounded bg-emerald-950 border border-emerald-700/80 text-emerald-400 text-[9px] font-bold flex items-center justify-center shrink-0">
+            PQ
+          </div>
+        `;
+        badge = `<span class="px-1.5 py-0.2 rounded text-[10px] font-semibold bg-emerald-900/30 text-emerald-400 border border-emerald-800/40">Parquet</span>`;
+      } else if (f.is_notebook) {
+        icon = `
+          <div class="w-4 h-4 rounded bg-amber-950 border border-amber-700/80 text-amber-400 text-[9px] font-bold flex items-center justify-center shrink-0">
+            NB
+          </div>
+        `;
+        badge = `<span class="px-1.5 py-0.2 rounded text-[10px] font-semibold bg-amber-900/30 text-amber-400 border border-amber-800/40">Notebook</span>`;
+      }
+
+      const fileQuerySql = encodeURIComponent(`SELECT * FROM read_parquet('s3://${BUCKET_NAME}/${f.key}') LIMIT 50`);
+      const dateStr = f.last_modified ? f.last_modified.replace('T', ' ').substring(0, 19) + ' UTC' : '—';
+
+      rowsHtml += `
+        <tr class="hover:bg-white/[0.02] transition-colors group">
+          <td class="px-5 py-3 text-gray-200">
+            <div class="flex items-center gap-2.5">
+              ${icon}
+              <button onclick="${f.is_parquet ? `inspectParquet('${escapeHtml(f.key)}')` : `downloadObject('${escapeHtml(f.key)}')`}" class="text-left hover:text-blue-400 transition-colors font-medium truncate max-w-sm sm:max-w-md">
+                ${escapeHtml(f.name)}
+              </button>
+              ${badge}
+            </div>
+          </td>
+          <td class="px-5 py-3 text-right text-gray-400 tabular-nums">${escapeHtml(f.size_human)}</td>
+          <td class="px-5 py-3 text-right text-gray-500 tabular-nums text-[11px]">${escapeHtml(dateStr)}</td>
+          <td class="px-5 py-3 text-right">
+            <div class="flex items-center justify-end gap-1.5 opacity-80 group-hover:opacity-100 transition-opacity">
+              ${f.is_parquet ? `
+                <button onclick="inspectParquet('${escapeHtml(f.key)}')" class="btn-ghost text-[11px] py-1 px-2 text-emerald-400 hover:text-emerald-300" title="Inspect Parquet schema and metadata">
+                  Schema
+                </button>
+                <a href="/sql?q=${fileQuerySql}" class="btn-ghost text-[11px] py-1 px-2 text-blue-400 hover:text-blue-300" title="Query in DuckDB">
+                  Query
+                </a>
+              ` : ''}
+              
+              <button onclick="downloadObject('${escapeHtml(f.key)}')" class="btn-ghost text-[11px] py-1 px-2 text-gray-300 hover:text-white" title="Download object">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+              </button>
+
+              ${CAN_DELETE ? `
+                <button onclick="openDeleteModal('${escapeHtml(f.key)}')" class="btn-ghost text-[11px] py-1 px-2 text-red-400 hover:text-red-300 hover:bg-red-900/20" title="Delete object">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
+              ` : ''}
+            </div>
+          </td>
+        </tr>
+      `;
+    });
+
+    tbody.innerHTML = rowsHtml;
+  }
+
+  function handleSearchFilter(query) {
+    const q = (query || "").trim().toLowerCase();
+    if (!q) {
+      renderItems(currentItems.folders, currentItems.files);
+      return;
+    }
+
+    const filteredFolders = currentItems.folders.filter(f => f.name.toLowerCase().includes(q));
+    const filteredFiles = currentItems.files.filter(f => f.name.toLowerCase().includes(q));
+    renderItems(filteredFolders, filteredFiles);
+  }
+
+  function updatePaginationControls(data) {
+    const prevBtn = document.getElementById('btn-prev-page');
+    const nextBtn = document.getElementById('btn-next-page');
+    const infoSpan = document.getElementById('pagination-info');
+
+    const totalFolders = data.total_folders || 0;
+    const totalFiles = data.total_files || 0;
+
+    infoSpan.textContent = `Current folder contains ${totalFolders} ${totalFolders === 1 ? 'folder' : 'folders'}, ${totalFiles} ${totalFiles === 1 ? 'file' : 'files'}`;
+
+    if (prevBtn) {
+      prevBtn.disabled = tokenHistory.length === 0;
+    }
+    if (nextBtn) {
+      nextBtn.disabled = !data.is_truncated || !data.next_continuation_token;
+    }
+  }
+
+  function navigateToPrefix(prefix) {
+    tokenHistory = [];
+    loadPrefix(prefix);
+  }
+
+  function navigateParent() {
+    if (!currentPrefix) return;
+    const trimmed = currentPrefix.replace(/\/$/, "");
+    const parent = trimmed.includes('/') ? trimmed.substring(0, trimmed.lastIndexOf('/') + 1) : "";
+    navigateToPrefix(parent);
+  }
+
+  function refreshCurrentPrefix() {
+    loadPrefix(currentPrefix);
+  }
+
+  function navigateNextPage() {
+    if (!currentContinuationToken) return;
+    tokenHistory.push({ prefix: currentPrefix, token: currentContinuationToken });
+    loadPrefix(currentPrefix, currentContinuationToken);
+  }
+
+  function navigatePrevPage() {
+    if (tokenHistory.length === 0) return;
+    tokenHistory.pop(); // Remove current
+    const prevEntry = tokenHistory.length > 0 ? tokenHistory[tokenHistory.length - 1] : null;
+    loadPrefix(currentPrefix, prevEntry ? prevEntry.token : null);
+  }
+
+  async function inspectParquet(key) {
+    activeModalObject = null;
+    const modal = document.getElementById('parquet-modal');
+    modal.classList.remove('hidden');
+
+    document.getElementById('modal-filename').textContent = key.split('/').pop();
+    document.getElementById('modal-key').textContent = `s3://${BUCKET_NAME}/${key}`;
+    document.getElementById('modal-rows').textContent = 'Loading...';
+    document.getElementById('modal-cols-count').textContent = '—';
+    document.getElementById('modal-row-groups').textContent = '—';
+    document.getElementById('modal-size').textContent = '—';
+    document.getElementById('modal-created-by').textContent = '';
+    document.getElementById('modal-columns-tbody').innerHTML = `
+      <tr>
+        <td colspan="5" class="px-4 py-8 text-center text-gray-500">
+          Reading Parquet footer metadata via PyArrow...
+        </td>
+      </tr>
+    `;
+
+    try {
+      const res = await fetch(`/api/v1/storage/objects/${encodeURIComponent(key)}/metadata`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      activeModalObject = data;
+
+      document.getElementById('modal-size').textContent = data.size_human || '—';
+      const pm = data.parquet_metadata;
+
+      if (pm && !pm.error) {
+        document.getElementById('modal-rows').textContent = (pm.num_rows || 0).toLocaleString();
+        document.getElementById('modal-cols-count').textContent = pm.num_columns || 0;
+        document.getElementById('modal-row-groups').textContent = pm.num_row_groups || 1;
+        document.getElementById('modal-created-by').textContent = pm.created_by ? `Engine: ${pm.created_by}` : '';
+
+        const colsTbody = document.getElementById('modal-columns-tbody');
+        let colRows = '';
+        (pm.columns || []).forEach(c => {
+          colRows += `
+            <tr class="hover:bg-white/[0.02]">
+              <td class="px-4 py-2 font-semibold text-gray-200">${escapeHtml(c.name)}</td>
+              <td class="px-4 py-2 text-emerald-400">${escapeHtml(c.arrow_type)}</td>
+              <td class="px-4 py-2 text-gray-400 text-[11px]">${escapeHtml(c.physical_type)}</td>
+              <td class="px-4 py-2 text-amber-300 text-[11px]">${escapeHtml(c.compression)}</td>
+              <td class="px-4 py-2 text-center text-gray-400">${c.nullable ? '✓' : '✗'}</td>
+            </tr>
+          `;
+        });
+        colsTbody.innerHTML = colRows || `<tr><td colspan="5" class="px-4 py-4 text-center text-gray-500">No columns found</td></tr>`;
+      } else {
+        document.getElementById('modal-rows').textContent = 'Error';
+        document.getElementById('modal-columns-tbody').innerHTML = `
+          <tr>
+            <td colspan="5" class="px-4 py-8 text-center text-red-400">
+              Could not parse Parquet metadata: ${escapeHtml(pm?.error || 'Unknown error')}
+            </td>
+          </tr>
+        `;
+      }
+
+      // Action buttons
+      const querySql = encodeURIComponent(`SELECT * FROM read_parquet('s3://${BUCKET_NAME}/${key}') LIMIT 50`);
+      document.getElementById('modal-btn-query').href = `/sql?q=${querySql}`;
+
+    } catch (err) {
+      console.error(err);
+      document.getElementById('modal-columns-tbody').innerHTML = `
+        <tr>
+          <td colspan="5" class="px-4 py-8 text-center text-red-400">
+            Failed to load object metadata: ${escapeHtml(err.message)}
+          </td>
+        </tr>
+      `;
+    }
+  }
+
+  function closeParquetModal() {
+    document.getElementById('parquet-modal').classList.add('hidden');
+    activeModalObject = null;
+  }
+
+  async function downloadObject(key) {
+    try {
+      const res = await fetch(`/api/v1/storage/objects/${encodeURIComponent(key)}/download`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.download_url) {
+          window.location.href = data.download_url;
+          return;
+        }
+      }
+      // Fallback to streaming proxy
+      window.location.href = `/api/v1/storage/objects/${encodeURIComponent(key)}/stream`;
+    } catch (err) {
+      console.warn("Presigned download failed, falling back to streaming proxy:", err);
+      window.location.href = `/api/v1/storage/objects/${encodeURIComponent(key)}/stream`;
+    }
+  }
+
+  function downloadModalObject() {
+    if (activeModalObject && activeModalObject.key) {
+      downloadObject(activeModalObject.key);
+    }
+  }
+
+  function copyModalS3URI() {
+    if (activeModalObject && activeModalObject.key) {
+      const uri = `s3://${BUCKET_NAME}/${activeModalObject.key}`;
+      navigator.clipboard.writeText(uri);
+      const btn = document.getElementById('modal-btn-copy-uri');
+      const orig = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(() => { btn.textContent = orig; }, 1500);
+    }
+  }
+
+  function copyCurrentS3URI() {
+    const uri = currentPrefix ? `s3://${BUCKET_NAME}/${currentPrefix}` : `s3://${BUCKET_NAME}/`;
+    navigator.clipboard.writeText(uri);
+    const textSpan = document.getElementById('copy-text');
+    if (textSpan) {
+      const orig = textSpan.textContent;
+      textSpan.textContent = 'Copied!';
+      setTimeout(() => { textSpan.textContent = orig; }, 1500);
+    }
+  }
+
+  function openDeleteModal(key) {
+    keyPendingDelete = key;
+    document.getElementById('delete-modal-key').textContent = `s3://${BUCKET_NAME}/${key}`;
+    document.getElementById('delete-modal').classList.remove('hidden');
+  }
+
+  function closeDeleteModal() {
+    document.getElementById('delete-modal').classList.add('hidden');
+    keyPendingDelete = null;
+  }
+
+  async function executeDelete() {
+    if (!keyPendingDelete) return;
+    const btn = document.getElementById('btn-confirm-delete');
+    btn.disabled = true;
+    btn.textContent = 'Deleting...';
+
+    try {
+      const res = await fetch(`/api/v1/storage/objects/${encodeURIComponent(keyPendingDelete)}`, {
+        method: 'DELETE'
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || `HTTP ${res.status}`);
+      }
+      closeDeleteModal();
+      refreshCurrentPrefix();
+    } catch (err) {
+      alert(`Delete failed: ${err.message}`);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Delete Object';
+    }
+  }
+
+  function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  // Close modals on Escape key
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeParquetModal();
+      closeDeleteModal();
+    }
+  });
+</script>
+
 {% endblock %}
