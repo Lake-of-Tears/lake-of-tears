@@ -40,11 +40,14 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install bandit
-        run: pip install bandit[toml]==1.7.9
+      - name: Install security tools
+        run: pip install bandit[toml]==1.7.9 pip-audit>=2.8.0
 
       - name: Run bandit
         run: bandit -r backend/ pipeline/ ui/ -ll -c pyproject.toml
+
+      - name: Run pip-audit
+        run: pip-audit -r backend/requirements.txt -r ui/requirements.txt
 
   docker-build:
     name: Docker Build (UI)
