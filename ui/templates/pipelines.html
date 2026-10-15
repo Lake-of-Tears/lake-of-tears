@@ -102,6 +102,14 @@
         <span id="timeline-tz-badge" class="hidden sm:inline-flex px-2 py-0.5 rounded text-[10px] font-mono text-gray-400 bg-white/[0.03] border border-white/[0.06]">
           UTC
         </span>
+
+        <!-- Run Status Legend -->
+        <div class="hidden lg:flex items-center gap-3 text-[10px] text-gray-400 bg-black/40 border border-white/[0.06] rounded-md px-2.5 py-1">
+          <span class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>Success</span>
+          <span class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-rose-400"></span>Failed</span>
+          <span class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></span>Running</span>
+          <span class="flex items-center gap-1.5"><svg class="w-2.5 h-2.5 text-gray-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>Scheduled</span>
+        </div>
       </div>
 
       <!-- Right Controls: Zoom & Collapse -->
@@ -111,6 +119,7 @@
           <button onclick="setTimelineZoom('24h')" id="btn-zoom-24h" class="zoom-btn active px-2.5 py-1 rounded text-xs font-medium transition-colors bg-white/[0.08] text-white">
             24h
           </button>
+
           <button onclick="setTimelineZoom('12h')" id="btn-zoom-12h" class="zoom-btn px-2.5 py-1 rounded text-xs font-medium hover:text-white transition-colors">
             12h
           </button>
@@ -786,26 +795,33 @@
           const state = r.state || 'unknown';
           let bgStyle = `background-color: ${colorHex}25; border-color: ${colorHex}88; color: #fff;`;
           let dotColor = 'bg-gray-400';
+          let stateBadge = `<span class="text-[9px] opacity-75 truncate uppercase hidden sm:inline">${state}</span>`;
+          let extraClasses = '';
+
           if (state === 'success') {
             dotColor = 'bg-emerald-400';
           } else if (state === 'running') {
             dotColor = 'bg-blue-400 animate-pulse';
+            extraClasses = 'ring-1 ring-blue-400/50 shadow-[0_0_8px_rgba(59,130,246,0.3)]';
           } else if (state === 'failed') {
             dotColor = 'bg-rose-400';
+            bgStyle = 'background-color: rgba(225, 29, 72, 0.22); border-color: rgba(244, 63, 94, 0.85); color: #fecdd3;';
+            extraClasses = 'ring-1 ring-rose-500/60 shadow-[0_0_10px_rgba(244,63,94,0.4)]';
+            stateBadge = '<span class="text-[9px] font-bold text-rose-300 truncate uppercase">FAILED</span>';
           } else if (state === 'queued') {
             dotColor = 'bg-amber-400';
           }
 
-          const runTooltip = `Pipeline: ${dagId}&#10;Run ID: ${r.dag_run_id}&#10;Status: ${state}&#10;Time: ${runDate.toLocaleString()}&#10;Duration: ${durationSec > 0 ? Math.round(durationSec) + 's' : 'In Progress'}&#10;Click to inspect run & logs`;
+          const runTooltip = `Pipeline: ${dagId}&#10;Run ID: ${r.dag_run_id}&#10;Status: ${state.toUpperCase()}&#10;Time: ${runDate.toLocaleString()}&#10;Duration: ${durationSec > 0 ? Math.round(durationSec) + 's' : 'In Progress'}&#10;Click to inspect run & logs`;
 
           return `
             <div onclick="onTimelineRunClick('${dagId}', '${r.dag_run_id}', true)"
                  title="${runTooltip}"
-                 style="left: ${pct}%; width: ${durationPct}%; min-width: 48px; ${bgStyle}"
-                 class="timeline-run-block absolute top-1.5 bottom-1.5 rounded border shadow-sm px-1.5 flex items-center justify-between gap-1 text-[10px] font-mono cursor-pointer hover:brightness-125 hover:z-30 transition-all select-none group">
+                 style="left: ${pct}%; width: ${durationPct}%; min-width: 52px; ${bgStyle}"
+                 class="timeline-run-block absolute top-1.5 bottom-1.5 rounded border shadow-sm px-1.5 flex items-center justify-between gap-1 text-[10px] font-mono cursor-pointer hover:brightness-125 hover:z-30 transition-all select-none group ${extraClasses}">
               <span class="w-1.5 h-1.5 rounded-full shrink-0 ${dotColor}"></span>
               <span class="truncate font-semibold">${formattedTime}</span>
-              <span class="text-[9px] opacity-75 truncate uppercase hidden sm:inline">${state}</span>
+              ${stateBadge}
             </div>
           `;
         } else {
