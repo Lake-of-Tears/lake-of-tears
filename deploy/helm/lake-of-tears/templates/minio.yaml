@@ -31,6 +31,7 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           image: {{ .Values.minio.image.repository }}:{{ .Values.minio.image.tag }}
+          imagePullPolicy: {{ .Values.minio.image.pullPolicy }}
           args: ["server", "/data", "--console-address", ":9001"]
           env:
             - name: MINIO_ROOT_USER
@@ -125,7 +126,11 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          image: minio/mc:RELEASE.2023-01-28T20-29-38Z
+          {{- $clientRepo := (.Values.minio.clientImage | default dict).repository | default .Values.minio.image.repository }}
+          {{- $clientTag := (.Values.minio.clientImage | default dict).tag | default .Values.minio.image.tag }}
+          {{- $clientPullPolicy := (.Values.minio.clientImage | default dict).pullPolicy | default .Values.minio.image.pullPolicy }}
+          image: {{ $clientRepo }}:{{ $clientTag }}
+          imagePullPolicy: {{ $clientPullPolicy }}
           env:
             - name: MC_CONFIG_DIR
               value: /tmp/.mc
