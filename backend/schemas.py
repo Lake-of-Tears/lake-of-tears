@@ -456,4 +456,3 @@ class DashboardStatsResponse(BaseModel):
     published_dashboards: int
     total_charts: int
     superset_online: bool
-

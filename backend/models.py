@@ -281,4 +281,3 @@ class WorkspaceDashboard(Base):
 
     workspace: Mapped["Workspace"] = relationship(foreign_keys=[workspace_id])
     creator: Mapped["User | None"] = relationship(foreign_keys=[created_by])
-

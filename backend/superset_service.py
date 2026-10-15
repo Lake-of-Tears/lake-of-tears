@@ -188,7 +188,9 @@ class HeadlessSupersetClient:
                                 {
                                     "id": str(d.get("id")),
                                     "name": d.get("table_name") or f"Dataset #{d.get('id')}",
-                                    "database": (d.get("database") or {}).get("database_name", "DuckDB Lakehouse"),
+                                    "database": (d.get("database") or {}).get(
+                                        "database_name", "DuckDB Lakehouse"
+                                    ),
                                     "schema": d.get("schema") or "public",
                                 }
                                 for d in raw_list
@@ -198,10 +200,30 @@ class HeadlessSupersetClient:
 
         # Standard Lakehouse semantic datasets available by default
         return [
-            {"id": "ds_datalake_storage", "name": "MinIO Data Lake Storage", "database": "DuckDB", "schema": "raw"},
-            {"id": "ds_query_history", "name": "Lakehouse Query Execution", "database": "DuckDB", "schema": "analytics"},
-            {"id": "ds_pipeline_runs", "name": "Airflow Pipeline Runs", "database": "PostgreSQL", "schema": "airflow"},
-            {"id": "ds_ingestion_events", "name": "Ingestion Events & Sinks", "database": "DuckDB", "schema": "ingest"},
+            {
+                "id": "ds_datalake_storage",
+                "name": "MinIO Data Lake Storage",
+                "database": "DuckDB",
+                "schema": "raw",
+            },
+            {
+                "id": "ds_query_history",
+                "name": "Lakehouse Query Execution",
+                "database": "DuckDB",
+                "schema": "analytics",
+            },
+            {
+                "id": "ds_pipeline_runs",
+                "name": "Airflow Pipeline Runs",
+                "database": "PostgreSQL",
+                "schema": "airflow",
+            },
+            {
+                "id": "ds_ingestion_events",
+                "name": "Ingestion Events & Sinks",
+                "database": "DuckDB",
+                "schema": "ingest",
+            },
         ]
 
     def execute_widget_query(self, widget: dict[str, Any]) -> dict[str, Any]:
@@ -244,7 +266,23 @@ class HeadlessSupersetClient:
             categories = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
             if time_range == "30d":
                 categories = [f"Day {i}" for i in range(1, 16)]
-                series_data = [120, 132, 101, 134, 90, 230, 210, 180, 240, 280, 250, 310, 290, 340, 380]
+                series_data = [
+                    120,
+                    132,
+                    101,
+                    134,
+                    90,
+                    230,
+                    210,
+                    180,
+                    240,
+                    280,
+                    250,
+                    310,
+                    290,
+                    340,
+                    380,
+                ]
             else:
                 series_data = [820, 932, 901, 934, 1290, 1330, 1320]
 

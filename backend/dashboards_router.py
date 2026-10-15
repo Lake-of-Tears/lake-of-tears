@@ -80,7 +80,9 @@ def _dashboard_write_context(
     )
 
 
-def _unique_slug(title: str, workspace_id: uuid.UUID, db: Session, exclude_id: uuid.UUID | None = None) -> str:
+def _unique_slug(
+    title: str, workspace_id: uuid.UUID, db: Session, exclude_id: uuid.UUID | None = None
+) -> str:
     base = slugify(title) or "dashboard"
     slug = base
     counter = 1
@@ -121,13 +123,18 @@ def _find_dashboard(dashboard_id: str, workspace_id: uuid.UUID, db: Session) -> 
         dash_uuid = uuid.UUID(dashboard_id)
         dash = (
             db.query(WorkspaceDashboard)
-            .filter(WorkspaceDashboard.id == dash_uuid, WorkspaceDashboard.workspace_id == workspace_id)
+            .filter(
+                WorkspaceDashboard.id == dash_uuid, WorkspaceDashboard.workspace_id == workspace_id
+            )
             .first()
         )
     except ValueError:
         dash = (
             db.query(WorkspaceDashboard)
-            .filter(WorkspaceDashboard.slug == dashboard_id, WorkspaceDashboard.workspace_id == workspace_id)
+            .filter(
+                WorkspaceDashboard.slug == dashboard_id,
+                WorkspaceDashboard.workspace_id == workspace_id,
+            )
             .first()
         )
 
@@ -146,11 +153,7 @@ async def get_dashboard_stats(
 ) -> DashboardStatsResponse:
     """Get aggregated metrics for workspace native dashboards."""
     ws, _, _ = ctx
-    dashboards = (
-        db.query(WorkspaceDashboard)
-        .filter(WorkspaceDashboard.workspace_id == ws.id)
-        .all()
-    )
+    dashboards = db.query(WorkspaceDashboard).filter(WorkspaceDashboard.workspace_id == ws.id).all()
     total = len(dashboards)
     published = sum(1 for d in dashboards if d.is_published)
     total_charts = sum(len(d.layout_config or []) for d in dashboards)
@@ -263,7 +266,9 @@ async def update_dashboard(
     return _to_response(dash)
 
 
-@router.post("/{dashboard_id}/widgets", response_model=DashboardResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{dashboard_id}/widgets", response_model=DashboardResponse, status_code=status.HTTP_201_CREATED
+)
 async def add_widget(
     dashboard_id: str,
     widget: WidgetConfig,
@@ -354,7 +359,7 @@ async def get_widget_data(
     dash = _find_dashboard(dashboard_id, ws.id, db)
 
     target_widget = None
-    for w in (dash.layout_config or []):
+    for w in dash.layout_config or []:
         if w.get("id") == widget_id:
             target_widget = dict(w)
             break

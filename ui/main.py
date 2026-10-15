@@ -2617,7 +2617,9 @@ async def ui_delete_widget(request: Request, dashboard_id: str, widget_id: str):
 
 @app.get("/api/dashboards/{dashboard_id}/widgets/{widget_id}/data")
 @app.get("/api/v1/dashboards/{dashboard_id}/widgets/{widget_id}/data")
-async def ui_get_widget_data(request: Request, dashboard_id: str, widget_id: str, time_range: str | None = None):
+async def ui_get_widget_data(
+    request: Request, dashboard_id: str, widget_id: str, time_range: str | None = None
+):
     token = _get_request_token(request)
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     ws = getattr(request.state, "workspace", None)
@@ -2661,4 +2663,3 @@ async def ui_delete_dashboard(request: Request, dashboard_id: str):
             return JSONResponse(resp.json(), status_code=resp.status_code)
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=502)
-
