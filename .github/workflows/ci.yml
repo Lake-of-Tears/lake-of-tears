@@ -50,7 +50,7 @@ jobs:
         run: pip-audit -r backend/requirements.txt -r ui/requirements.txt
 
       - name: Run Trivy Dockerfile scan
-        uses: aquasecurity/trivy-action@0.29.0
+        uses: aquasecurity/trivy-action@v0.30.0
         with:
           scan-type: "config"
           scan-ref: "."
