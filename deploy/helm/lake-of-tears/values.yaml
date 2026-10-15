@@ -255,6 +255,11 @@ airflow:
       drop:
         - ALL
 
+  # Wait for PostgreSQL to be ready before starting airflow
+  waitForDb:
+    enabled: true
+    timeoutSeconds: 60
+
 # ---------------------------------------------------------------------------
 # Auth backend — FastAPI service handling login, SSO, and user management
 # ---------------------------------------------------------------------------
@@ -317,6 +322,11 @@ backend:
     capabilities:
       drop:
         - ALL
+
+  # Wait for PostgreSQL to be ready before starting backend
+  waitForDb:
+    enabled: true
+    timeoutSeconds: 60
 
 # ---------------------------------------------------------------------------
 # PostgreSQL — auth database
