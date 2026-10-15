@@ -122,8 +122,10 @@ async def get_download_url(
         return {
             "key": key,
             "download_url": url,
+            "stream_url": f"/api/v1/storage/objects/{key}/stream",
             "expires_in": expires_in,
         }
+
     except Exception as exc:
         logger.error("Failed to generate download URL for '%s': %s", key, exc)
         raise HTTPException(status_code=500, detail=f"Failed to generate download URL: {exc}")

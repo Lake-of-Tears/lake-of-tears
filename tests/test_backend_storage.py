@@ -241,6 +241,66 @@ def test_get_object_metadata_parquet():
     assert id_col["arrow_type"] == "int64"
 
 
+def test_get_object_metadata_notebook():
+    import json
+
+    mock_s3 = MagicMock()
+    now = datetime.now(UTC)
+
+    nb_content = {
+        "nbformat": 4,
+        "nbformat_minor": 5,
+        "metadata": {
+            "kernelspec": {
+                "display_name": "Python 3 (ipykernel)",
+                "language": "python",
+                "name": "python3",
+            },
+            "papermill": {
+                "duration": 5.42,
+                "exception": False,
+                "status": "completed",
+            },
+        },
+        "cells": [
+            {"cell_type": "markdown", "source": "# Analysis"},
+            {"cell_type": "code", "execution_count": 1, "source": "print('hello')"},
+        ],
+    }
+    nb_bytes = json.dumps(nb_content).encode("utf-8")
+
+    mock_s3.head_object.return_value = {
+        "ContentLength": len(nb_bytes),
+        "LastModified": now,
+        "ContentType": "application/x-ipynb+json",
+        "ETag": '"etag-nb-001"',
+        "Metadata": {},
+    }
+
+    body_mock = MagicMock()
+    body_mock.read.return_value = nb_bytes
+    mock_s3.get_object.return_value = {"Body": body_mock}
+
+    meta = storage_service.get_object_metadata(
+        bucket="datalake",
+        key="notebook_runs/default/root_db/run1.ipynb",
+        s3_client=mock_s3,
+    )
+
+    assert meta["key"] == "notebook_runs/default/root_db/run1.ipynb"
+    assert meta["is_parquet"] is False
+    assert meta["is_notebook"] is True
+    assert meta["notebook_metadata"] is not None
+
+    nb_info = meta["notebook_metadata"]
+    assert nb_info["cells_count"] == 2
+    assert nb_info["kernel_name"] == "Python 3 (ipykernel)"
+    assert nb_info["language"] == "python"
+    assert nb_info["executed_by"] == "Papermill"
+    assert nb_info["duration_seconds"] == 5.42
+    assert nb_info["has_exception"] is False
+
+
 def test_get_download_url_remaps_public_endpoint():
     mock_s3 = MagicMock()
     mock_s3.generate_presigned_url.return_value = (

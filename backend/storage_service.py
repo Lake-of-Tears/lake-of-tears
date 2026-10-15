@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import logging
 import math
 import os
@@ -319,6 +320,31 @@ def get_object_metadata(
             logger.warning("Could not parse Parquet metadata for %s: %s", clean_key, exc)
             parquet_info = {"error": str(exc)}
 
+    notebook_info: dict[str, Any] | None = None
+    if is_notebook and size > 0 and size < 20 * 1024 * 1024:
+        try:
+            obj = s3.get_object(Bucket=bucket, Key=clean_key)
+            nb_data = json.loads(obj["Body"].read().decode("utf-8"))
+            cells = nb_data.get("cells", [])
+            metadata = nb_data.get("metadata", {})
+            papermill_meta = metadata.get("papermill", {})
+            kernelspec = metadata.get("kernelspec", {})
+
+            notebook_info = {
+                "nbformat": nb_data.get("nbformat", 4),
+                "cells_count": len(cells),
+                "kernel_name": kernelspec.get("display_name")
+                or kernelspec.get("name")
+                or "Python 3",
+                "language": kernelspec.get("language") or "python",
+                "executed_by": "Papermill" if papermill_meta else None,
+                "duration_seconds": papermill_meta.get("duration"),
+                "has_exception": bool(papermill_meta.get("exception")),
+            }
+        except Exception as exc:
+            logger.warning("Could not parse notebook metadata for %s: %s", clean_key, exc)
+            notebook_info = {"error": str(exc)}
+
     return {
         "bucket": bucket,
         "key": clean_key,
@@ -332,6 +358,7 @@ def get_object_metadata(
         "is_notebook": is_notebook,
         "custom_metadata": custom_metadata,
         "parquet_metadata": parquet_info,
+        "notebook_metadata": notebook_info,
     }
 
 

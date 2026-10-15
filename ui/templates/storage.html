@@ -167,14 +167,14 @@
 
 </div>
 
-<!-- ── Parquet Schema & Metadata Modal ────────────────────────────────────── -->
+<!-- ── Object Schema & Metadata Modal ────────────────────────────────────── -->
 <div id="parquet-modal" class="fixed inset-0 z-50 hidden bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
   <div class="card w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border border-gray-700">
     
     <!-- Modal Header -->
     <div class="px-6 py-4 border-b border-gray-800 flex items-center justify-between bg-black/40">
       <div class="flex items-center gap-3">
-        <div class="w-8 h-8 rounded bg-emerald-950/60 border border-emerald-800/60 flex items-center justify-center text-emerald-400 font-bold text-xs">
+        <div id="modal-badge-container" class="w-8 h-8 rounded bg-emerald-950/60 border border-emerald-800/60 flex items-center justify-center text-emerald-400 font-bold text-xs">
           PQ
         </div>
         <div>
@@ -195,25 +195,25 @@
       <!-- Metric Highlights -->
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div class="p-3 rounded-lg bg-gray-800/50 border border-gray-700/60">
-          <span class="text-[10px] text-gray-400 uppercase tracking-wide block">Total Rows</span>
+          <span id="modal-metric-1-label" class="text-[10px] text-gray-400 uppercase tracking-wide block">Total Rows</span>
           <span id="modal-rows" class="text-lg font-bold text-gray-100 tabular-nums font-mono">—</span>
         </div>
         <div class="p-3 rounded-lg bg-gray-800/50 border border-gray-700/60">
-          <span class="text-[10px] text-gray-400 uppercase tracking-wide block">Columns</span>
+          <span id="modal-metric-2-label" class="text-[10px] text-gray-400 uppercase tracking-wide block">Columns</span>
           <span id="modal-cols-count" class="text-lg font-bold text-gray-100 tabular-nums font-mono">—</span>
         </div>
         <div class="p-3 rounded-lg bg-gray-800/50 border border-gray-700/60">
-          <span class="text-[10px] text-gray-400 uppercase tracking-wide block">Row Groups</span>
+          <span id="modal-metric-3-label" class="text-[10px] text-gray-400 uppercase tracking-wide block">Row Groups</span>
           <span id="modal-row-groups" class="text-lg font-bold text-gray-100 tabular-nums font-mono">—</span>
         </div>
         <div class="p-3 rounded-lg bg-gray-800/50 border border-gray-700/60">
-          <span class="text-[10px] text-gray-400 uppercase tracking-wide block">File Size</span>
+          <span id="modal-metric-4-label" class="text-[10px] text-gray-400 uppercase tracking-wide block">File Size</span>
           <span id="modal-size" class="text-lg font-bold text-gray-100 tabular-nums font-mono">—</span>
         </div>
       </div>
 
-      <!-- Column Schema Table -->
-      <div>
+      <!-- Parquet Schema Section -->
+      <div id="modal-parquet-section">
         <div class="flex items-center justify-between mb-2">
           <h3 class="text-xs font-semibold text-gray-300 uppercase tracking-wider">Parquet Schema Definition</h3>
           <span id="modal-created-by" class="text-[11px] text-gray-500 font-mono truncate max-w-sm"></span>
@@ -238,6 +238,56 @@
         </div>
       </div>
 
+      <!-- Notebook Section -->
+      <div id="modal-notebook-section" class="hidden space-y-4">
+        <div class="p-4 rounded-lg bg-gray-800/40 border border-gray-700/60 flex items-start gap-3">
+          <div class="w-8 h-8 rounded-lg bg-amber-950/60 border border-amber-800/60 flex items-center justify-center shrink-0 text-amber-400">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+            </svg>
+          </div>
+          <div class="space-y-1 text-xs">
+            <div class="flex items-center gap-2">
+              <span class="font-semibold text-gray-200">Lake of Tears Notebook Run Artifact</span>
+              <span id="modal-nb-status-badge" class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-900/30 text-emerald-400 border border-emerald-800/40">Executed Successfully</span>
+            </div>
+            <p class="text-gray-400 leading-relaxed">
+              This Jupyter Notebook was executed and archived to MinIO object storage. You can download the completed notebook file to view all code cells, markdown descriptions, charts, and execution outputs in JupyterLab or VS Code.
+            </p>
+          </div>
+        </div>
+
+        <div class="border border-gray-800 rounded-lg overflow-hidden">
+          <table class="w-full text-left font-mono text-xs">
+            <tbody class="divide-y divide-gray-800 text-gray-300">
+              <tr class="hover:bg-white/[0.02]">
+                <td class="px-4 py-2.5 text-gray-400 font-medium w-48">Execution Engine</td>
+                <td id="modal-nb-engine" class="px-4 py-2.5 text-gray-200">Papermill</td>
+              </tr>
+              <tr class="hover:bg-white/[0.02]">
+                <td class="px-4 py-2.5 text-gray-400 font-medium">Kernel & Language</td>
+                <td id="modal-nb-kernel" class="px-4 py-2.5 text-gray-200">Python 3 (python)</td>
+              </tr>
+              <tr class="hover:bg-white/[0.02]">
+                <td class="px-4 py-2.5 text-gray-400 font-medium">Format Version</td>
+                <td id="modal-nb-format" class="px-4 py-2.5 text-gray-200">nbformat v4</td>
+              </tr>
+              <tr class="hover:bg-white/[0.02]">
+                <td class="px-4 py-2.5 text-gray-400 font-medium">Execution Duration</td>
+                <td id="modal-nb-duration" class="px-4 py-2.5 text-gray-200">—</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Generic File Section -->
+      <div id="modal-generic-section" class="hidden space-y-4">
+        <div class="p-4 rounded-lg bg-gray-800/40 border border-gray-700/60 text-xs text-gray-400">
+          Standard object stored in MinIO S3 bucket <span class="font-mono text-gray-300">{{ minio_bucket|default('datalake') }}</span>. Download the object to view its raw contents locally.
+        </div>
+      </div>
+
     </div>
 
     <!-- Modal Footer Actions -->
@@ -253,7 +303,7 @@
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
           </svg>
-          Download
+          <span id="modal-btn-download-text">Download</span>
         </button>
         <a id="modal-btn-query" href="#" class="btn-primary text-xs gap-1.5">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -508,7 +558,7 @@
           <td class="px-5 py-3 text-gray-200">
             <div class="flex items-center gap-2.5">
               ${icon}
-              <button onclick="${f.is_parquet ? `inspectParquet('${escapeHtml(f.key)}')` : `downloadObject('${escapeHtml(f.key)}')`}" class="text-left hover:text-blue-400 transition-colors font-medium truncate max-w-sm sm:max-w-md">
+              <button onclick="inspectObject('${escapeHtml(f.key)}', ${f.is_parquet ? 'true' : 'false'}, ${f.is_notebook ? 'true' : 'false'})" class="text-left hover:text-blue-400 transition-colors font-medium truncate max-w-sm sm:max-w-md">
                 ${escapeHtml(f.name)}
               </button>
               ${badge}
@@ -519,13 +569,21 @@
           <td class="px-5 py-3 text-right">
             <div class="flex items-center justify-end gap-1.5 opacity-80 group-hover:opacity-100 transition-opacity">
               ${f.is_parquet ? `
-                <button onclick="inspectParquet('${escapeHtml(f.key)}')" class="btn-ghost text-[11px] py-1 px-2 text-emerald-400 hover:text-emerald-300" title="Inspect Parquet schema and metadata">
+                <button onclick="inspectObject('${escapeHtml(f.key)}', true, false)" class="btn-ghost text-[11px] py-1 px-2 text-emerald-400 hover:text-emerald-300" title="Inspect Parquet schema and metadata">
                   Schema
                 </button>
                 <a href="/sql?q=${fileQuerySql}" class="btn-ghost text-[11px] py-1 px-2 text-blue-400 hover:text-blue-300" title="Query in DuckDB">
                   Query
                 </a>
-              ` : ''}
+              ` : f.is_notebook ? `
+                <button onclick="inspectObject('${escapeHtml(f.key)}', false, true)" class="btn-ghost text-[11px] py-1 px-2 text-amber-400 hover:text-amber-300" title="Inspect notebook run metadata">
+                  Inspect
+                </button>
+              ` : `
+                <button onclick="inspectObject('${escapeHtml(f.key)}', false, false)" class="btn-ghost text-[11px] py-1 px-2 text-gray-400 hover:text-white" title="Inspect object metadata">
+                  Inspect
+                </button>
+              `}
               
               <button onclick="downloadObject('${escapeHtml(f.key)}')" class="btn-ghost text-[11px] py-1 px-2 text-gray-300 hover:text-white" title="Download object">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -608,25 +666,94 @@
     loadPrefix(currentPrefix, prevEntry ? prevEntry.token : null);
   }
 
-  async function inspectParquet(key) {
-    activeModalObject = null;
+  async function inspectObject(key, isParquet = false, isNotebook = false) {
+    activeModalObject = { key: key };
     const modal = document.getElementById('parquet-modal');
     modal.classList.remove('hidden');
 
-    document.getElementById('modal-filename').textContent = key.split('/').pop();
+    const filename = key.split('/').pop();
+    document.getElementById('modal-filename').textContent = filename;
     document.getElementById('modal-key').textContent = `s3://${BUCKET_NAME}/${key}`;
-    document.getElementById('modal-rows').textContent = 'Loading...';
-    document.getElementById('modal-cols-count').textContent = '—';
-    document.getElementById('modal-row-groups').textContent = '—';
-    document.getElementById('modal-size').textContent = '—';
-    document.getElementById('modal-created-by').textContent = '';
-    document.getElementById('modal-columns-tbody').innerHTML = `
-      <tr>
-        <td colspan="5" class="px-4 py-8 text-center text-gray-500">
-          Reading Parquet footer metadata via PyArrow...
-        </td>
-      </tr>
-    `;
+
+    const badgeContainer = document.getElementById('modal-badge-container');
+    const queryBtn = document.getElementById('modal-btn-query');
+    const downloadBtnText = document.getElementById('modal-btn-download-text');
+    const parquetSection = document.getElementById('modal-parquet-section');
+    const notebookSection = document.getElementById('modal-notebook-section');
+    const genericSection = document.getElementById('modal-generic-section');
+
+    const m1Label = document.getElementById('modal-metric-1-label');
+    const m2Label = document.getElementById('modal-metric-2-label');
+    const m3Label = document.getElementById('modal-metric-3-label');
+    const m4Label = document.getElementById('modal-metric-4-label');
+
+    const m1Val = document.getElementById('modal-rows');
+    const m2Val = document.getElementById('modal-cols-count');
+    const m3Val = document.getElementById('modal-row-groups');
+    const m4Val = document.getElementById('modal-size');
+
+    // Reset view based on type
+    if (isParquet) {
+      badgeContainer.className = "w-8 h-8 rounded bg-emerald-950/60 border border-emerald-800/60 flex items-center justify-center text-emerald-400 font-bold text-xs";
+      badgeContainer.textContent = "PQ";
+      m1Label.textContent = "Total Rows";
+      m2Label.textContent = "Columns";
+      m3Label.textContent = "Row Groups";
+      m4Label.textContent = "File Size";
+      m1Val.textContent = "Loading...";
+      m2Val.textContent = "—";
+      m3Val.textContent = "—";
+      m4Val.textContent = "—";
+      parquetSection.classList.remove('hidden');
+      notebookSection.classList.add('hidden');
+      genericSection.classList.add('hidden');
+      queryBtn.classList.remove('hidden');
+      downloadBtnText.textContent = "Download Parquet";
+      document.getElementById('modal-created-by').textContent = "";
+      document.getElementById('modal-columns-tbody').innerHTML = `
+        <tr>
+          <td colspan="5" class="px-4 py-8 text-center text-gray-500">
+            Reading Parquet footer metadata via PyArrow...
+          </td>
+        </tr>
+      `;
+    } else if (isNotebook) {
+      badgeContainer.className = "w-8 h-8 rounded bg-amber-950/60 border border-amber-800/60 flex items-center justify-center text-amber-400 font-bold text-xs";
+      badgeContainer.textContent = "NB";
+      m1Label.textContent = "Cells Count";
+      m2Label.textContent = "Kernel";
+      m3Label.textContent = "Execution";
+      m4Label.textContent = "File Size";
+      m1Val.textContent = "Loading...";
+      m2Val.textContent = "—";
+      m3Val.textContent = "—";
+      m4Val.textContent = "—";
+      parquetSection.classList.add('hidden');
+      notebookSection.classList.remove('hidden');
+      genericSection.classList.add('hidden');
+      queryBtn.classList.add('hidden');
+      downloadBtnText.textContent = "Download Notebook";
+    } else {
+      badgeContainer.className = "w-8 h-8 rounded bg-gray-800 border border-gray-700 flex items-center justify-center text-gray-300 font-bold text-xs";
+      badgeContainer.innerHTML = `
+        <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+        </svg>
+      `;
+      m1Label.textContent = "File Size";
+      m2Label.textContent = "Content Type";
+      m3Label.textContent = "ETag";
+      m4Label.textContent = "Last Modified";
+      m1Val.textContent = "Loading...";
+      m2Val.textContent = "—";
+      m3Val.textContent = "—";
+      m4Val.textContent = "—";
+      parquetSection.classList.add('hidden');
+      notebookSection.classList.add('hidden');
+      genericSection.classList.remove('hidden');
+      queryBtn.classList.add('hidden');
+      downloadBtnText.textContent = "Download File";
+    }
 
     try {
       const res = await fetch(`/api/v1/storage/objects/${encodeURIComponent(key)}/metadata`);
@@ -634,54 +761,96 @@
       const data = await res.json();
       activeModalObject = data;
 
-      document.getElementById('modal-size').textContent = data.size_human || '—';
-      const pm = data.parquet_metadata;
+      if (isParquet) {
+        m4Val.textContent = data.size_human || '—';
+        const pm = data.parquet_metadata;
+        if (pm && !pm.error) {
+          m1Val.textContent = (pm.num_rows || 0).toLocaleString();
+          m2Val.textContent = pm.num_columns || 0;
+          m3Val.textContent = pm.num_row_groups || 1;
+          document.getElementById('modal-created-by').textContent = pm.created_by ? `Engine: ${pm.created_by}` : '';
 
-      if (pm && !pm.error) {
-        document.getElementById('modal-rows').textContent = (pm.num_rows || 0).toLocaleString();
-        document.getElementById('modal-cols-count').textContent = pm.num_columns || 0;
-        document.getElementById('modal-row-groups').textContent = pm.num_row_groups || 1;
-        document.getElementById('modal-created-by').textContent = pm.created_by ? `Engine: ${pm.created_by}` : '';
-
-        const colsTbody = document.getElementById('modal-columns-tbody');
-        let colRows = '';
-        (pm.columns || []).forEach(c => {
-          colRows += `
-            <tr class="hover:bg-white/[0.02]">
-              <td class="px-4 py-2 font-semibold text-gray-200">${escapeHtml(c.name)}</td>
-              <td class="px-4 py-2 text-emerald-400">${escapeHtml(c.arrow_type)}</td>
-              <td class="px-4 py-2 text-gray-400 text-[11px]">${escapeHtml(c.physical_type)}</td>
-              <td class="px-4 py-2 text-amber-300 text-[11px]">${escapeHtml(c.compression)}</td>
-              <td class="px-4 py-2 text-center text-gray-400">${c.nullable ? '✓' : '✗'}</td>
+          const colsTbody = document.getElementById('modal-columns-tbody');
+          let colRows = '';
+          (pm.columns || []).forEach(c => {
+            colRows += `
+              <tr class="hover:bg-white/[0.02]">
+                <td class="px-4 py-2 font-semibold text-gray-200">${escapeHtml(c.name)}</td>
+                <td class="px-4 py-2 text-emerald-400">${escapeHtml(c.arrow_type)}</td>
+                <td class="px-4 py-2 text-gray-400 text-[11px]">${escapeHtml(c.physical_type)}</td>
+                <td class="px-4 py-2 text-amber-300 text-[11px]">${escapeHtml(c.compression)}</td>
+                <td class="px-4 py-2 text-center text-gray-400">${c.nullable ? '✓' : '✗'}</td>
+              </tr>
+            `;
+          });
+          colsTbody.innerHTML = colRows || `<tr><td colspan="5" class="px-4 py-4 text-center text-gray-500">No columns found</td></tr>`;
+        } else {
+          m1Val.textContent = 'Error';
+          document.getElementById('modal-columns-tbody').innerHTML = `
+            <tr>
+              <td colspan="5" class="px-4 py-8 text-center text-red-400">
+                Could not parse Parquet metadata: ${escapeHtml(pm?.error || 'Unknown error')}
+              </td>
             </tr>
           `;
-        });
-        colsTbody.innerHTML = colRows || `<tr><td colspan="5" class="px-4 py-4 text-center text-gray-500">No columns found</td></tr>`;
+        }
+        const querySql = encodeURIComponent(`SELECT * FROM read_parquet('s3://${BUCKET_NAME}/${key}') LIMIT 50`);
+        queryBtn.href = `/sql?q=${querySql}`;
+
+      } else if (isNotebook) {
+        m4Val.textContent = data.size_human || '—';
+        const nb = data.notebook_metadata;
+        if (nb && !nb.error) {
+          m1Val.textContent = nb.cells_count || 0;
+          m2Val.textContent = nb.kernel_name || 'Python 3';
+          const dur = nb.duration_seconds != null ? `${Number(nb.duration_seconds).toFixed(2)}s` : 'Completed';
+          m3Val.textContent = dur;
+
+          const statusBadge = document.getElementById('modal-nb-status-badge');
+          if (nb.has_exception) {
+            statusBadge.className = "px-2 py-0.5 rounded text-[10px] font-semibold bg-red-900/30 text-red-400 border border-red-800/40";
+            statusBadge.textContent = "Execution Exception";
+          } else {
+            statusBadge.className = "px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-900/30 text-emerald-400 border border-emerald-800/40";
+            statusBadge.textContent = "Executed Successfully";
+          }
+
+          document.getElementById('modal-nb-engine').textContent = nb.executed_by || 'Papermill / Jupyter';
+          document.getElementById('modal-nb-kernel').textContent = `${nb.kernel_name || 'Python 3'} (${nb.language || 'python'})`;
+          document.getElementById('modal-nb-format').textContent = `nbformat v${nb.nbformat || 4}`;
+          document.getElementById('modal-nb-duration').textContent = nb.duration_seconds != null ? `${Number(nb.duration_seconds).toFixed(2)} seconds` : '—';
+        } else {
+          m1Val.textContent = '—';
+          m2Val.textContent = 'Python';
+          m3Val.textContent = 'Raw';
+          document.getElementById('modal-nb-engine').textContent = 'Jupyter Notebook';
+          document.getElementById('modal-nb-kernel').textContent = 'Python';
+          document.getElementById('modal-nb-format').textContent = 'nbformat v4';
+          document.getElementById('modal-nb-duration').textContent = '—';
+        }
       } else {
-        document.getElementById('modal-rows').textContent = 'Error';
+        m1Val.textContent = data.size_human || '—';
+        m2Val.textContent = (data.content_type || 'application/octet-stream').split(';')[0];
+        m3Val.textContent = data.etag ? data.etag.substring(0, 10) + '...' : '—';
+        m4Val.textContent = data.last_modified ? data.last_modified.replace('T', ' ').substring(0, 10) : '—';
+      }
+
+    } catch (err) {
+      console.error(err);
+      if (isParquet) {
         document.getElementById('modal-columns-tbody').innerHTML = `
           <tr>
             <td colspan="5" class="px-4 py-8 text-center text-red-400">
-              Could not parse Parquet metadata: ${escapeHtml(pm?.error || 'Unknown error')}
+              Failed to load object metadata: ${escapeHtml(err.message)}
             </td>
           </tr>
         `;
       }
-
-      // Action buttons
-      const querySql = encodeURIComponent(`SELECT * FROM read_parquet('s3://${BUCKET_NAME}/${key}') LIMIT 50`);
-      document.getElementById('modal-btn-query').href = `/sql?q=${querySql}`;
-
-    } catch (err) {
-      console.error(err);
-      document.getElementById('modal-columns-tbody').innerHTML = `
-        <tr>
-          <td colspan="5" class="px-4 py-8 text-center text-red-400">
-            Failed to load object metadata: ${escapeHtml(err.message)}
-          </td>
-        </tr>
-      `;
     }
+  }
+
+  function inspectParquet(key) {
+    inspectObject(key, true, false);
   }
 
   function closeParquetModal() {
@@ -689,22 +858,14 @@
     activeModalObject = null;
   }
 
-  async function downloadObject(key) {
-    try {
-      const res = await fetch(`/api/v1/storage/objects/${encodeURIComponent(key)}/download`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.download_url) {
-          window.location.href = data.download_url;
-          return;
-        }
-      }
-      // Fallback to streaming proxy
-      window.location.href = `/api/v1/storage/objects/${encodeURIComponent(key)}/stream`;
-    } catch (err) {
-      console.warn("Presigned download failed, falling back to streaming proxy:", err);
-      window.location.href = `/api/v1/storage/objects/${encodeURIComponent(key)}/stream`;
-    }
+  function downloadObject(key) {
+    if (!key) return;
+    const link = document.createElement('a');
+    link.href = `/api/v1/storage/objects/${encodeURIComponent(key)}/stream`;
+    link.download = key.split('/').pop() || 'download';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   }
 
   function downloadModalObject() {

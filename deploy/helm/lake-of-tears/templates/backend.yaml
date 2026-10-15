@@ -142,6 +142,8 @@ spec:
                   key: MINIO_ROOT_PASSWORD
             - name: MINIO_BUCKET
               value: datalake
+            - name: MINIO_PUBLIC_ENDPOINT
+              value: "http://{{ .Values.ingress.minioApiHost | default "s3.localhost" }}"
             - name: AIRFLOW_URL
               value: "http://{{ include "lake-of-tears.fullname" . }}-airflow:{{ .Values.airflow.service.port }}/airflow"
             - name: AIRFLOW_ADMIN_USER
