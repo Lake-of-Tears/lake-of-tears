@@ -10,7 +10,7 @@
 #   Lake UI   → http://localhost:3000
 #   MinIO API → http://localhost:9000  (S3 endpoint)
 #   MinIO UI  → http://localhost:9001  (storage console)
-#   Jupyter   → http://localhost:8888
+#   Jupyter   → internal only (no published port; used through the Lake UI notebooks)
 #   Superset  → http://localhost:8088
 #   Airflow   → http://localhost:8080
 #
@@ -211,7 +211,8 @@ services:
     volumes:
       - ${DATALAKE_DATA_DIR:-~}/notebooks:/home/jovyan/work
       - ${DATALAKE_DATA_DIR:-~}/datalake:/home/jovyan/datalake
-    # base_url=/jupyter/ allows nginx to proxy at /jupyter/ path
+    # base_url=/jupyter/: the Lake UI notebook proxy builds Jupyter API URLs from this prefix
+    # (JUPYTER_BASE_URL); Jupyter is not exposed through nginx.
     command: >
       bash -c "
         pip install duckdb requests boto3 google-genai --quiet &&

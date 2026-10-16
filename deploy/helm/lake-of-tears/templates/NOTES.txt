@@ -23,7 +23,9 @@ Access Endpoints (via Ingress):
 -------------------------------------------------------------------------------
   Lake UI / Shell:    {{ $proto }}://{{ .Values.ingress.host }}/
   Auth API:           {{ $proto }}://{{ .Values.ingress.host }}/api/
+{{- if and .Values.jupyter.ingress .Values.jupyter.ingress.enabled }}
   JupyterLab:         {{ $proto }}://{{ .Values.ingress.host }}/jupyter/
+{{- end }}
   Apache Airflow:     {{ $proto }}://{{ .Values.ingress.host }}/airflow/
   Apache Superset:    {{ $proto }}://{{ .Values.ingress.supersetHost }}/
   MinIO Console:      {{ $proto }}://{{ .Values.ingress.minioConsoleHost }}/
