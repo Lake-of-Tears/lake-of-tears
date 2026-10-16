@@ -13,6 +13,11 @@ Every change made to this repo gets one row, newest first.
 
 | Date | Action | Ticket | Files | Summary |
 |---|---|---|---|---|
+| 20261016 | BUG FIX | #132 | `backend/main.py` | Admin hard delete (`DELETE /api/admin/workspaces/{id}`, `mode=hard`) now deletes MinIO objects for every owned catalog before the DB rows (502 on storage failure); skips prefixes shared with other workspaces |
+| 20261016 | BUG FIX | #132 | `pipeline/dags/purge_inactive_workspaces_dag.py` | Prefix derivation never matched real `s3://bucket/.../*.parquet` patterns, so the DAG deleted nothing; now correct, with shared-prefix protection |
+| 20261016 | ADD | #132 | `tests/test_workspace_purge_objects.py` | Tests for workspace object purge, shared-prefix sparing, 502 path and ordering |
+| 20261016 | BUG FIX | #129 | `backend/main.py`, `backend/alembic/versions/0007_backfill_default_workspace_is_system.py`, `tests/test_default_workspace_system.py` | Default workspace now created with `is_system=True`; migration 0007 backfills existing installs (PR #130) |
+| 20261016 | REMOVE | #126 | `backend/main.py`, `tests/test_workspace_delete_routes.py` | Removed legacy `DELETE /api/workspaces/{id}` route that bypassed the admin delete safeguards (PR #131) |
 | 20261016 | IMPROVEMENT | #79 | `docs/wiki/Workspaces-and-Catalog-Management.md` | Added note: log in via http://localhost (port 80), not :3000, which does not proxy /api/ |
 | 20261015 | BUG FIX | #125 | `backend/main.py`, `backend/catalog_storage.py` | `POST /api/catalogs/{id}/purge` now deletes MinIO objects before the DB rows (502 on storage failure); skips prefixes shared with other catalogs |
 | 20261015 | BUG FIX | #125 | `pipeline/dags/purge_deleted_catalogs_dag.py` | Prefix derivation never matched real `s3://bucket/.../*.parquet` patterns, so the DAG deleted nothing; now derives the key prefix correctly |

@@ -1071,18 +1071,29 @@ def reactivate_catalog(
     return _catalog_response(catalog, current_user, db)
 
 
-def _purge_catalog_objects(db: Session, catalog: Catalog) -> None:
-    """Remove the catalog's table data from object storage (see catalog_storage)."""
+def _purge_objects_for_catalogs(db: Session, catalog_ids: set) -> None:
+    """Delete object data for the given catalogs, sparing prefixes other catalogs use."""
     rows = (
         db.query(CatalogTable.s3_path_pattern, CatalogSchema.catalog_id)
         .join(CatalogSchema, CatalogTable.schema_id == CatalogSchema.id)
         .filter(CatalogTable.s3_path_pattern.isnot(None))
         .all()
     )
-    own = [p for p, cid in rows if cid == catalog.id]
-    others = [p for p, cid in rows if cid != catalog.id]
+    own = [p for p, cid in rows if cid in catalog_ids]
+    others = [p for p, cid in rows if cid not in catalog_ids]
     for prefix in prefixes_to_delete(own, others):
         delete_prefix(prefix)
+
+
+def _purge_catalog_objects(db: Session, catalog: Catalog) -> None:
+    """Remove the catalog's table data from object storage (see catalog_storage)."""
+    _purge_objects_for_catalogs(db, {catalog.id})
+
+
+def _purge_workspace_objects(db: Session, ws: Workspace) -> None:
+    """Remove the table data of every catalog the workspace owns."""
+    ids = {c.id for c in db.query(Catalog.id).filter(Catalog.owner_workspace_id == ws.id)}
+    _purge_objects_for_catalogs(db, ids)
 
 
 @app.post("/api/catalogs/{catalog_id}/purge")
@@ -1735,6 +1746,11 @@ def admin_delete_workspace(
     if req.mode == "hard":
         if not req.confirm_name or req.confirm_name != ws.name:
             raise HTTPException(400, "Workspace name confirmation does not match")
+        # Delete object data first: if storage fails the DB rows survive and this can retry.
+        try:
+            _purge_workspace_objects(db, ws)
+        except Exception as exc:
+            raise HTTPException(502, "Failed to delete workspace data from object storage") from exc
         db.delete(ws)
         db.commit()
         return
