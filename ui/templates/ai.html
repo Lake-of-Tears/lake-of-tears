@@ -1,47 +1,48 @@
 {% extends "base.html" %}
-{% block title %}AI Query — Lake of Tears{% endblock %}
+{% block title %}AI Query &amp; Genie Analyst — Lake of Tears{% endblock %}
 {% block content %}
 
-<div class="max-w-3xl mx-auto space-y-6">
+<!-- Apache ECharts for Genie Auto-Visualizations -->
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
 
-  <div>
-    <h1 class="text-xl font-semibold text-gray-100">AI Query</h1>
-    <p class="text-sm text-gray-500 mt-1">Ask questions in plain English — Gemini searches your embeddings and generates a grounded answer.</p>
+<div class="h-full max-w-5xl mx-auto flex flex-col gap-4">
+
+  <!-- Header & Mode Selector -->
+  <div class="flex items-center justify-between flex-wrap gap-3 shrink-0">
+    <div>
+      <div class="flex items-center gap-2.5">
+        <h1 class="text-xl font-semibold text-gray-100">AI Query &amp; Genie Data Analyst</h1>
+        <span class="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 font-medium">
+          Multi-Turn Text-to-SQL + RAG
+        </span>
+      </div>
+      <p class="text-xs text-gray-500 mt-1">
+        Ask questions in plain English — Genie discovers your workspace catalog schema, synthesizes &amp; executes DuckDB SQL, and visualizes insights.
+      </p>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <div class="inline-flex rounded-lg bg-gray-900 border border-gray-800 p-0.5 text-xs">
+        <button type="button" id="modeBtn-genie" onclick="setAiMode('genie')" class="px-2.5 py-1 rounded-md font-medium bg-blue-600 text-white">
+          Genie SQL
+        </button>
+        <button type="button" id="modeBtn-hybrid" onclick="setAiMode('hybrid')" class="px-2.5 py-1 rounded-md font-medium text-gray-400 hover:text-gray-200">
+          Hybrid
+        </button>
+        <button type="button" id="modeBtn-rag" onclick="setAiMode('rag')" class="px-2.5 py-1 rounded-md font-medium text-gray-400 hover:text-gray-200">
+          RAG Embeddings
+        </button>
+      </div>
+      <button type="button" onclick="clearGenieConversation()" class="btn-ghost text-xs py-1.5 px-2.5 border border-gray-800 rounded-md text-gray-400 hover:text-gray-200">
+        New Chat
+      </button>
+    </div>
   </div>
 
-  <!-- Input -->
-  <form method="post" action="/ai" id="aiForm" class="space-y-3">
-    <div class="flex gap-3">
-      <input
-        type="text"
-        name="question"
-        id="question"
-        value="{{ question }}"
-        placeholder="What was our revenue trend over the last 30 days?"
-        class="input-dark flex-1"
-        autocomplete="off"
-      />
-      <button type="submit" id="askBtn" class="btn-primary shrink-0">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-        Ask
-      </button>
-    </div>
-    <div class="flex flex-wrap gap-2">
-      {% for q in example_questions %}
-      <button type="button"
-              onclick="document.getElementById('question').value = {{ q | tojson }}"
-              class="btn-ghost text-xs py-1">
-        {{ q }}
-      </button>
-      {% endfor %}
-    </div>
-    <span id="loadingHint" class="hidden text-xs text-gray-600 animate-pulse">Embedding &amp; searching…</span>
-  </form>
-
-  <!-- Answer -->
+  <!-- Server-rendered Fallback Result (when submitted via standard POST /ai) -->
   {% if result %}
     {% if result.ok %}
-    <div class="card p-5 space-y-4">
+    <div class="card p-5 space-y-4 shrink-0">
       <div class="prose prose-invert prose-sm max-w-none text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">{{ result.answer }}</div>
       {% if result.snippets %}
       <details class="group">
@@ -64,31 +65,386 @@
       {% endif %}
     </div>
     {% else %}
-    <div class="card p-5 border-red-900/50">
+    <div class="card p-5 border-red-900/50 shrink-0">
       <p class="text-red-400 text-sm font-semibold mb-1">Error</p>
       <p class="text-gray-500 text-xs font-mono">{{ result.error }}</p>
     </div>
     {% endif %}
   {% endif %}
 
-  <!-- How it works -->
-  <div class="card p-4">
-    <p class="text-xs font-semibold text-gray-500 mb-2">How it works</p>
-    <ol class="text-xs text-gray-600 space-y-1 list-decimal list-inside leading-relaxed">
-      <li>Question → <code class="text-blue-500 bg-gray-800 px-1 rounded">gemini-embedding-001</code> → 768-dim vector</li>
-      <li>DuckDB VSS cosine similarity search over <code class="text-gray-400 bg-gray-800 px-1 rounded">embeddings/**/*.parquet</code></li>
-      <li>Top-5 results + question → <code class="text-blue-500 bg-gray-800 px-1 rounded">gemini-2.5-flash</code> → grounded answer</li>
-    </ol>
+  <!-- Multi-Turn Conversation Feed -->
+  <div id="genieChatThread" class="flex-1 card p-4 overflow-y-auto space-y-4 min-h-[320px]">
+    <div id="genieEmptyState" class="h-full flex flex-col items-center justify-center text-center py-8 space-y-4">
+      <div class="w-11 h-11 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+      </div>
+      <div class="max-w-md space-y-1">
+        <p class="text-sm font-semibold text-gray-200">Ask anything about your Lakehouse data</p>
+        <p class="text-xs text-gray-500">
+          Genie inspects your workspace Catalog schemas, generates &amp; self-corrects DuckDB SQL, runs live queries against S3 Parquet, and plots charts automatically.
+        </p>
+      </div>
+      <div class="flex flex-wrap justify-center gap-2 max-w-2xl pt-2">
+        {% for q in example_questions %}
+        <button type="button"
+                onclick="askExampleQuestion({{ q | tojson }})"
+                class="btn-ghost text-xs py-1.5 px-3 border border-gray-800 rounded-full hover:border-blue-500/40">
+          {{ q }}
+        </button>
+        {% endfor %}
+      </div>
+    </div>
   </div>
+
+  <!-- Input Form -->
+  <form method="post" action="/ai" id="aiForm" class="card p-3 space-y-2.5 shrink-0">
+    <div class="flex gap-3">
+      <input
+        type="text"
+        name="question"
+        id="question"
+        value="{{ question }}"
+        placeholder="Ask a question or follow-up (e.g. 'What was our revenue trend over the last 30 days?' or 'Now break that down by stage')…"
+        class="input-dark flex-1 text-xs"
+        autocomplete="off"
+      />
+      <button type="submit" id="askBtn" class="btn-primary shrink-0 text-xs px-4">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        Ask Genie
+      </button>
+    </div>
+    <div class="flex items-center justify-between text-[11px] text-gray-500">
+      <span id="loadingHint" class="hidden text-blue-400 animate-pulse">
+        Discovering schema → generating SQL → executing in DuckDB…
+      </span>
+      <span class="ml-auto">
+        Agent loop: Schema Discovery → SQL Generation &amp; Self-Correction → Live DuckDB Execution → Chart + Insight
+      </span>
+    </div>
+  </form>
 
 </div>
 
 <script>
-document.getElementById('aiForm').addEventListener('submit', function() {
-  const btn = document.getElementById('askBtn');
+const WORKSPACE_STORAGE_KEY = "lake_genie_chat_{{ (workspace.id if workspace and workspace.id is defined else 'default') }}";
+let currentAiMode = "genie";
+let chatHistory = [];
+let chartCounter = 0;
+
+function setAiMode(mode) {
+  currentAiMode = mode;
+  ["genie", "hybrid", "rag"].forEach(m => {
+    const btn = document.getElementById("modeBtn-" + m);
+    if (!btn) return;
+    if (m === mode) {
+      btn.className = "px-2.5 py-1 rounded-md font-medium bg-blue-600 text-white";
+    } else {
+      btn.className = "px-2.5 py-1 rounded-md font-medium text-gray-400 hover:text-gray-200";
+    }
+  });
+}
+
+function askExampleQuestion(q) {
+  const input = document.getElementById("question");
+  input.value = q;
+  submitGenieQuestion(q);
+}
+
+function clearGenieConversation() {
+  chatHistory = [];
+  try {
+    localStorage.removeItem(WORKSPACE_STORAGE_KEY);
+  } catch (e) {}
+  renderConversationThread();
+}
+
+function saveConversation() {
+  try {
+    localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(chatHistory.slice(-12)));
+  } catch (e) {}
+}
+
+function loadConversation() {
+  try {
+    const raw = localStorage.getItem(WORKSPACE_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        chatHistory = parsed;
+        renderConversationThread();
+      }
+    }
+  } catch (e) {}
+}
+
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str == null ? "" : String(str);
+  return div.innerHTML;
+}
+
+function renderConversationThread() {
+  const container = document.getElementById("genieChatThread");
+  if (!chatHistory || chatHistory.length === 0) {
+    container.innerHTML = `
+      <div id="genieEmptyState" class="h-full flex flex-col items-center justify-center text-center py-8 space-y-4">
+        <div class="w-11 h-11 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        </div>
+        <div class="max-w-md space-y-1">
+          <p class="text-sm font-semibold text-gray-200">Ask anything about your Lakehouse data</p>
+          <p class="text-xs text-gray-500">
+            Genie inspects your workspace Catalog schemas, generates &amp; self-corrects DuckDB SQL, runs live queries against S3 Parquet, and plots charts automatically.
+          </p>
+        </div>
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = "";
+  const pendingCharts = [];
+
+  chatHistory.forEach((turn, idx) => {
+    if (turn.role === "user") {
+      const userDiv = document.createElement("div");
+      userDiv.className = "flex justify-end";
+      userDiv.innerHTML = `
+        <div class="max-w-2xl rounded-xl bg-blue-600/20 border border-blue-500/30 px-4 py-2.5 text-xs text-gray-100">
+          ${escapeHtml(turn.content)}
+        </div>`;
+      container.appendChild(userDiv);
+      return;
+    }
+
+    const msgDiv = document.createElement("div");
+    msgDiv.className = "rounded-xl bg-gray-900/90 border border-gray-800 p-4 space-y-3 text-xs";
+
+    let badgesHtml = `<span class="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">${escapeHtml(turn.mode || "genie")}</span>`;
+    if (turn.row_count != null && turn.sql) {
+      badgesHtml += `<span class="text-[11px] text-gray-400">${turn.row_count} row${turn.row_count === 1 ? "" : "s"}</span>`;
+    }
+    if (turn.execution_ms) {
+      badgesHtml += `<span class="text-[11px] text-gray-600 tabular-nums">${turn.execution_ms} ms</span>`;
+    }
+    if (turn.self_corrected) {
+      badgesHtml += `<span class="text-[10px] px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">Auto-Fixed SQL</span>`;
+    }
+    if (turn.sql) {
+      const encodedSql = encodeURIComponent(turn.sql);
+      badgesHtml += `<a href="/sql?q=${encodedSql}" class="ml-auto text-[11px] text-blue-400 hover:text-blue-300 flex items-center gap-1">Open in SQL Editor →</a>`;
+    }
+
+    let bodyHtml = `
+      <div class="flex items-center flex-wrap gap-2 pb-2 border-b border-gray-800/80">
+        ${badgesHtml}
+      </div>
+      <div class="text-gray-200 text-sm leading-relaxed whitespace-pre-wrap">${escapeHtml(turn.content)}</div>
+    `;
+
+    const hasRows = Array.isArray(turn.rows) && turn.rows.length > 0 && Array.isArray(turn.columns) && turn.columns.length > 0;
+    const hasChart = hasRows && turn.chart_config && turn.chart_config.type && turn.chart_config.type !== "table";
+    const chartDomId = `genie-chart-${idx}-${++chartCounter}`;
+
+    if (hasChart) {
+      bodyHtml += `
+        <div class="rounded-lg bg-gray-950/60 border border-gray-800/80 p-3">
+          <div id="${chartDomId}" class="w-full h-56"></div>
+        </div>
+      `;
+      pendingCharts.push({ domId: chartDomId, turn: turn });
+    }
+
+    if (hasRows) {
+      let thead = turn.columns.map(c => `<th class="px-3 py-1.5 text-left font-semibold text-gray-500 whitespace-nowrap">${escapeHtml(c)}</th>`).join("");
+      let tbody = turn.rows.slice(0, 25).map(r => {
+        const cells = r.map(cell => `<td class="px-3 py-1.5 text-gray-300 font-mono whitespace-nowrap max-w-xs truncate">${escapeHtml(cell)}</td>`).join("");
+        return `<tr class="hover:bg-white/[0.02]">${cells}</tr>`;
+      }).join("");
+      bodyHtml += `
+        <div class="rounded-lg border border-gray-800 overflow-x-auto max-h-60">
+          <table class="w-full text-xs">
+            <thead class="sticky top-0 bg-gray-900 border-b border-gray-800"><tr>${thead}</tr></thead>
+            <tbody class="divide-y divide-gray-800/50">${tbody}</tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    if (turn.sql) {
+      bodyHtml += `
+        <details class="group">
+          <summary class="text-[11px] text-gray-500 cursor-pointer hover:text-gray-300 select-none">
+            View Generated DuckDB SQL
+          </summary>
+          <pre class="mt-2 bg-gray-950 border border-gray-800 rounded p-3 font-mono text-[11px] text-blue-300 overflow-x-auto whitespace-pre-wrap">${escapeHtml(turn.sql)}</pre>
+        </details>
+      `;
+    }
+
+    if (Array.isArray(turn.snippets) && turn.snippets.length > 0) {
+      const items = turn.snippets.map(s => `
+        <div class="bg-gray-800/60 rounded px-3 py-2 text-xs">
+          <div class="flex justify-between mb-1">
+            <span class="text-blue-400 font-medium">${escapeHtml(s.source)}</span>
+            <span class="text-gray-500 tabular-nums">score ${escapeHtml(s.score)}</span>
+          </div>
+          <p class="text-gray-400">${escapeHtml((s.summary || "").slice(0, 220))}</p>
+        </div>
+      `).join("");
+      bodyHtml += `
+        <details class="group">
+          <summary class="text-[11px] text-gray-500 cursor-pointer hover:text-gray-300 select-none">
+            ${turn.snippets.length} Semantic Embedding Snippet${turn.snippets.length === 1 ? "" : "s"}
+          </summary>
+          <div class="mt-2 space-y-1.5">${items}</div>
+        </details>
+      `;
+    }
+
+    msgDiv.innerHTML = bodyHtml;
+    container.appendChild(msgDiv);
+  });
+
+  container.scrollTop = container.scrollHeight;
+
+  if (typeof echarts !== "undefined") {
+    pendingCharts.forEach(({ domId, turn }) => {
+      const el = document.getElementById(domId);
+      if (!el) return;
+      renderGenieEChart(el, turn);
+    });
+  }
+}
+
+function renderGenieEChart(el, turn) {
+  const cfg = turn.chart_config || {};
+  const cols = turn.columns || [];
+  const rows = turn.rows || [];
+  const xIdx = Math.max(0, cols.indexOf(cfg.x_column));
+  const yCols = (cfg.y_columns && cfg.y_columns.length > 0) ? cfg.y_columns : cols.slice(1, 2);
+
+  if (cfg.type === "kpi") {
+    const valIdx = cols.indexOf(yCols[0]);
+    const val = (rows[0] && valIdx >= 0) ? rows[0][valIdx] : (rows[0] ? rows[0][0] : "—");
+    el.className = "w-full py-6 flex flex-col items-center justify-center";
+    el.innerHTML = `
+      <span class="text-xs text-gray-500 uppercase tracking-wider">${escapeHtml(yCols[0] || cfg.title)}</span>
+      <span class="text-3xl font-bold text-blue-400 mt-1 tabular-nums">${escapeHtml(val)}</span>
+    `;
+    return;
+  }
+
+  const chart = echarts.init(el);
+  const xLabels = rows.map(r => String(r[xIdx] ?? ""));
+
+  if (cfg.type === "pie") {
+    const yIdx = Math.max(0, cols.indexOf(yCols[0]));
+    chart.setOption({
+      backgroundColor: "transparent",
+      tooltip: { trigger: "item" },
+      series: [{
+        type: "pie",
+        radius: ["40%", "70%"],
+        data: rows.map(r => ({ name: String(r[xIdx] ?? ""), value: Number(r[yIdx]) || 0 }))
+      }]
+    });
+    return;
+  }
+
+  const series = yCols.map(yCol => {
+    const yIdx = Math.max(0, cols.indexOf(yCol));
+    return {
+      name: yCol,
+      type: cfg.type === "line" ? "line" : "bar",
+      smooth: true,
+      data: rows.map(r => Number(r[yIdx]) || 0)
+    };
+  });
+
+  chart.setOption({
+    backgroundColor: "transparent",
+    tooltip: { trigger: "axis" },
+    grid: { left: 48, right: 20, top: 24, bottom: 28 },
+    xAxis: { type: "category", data: xLabels, axisLabel: { color: "#9ca3af", fontSize: 10 } },
+    yAxis: { type: "value", axisLabel: { color: "#9ca3af", fontSize: 10 }, splitLine: { lineStyle: { color: "#1f2937" } } },
+    series: series
+  });
+}
+
+async function submitGenieQuestion(questionText) {
+  const input = document.getElementById("question");
+  const btn = document.getElementById("askBtn");
+  const hint = document.getElementById("loadingHint");
+  const q = (questionText || input.value || "").trim();
+  if (!q) return;
+
+  const priorHistory = chatHistory.map(t => ({
+    role: t.role,
+    content: t.content,
+    sql: t.sql || null
+  }));
+
+  chatHistory.push({ role: "user", content: q });
+  renderConversationThread();
+  input.value = "";
+
   btn.disabled = true;
-  btn.classList.add('opacity-60', 'cursor-not-allowed');
-  document.getElementById('loadingHint').classList.remove('hidden');
+  btn.classList.add("opacity-60", "cursor-not-allowed");
+  hint.classList.remove("hidden");
+
+  try {
+    const resp = await fetch("/api/v1/ai/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        question: q,
+        mode: currentAiMode,
+        history: priorHistory
+      })
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      chatHistory.push({
+        role: "assistant",
+        mode: data.mode || currentAiMode,
+        content: data.answer || "",
+        sql: data.sql || null,
+        self_corrected: Boolean(data.self_corrected),
+        columns: data.columns || [],
+        rows: data.rows || [],
+        row_count: data.row_count || 0,
+        execution_ms: data.execution_ms || 0,
+        chart_config: data.chart_config || null,
+        snippets: data.snippets || []
+      });
+    } else {
+      chatHistory.push({
+        role: "assistant",
+        mode: currentAiMode,
+        content: "Error: " + (data.error || "Unable to complete request.")
+      });
+    }
+    saveConversation();
+    renderConversationThread();
+  } catch (err) {
+    chatHistory.push({
+      role: "assistant",
+      mode: currentAiMode,
+      content: "Request failed: " + err
+    });
+    renderConversationThread();
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove("opacity-60", "cursor-not-allowed");
+    hint.classList.add("hidden");
+  }
+}
+
+document.getElementById("aiForm").addEventListener("submit", function(e) {
+  e.preventDefault();
+  submitGenieQuestion();
 });
+
+loadConversation();
 </script>
 {% endblock %}

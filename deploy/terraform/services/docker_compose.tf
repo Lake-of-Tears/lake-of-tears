@@ -25,7 +25,6 @@ resource "null_resource" "docker_compose_deploy" {
       var.jupyter_token,
       var.superset_admin_password,
       var.airflow_password,
-      var.gemini_api_key,
     ]))
   }
 
@@ -67,7 +66,6 @@ resource "null_resource" "docker_compose_deploy" {
       "SUPERSET_ADMIN_PASSWORD=${var.superset_admin_password}",
       "AIRFLOW_SECRET_KEY=AirflowDatalakeSecret2025xK42",
       "AIRFLOW_PASSWORD=${var.airflow_password}",
-      "GEMINI_API_KEY=${var.gemini_api_key}",
       "TRUENAS_HOST=${var.truenas_script_host}",
       "TRUENAS_API_KEY=${var.truenas_api_key}",
       "JELLYFIN_API_KEY=${var.jellyfin_api_key}",

@@ -355,6 +355,8 @@ class SystemSettingResponse(BaseModel):
     workspace_inactive_grace_period_days: int
     session_inactivity_timeout_minutes: int
     session_max_hours: int
+    gemini_api_key_configured: bool = False
+    gemini_api_key_masked: str | None = None
 
 
 class UpdateSystemSettingsRequest(BaseModel):
@@ -362,6 +364,8 @@ class UpdateSystemSettingsRequest(BaseModel):
     workspace_inactive_grace_period_days: int | None = None
     session_inactivity_timeout_minutes: int | None = None
     session_max_hours: int | None = None
+    gemini_api_key: str | None = None
+    clear_gemini_api_key: bool = False
 
     @field_validator("session_inactivity_timeout_minutes")
     @classmethod
@@ -390,6 +394,17 @@ class UpdateSystemSettingsRequest(BaseModel):
         if v is not None and (v < 0 or v > 365):
             raise ValueError("Days must be between 0 and 365")
         return v
+
+
+class TestGeminiKeyRequest(BaseModel):
+    api_key: str | None = None
+    model: str | None = None
+
+
+class TestGeminiKeyResponse(BaseModel):
+    ok: bool
+    model: str
+    message: str
 
 
 # ── Dashboards & Native Widgets ───────────────────────────────────────────────
@@ -456,3 +471,102 @@ class DashboardStatsResponse(BaseModel):
     published_dashboards: int
     total_charts: int
     superset_online: bool
+
+
+# ── AI Query, SQL AI Assistant & Genie Conversational Agent ───────────────────
+
+
+class SqlExecuteRequest(BaseModel):
+    sql: str
+    read_only: bool = False
+    max_ai_rows: int = 50
+
+
+class SqlExecuteResponse(BaseModel):
+    ok: bool
+    columns: list[str] = []
+    rows: list[list[Any]] = []
+    row_count: int = 0
+    execution_ms: float = 0.0
+    ai_calls_made: int = 0
+    registered_views: list[str] = []
+    error: str | None = None
+
+
+class SqlGenerateRequest(BaseModel):
+    prompt: str
+    current_sql: str | None = None
+    model: str = "gemini-2.5-flash"
+
+
+class SqlGenerateResponse(BaseModel):
+    ok: bool
+    sql: str = ""
+    explanation: str = ""
+    tables_used: list[str] = []
+    ai_functions_used: list[str] = []
+    error: str | None = None
+
+
+class SqlFixRequest(BaseModel):
+    sql: str
+    error: str
+    model: str = "gemini-2.5-flash"
+
+
+class SqlFixResponse(BaseModel):
+    ok: bool
+    fixed_sql: str = ""
+    explanation: str = ""
+    error: str | None = None
+
+
+class SqlExplainRequest(BaseModel):
+    sql: str
+    model: str = "gemini-2.5-flash"
+
+
+class SqlExplainResponse(BaseModel):
+    ok: bool
+    summary: str = ""
+    steps: list[str] = []
+    tables_referenced: list[str] = []
+    ai_functions_used: list[str] = []
+    error: str | None = None
+
+
+class ChatMessageItem(BaseModel):
+    role: str  # 'user' | 'assistant'
+    content: str
+    sql: str | None = None
+
+
+class GenieChatRequest(BaseModel):
+    question: str
+    mode: str = "genie"  # 'genie' | 'hybrid' | 'rag'
+    history: list[ChatMessageItem] = []
+    model: str = "gemini-2.5-flash"
+
+
+class GenieChartConfig(BaseModel):
+    type: str = "table"  # 'bar' | 'line' | 'area' | 'pie' | 'kpi' | 'table'
+    title: str = ""
+    x_column: str | None = None
+    y_columns: list[str] = []
+
+
+class GenieChatResponse(BaseModel):
+    ok: bool
+    mode: str = "genie"
+    answer: str = ""
+    sql: str | None = None
+    self_corrected: bool = False
+    initial_error: str | None = None
+    columns: list[str] = []
+    rows: list[list[Any]] = []
+    row_count: int = 0
+    execution_ms: float = 0.0
+    chart_config: GenieChartConfig | None = None
+    snippets: list[dict[str, Any]] = []
+    tables_used: list[str] = []
+    error: str | None = None

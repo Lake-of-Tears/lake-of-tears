@@ -29,7 +29,6 @@ resource "null_resource" "embed_scripts" {
   provisioner "remote-exec" {
     inline = [
       "pip3 install 'duckdb[vss]' google-genai scikit-learn --break-system-packages --quiet",
-      "grep -q GEMINI_API_KEY $HOME/datalake/.env || echo 'GEMINI_API_KEY=${var.gemini_api_key}' >> $HOME/datalake/.env",
       "crontab -l 2>/dev/null | grep -v '# datalake-embed' | crontab -",
     ]
   }

@@ -7,7 +7,6 @@
 #     --namespace lake-of-tears \
 #     --create-namespace \
 #     --set minio.rootPassword=changeme \
-#     --set gemini.apiKey=your-key \
 #     -f my-values.yaml
 #
 # All passwords and API keys should be supplied at install time via --set or
@@ -388,13 +387,6 @@ shopify:
 
 hubspot:
   accessToken: ""
-
-# ---------------------------------------------------------------------------
-# Google Gemini AI
-# ---------------------------------------------------------------------------
-gemini:
-  # Google AI Studio API key — REQUIRED for embeddings and RAG
-  apiKey: ""
 
 # ---------------------------------------------------------------------------
 # Ingress

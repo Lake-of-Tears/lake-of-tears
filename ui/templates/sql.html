@@ -4,78 +4,503 @@
 
 <div class="h-full flex flex-col gap-4">
 
-  <div class="flex items-center justify-between shrink-0">
-    <h1 class="text-xl font-semibold text-gray-100">SQL Editor</h1>
-    <span class="text-xs text-gray-600">DuckDB · reads directly from S3 Parquet</span>
+  <!-- Header -->
+  <div class="flex items-center justify-between shrink-0 flex-wrap gap-2">
+    <div class="flex items-center gap-3">
+      <h1 class="text-xl font-semibold text-gray-100">SQL Editor</h1>
+      <span class="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 font-medium">
+        DuckDB + SQL AI Functions
+      </span>
+      <span class="text-xs text-gray-500 hidden sm:inline">Reads directly from S3 Parquet &amp; Workspace Catalog views</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <button type="button" id="toggleSidebarBtn" onclick="toggleSqlSidebar()" class="btn-ghost text-xs py-1.5 px-3 flex items-center gap-1.5 border border-gray-800 rounded-md">
+        <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h7"/></svg>
+        <span>Schema &amp; AI Functions</span>
+      </button>
+    </div>
   </div>
 
-  <!-- Editor -->
-  <form method="post" action="/sql" class="flex-1 flex flex-col gap-3 min-h-0">
-    <div class="flex items-start gap-3 shrink-0">
-      <div class="flex-1">
-        <textarea
-          name="sql"
-          rows="8"
-          class="input-dark font-mono text-xs resize-none h-44"
-          placeholder="SELECT * FROM read_parquet('s3://datalake/raw/**/*.parquet') LIMIT 10"
-          spellcheck="false"
-        >{{ sql }}</textarea>
+  <!-- Main Workspace Split: Editor/Results + Collapsible Reference Sidebar -->
+  <div class="flex-1 flex gap-4 min-h-0 overflow-hidden">
+
+    <!-- Left Column: AI Assistant Bar + SQL Editor + Results -->
+    <div class="flex-1 flex flex-col gap-3 min-h-0 min-w-0">
+
+      <!-- Databricks-style Inline AI SQL Assistant Bar -->
+      <div class="card p-3 bg-gradient-to-r from-blue-950/30 via-gray-900 to-gray-900 border-blue-500/20 shrink-0">
+        <div class="flex items-center gap-2">
+          <div class="flex items-center gap-1.5 text-xs font-semibold text-blue-400 shrink-0">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            <span>AI Assistant</span>
+          </div>
+          <input
+            type="text"
+            id="aiSqlPrompt"
+            class="input-dark text-xs py-1.5 flex-1"
+            placeholder="Describe a query in plain English (e.g. 'Show monthly revenue from Stripe charges for 2026' or 'Classify HubSpot deal stages with ai_classify')…"
+            autocomplete="off"
+          />
+          <button
+            type="button"
+            id="btnGenerateSql"
+            onclick="generateSqlWithAi()"
+            class="btn-primary text-xs py-1.5 px-3 whitespace-nowrap shrink-0"
+          >
+            Generate SQL
+          </button>
+        </div>
+
+        <!-- AI Generation Explanation Banner -->
+        <div id="aiGeneratedBanner" class="hidden mt-2.5 pt-2.5 border-t border-gray-800/80 flex items-start justify-between gap-3 text-xs">
+          <div class="space-y-1">
+            <p id="aiGeneratedExplanation" class="text-gray-300"></p>
+            <div id="aiGeneratedBadges" class="flex flex-wrap gap-1.5"></div>
+          </div>
+          <button type="button" onclick="document.getElementById('aiGeneratedBanner').classList.add('hidden')" class="text-gray-500 hover:text-gray-300">✕</button>
+        </div>
       </div>
-      <div class="flex flex-col gap-2 shrink-0">
-        <button type="submit" class="btn-primary whitespace-nowrap">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-          Run Query
+
+      <!-- SQL Editor Form -->
+      <form method="post" action="/sql" id="sqlEditorForm" class="flex flex-col gap-2.5 shrink-0">
+        <div class="flex items-start gap-3">
+          <div class="flex-1">
+            <textarea
+              name="sql"
+              id="sqlTextarea"
+              rows="7"
+              class="input-dark font-mono text-xs resize-y h-40 w-full leading-relaxed"
+              placeholder="SELECT * FROM read_parquet('s3://datalake/raw/**/*.parquet') LIMIT 10"
+              spellcheck="false"
+            >{{ sql }}</textarea>
+          </div>
+          <div class="flex flex-col gap-2 shrink-0">
+            <button type="submit" id="btnRunQuery" class="btn-primary whitespace-nowrap justify-center">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              Run Query
+            </button>
+            <button
+              type="button"
+              id="btnExplainQuery"
+              onclick="explainCurrentQuery()"
+              class="btn-ghost text-xs py-2 px-3 border border-gray-800 rounded-md whitespace-nowrap flex items-center justify-center gap-1.5 hover:border-blue-500/40"
+            >
+              <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              Explain Query
+            </button>
+          </div>
+        </div>
+
+        <!-- Example queries -->
+        <div class="flex flex-wrap items-center gap-1.5">
+          <span class="text-[11px] text-gray-500 mr-1">Examples:</span>
+          {% for eq in example_queries %}
+          <button type="button"
+                  onclick="document.querySelector('textarea[name=sql]').value = {{ eq.sql | tojson }}"
+                  class="btn-ghost text-xs py-1 px-2 border border-gray-800/60 rounded">
+            {{ eq.label }}
+          </button>
+          {% endfor %}
+        </div>
+      </form>
+
+      <!-- Results Panel -->
+      {% if result %}
+      <div class="flex-1 card overflow-hidden flex flex-col min-h-0">
+        {% if result.ok %}
+        <div class="px-4 py-2.5 border-b border-gray-800 flex items-center justify-between shrink-0">
+          <div class="flex items-center gap-3">
+            <span class="text-xs text-gray-400 font-medium">{{ result.row_count }} row{% if result.row_count != 1 %}s{% endif %}</span>
+            {% if result.execution_ms is defined %}
+            <span class="text-xs text-gray-600 tabular-nums">{{ result.execution_ms }} ms</span>
+            {% endif %}
+            {% if result.ai_calls_made is defined and result.ai_calls_made > 0 %}
+            <span class="text-[11px] px-2 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">
+              {{ result.ai_calls_made }} Gemini UDF call{% if result.ai_calls_made != 1 %}s{% endif %}
+            </span>
+            {% endif %}
+          </div>
+        </div>
+        <div class="overflow-auto flex-1">
+          <table class="w-full text-xs">
+            <thead class="sticky top-0 bg-gray-900 border-b border-gray-800">
+              <tr>
+                {% for col in result.columns %}
+                <th class="px-4 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">{{ col }}</th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-800/50">
+              {% for row in result.rows %}
+              <tr class="hover:bg-white/[0.02]">
+                {% for cell in row %}
+                <td class="px-4 py-2 text-gray-300 font-mono whitespace-nowrap max-w-md truncate" title="{{ cell }}">{{ cell }}</td>
+                {% endfor %}
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="p-5 space-y-4 overflow-auto">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="text-red-400 text-sm font-semibold mb-1">Query error</p>
+              <p id="queryErrorMessage" class="text-gray-400 text-xs font-mono whitespace-pre-wrap">{{ result.error }}</p>
+            </div>
+            <button
+              type="button"
+              id="btnFixWithAi"
+              onclick="fixQueryWithAi()"
+              class="btn-primary text-xs py-1.5 px-3 shrink-0 flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+              Fix with AI
+            </button>
+          </div>
+
+          <!-- AI Fix Preview Box -->
+          <div id="aiFixContainer" class="hidden rounded-lg border border-blue-500/30 bg-blue-950/20 p-4 space-y-3">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-semibold text-blue-400">AI Suggested Fix</span>
+              <div class="flex items-center gap-2">
+                <button type="button" onclick="applyFixedSql(false)" class="btn-ghost text-xs py-1 px-2.5 border border-gray-700 rounded">
+                  Apply to Editor
+                </button>
+                <button type="button" onclick="applyFixedSql(true)" class="btn-primary text-xs py-1 px-2.5">
+                  Apply &amp; Run
+                </button>
+              </div>
+            </div>
+            <p id="aiFixExplanation" class="text-xs text-gray-300 leading-relaxed"></p>
+            <pre id="aiFixSqlPreview" class="bg-gray-950/90 border border-gray-800 rounded p-3 text-xs font-mono text-green-300 overflow-x-auto whitespace-pre-wrap"></pre>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+
+    </div>
+
+    <!-- Right Column: Collapsible Schema & SQL AI Functions Sidebar -->
+    <aside id="sqlReferenceSidebar" class="w-80 shrink-0 card flex flex-col overflow-hidden">
+      <div class="flex border-b border-gray-800 shrink-0">
+        <button
+          type="button"
+          id="tabBtnSchema"
+          onclick="switchSidebarTab('schema')"
+          class="flex-1 py-2.5 text-xs font-semibold text-blue-400 border-b-2 border-blue-500 bg-gray-900/60"
+        >
+          Catalog &amp; Datasets
+        </button>
+        <button
+          type="button"
+          id="tabBtnFunctions"
+          onclick="switchSidebarTab('functions')"
+          class="flex-1 py-2.5 text-xs font-semibold text-gray-500 hover:text-gray-300 border-b-2 border-transparent"
+        >
+          AI Functions (4)
         </button>
       </div>
-    </div>
 
-    <!-- Example queries -->
-    <div class="flex flex-wrap gap-2 shrink-0">
-      {% for eq in example_queries %}
-      <button type="button"
-              onclick="document.querySelector('textarea[name=sql]').value = {{ eq.sql | tojson }}"
-              class="btn-ghost text-xs py-1">
-        {{ eq.label }}
-      </button>
-      {% endfor %}
-    </div>
-  </form>
+      <!-- Tab 1: Workspace Catalog & S3 Datasets -->
+      <div id="sidebarTabSchema" class="flex-1 overflow-y-auto p-3 space-y-4 text-xs">
+        {% if catalogs %}
+        <div>
+          <p class="text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-2">Workspace Catalog Tables</p>
+          <div class="space-y-2">
+            {% for cat in catalogs %}
+              {% for sch in cat.schemas or [] %}
+                {% for tbl in sch.tables or [] %}
+                <div class="bg-gray-800/40 border border-gray-800 rounded p-2.5 hover:border-gray-700 transition-colors">
+                  <div class="flex items-center justify-between gap-1">
+                    <span class="font-mono text-blue-400 font-medium truncate">{{ sch.slug }}.{{ tbl.slug }}</span>
+                    <button
+                      type="button"
+                      onclick="insertSqlSnippet('SELECT * FROM {{ sch.slug }}.{{ tbl.slug }} LIMIT 20')"
+                      class="text-[10px] text-gray-400 hover:text-white px-1.5 py-0.5 bg-gray-800 rounded"
+                    >
+                      Query
+                    </button>
+                  </div>
+                  {% if tbl.s3_path_pattern %}
+                  <p class="text-[10px] text-gray-500 font-mono truncate mt-1" title="{{ tbl.s3_path_pattern }}">{{ tbl.s3_path_pattern }}</p>
+                  {% endif %}
+                </div>
+                {% endfor %}
+              {% endfor %}
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
 
-  <!-- Results -->
-  {% if result %}
-  <div class="flex-1 card overflow-hidden flex flex-col min-h-0">
-    {% if result.ok %}
-    <div class="px-4 py-2.5 border-b border-gray-800 flex items-center justify-between shrink-0">
-      <span class="text-xs text-gray-400">{{ result.row_count }} row{% if result.row_count != 1 %}s{% endif %}</span>
-    </div>
-    <div class="overflow-auto flex-1">
-      <table class="w-full text-xs">
-        <thead class="sticky top-0 bg-gray-900 border-b border-gray-800">
-          <tr>
-            {% for col in result.columns %}
-            <th class="px-4 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">{{ col }}</th>
+        <div>
+          <p class="text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-2">Lakehouse S3 Parquet Datasets</p>
+          <div class="space-y-2">
+            {% for ds in default_datasets or [] %}
+            <div class="bg-gray-800/40 border border-gray-800 rounded p-2.5 space-y-1.5">
+              <div class="flex items-center justify-between gap-2">
+                <span class="font-mono text-gray-200 font-medium">{{ ds.name }}</span>
+                <button
+                  type="button"
+                  onclick="insertSqlSnippet({{ ('SELECT * FROM read_parquet(\'' ~ ds.s3_path ~ '\') LIMIT 20') | tojson }})"
+                  class="text-[10px] text-blue-400 hover:text-blue-300 px-1.5 py-0.5 bg-blue-500/10 rounded"
+                >
+                  Insert SQL
+                </button>
+              </div>
+              <p class="text-[11px] text-gray-500 leading-snug">{{ ds.description }}</p>
+              <div class="flex flex-wrap gap-1 pt-1">
+                {% for col in ds.columns %}
+                <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-gray-900 text-gray-400 border border-gray-800">
+                  {{ col.name }}: <span class="text-gray-500">{{ col.type }}</span>
+                </span>
+                {% endfor %}
+              </div>
+            </div>
             {% endfor %}
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-gray-800/50">
-          {% for row in result.rows %}
-          <tr class="hover:bg-white/[0.02]">
-            {% for cell in row %}
-            <td class="px-4 py-2 text-gray-300 font-mono whitespace-nowrap max-w-xs truncate">{{ cell }}</td>
-            {% endfor %}
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% else %}
-    <div class="p-6">
-      <p class="text-red-400 text-sm font-semibold mb-1">Query error</p>
-      <p class="text-gray-500 text-xs font-mono">{{ result.error }}</p>
-    </div>
-    {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 2: DuckDB SQL AI Functions -->
+      <div id="sidebarTabFunctions" class="hidden flex-1 overflow-y-auto p-3 space-y-3 text-xs">
+        <p class="text-[11px] text-gray-400 leading-relaxed">
+          Call Gemini models directly inside DuckDB SQL queries across rows. Built-in LRU caching &amp; concurrency throttling protect rate limits.
+        </p>
+        {% for fn in sql_ai_functions or [] %}
+        <div class="bg-gray-800/50 border border-gray-800 rounded-md p-3 space-y-2">
+          <div class="flex items-center justify-between gap-2">
+            <code class="text-blue-400 font-mono font-semibold text-[11px]">{{ fn.signature }}</code>
+            <button
+              type="button"
+              onclick="insertSqlSnippet({{ fn.example | tojson }})"
+              class="text-[10px] px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 shrink-0"
+            >
+              Try Example
+            </button>
+          </div>
+          <p class="text-gray-400 text-[11px] leading-relaxed">{{ fn.description }}</p>
+        </div>
+        {% endfor %}
+      </div>
+    </aside>
+
   </div>
-  {% endif %}
 
 </div>
+
+<!-- Explain Query Modal -->
+<div id="explainQueryModal" class="hidden fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+  <div class="card max-w-xl w-full p-5 space-y-4 border border-gray-700 shadow-2xl">
+    <div class="flex items-center justify-between border-b border-gray-800 pb-3">
+      <div class="flex items-center gap-2">
+        <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <h3 class="text-sm font-semibold text-gray-100">AI Query Explanation</h3>
+      </div>
+      <button type="button" onclick="closeExplainModal()" class="text-gray-500 hover:text-gray-300 text-sm">✕</button>
+    </div>
+    <div id="explainModalBody" class="space-y-3 text-xs text-gray-300 max-h-96 overflow-y-auto">
+      <p class="text-gray-500 animate-pulse">Analyzing SQL query transformations…</p>
+    </div>
+    <div class="flex justify-end pt-2 border-t border-gray-800">
+      <button type="button" onclick="closeExplainModal()" class="btn-ghost text-xs py-1.5 px-4 border border-gray-700 rounded">
+        Close
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+let _lastFixedSql = "";
+
+function toggleSqlSidebar() {
+  const sb = document.getElementById("sqlReferenceSidebar");
+  sb.classList.toggle("hidden");
+}
+
+function switchSidebarTab(tab) {
+  const schemaPanel = document.getElementById("sidebarTabSchema");
+  const fnPanel = document.getElementById("sidebarTabFunctions");
+  const btnSchema = document.getElementById("tabBtnSchema");
+  const btnFn = document.getElementById("tabBtnFunctions");
+
+  if (tab === "schema") {
+    schemaPanel.classList.remove("hidden");
+    fnPanel.classList.add("hidden");
+    btnSchema.className = "flex-1 py-2.5 text-xs font-semibold text-blue-400 border-b-2 border-blue-500 bg-gray-900/60";
+    btnFn.className = "flex-1 py-2.5 text-xs font-semibold text-gray-500 hover:text-gray-300 border-b-2 border-transparent";
+  } else {
+    schemaPanel.classList.add("hidden");
+    fnPanel.classList.remove("hidden");
+    btnFn.className = "flex-1 py-2.5 text-xs font-semibold text-blue-400 border-b-2 border-blue-500 bg-gray-900/60";
+    btnSchema.className = "flex-1 py-2.5 text-xs font-semibold text-gray-500 hover:text-gray-300 border-b-2 border-transparent";
+  }
+}
+
+function insertSqlSnippet(snippet) {
+  const textarea = document.getElementById("sqlTextarea");
+  textarea.value = snippet;
+  textarea.focus();
+}
+
+async function generateSqlWithAi() {
+  const promptInput = document.getElementById("aiSqlPrompt");
+  const btn = document.getElementById("btnGenerateSql");
+  const textarea = document.getElementById("sqlTextarea");
+  const banner = document.getElementById("aiGeneratedBanner");
+  const explanationEl = document.getElementById("aiGeneratedExplanation");
+  const badgesEl = document.getElementById("aiGeneratedBadges");
+
+  const prompt = promptInput.value.trim();
+  if (!prompt) return;
+
+  btn.disabled = true;
+  const origText = btn.textContent;
+  btn.textContent = "Generating…";
+
+  try {
+    const resp = await fetch("/api/v1/ai/sql/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: prompt, current_sql: textarea.value })
+    });
+    const data = await resp.json();
+    if (data.ok && data.sql) {
+      textarea.value = data.sql;
+      explanationEl.textContent = data.explanation || "Generated DuckDB SQL query.";
+      badgesEl.innerHTML = "";
+      (data.tables_used || []).forEach(t => {
+        const span = document.createElement("span");
+        span.className = "text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20";
+        span.textContent = "table: " + t;
+        badgesEl.appendChild(span);
+      });
+      (data.ai_functions_used || []).forEach(fn => {
+        const span = document.createElement("span");
+        span.className = "text-[10px] font-mono px-2 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20";
+        span.textContent = "udf: " + fn + "()";
+        badgesEl.appendChild(span);
+      });
+      banner.classList.remove("hidden");
+    } else {
+      explanationEl.textContent = "Error: " + (data.error || "Could not generate SQL.");
+      badgesEl.innerHTML = "";
+      banner.classList.remove("hidden");
+    }
+  } catch (err) {
+    explanationEl.textContent = "Request failed: " + err;
+    banner.classList.remove("hidden");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origText;
+  }
+}
+
+async function fixQueryWithAi() {
+  const btn = document.getElementById("btnFixWithAi");
+  const textarea = document.getElementById("sqlTextarea");
+  const errEl = document.getElementById("queryErrorMessage");
+  const container = document.getElementById("aiFixContainer");
+  const expEl = document.getElementById("aiFixExplanation");
+  const previewEl = document.getElementById("aiFixSqlPreview");
+
+  if (!btn || !errEl) return;
+  btn.disabled = true;
+  btn.textContent = "Diagnosing…";
+
+  try {
+    const resp = await fetch("/api/v1/ai/sql/fix", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sql: textarea.value,
+        error: errEl.textContent.trim()
+      })
+    });
+    const data = await resp.json();
+    if (data.ok && data.fixed_sql) {
+      _lastFixedSql = data.fixed_sql;
+      expEl.textContent = data.explanation || "Fixed query based on DuckDB error message.";
+      previewEl.textContent = data.fixed_sql;
+      container.classList.remove("hidden");
+    } else {
+      expEl.textContent = "Unable to auto-fix: " + (data.error || "Unknown error");
+      previewEl.textContent = "";
+      container.classList.remove("hidden");
+    }
+  } catch (err) {
+    expEl.textContent = "Request failed: " + err;
+    container.classList.remove("hidden");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Fix with AI";
+  }
+}
+
+function applyFixedSql(andRun) {
+  if (!_lastFixedSql) return;
+  const textarea = document.getElementById("sqlTextarea");
+  textarea.value = _lastFixedSql;
+  if (andRun) {
+    document.getElementById("sqlEditorForm").submit();
+  }
+}
+
+async function explainCurrentQuery() {
+  const textarea = document.getElementById("sqlTextarea");
+  const modal = document.getElementById("explainQueryModal");
+  const body = document.getElementById("explainModalBody");
+  const sql = textarea.value.trim();
+  if (!sql) return;
+
+  modal.classList.remove("hidden");
+  body.innerHTML = '<p class="text-gray-400 animate-pulse">Analyzing SQL query with Gemini…</p>';
+
+  try {
+    const resp = await fetch("/api/v1/ai/sql/explain", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sql: sql })
+    });
+    const data = await resp.json();
+    if (!data.ok) {
+      body.innerHTML = `<p class="text-red-400">${data.error || "Failed to explain query."}</p>`;
+      return;
+    }
+    let html = `<div class="p-3 rounded bg-gray-900 border border-gray-800 text-gray-200 leading-relaxed">${data.summary || ""}</div>`;
+    if (data.steps && data.steps.length > 0) {
+      html += `<div class="space-y-1.5"><p class="font-semibold text-gray-400">Execution Steps</p><ol class="list-decimal list-inside space-y-1 text-gray-300">`;
+      data.steps.forEach(s => {
+        html += `<li>${s}</li>`;
+      });
+      html += `</ol></div>`;
+    }
+    if ((data.tables_referenced && data.tables_referenced.length > 0) || (data.ai_functions_used && data.ai_functions_used.length > 0)) {
+      html += `<div class="flex flex-wrap gap-1.5 pt-2">`;
+      (data.tables_referenced || []).forEach(t => {
+        html += `<span class="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">table: ${t}</span>`;
+      });
+      (data.ai_functions_used || []).forEach(fn => {
+        html += `<span class="text-[10px] font-mono px-2 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">udf: ${fn}()</span>`;
+      });
+      html += `</div>`;
+    }
+    body.innerHTML = html;
+  } catch (err) {
+    body.innerHTML = `<p class="text-red-400">Error: ${err}</p>`;
+  }
+}
+
+function closeExplainModal() {
+  document.getElementById("explainQueryModal").classList.add("hidden");
+}
+
+document.getElementById("aiSqlPrompt").addEventListener("keydown", function(e) {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    generateSqlWithAi();
+  }
+});
+</script>
 {% endblock %}

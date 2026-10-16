@@ -89,9 +89,6 @@ airflow:
   secretKey: "changeme-airflow-secret"
   adminPassword: "changeme-airflow-admin"
 
-gemini:
-  apiKey: ""
-
 stripe:
   secretKey: ""
 

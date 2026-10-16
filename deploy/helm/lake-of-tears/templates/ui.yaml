@@ -51,11 +51,6 @@ spec:
                   key: MINIO_ROOT_PASSWORD
             - name: MINIO_BUCKET
               value: datalake
-            - name: GEMINI_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "lake-of-tears.fullname" . }}-credentials
-                  key: GEMINI_API_KEY
             - name: MINIO_CONSOLE_URL
               value: {{ .Values.lakeui.minioConsoleUrl | default (printf "https://%s" .Values.ingress.minioConsoleHost) | quote }}
             - name: SUPERSET_URL

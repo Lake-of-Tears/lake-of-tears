@@ -141,11 +141,13 @@ spec:
                   key: MINIO_ROOT_PASSWORD
             - name: MINIO_BUCKET
               value: datalake
-            - name: GEMINI_API_KEY
+            - name: BACKEND_URL
+              value: "http://{{ include "lake-of-tears.fullname" . }}-backend:8000"
+            - name: AUTH_SECRET_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "lake-of-tears.fullname" . }}-credentials
-                  key: GEMINI_API_KEY
+                  key: authSecretKey
             - name: STRIPE_SECRET_KEY
               valueFrom:
                 secretKeyRef:

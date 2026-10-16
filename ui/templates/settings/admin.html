@@ -222,6 +222,71 @@
         </div>
       </form>
     </div>
+
+    <div class="border-t border-white/[0.06] pt-6" id="ai-settings">
+      <div class="flex items-center justify-between gap-3 mb-1">
+        <h2 class="text-sm font-semibold text-gray-300">AI &amp; External API Keys</h2>
+        {% if admin_settings.gemini_api_key_configured %}
+        <span class="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-900/40 border border-emerald-700/50 text-emerald-400">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+          Configured ({{ admin_settings.gemini_api_key_masked or '••••••••' }})
+        </span>
+        {% else %}
+        <span class="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-900/40 border border-amber-700/50 text-amber-400">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+          Not Configured
+        </span>
+        {% endif %}
+      </div>
+      <p class="text-xs text-gray-500 mb-5">
+        Configure the instance-wide <code class="text-gray-400">GEMINI_API_KEY</code> used across SQL AI Functions (<code class="text-gray-400">ai_query</code>, <code class="text-gray-400">ai_summarize</code>, <code class="text-gray-400">ai_classify</code>, <code class="text-gray-400">ai_extract</code>), the SQL Editor Assistant, Genie Conversational Agent, and embedding pipelines. Stored encrypted at rest.
+      </p>
+
+      <div class="space-y-4">
+        <form action="/settings/admin/ai-settings" method="post" class="space-y-3">
+          <input type="hidden" name="action" value="save" />
+          <div>
+            <label for="gemini-api-key-input" class="block text-xs text-gray-400 font-medium mb-1">
+              Google Gemini API Key (<code class="text-gray-400">GEMINI_API_KEY</code>)
+            </label>
+            <p class="text-[11px] text-gray-600 mb-2">
+              {% if admin_settings.gemini_api_key_configured %}
+              Active key: <code class="text-gray-300">{{ admin_settings.gemini_api_key_masked }}</code>. Enter a new key below to replace it.
+              {% else %}
+              Enter a Google AI Studio API key to enable AI Query, SQL AI Functions, and Genie.
+              {% endif %}
+            </p>
+            <div class="flex items-center gap-2">
+              <input id="gemini-api-key-input" type="password" name="gemini_api_key"
+                     autocomplete="off"
+                     placeholder="{% if admin_settings.gemini_api_key_configured %}Enter new key to replace ({{ admin_settings.gemini_api_key_masked }}){% else %}AIzaSy...{% endif %}"
+                     class="flex-1 input-dark text-sm font-mono"
+                     style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+              <button type="button" id="test-gemini-key-btn" onclick="testGeminiKey()"
+                      class="text-xs px-3 py-2 rounded-md border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition-colors shrink-0">
+                Test Key
+              </button>
+              <button type="submit" class="btn-primary shrink-0">
+                {{ 'Replace Key' if admin_settings.gemini_api_key_configured else 'Save Key' }}
+              </button>
+            </div>
+          </div>
+        </form>
+
+        {% if admin_settings.gemini_api_key_configured %}
+        <form action="/settings/admin/ai-settings" method="post" class="flex justify-end"
+              onsubmit="return confirm('Clear the configured GEMINI_API_KEY? AI functions and Genie queries will stop working until a new key is saved.');">
+          <input type="hidden" name="action" value="clear" />
+          <button type="submit"
+                  class="text-xs px-3 py-1.5 rounded border border-red-800/50 text-red-400 hover:text-red-300 hover:border-red-600/50 transition-colors">
+            Clear Stored Key
+          </button>
+        </form>
+        {% endif %}
+
+        <div id="gemini-key-test-status" class="hidden text-xs px-3 py-2 rounded-md border"></div>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -238,6 +303,43 @@
       const label = h > 0 ? (h + 'h' + (m > 0 ? ' ' + m + 'm' : '')) : m + 'm';
       hint.textContent = 'Warning shown 5 minutes before sign-out. Idle users signed out after ' + label + '.';
       hint.className = 'text-xs text-blue-500 mt-2';
+    }
+  }
+
+  async function testGeminiKey() {
+    const input = document.getElementById('gemini-api-key-input');
+    const btn = document.getElementById('test-gemini-key-btn');
+    const statusBox = document.getElementById('gemini-key-test-status');
+    const candidate = input ? input.value.trim() : '';
+
+    btn.disabled = true;
+    btn.textContent = 'Testing...';
+    statusBox.classList.remove('hidden');
+    statusBox.className = 'text-xs px-3 py-2 rounded-md border border-blue-800/50 bg-blue-900/20 text-blue-300';
+    statusBox.textContent = candidate
+      ? 'Testing entered API key against Gemini...'
+      : 'Testing stored API key against Gemini...';
+
+    try {
+      const resp = await fetch('/settings/admin/ai-settings/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: candidate || null })
+      });
+      const data = await resp.json();
+      if (data.ok) {
+        statusBox.className = 'text-xs px-3 py-2 rounded-md border border-emerald-800/50 bg-emerald-900/20 text-emerald-300';
+        statusBox.textContent = '✓ ' + (data.message || 'API key is valid.');
+      } else {
+        statusBox.className = 'text-xs px-3 py-2 rounded-md border border-red-800/50 bg-red-900/20 text-red-300';
+        statusBox.textContent = '✕ ' + (data.message || 'API key validation failed.');
+      }
+    } catch (err) {
+      statusBox.className = 'text-xs px-3 py-2 rounded-md border border-red-800/50 bg-red-900/20 text-red-300';
+      statusBox.textContent = '✕ Failed to test key: ' + err;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Test Key';
     }
   }
   </script>

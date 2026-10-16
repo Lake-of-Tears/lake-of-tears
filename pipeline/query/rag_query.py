@@ -2,14 +2,12 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[2]))
+sys.path.insert(0, str(Path(__file__).parents[1] / "shared"))
 
 import os
 
 import duckdb
-from gemini_embedder import embed_query
-from google import genai
-
-_client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+from gemini_embedder import embed_query, get_gemini_client
 
 
 def rag(question: str, top_k: int = 10) -> str:
@@ -34,7 +32,8 @@ def rag(question: str, top_k: int = 10) -> str:
 
     context = "\n".join(f"[{r.source}] {r.content}" for _, r in results.iterrows())
 
-    response = _client.models.generate_content(
+    client = get_gemini_client()
+    response = client.models.generate_content(
         model="gemini-2.5-flash",
         contents=f"You are an assistant that answers questions about home data.\n\n"
         f"Context from data lake:\n{context}\n\n"
@@ -44,6 +43,4 @@ def rag(question: str, top_k: int = 10) -> str:
 
 
 if __name__ == "__main__":
-    import sys
-
     print(rag(" ".join(sys.argv[1:])))

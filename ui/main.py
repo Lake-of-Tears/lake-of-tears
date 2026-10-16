@@ -23,8 +23,9 @@ from google import genai
 from starlette.middleware.base import BaseHTTPMiddleware
 
 try:
-    from ui import notebook_proxy
+    from ui import duckdb_ai, notebook_proxy
 except ImportError:
+    import duckdb_ai
     import notebook_proxy
 
 logger = logging.getLogger("lake.ui")
@@ -40,7 +41,7 @@ MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "datalake")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_API_KEY = ""
 MINIO_CONSOLE_URL = os.getenv("MINIO_CONSOLE_URL", "http://localhost:9001")
 SUPERSET_URL = os.getenv("SUPERSET_URL", "http://localhost:8088")
 JUPYTER_TOKEN = os.getenv("JUPYTER_TOKEN", "")
@@ -64,6 +65,24 @@ _WORKSPACE_COOKIE = "lake_workspace_id"
 _SESSION_CONFIG_CACHE: dict | None = None
 _SESSION_CONFIG_FETCHED_AT: float = 0.0
 _SESSION_CONFIG_TTL = 60.0  # seconds
+
+
+def _get_gemini_api_key() -> str:
+    """Resolve the active GEMINI_API_KEY from the Admin Panel backend setting."""
+    if GEMINI_API_KEY and GEMINI_API_KEY.strip():
+        return GEMINI_API_KEY.strip()
+    try:
+        with httpx.Client(timeout=3) as client:
+            resp = client.get(
+                f"{BACKEND_URL}/api/internal/settings/gemini-key",
+                headers={"X-Internal-Secret": AUTH_SECRET_KEY},
+            )
+        if resp.status_code == 200:
+            data = resp.json()
+            return str(data.get("gemini_api_key") or "").strip()
+    except Exception:
+        pass
+    return ""
 
 
 def _get_session_config() -> dict:
@@ -317,7 +336,12 @@ def _get_catalog_data() -> dict[str, Any]:
         return {"ok": False, "error": str(exc)}
 
 
-def _duckdb_connection(load_vss: bool = False):
+def _duckdb_connection(
+    load_vss: bool = False,
+    register_ai: bool = True,
+    max_ai_rows: int = 50,
+    ai_state: dict[str, int] | None = None,
+):
     config = {
         "s3_endpoint": MINIO_ENDPOINT,
         "s3_access_key_id": MINIO_ACCESS_KEY,
@@ -329,18 +353,55 @@ def _duckdb_connection(load_vss: bool = False):
     con.execute("INSTALL httpfs; LOAD httpfs;")
     if load_vss:
         con.execute("INSTALL vss; LOAD vss;")
+    if register_ai:
+        duckdb_ai.register_ai_functions(
+            con,
+            api_key=_get_gemini_api_key,
+            max_rows=max_ai_rows,
+            state=ai_state,
+            client_factory=lambda api_key: genai.Client(api_key=api_key),
+        )
     return con
 
 
-def _run_query(sql: str) -> dict[str, Any]:
+def _run_query(
+    sql: str,
+    catalogs: list[dict[str, Any]] | None = None,
+    read_only: bool = False,
+    max_ai_rows: int = 50,
+) -> dict[str, Any]:
+    if read_only:
+        allowed, reason = duckdb_ai.is_read_only_sql(sql)
+        if not allowed:
+            return {"ok": False, "error": reason}
+
+    ai_state = {"rows_processed": 0, "ai_calls": 0}
+    start_ts = time.perf_counter()
+    con = None
     try:
-        con = _duckdb_connection()
+        con = _duckdb_connection(max_ai_rows=max_ai_rows, ai_state=ai_state)
+        registered_views = duckdb_ai.register_catalog_views(con, catalogs)
         rel = con.execute(sql)
-        columns = [desc[0] for desc in rel.description]
+        columns = [desc[0] for desc in (rel.description or [])]
         rows = rel.fetchall()
         con.close()
-        return {"ok": True, "columns": columns, "rows": rows, "row_count": len(rows)}
+        con = None
+        elapsed_ms = round((time.perf_counter() - start_ts) * 1000.0, 2)
+        return {
+            "ok": True,
+            "columns": columns,
+            "rows": rows,
+            "row_count": len(rows),
+            "execution_ms": elapsed_ms,
+            "ai_calls_made": ai_state.get("ai_calls", 0),
+            "registered_views": registered_views,
+        }
     except Exception as exc:
+        if con is not None:
+            try:
+                con.close()
+            except Exception:
+                pass
         return {"ok": False, "error": str(exc)}
 
 
@@ -360,10 +421,11 @@ AI_VECTOR_SQL = """
 
 
 def _ai_query(question: str) -> dict[str, Any]:
-    if not GEMINI_API_KEY:
-        return {"ok": False, "error": "GEMINI_API_KEY is not set."}
+    active_key = _get_gemini_api_key()
+    if not active_key:
+        return {"ok": False, "error": duckdb_ai.GEMINI_KEY_NOT_CONFIGURED_MSG}
     try:
-        client = genai.Client(api_key=GEMINI_API_KEY)
+        client = genai.Client(api_key=active_key)
 
         embed_resp = client.models.embed_content(
             model="gemini-embedding-001",
@@ -427,6 +489,22 @@ EXAMPLE_QUERIES = [
     {
         "label": "Embedding count by source",
         "sql": "SELECT source, COUNT(*) AS cnt FROM read_parquet('s3://datalake/embeddings/**/*.parquet') GROUP BY source ORDER BY cnt DESC",
+    },
+    {
+        "label": "✨ AI Sentiment (ai_query)",
+        "sql": "SELECT id, amount_usd, description, ai_query('gemini-2.5-flash', 'Classify payment risk in one word: ' || description) AS risk_label FROM read_parquet('s3://datalake/raw/stripe_charges/**/*.parquet') LIMIT 10",
+    },
+    {
+        "label": "✨ AI Summarize (ai_summarize)",
+        "sql": "SELECT source, ingested_at, ai_summarize(summary) AS executive_brief FROM read_parquet('s3://datalake/embeddings/**/*.parquet') LIMIT 5",
+    },
+    {
+        "label": "✨ AI Classify (ai_classify)",
+        "sql": "SELECT deal_name, stage, amount_usd, ai_classify(stage, ['early_stage', 'late_stage', 'closed']) AS funnel_bucket FROM read_parquet('s3://datalake/raw/hubspot_deals/**/*.parquet') LIMIT 10",
+    },
+    {
+        "label": "✨ AI Extract JSON (ai_extract)",
+        "sql": "SELECT source, ai_extract(summary, ['metric', 'value', 'status']) AS structured_json FROM read_parquet('s3://datalake/embeddings/**/*.parquet') LIMIT 5",
     },
 ]
 
@@ -564,10 +642,25 @@ async def storage(request: Request):
     )
 
 
+def _resolve_ui_catalogs(request: Request) -> list[dict[str, Any]]:
+    token = request.cookies.get("lake_token")
+    ws = getattr(request.state, "workspace", None)
+    if token and ws and isinstance(ws, dict) and ws.get("id"):
+        res = _backend_get(f"/api/workspaces/{ws['id']}/catalogs", token)
+        if isinstance(res, list):
+            return res
+    if token:
+        res = _backend_get("/api/catalogs", token)
+        if isinstance(res, list):
+            return res
+    return []
+
+
 @app.get("/sql", response_class=HTMLResponse)
 async def sql_get(request: Request):
     query_sql = request.query_params.get("q") or request.query_params.get("sql")
     selected_sql = query_sql if query_sql else EXAMPLE_QUERIES[0]["sql"]
+    catalogs = _resolve_ui_catalogs(request)
     return templates.TemplateResponse(
         request=request,
         name="sql.html",
@@ -577,13 +670,17 @@ async def sql_get(request: Request):
             "result": None,
             "sql": selected_sql,
             "example_queries": EXAMPLE_QUERIES,
+            "catalogs": catalogs,
+            "default_datasets": duckdb_ai.get_default_datasets(MINIO_BUCKET),
+            "sql_ai_functions": duckdb_ai.SQL_AI_FUNCTIONS,
         },
     )
 
 
 @app.post("/sql", response_class=HTMLResponse)
 async def sql_post(request: Request, sql: str = Form(...)):
-    result = _run_query(sql)
+    catalogs = _resolve_ui_catalogs(request)
+    result = _run_query(sql, catalogs=catalogs)
     return templates.TemplateResponse(
         request=request,
         name="sql.html",
@@ -593,6 +690,9 @@ async def sql_post(request: Request, sql: str = Form(...)):
             "result": result,
             "sql": sql,
             "example_queries": EXAMPLE_QUERIES,
+            "catalogs": catalogs,
+            "default_datasets": duckdb_ai.get_default_datasets(MINIO_BUCKET),
+            "sql_ai_functions": duckdb_ai.SQL_AI_FUNCTIONS,
         },
     )
 
@@ -687,6 +787,8 @@ async def ingest(request: Request):
 
 @app.get("/ai", response_class=HTMLResponse)
 async def ai_get(request: Request):
+    catalogs = _resolve_ui_catalogs(request)
+    ws = getattr(request.state, "workspace", None)
     return templates.TemplateResponse(
         request=request,
         name="ai.html",
@@ -696,6 +798,10 @@ async def ai_get(request: Request):
             "result": None,
             "question": "",
             "example_questions": EXAMPLE_QUESTIONS,
+            "catalogs": catalogs,
+            "default_datasets": duckdb_ai.get_default_datasets(MINIO_BUCKET),
+            "sql_ai_functions": duckdb_ai.SQL_AI_FUNCTIONS,
+            "workspace": ws,
         },
     )
 
@@ -703,6 +809,8 @@ async def ai_get(request: Request):
 @app.post("/ai", response_class=HTMLResponse)
 async def ai_post(request: Request, question: str = Form(...)):
     result = _ai_query(question)
+    catalogs = _resolve_ui_catalogs(request)
+    ws = getattr(request.state, "workspace", None)
     return templates.TemplateResponse(
         request=request,
         name="ai.html",
@@ -712,6 +820,10 @@ async def ai_post(request: Request, question: str = Form(...)):
             "result": result,
             "question": question,
             "example_questions": EXAMPLE_QUESTIONS,
+            "catalogs": catalogs,
+            "default_datasets": duckdb_ai.get_default_datasets(MINIO_BUCKET),
+            "sql_ai_functions": duckdb_ai.SQL_AI_FUNCTIONS,
+            "workspace": ws,
         },
     )
 
@@ -1000,6 +1112,8 @@ async def settings_admin_get(request: Request):
         "workspace_inactive_grace_period_days": 30,
         "session_inactivity_timeout_minutes": 0,
         "session_max_hours": 24,
+        "gemini_api_key_configured": False,
+        "gemini_api_key_masked": None,
     }
     return templates.TemplateResponse(
         request=request,
@@ -1108,6 +1222,62 @@ async def settings_admin_session_settings(
         },
     )
     return RedirectResponse(url="/settings/admin?saved=1", status_code=302)
+
+
+@app.post("/settings/admin/ai-settings")
+async def settings_admin_ai_settings(
+    request: Request,
+    action: str = Form("save"),
+    gemini_api_key: str = Form(""),
+):
+    user = request.state.user
+    if not user or user.get("role") != "superadmin":
+        return RedirectResponse(url="/", status_code=302)
+    token = request.cookies.get("lake_token")
+    if action == "clear":
+        _backend_patch("/api/admin/settings", token, {"clear_gemini_api_key": True})
+        duckdb_ai.clear_ai_cache()
+    elif gemini_api_key.strip():
+        _backend_patch(
+            "/api/admin/settings",
+            token,
+            {"gemini_api_key": gemini_api_key.strip()},
+        )
+        duckdb_ai.clear_ai_cache()
+    return RedirectResponse(url="/settings/admin?saved=1", status_code=302)
+
+
+@app.post("/settings/admin/ai-settings/test")
+async def settings_admin_ai_settings_test(request: Request):
+    user = request.state.user
+    if not user or user.get("role") != "superadmin":
+        return JSONResponse(
+            {"ok": False, "message": "Superadmin access required."}, status_code=403
+        )
+    token = request.cookies.get("lake_token")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    payload = {
+        "api_key": body.get("api_key"),
+        "model": body.get("model") or "gemini-2.5-flash",
+    }
+    try:
+        with httpx.Client(timeout=15) as client:
+            resp = client.post(
+                f"{BACKEND_URL}/api/admin/settings/test-gemini-key",
+                headers={"Authorization": f"Bearer {token}"} if token else {},
+                json=payload,
+            )
+        if resp.status_code == 200:
+            return JSONResponse(resp.json())
+        return JSONResponse(
+            {"ok": False, "message": f"Backend error ({resp.status_code}): {resp.text}"},
+            status_code=resp.status_code,
+        )
+    except Exception as exc:
+        return JSONResponse({"ok": False, "message": f"Connection error: {exc}"}, status_code=502)
 
 
 @app.post("/settings/admin/workspaces/{workspace_id}/mark-inactive")
@@ -2663,3 +2833,306 @@ async def ui_delete_dashboard(request: Request, dashboard_id: str):
             return JSONResponse(resp.json(), status_code=resp.status_code)
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+# ── Native AI Query, SQL AI Assistant & Genie Conversational Agent APIs ───────
+
+
+def _ui_genie_chat(
+    question: str,
+    mode: str = "genie",
+    history: list[dict[str, Any]] | None = None,
+    catalogs: list[dict[str, Any]] | None = None,
+    model: str = "gemini-2.5-flash",
+) -> dict[str, Any]:
+    """Execute Genie conversational data analyst loop in Lake UI."""
+    active_key = _get_gemini_api_key()
+    if not active_key:
+        return {"ok": False, "mode": mode, "error": duckdb_ai.GEMINI_KEY_NOT_CONFIGURED_MSG}
+
+    if mode == "rag":
+        rag_res = _ai_query(question)
+        if not rag_res.get("ok"):
+            return {"ok": False, "mode": "rag", "error": rag_res.get("error")}
+        return {
+            "ok": True,
+            "mode": "rag",
+            "answer": rag_res.get("answer", ""),
+            "sql": None,
+            "self_corrected": False,
+            "initial_error": None,
+            "columns": [],
+            "rows": [],
+            "row_count": 0,
+            "execution_ms": 0.0,
+            "chart_config": None,
+            "snippets": rag_res.get("snippets", []),
+            "tables_used": [],
+            "error": None,
+        }
+
+    history_lines: list[str] = []
+    for turn in (history or [])[-6:]:
+        role = turn.get("role", "user")
+        content = turn.get("content", "")
+        turn_sql = turn.get("sql")
+        if turn_sql:
+            history_lines.append(f"{role.upper()}: {content}\nSQL: {turn_sql}")
+        else:
+            history_lines.append(f"{role.upper()}: {content}")
+    history_ctx = (
+        "\n### Prior Conversation Turns\n" + "\n".join(history_lines) + "\n"
+        if history_lines
+        else ""
+    )
+
+    schema_ctx = duckdb_ai.build_schema_prompt_context(catalogs, bucket=MINIO_BUCKET)
+    synth_prompt = (
+        "You are the Lake of Tears Genie Data Analyst, an autonomous conversational SQL agent.\n"
+        "Given the workspace catalog schema, conversation history, and the user's question, "
+        "write a single read-only DuckDB SELECT query to answer the question.\n"
+        "Rules:\n"
+        "1. Only generate read-only SELECT / WITH queries (never DROP/INSERT/UPDATE/DELETE).\n"
+        "2. Always include a LIMIT (e.g. LIMIT 50) unless aggregating to a small summary table.\n"
+        "3. You may use DuckDB SQL AI functions (`ai_query`, `ai_summarize`, `ai_classify`, `ai_extract`) when appropriate.\n\n"
+        f"{schema_ctx}\n"
+        f"{history_ctx}\n"
+        f"User Question: {question}\n\n"
+        "Respond ONLY with a valid JSON object matching this exact schema:\n"
+        '{"sql": "SELECT ...", "tables_used": ["stripe_charges"], "reasoning": "Brief plan"}'
+    )
+
+    def _client_factory(api_key: str):
+        return genai.Client(api_key=api_key)
+
+    try:
+        raw_plan = duckdb_ai.call_gemini_text(
+            synth_prompt,
+            model=model,
+            api_key=active_key,
+            client_factory=_client_factory,
+        )
+        parsed_plan = duckdb_ai._parse_json_response(raw_plan)
+        generated_sql = duckdb_ai._strip_code_fences(
+            str(parsed_plan.get("sql") or raw_plan)
+        ).strip()
+        tables_used = [str(t) for t in (parsed_plan.get("tables_used") or []) if t]
+    except Exception as exc:
+        return {"ok": False, "mode": mode, "error": f"Failed to synthesize SQL: {exc}"}
+
+    exec_res = _run_query(generated_sql, catalogs=catalogs, read_only=True)
+    self_corrected = False
+    initial_error: str | None = None
+
+    if not exec_res["ok"] and exec_res.get("error"):
+        initial_error = exec_res["error"]
+        fix_res = duckdb_ai.fix_sql_query(
+            sql=generated_sql,
+            error_message=initial_error or "",
+            catalogs=catalogs,
+            model=model,
+            api_key=active_key,
+            bucket=MINIO_BUCKET,
+            client_factory=_client_factory,
+        )
+        if fix_res.get("ok") and fix_res.get("fixed_sql"):
+            candidate_sql = fix_res["fixed_sql"]
+            retry_res = _run_query(candidate_sql, catalogs=catalogs, read_only=True)
+            if retry_res["ok"]:
+                generated_sql = candidate_sql
+                exec_res = retry_res
+                self_corrected = True
+
+    snippets: list[dict[str, Any]] = []
+    if mode == "hybrid" or not exec_res["ok"]:
+        rag_res = _ai_query(question)
+        if rag_res.get("ok"):
+            snippets = rag_res.get("snippets", [])
+
+    columns = exec_res.get("columns", [])
+    raw_rows = exec_res.get("rows", [])
+    rows = [[duckdb_ai.serialize_cell(c) for c in r] for r in raw_rows]
+    row_count = exec_res.get("row_count", 0)
+    execution_ms = exec_res.get("execution_ms", 0.0)
+    chart_config = (
+        duckdb_ai.infer_chart_config(columns, rows, question=question) if exec_res["ok"] else None
+    )
+
+    if exec_res["ok"]:
+        insight_prompt = (
+            "You are the Lake of Tears Genie Data Analyst.\n"
+            "Provide a clear, concise, data-driven answer to the user's question based on the executed DuckDB query results.\n"
+            "Highlight key numbers, trends, or top items.\n\n"
+            f"Question: {question}\n"
+            f"Executed SQL:\n```sql\n{generated_sql}\n```\n"
+            f"Columns: {columns}\n"
+            f"Sample Rows ({row_count} total): {rows[:20]}\n"
+        )
+        if snippets:
+            snippet_text = "\n".join(f"- [{s['source']}]: {s['summary']}" for s in snippets[:3])
+            insight_prompt += f"\nAdditional Semantic Context:\n{snippet_text}\n"
+    else:
+        if snippets:
+            snippet_text = "\n".join(f"- [{s['source']}]: {s['summary']}" for s in snippets)
+            insight_prompt = (
+                "You are the Lake of Tears Genie Data Analyst.\n"
+                "The live SQL query could not be executed against the current S3 Parquet files "
+                f"({exec_res.get('error')}), so answer using these semantic search snippets and explain the SQL query you synthesized:\n\n"
+                f"Question: {question}\nSnippets:\n{snippet_text}"
+            )
+        else:
+            return {
+                "ok": True,
+                "mode": mode,
+                "answer": (
+                    f"I synthesized a DuckDB query for your question, but execution returned an error: "
+                    f"`{exec_res.get('error')}`. You can open the query in the SQL Editor to inspect or adjust the S3 path."
+                ),
+                "sql": generated_sql,
+                "self_corrected": self_corrected,
+                "initial_error": initial_error,
+                "columns": [],
+                "rows": [],
+                "row_count": 0,
+                "execution_ms": execution_ms,
+                "chart_config": None,
+                "snippets": [],
+                "tables_used": tables_used,
+                "error": exec_res.get("error"),
+            }
+
+    try:
+        answer = duckdb_ai.call_gemini_text(
+            insight_prompt,
+            model=model,
+            api_key=active_key,
+            client_factory=_client_factory,
+        )
+    except Exception as exc:
+        answer = f"Query returned {row_count} rows. (Narrative synthesis error: {exc})"
+
+    return {
+        "ok": True,
+        "mode": mode,
+        "answer": answer,
+        "sql": generated_sql,
+        "self_corrected": self_corrected,
+        "initial_error": initial_error,
+        "columns": columns,
+        "rows": rows,
+        "row_count": row_count,
+        "execution_ms": execution_ms,
+        "chart_config": chart_config,
+        "snippets": snippets,
+        "tables_used": tables_used,
+        "error": None,
+    }
+
+
+@app.get("/api/ai/context")
+@app.get("/api/v1/ai/context")
+async def ui_ai_context(request: Request):
+    catalogs = _resolve_ui_catalogs(request)
+    ws = getattr(request.state, "workspace", None) or {}
+    return JSONResponse(
+        {
+            "ok": True,
+            "workspace_id": str(ws.get("id", "")),
+            "workspace_slug": ws.get("slug", "default"),
+            "workspace_name": ws.get("name", "Default"),
+            "catalogs": catalogs,
+            "default_datasets": duckdb_ai.get_default_datasets(MINIO_BUCKET),
+            "sql_ai_functions": duckdb_ai.SQL_AI_FUNCTIONS,
+        }
+    )
+
+
+@app.post("/api/ai/sql/execute")
+@app.post("/api/v1/ai/sql/execute")
+async def ui_ai_sql_execute(request: Request):
+    body = await request.json()
+    sql = str(body.get("sql") or "")
+    read_only = bool(body.get("read_only", False))
+    max_ai_rows = int(body.get("max_ai_rows", 50))
+    catalogs = _resolve_ui_catalogs(request)
+    res = _run_query(sql, catalogs=catalogs, read_only=read_only, max_ai_rows=max_ai_rows)
+    if res.get("ok"):
+        res["rows"] = [[duckdb_ai.serialize_cell(c) for c in r] for r in res.get("rows", [])]
+    return JSONResponse(res)
+
+
+@app.post("/api/ai/sql/generate")
+@app.post("/api/v1/ai/sql/generate")
+async def ui_ai_sql_generate(request: Request):
+    body = await request.json()
+    prompt = str(body.get("prompt") or "")
+    current_sql = body.get("current_sql")
+    model = str(body.get("model") or "gemini-2.5-flash")
+    catalogs = _resolve_ui_catalogs(request)
+    res = duckdb_ai.generate_sql_from_prompt(
+        prompt=prompt,
+        catalogs=catalogs,
+        current_sql=current_sql,
+        model=model,
+        api_key=_get_gemini_api_key(),
+        bucket=MINIO_BUCKET,
+        client_factory=lambda api_key: genai.Client(api_key=api_key),
+    )
+    return JSONResponse(res)
+
+
+@app.post("/api/ai/sql/fix")
+@app.post("/api/v1/ai/sql/fix")
+async def ui_ai_sql_fix(request: Request):
+    body = await request.json()
+    sql = str(body.get("sql") or "")
+    error_msg = str(body.get("error") or "")
+    model = str(body.get("model") or "gemini-2.5-flash")
+    catalogs = _resolve_ui_catalogs(request)
+    res = duckdb_ai.fix_sql_query(
+        sql=sql,
+        error_message=error_msg,
+        catalogs=catalogs,
+        model=model,
+        api_key=_get_gemini_api_key(),
+        bucket=MINIO_BUCKET,
+        client_factory=lambda api_key: genai.Client(api_key=api_key),
+    )
+    return JSONResponse(res)
+
+
+@app.post("/api/ai/sql/explain")
+@app.post("/api/v1/ai/sql/explain")
+async def ui_ai_sql_explain(request: Request):
+    body = await request.json()
+    sql = str(body.get("sql") or "")
+    model = str(body.get("model") or "gemini-2.5-flash")
+    catalogs = _resolve_ui_catalogs(request)
+    res = duckdb_ai.explain_sql_query(
+        sql=sql,
+        catalogs=catalogs,
+        model=model,
+        api_key=_get_gemini_api_key(),
+        bucket=MINIO_BUCKET,
+        client_factory=lambda api_key: genai.Client(api_key=api_key),
+    )
+    return JSONResponse(res)
+
+
+@app.post("/api/ai/chat")
+@app.post("/api/v1/ai/chat")
+async def ui_ai_chat(request: Request):
+    body = await request.json()
+    question = str(body.get("question") or "")
+    mode = str(body.get("mode") or "genie")
+    history = body.get("history") or []
+    model = str(body.get("model") or "gemini-2.5-flash")
+    catalogs = _resolve_ui_catalogs(request)
+    res = _ui_genie_chat(
+        question=question,
+        mode=mode,
+        history=history,
+        catalogs=catalogs,
+        model=model,
+    )
+    return JSONResponse(res)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import os
 import re
 import threading
@@ -7,21 +8,27 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
+import ai_service
 import jwt as _jwt
+from ai_router import router as ai_router
 from auth import (
     COOKIE_NAME,
+    SECRET_KEY,
     create_token,
     decode_token,
     get_current_user,
     get_session_expires_delta,
+    get_stored_gemini_api_key,
     hash_password,
+    mask_secret,
     require_superadmin,
+    set_stored_gemini_api_key,
     verify_password,
 )
 from dashboards_router import router as dashboards_router
 from database import get_db
 from email_service import send_access_removed, send_access_requested, send_access_reviewed
-from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from models import (
     Catalog,
@@ -57,6 +64,8 @@ from schemas import (
     ReviewAccessRequest,
     SharedCatalogSettingsItem,
     SystemSettingResponse,
+    TestGeminiKeyRequest,
+    TestGeminiKeyResponse,
     UpdateCatalogRequest,
     UpdateMemberRequest,
     UpdateMeRequest,
@@ -71,7 +80,7 @@ from schemas import (
     WorkspaceMemberResponse,
     WorkspaceResponse,
 )
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 from storage_router import router as storage_router
 
@@ -119,6 +128,8 @@ app.include_router(storage_router, prefix="/api/v1/storage", tags=["storage"])
 app.include_router(storage_router, prefix="/api/storage", tags=["storage"])
 app.include_router(dashboards_router, prefix="/api/v1/dashboards", tags=["dashboards"])
 app.include_router(dashboards_router, prefix="/api/dashboards", tags=["dashboards"])
+app.include_router(ai_router, prefix="/api/v1/ai", tags=["ai"])
+app.include_router(ai_router, prefix="/api/ai", tags=["ai"])
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -784,6 +795,11 @@ def _get_session_max_hours(db: Session) -> int:
 
 
 def _ensure_system_settings(db: Session) -> None:
+    try:
+        db.execute(text("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS value_str TEXT"))
+        db.commit()
+    except Exception:
+        db.rollback()
     defaults = {
         "catalog_soft_delete_days": _DEFAULT_SOFT_DELETE_DAYS,
         "workspace_inactive_grace_period_days": _DEFAULT_WORKSPACE_INACTIVE_DAYS,
@@ -1753,17 +1769,24 @@ def get_public_settings(db: Session = Depends(get_db)):
     }
 
 
-@app.get("/api/admin/settings", response_model=SystemSettingResponse)
-def get_admin_settings(
-    db: Session = Depends(get_db),
-    _: User = Depends(require_superadmin),
-):
+def _system_setting_response(db: Session) -> SystemSettingResponse:
+    raw_key = get_stored_gemini_api_key(db)
     return SystemSettingResponse(
         catalog_soft_delete_days=_get_soft_delete_days(db),
         workspace_inactive_grace_period_days=_get_workspace_inactive_days(db),
         session_inactivity_timeout_minutes=_get_session_inactivity_minutes(db),
         session_max_hours=_get_session_max_hours(db),
+        gemini_api_key_configured=bool(raw_key),
+        gemini_api_key_masked=mask_secret(raw_key),
     )
+
+
+@app.get("/api/admin/settings", response_model=SystemSettingResponse)
+def get_admin_settings(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    return _system_setting_response(db)
 
 
 def _upsert_setting(db: Session, key: str, value: int, user_id) -> None:
@@ -1802,10 +1825,71 @@ def update_admin_settings(
         )
     if req.session_max_hours is not None:
         _upsert_setting(db, "session_max_hours", req.session_max_hours, current_user.id)
+    if req.clear_gemini_api_key:
+        set_stored_gemini_api_key(db, None, current_user.id)
+        ai_service.clear_ai_cache()
+    elif req.gemini_api_key is not None:
+        clean_key = req.gemini_api_key.strip()
+        if not clean_key:
+            raise HTTPException(400, "GEMINI_API_KEY cannot be empty")
+        set_stored_gemini_api_key(db, clean_key, current_user.id)
+        ai_service.clear_ai_cache()
     db.commit()
-    return SystemSettingResponse(
-        catalog_soft_delete_days=_get_soft_delete_days(db),
-        workspace_inactive_grace_period_days=_get_workspace_inactive_days(db),
-        session_inactivity_timeout_minutes=_get_session_inactivity_minutes(db),
-        session_max_hours=_get_session_max_hours(db),
+    return _system_setting_response(db)
+
+
+@app.post("/api/admin/settings/test-gemini-key", response_model=TestGeminiKeyResponse)
+def test_admin_gemini_key(
+    req: TestGeminiKeyRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    candidate = (req.api_key or "").strip() or get_stored_gemini_api_key(db)
+    model = (req.model or "").strip() or ai_service.AI_DEFAULT_MODEL
+    if not candidate:
+        return TestGeminiKeyResponse(
+            ok=False,
+            model=model,
+            message="No GEMINI_API_KEY is configured or provided to test.",
+        )
+    result = ai_service.test_gemini_api_key(api_key=candidate, model=model)
+    return TestGeminiKeyResponse(
+        ok=bool(result.get("ok")),
+        model=str(result.get("model") or model),
+        message=str(result.get("message") or ""),
     )
+
+
+@app.get("/api/internal/settings/gemini-key")
+def get_internal_gemini_key(
+    x_internal_secret: str | None = Header(default=None),
+    lake_token: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    """Return the active decrypted GEMINI_API_KEY to internal services (ui, pipeline)."""
+    authorized = False
+    if x_internal_secret and hmac.compare_digest(
+        x_internal_secret.encode("utf-8"), SECRET_KEY.encode("utf-8")
+    ):
+        authorized = True
+    else:
+        token = lake_token
+        if not token and authorization and authorization.startswith("Bearer "):
+            token = authorization[7:]
+        if token:
+            try:
+                payload = decode_token(token)
+                sub_val = payload.get("sub")
+                user_uuid = uuid.UUID(str(sub_val))
+                user = db.query(User).filter(User.id == user_uuid).first()
+                if user and user.is_active:
+                    authorized = True
+            except Exception:
+                authorized = False
+
+    if not authorized:
+        raise HTTPException(401, "Not authorized")
+
+    raw_key = get_stored_gemini_api_key(db)
+    return {"gemini_api_key": raw_key, "configured": bool(raw_key)}

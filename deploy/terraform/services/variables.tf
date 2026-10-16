@@ -68,11 +68,6 @@ variable "jupyter_token" {
   sensitive = true
 }
 
-variable "gemini_api_key" {
-  type      = string
-  sensitive = true
-}
-
 variable "airflow_password" {
   type      = string
   sensitive = true

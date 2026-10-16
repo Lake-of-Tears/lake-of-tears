@@ -2,15 +2,13 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[2]))
+sys.path.insert(0, str(Path(__file__).parents[1] / "shared"))
 
-import os
 from datetime import date, timedelta
 
 import pandas as pd
-from google import genai
+from gemini_embedder import get_gemini_client
 from storage_writer import get_duckdb_con, write_to_storage
-
-_client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 
 SOURCES = {
     "jellyfin": ("Name", "raw/jellyfin/**/*.parquet"),
@@ -32,8 +30,9 @@ def summarize_day(source: str, text_col: str, parquet_glob: str):
     if df.empty:
         return
 
+    client = get_gemini_client()
     content = "\n".join(df[text_col].dropna().astype(str).tolist())
-    response = _client.models.generate_content(
+    response = client.models.generate_content(
         model="gemini-2.5-flash",
         contents=f"Summarize the following {source} activity from {yesterday} "
         f"in 3-5 bullet points:\n\n{content}",

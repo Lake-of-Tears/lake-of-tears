@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import os
+import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 
 import jwt
-from database import get_db
+from database import SessionLocal, get_db
 from fastapi import Cookie, Depends, Header, HTTPException
 from models import SystemSetting, User, Workspace, WorkspaceMember
 from passlib.context import CryptContext
@@ -14,11 +18,128 @@ from sqlalchemy.orm import Session
 SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "dev-secret-please-change-in-production")
 ALGORITHM = "HS256"
 COOKIE_NAME = "lake_token"
+GEMINI_API_KEY_SETTING = "gemini_api_key"
 
 # Fallback TTL used when the DB is unavailable (e.g. during first startup).
 _FALLBACK_TTL = timedelta(hours=24)
 
 _pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def _keystream(enc_key: bytes, nonce: bytes, length: int) -> bytes:
+    out = bytearray()
+    counter = 0
+    while len(out) < length:
+        block = hmac.new(enc_key, nonce + counter.to_bytes(4, "big"), hashlib.sha256).digest()
+        out.extend(block)
+        counter += 1
+    return bytes(out[:length])
+
+
+def encrypt_secret(plaintext: str) -> str:
+    """Encrypt a secret string at rest using key material derived from AUTH_SECRET_KEY."""
+    raw = plaintext.encode("utf-8")
+    nonce = secrets.token_bytes(16)
+    secret_bytes = SECRET_KEY.encode("utf-8")
+    enc_key = hmac.new(secret_bytes, b"lot-secret-enc-v1", hashlib.sha256).digest()
+    mac_key = hmac.new(secret_bytes, b"lot-secret-mac-v1", hashlib.sha256).digest()
+    stream = _keystream(enc_key, nonce, len(raw))
+    ciphertext = bytes(a ^ b for a, b in zip(raw, stream, strict=False))
+    tag = hmac.new(mac_key, nonce + ciphertext, hashlib.sha256).digest()
+    return (
+        "v1:"
+        + base64.urlsafe_b64encode(nonce).decode("ascii")
+        + ":"
+        + base64.urlsafe_b64encode(ciphertext).decode("ascii")
+        + ":"
+        + base64.urlsafe_b64encode(tag).decode("ascii")
+    )
+
+
+def decrypt_secret(token: str | None) -> str:
+    """Decrypt a secret encrypted by encrypt_secret(). Returns '' if empty or invalid."""
+    if not token:
+        return ""
+    if not token.startswith("v1:"):
+        return ""
+    parts = token.split(":")
+    if len(parts) != 4:
+        return ""
+    try:
+        nonce = base64.urlsafe_b64decode(parts[1].encode("ascii"))
+        ciphertext = base64.urlsafe_b64decode(parts[2].encode("ascii"))
+        tag = base64.urlsafe_b64decode(parts[3].encode("ascii"))
+    except Exception:
+        return ""
+    secret_bytes = SECRET_KEY.encode("utf-8")
+    enc_key = hmac.new(secret_bytes, b"lot-secret-enc-v1", hashlib.sha256).digest()
+    mac_key = hmac.new(secret_bytes, b"lot-secret-mac-v1", hashlib.sha256).digest()
+    expected_tag = hmac.new(mac_key, nonce + ciphertext, hashlib.sha256).digest()
+    if not hmac.compare_digest(tag, expected_tag):
+        return ""
+    stream = _keystream(enc_key, nonce, len(ciphertext))
+    plaintext = bytes(a ^ b for a, b in zip(ciphertext, stream, strict=False))
+    try:
+        return plaintext.decode("utf-8")
+    except UnicodeDecodeError:
+        return ""
+
+
+def mask_secret(plaintext: str | None) -> str | None:
+    """Return a masked preview (e.g. '••••••••1234') or None if unset."""
+    if not plaintext or not plaintext.strip():
+        return None
+    clean = plaintext.strip()
+    if len(clean) <= 4:
+        return "••••••••"
+    return f"••••••••{clean[-4:]}"
+
+
+def get_stored_gemini_api_key(db: Session | None = None) -> str:
+    """Retrieve and decrypt the GEMINI_API_KEY configured in the Admin Panel."""
+    owns_session = False
+    if db is None:
+        try:
+            db = SessionLocal()
+            owns_session = True
+        except Exception:
+            return ""
+    try:
+        setting = (
+            db.query(SystemSetting).filter(SystemSetting.key == GEMINI_API_KEY_SETTING).first()
+        )
+        if not setting or not setting.value_str:
+            return ""
+        return decrypt_secret(setting.value_str).strip()
+    except Exception:
+        return ""
+    finally:
+        if owns_session and db is not None:
+            db.close()
+
+
+def set_stored_gemini_api_key(
+    db: Session,
+    plaintext_key: str | None,
+    user_id: uuid.UUID | None = None,
+) -> None:
+    """Encrypt and store (or clear) the GEMINI_API_KEY in system_settings."""
+    clean = (plaintext_key or "").strip()
+    encrypted = encrypt_secret(clean) if clean else None
+    setting = db.query(SystemSetting).filter(SystemSetting.key == GEMINI_API_KEY_SETTING).first()
+    if setting:
+        setting.value_str = encrypted
+        setting.updated_at = datetime.now(UTC)
+        setting.updated_by = user_id
+    else:
+        db.add(
+            SystemSetting(
+                key=GEMINI_API_KEY_SETTING,
+                value=None,
+                value_str=encrypted,
+                updated_by=user_id,
+            )
+        )
 
 
 def hash_password(password: str) -> str:
@@ -421,6 +542,76 @@ def get_dashboard_workspace_and_role(
     if require_write and current_user.role != "superadmin" and role == "viewer":
         raise HTTPException(
             403, "Workspace viewer role is read-only. Cannot create, edit, or delete dashboards."
+        )
+
+    return ws, role
+
+
+def get_ai_workspace_and_role(
+    workspace_id: str | None = None,
+    workspace_slug: str | None = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    require_write: bool = False,
+) -> tuple[Workspace, str]:
+    """Resolve workspace and verify user permissions for AI & SQL operations."""
+    ws = None
+    if workspace_slug:
+        ws = (
+            db.query(Workspace)
+            .filter(Workspace.slug == workspace_slug.strip(), Workspace.status == "active")
+            .first()
+        )
+    elif workspace_id:
+        try:
+            ws_uuid = uuid.UUID(str(workspace_id))
+            ws = (
+                db.query(Workspace)
+                .filter(Workspace.id == ws_uuid, Workspace.status == "active")
+                .first()
+            )
+        except (ValueError, TypeError):
+            ws = None
+
+    if not ws:
+        if current_user.role == "superadmin":
+            ws = (
+                db.query(Workspace)
+                .filter(Workspace.status == "active")
+                .order_by(Workspace.created_at)
+                .first()
+            )
+        else:
+            ws = (
+                db.query(Workspace)
+                .join(WorkspaceMember, WorkspaceMember.workspace_id == Workspace.id)
+                .filter(WorkspaceMember.user_id == current_user.id, Workspace.status == "active")
+                .order_by(Workspace.created_at)
+                .first()
+            )
+
+    if not ws:
+        raise HTTPException(404, "Workspace not found")
+
+    member = (
+        db.query(WorkspaceMember)
+        .filter(
+            WorkspaceMember.workspace_id == ws.id,
+            WorkspaceMember.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not member and current_user.role != "superadmin":
+        raise HTTPException(403, "Not a member of this workspace")
+
+    role = (
+        member.role if member else ("superadmin" if current_user.role == "superadmin" else "viewer")
+    )
+
+    if require_write and current_user.role != "superadmin" and role == "viewer":
+        raise HTTPException(
+            403, "Workspace viewer role is read-only. Cannot execute write operations."
         )
 
     return ws, role

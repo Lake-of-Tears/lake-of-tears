@@ -2,18 +2,17 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[2]))
+sys.path.insert(0, str(Path(__file__).parents[1] / "shared"))
 
 import os
 
 import duckdb
 import numpy as np
-from google import genai
+from gemini_embedder import get_gemini_client
 from sklearn.ensemble import IsolationForest
 from storage_writer import _load_env
 
 _load_env()
-
-_client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 
 
 def detect_anomalies(source: str = "truenas", contamination: float = 0.05) -> str:
@@ -40,7 +39,8 @@ def detect_anomalies(source: str = "truenas", contamination: float = 0.05) -> st
     if not anomalies:
         return "No anomalies detected."
 
-    response = _client.models.generate_content(
+    client = get_gemini_client()
+    response = client.models.generate_content(
         model="gemini-2.5-flash",
         contents=f"The following {source} entries were flagged as anomalies. "
         f"Summarize what's unusual about them:\n\n" + "\n".join(anomalies[:20]),
