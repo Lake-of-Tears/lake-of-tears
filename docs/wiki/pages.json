@@ -1,6 +1,16 @@
 {
   "pages": [
     {
+      "slug": "home",
+      "title": "Home",
+      "file": "Home.md"
+    },
+    {
+      "slug": "architecture-overview",
+      "title": "Architecture Overview",
+      "file": "Architecture-Overview.md"
+    },
+    {
       "slug": "workspaces-and-catalog-management",
       "title": "Workspaces and Catalog Management",
       "file": "Workspaces-and-Catalog-Management.md"
