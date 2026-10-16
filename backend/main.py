@@ -27,6 +27,7 @@ from auth import (
     set_stored_gemini_model,
     verify_password,
 )
+from catalog_storage import delete_prefix, prefixes_to_delete
 from dashboards_router import router as dashboards_router
 from database import get_db
 from email_service import send_access_removed, send_access_requested, send_access_reviewed
@@ -1080,6 +1081,20 @@ def reactivate_catalog(
     return _catalog_response(catalog, current_user, db)
 
 
+def _purge_catalog_objects(db: Session, catalog: Catalog) -> None:
+    """Remove the catalog's table data from object storage (see catalog_storage)."""
+    rows = (
+        db.query(CatalogTable.s3_path_pattern, CatalogSchema.catalog_id)
+        .join(CatalogSchema, CatalogTable.schema_id == CatalogSchema.id)
+        .filter(CatalogTable.s3_path_pattern.isnot(None))
+        .all()
+    )
+    own = [p for p, cid in rows if cid == catalog.id]
+    others = [p for p, cid in rows if cid != catalog.id]
+    for prefix in prefixes_to_delete(own, others):
+        delete_prefix(prefix)
+
+
 @app.post("/api/catalogs/{catalog_id}/purge")
 def purge_catalog(
     catalog_id: str,
@@ -1102,6 +1117,12 @@ def purge_catalog(
 
     if req.confirm_name != catalog.name:
         raise HTTPException(422, "Catalog name confirmation does not match")
+
+    # Delete object data first: if storage fails the DB rows survive and the purge can retry.
+    try:
+        _purge_catalog_objects(db, catalog)
+    except Exception as exc:
+        raise HTTPException(502, "Failed to delete catalog data from object storage") from exc
 
     db.delete(catalog)
     db.commit()

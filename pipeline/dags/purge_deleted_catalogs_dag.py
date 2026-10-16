@@ -33,6 +33,23 @@ def _collect_s3_paths(db, catalog_id: str) -> list[str]:
     return [r[0] for r in rows if r[0]]
 
 
+def _prefix_for_pattern(pattern: str) -> str | None:
+    import re
+
+    scheme = f"s3://{MINIO_BUCKET}/"
+    pattern = pattern.strip()
+    if not pattern.startswith(scheme):
+        return None
+    key = pattern[len(scheme) :]
+    glob = re.search(r"[*?\[]", key)
+    if glob:
+        key = key[: glob.start()]
+    if "/" not in key:
+        return None
+    prefix = key.rsplit("/", 1)[0].strip("/")
+    return f"{prefix}/" if prefix else None
+
+
 def _delete_s3_prefix(prefix: str) -> None:
     import boto3
 
@@ -80,8 +97,11 @@ def purge_deleted_catalogs():
 
             # Delete S3 data first; if this fails the task retries before touching DB
             for path in s3_paths:
-                # Derive the prefix from the path pattern (strip glob suffixes)
-                prefix = path.rstrip("*").rstrip("/")
+                # Patterns look like s3://bucket/a/b/**/*.parquet; list by key prefix "a/b/"
+                prefix = _prefix_for_pattern(path)
+                if prefix is None:
+                    print(f"  Skipping unrecognised path pattern: {path}")
+                    continue
                 try:
                     _delete_s3_prefix(prefix)
                     print(f"  Deleted S3 prefix: {prefix}")
