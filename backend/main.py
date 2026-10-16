@@ -170,7 +170,13 @@ def _create_default_catalog(db: Session, ws: Workspace, user: User) -> Catalog:
 
 def _create_default_workspace(db: Session, user: User) -> Workspace:
     slug = _unique_slug(db, "default")
-    ws = Workspace(name="Default", slug=slug, description="Default workspace", created_by=user.id)
+    ws = Workspace(
+        name="Default",
+        slug=slug,
+        description="Default workspace",
+        created_by=user.id,
+        is_system=True,
+    )
     db.add(ws)
     db.flush()
     db.add(WorkspaceMember(workspace_id=ws.id, user_id=user.id, role="admin"))
