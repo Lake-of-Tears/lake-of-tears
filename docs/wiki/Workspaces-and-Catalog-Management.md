@@ -12,7 +12,7 @@ A **workspace** is a tenant boundary. Users belong to one or more workspaces wit
 
 The first user to register becomes the superadmin and a **Default** workspace is created automatically (`is_system = true`). The Default workspace is meant to be undeletable.
 
-> **Needs confirmation:** on a fresh install the Default workspace is created without `is_system = true` (check `select name, is_system from workspaces`), so the admin API's system-workspace guard does not apply and the Admin panel offers **Mark inactive** and **Delete now** on it. Only the legacy `DELETE /api/workspaces/{id}` protects it, by slug.
+> **Known issue (#129, fix in #130):** before the fix, the Default workspace was created without `is_system = true`, so the admin API's system-workspace guard did not apply and the Admin panel offered **Mark inactive** and **Delete now** on it. Once #130 is merged, Default is flagged on creation (and existing installs are backfilled by migration `0007`), the API returns `409`, and the Admin panel shows a **System** badge instead. Update the Admin screenshot below after that release.
 
 ![Workspace switcher showing Default and Analytics](images/workspace-switcher.jpg)
 
