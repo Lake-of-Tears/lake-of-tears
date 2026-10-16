@@ -20,6 +20,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from google import genai
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 
 try:
@@ -65,6 +66,34 @@ _WORKSPACE_COOKIE = "lake_workspace_id"
 _SESSION_CONFIG_CACHE: dict | None = None
 _SESSION_CONFIG_FETCHED_AT: float = 0.0
 _SESSION_CONFIG_TTL = 60.0  # seconds
+
+
+_GEMINI_MODEL_CACHE: tuple[str, float] | None = None
+_GEMINI_MODEL_TTL = 30.0
+
+
+def _get_gemini_default_model() -> str:
+    """Resolve the default Gemini model from the Admin Panel backend setting (cached briefly)."""
+    global _GEMINI_MODEL_CACHE
+    now = time.monotonic()
+    if _GEMINI_MODEL_CACHE is not None and now - _GEMINI_MODEL_CACHE[1] < _GEMINI_MODEL_TTL:
+        return _GEMINI_MODEL_CACHE[0]
+    model = duckdb_ai.DEFAULT_GEMINI_MODEL
+    try:
+        with httpx.Client(timeout=3) as client:
+            resp = client.get(
+                f"{BACKEND_URL}/api/internal/settings/gemini-key",
+                headers={"X-Internal-Secret": AUTH_SECRET_KEY},
+            )
+        if resp.status_code == 200:
+            model = str(resp.json().get("gemini_default_model") or "").strip() or model
+    except Exception:
+        pass
+    _GEMINI_MODEL_CACHE = (model, now)
+    return model
+
+
+duckdb_ai.set_default_model_provider(_get_gemini_default_model)
 
 
 def _get_gemini_api_key() -> str:
@@ -369,6 +398,7 @@ def _run_query(
     catalogs: list[dict[str, Any]] | None = None,
     read_only: bool = False,
     max_ai_rows: int = 50,
+    cancel: Any = None,
 ) -> dict[str, Any]:
     if read_only:
         allowed, reason = duckdb_ai.is_read_only_sql(sql)
@@ -380,6 +410,9 @@ def _run_query(
     con = None
     try:
         con = _duckdb_connection(max_ai_rows=max_ai_rows, ai_state=ai_state)
+        if cancel is not None:
+            cancel.attach(con)
+            cancel.check()
         registered_views = duckdb_ai.register_catalog_views(con, catalogs)
         rel = con.execute(sql)
         columns = [desc[0] for desc in (rel.description or [])]
@@ -402,7 +435,12 @@ def _run_query(
                 con.close()
             except Exception:
                 pass
+        if cancel is not None and cancel.cancelled:
+            raise duckdb_ai.GenieCancelled() from exc
         return {"ok": False, "error": str(exc)}
+    finally:
+        if cancel is not None:
+            cancel.detach()
 
 
 AI_VECTOR_SQL = """
@@ -460,7 +498,7 @@ def _ai_query(question: str) -> dict[str, Any]:
         )
 
         answer = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model=_get_gemini_default_model(),
             contents=prompt,
         ).text
 
@@ -492,7 +530,7 @@ EXAMPLE_QUERIES = [
     },
     {
         "label": "✨ AI Sentiment (ai_query)",
-        "sql": "SELECT id, amount_usd, description, ai_query('gemini-2.5-flash', 'Classify payment risk in one word: ' || description) AS risk_label FROM read_parquet('s3://datalake/raw/stripe_charges/**/*.parquet') LIMIT 10",
+        "sql": "SELECT id, amount_usd, description, ai_query('gemini-3.8-flash', 'Classify payment risk in one word: ' || description) AS risk_label FROM read_parquet('s3://datalake/raw/stripe_charges/**/*.parquet') LIMIT 10",
     },
     {
         "label": "✨ AI Summarize (ai_summarize)",
@@ -1114,6 +1152,7 @@ async def settings_admin_get(request: Request):
         "session_max_hours": 24,
         "gemini_api_key_configured": False,
         "gemini_api_key_masked": None,
+        "gemini_default_model": duckdb_ai.DEFAULT_GEMINI_MODEL,
     }
     return templates.TemplateResponse(
         request=request,
@@ -1229,7 +1268,9 @@ async def settings_admin_ai_settings(
     request: Request,
     action: str = Form("save"),
     gemini_api_key: str = Form(""),
+    gemini_default_model: str | None = Form(None),
 ):
+    global _GEMINI_MODEL_CACHE
     user = request.state.user
     if not user or user.get("role") != "superadmin":
         return RedirectResponse(url="/", status_code=302)
@@ -1243,6 +1284,14 @@ async def settings_admin_ai_settings(
             token,
             {"gemini_api_key": gemini_api_key.strip()},
         )
+        duckdb_ai.clear_ai_cache()
+    if action != "clear" and gemini_default_model is not None:
+        _backend_patch(
+            "/api/admin/settings",
+            token,
+            {"gemini_default_model": gemini_default_model.strip()},
+        )
+        _GEMINI_MODEL_CACHE = None
         duckdb_ai.clear_ai_cache()
     return RedirectResponse(url="/settings/admin?saved=1", status_code=302)
 
@@ -1261,7 +1310,7 @@ async def settings_admin_ai_settings_test(request: Request):
         body = {}
     payload = {
         "api_key": body.get("api_key"),
-        "model": body.get("model") or "gemini-2.5-flash",
+        "model": body.get("model") or None,
     }
     try:
         with httpx.Client(timeout=15) as client:
@@ -2843,15 +2892,23 @@ def _ui_genie_chat(
     mode: str = "genie",
     history: list[dict[str, Any]] | None = None,
     catalogs: list[dict[str, Any]] | None = None,
-    model: str = "gemini-2.5-flash",
+    model: str | None = None,
+    cancel: Any = None,
 ) -> dict[str, Any]:
     """Execute Genie conversational data analyst loop in Lake UI."""
+
+    def _check_cancelled() -> None:
+        if cancel is not None:
+            cancel.check()
+
     active_key = _get_gemini_api_key()
     if not active_key:
         return {"ok": False, "mode": mode, "error": duckdb_ai.GEMINI_KEY_NOT_CONFIGURED_MSG}
 
+    _check_cancelled()
     if mode == "rag":
         rag_res = _ai_query(question)
+        _check_cancelled()
         if not rag_res.get("ok"):
             return {"ok": False, "mode": "rag", "error": rag_res.get("error")}
         return {
@@ -2920,12 +2977,14 @@ def _ui_genie_chat(
     except Exception as exc:
         return {"ok": False, "mode": mode, "error": f"Failed to synthesize SQL: {exc}"}
 
-    exec_res = _run_query(generated_sql, catalogs=catalogs, read_only=True)
+    _check_cancelled()
+    exec_res = _run_query(generated_sql, catalogs=catalogs, read_only=True, cancel=cancel)
     self_corrected = False
     initial_error: str | None = None
 
     if not exec_res["ok"] and exec_res.get("error"):
         initial_error = exec_res["error"]
+        _check_cancelled()
         fix_res = duckdb_ai.fix_sql_query(
             sql=generated_sql,
             error_message=initial_error or "",
@@ -2937,15 +2996,18 @@ def _ui_genie_chat(
         )
         if fix_res.get("ok") and fix_res.get("fixed_sql"):
             candidate_sql = fix_res["fixed_sql"]
-            retry_res = _run_query(candidate_sql, catalogs=catalogs, read_only=True)
+            _check_cancelled()
+            retry_res = _run_query(candidate_sql, catalogs=catalogs, read_only=True, cancel=cancel)
             if retry_res["ok"]:
                 generated_sql = candidate_sql
                 exec_res = retry_res
                 self_corrected = True
 
     snippets: list[dict[str, Any]] = []
+    _check_cancelled()
     if mode == "hybrid" or not exec_res["ok"]:
         rag_res = _ai_query(question)
+        _check_cancelled()
         if rag_res.get("ok"):
             snippets = rag_res.get("snippets", [])
 
@@ -3001,6 +3063,7 @@ def _ui_genie_chat(
                 "error": exec_res.get("error"),
             }
 
+    _check_cancelled()
     try:
         answer = duckdb_ai.call_gemini_text(
             insight_prompt,
@@ -3010,6 +3073,7 @@ def _ui_genie_chat(
         )
     except Exception as exc:
         answer = f"Query returned {row_count} rows. (Narrative synthesis error: {exc})"
+    _check_cancelled()
 
     return {
         "ok": True,
@@ -3067,7 +3131,7 @@ async def ui_ai_sql_generate(request: Request):
     body = await request.json()
     prompt = str(body.get("prompt") or "")
     current_sql = body.get("current_sql")
-    model = str(body.get("model") or "gemini-2.5-flash")
+    model = str(body["model"]) if body.get("model") else None
     catalogs = _resolve_ui_catalogs(request)
     res = duckdb_ai.generate_sql_from_prompt(
         prompt=prompt,
@@ -3087,7 +3151,7 @@ async def ui_ai_sql_fix(request: Request):
     body = await request.json()
     sql = str(body.get("sql") or "")
     error_msg = str(body.get("error") or "")
-    model = str(body.get("model") or "gemini-2.5-flash")
+    model = str(body["model"]) if body.get("model") else None
     catalogs = _resolve_ui_catalogs(request)
     res = duckdb_ai.fix_sql_query(
         sql=sql,
@@ -3106,7 +3170,7 @@ async def ui_ai_sql_fix(request: Request):
 async def ui_ai_sql_explain(request: Request):
     body = await request.json()
     sql = str(body.get("sql") or "")
-    model = str(body.get("model") or "gemini-2.5-flash")
+    model = str(body["model"]) if body.get("model") else None
     catalogs = _resolve_ui_catalogs(request)
     res = duckdb_ai.explain_sql_query(
         sql=sql,
@@ -3119,6 +3183,21 @@ async def ui_ai_sql_explain(request: Request):
     return JSONResponse(res)
 
 
+_GENIE_CANCEL_TOKENS: dict[str, tuple[str, Any]] = {}
+
+
+def _request_user_id(request: Request) -> str:
+    """Identify the caller from the session cookie (/api/ paths bypass AuthMiddleware)."""
+    token = request.cookies.get("lake_token")
+    if not token:
+        return ""
+    try:
+        payload = jwt.decode(token, AUTH_SECRET_KEY, algorithms=["HS256"])
+    except Exception:
+        return ""
+    return str(payload.get("sub") or payload.get("id") or payload.get("email") or "")
+
+
 @app.post("/api/ai/chat")
 @app.post("/api/v1/ai/chat")
 async def ui_ai_chat(request: Request):
@@ -3126,13 +3205,55 @@ async def ui_ai_chat(request: Request):
     question = str(body.get("question") or "")
     mode = str(body.get("mode") or "genie")
     history = body.get("history") or []
-    model = str(body.get("model") or "gemini-2.5-flash")
+    model = str(body["model"]) if body.get("model") else None
+    request_id = str(body.get("request_id") or "")
     catalogs = _resolve_ui_catalogs(request)
-    res = _ui_genie_chat(
-        question=question,
-        mode=mode,
-        history=history,
-        catalogs=catalogs,
-        model=model,
+
+    cancel = duckdb_ai.CancelToken()
+    if request_id:
+        _GENIE_CANCEL_TOKENS[request_id] = (_request_user_id(request), cancel)
+
+    work = asyncio.ensure_future(
+        run_in_threadpool(
+            _ui_genie_chat,
+            question=question,
+            mode=mode,
+            history=history,
+            catalogs=catalogs,
+            model=model,
+            cancel=cancel,
+        )
     )
+
+    async def _watch_disconnect() -> None:
+        while not work.done():
+            if await request.is_disconnected():
+                cancel.cancel()
+                return
+            await asyncio.sleep(0.5)
+
+    watcher = asyncio.ensure_future(_watch_disconnect())
+    try:
+        res = await work
+    except duckdb_ai.GenieCancelled:
+        res = {"ok": False, "mode": mode, "cancelled": True, "error": "Request cancelled"}
+    finally:
+        watcher.cancel()
+        if request_id:
+            _GENIE_CANCEL_TOKENS.pop(request_id, None)
     return JSONResponse(res)
+
+
+@app.post("/api/ai/chat/cancel")
+@app.post("/api/v1/ai/chat/cancel")
+async def ui_ai_chat_cancel(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    request_id = str(body.get("request_id") or "")
+    entry = _GENIE_CANCEL_TOKENS.get(request_id)
+    if not entry or entry[0] != _request_user_id(request):
+        return JSONResponse({"ok": False, "error": "No matching running request."}, status_code=404)
+    entry[1].cancel()
+    return JSONResponse({"ok": True})

@@ -357,6 +357,7 @@ class SystemSettingResponse(BaseModel):
     session_max_hours: int
     gemini_api_key_configured: bool = False
     gemini_api_key_masked: str | None = None
+    gemini_default_model: str | None = None
 
 
 class UpdateSystemSettingsRequest(BaseModel):
@@ -366,6 +367,7 @@ class UpdateSystemSettingsRequest(BaseModel):
     session_max_hours: int | None = None
     gemini_api_key: str | None = None
     clear_gemini_api_key: bool = False
+    gemini_default_model: str | None = None
 
     @field_validator("session_inactivity_timeout_minutes")
     @classmethod
@@ -496,7 +498,7 @@ class SqlExecuteResponse(BaseModel):
 class SqlGenerateRequest(BaseModel):
     prompt: str
     current_sql: str | None = None
-    model: str = "gemini-2.5-flash"
+    model: str | None = None
 
 
 class SqlGenerateResponse(BaseModel):
@@ -511,7 +513,7 @@ class SqlGenerateResponse(BaseModel):
 class SqlFixRequest(BaseModel):
     sql: str
     error: str
-    model: str = "gemini-2.5-flash"
+    model: str | None = None
 
 
 class SqlFixResponse(BaseModel):
@@ -523,7 +525,7 @@ class SqlFixResponse(BaseModel):
 
 class SqlExplainRequest(BaseModel):
     sql: str
-    model: str = "gemini-2.5-flash"
+    model: str | None = None
 
 
 class SqlExplainResponse(BaseModel):
@@ -545,7 +547,7 @@ class GenieChatRequest(BaseModel):
     question: str
     mode: str = "genie"  # 'genie' | 'hybrid' | 'rag'
     history: list[ChatMessageItem] = []
-    model: str = "gemini-2.5-flash"
+    model: str | None = None
 
 
 class GenieChartConfig(BaseModel):

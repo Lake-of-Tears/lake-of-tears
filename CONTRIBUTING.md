@@ -63,7 +63,7 @@ Lake of Tears brings analytical compute, storage, vector search, orchestration, 
    ```bash
    cp .env.example .env
    ```
-   Edit `.env` to configure your credentials (at minimum: `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `AUTH_SECRET_KEY`, and `GEMINI_API_KEY`).
+   Edit `.env` to configure your credentials (at minimum: `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, and `AUTH_SECRET_KEY`). The Gemini API key is configured in Settings → Admin Panel after first login.
 
 3. **Start the stack:**
    ```bash

@@ -220,8 +220,8 @@ def test_admin_settings_gemini_api_key_lifecycle_and_internal_endpoint():
                 right_val = (
                     getattr(getattr(args[0], "right", None), "value", None) if args else None
                 )
-                if right_val == "gemini_api_key":
-                    fq.first.return_value = settings_store.get("gemini_api_key")
+                if right_val in ("gemini_api_key", "gemini_default_model"):
+                    fq.first.return_value = settings_store.get(right_val)
                 else:
                     fq.first.return_value = None
                 return fq
@@ -271,7 +271,29 @@ def test_admin_settings_gemini_api_key_lifecycle_and_internal_endpoint():
             headers={"X-Internal-Secret": auth.SECRET_KEY},
         )
         assert int_resp.status_code == 200
-        assert int_resp.json() == {"gemini_api_key": raw_key, "configured": True}
+        assert int_resp.json() == {
+            "gemini_api_key": raw_key,
+            "configured": True,
+            "gemini_default_model": "gemini-3.8-flash",
+        }
+
+        # 3b. Default model can be set via the Admin Panel and is exposed to internal services
+        model_resp = client.patch(
+            "/api/admin/settings",
+            headers=headers,
+            json={"gemini_default_model": "gemini-custom-model"},
+        )
+        assert model_resp.status_code == 200
+        assert model_resp.json()["gemini_default_model"] == "gemini-custom-model"
+        int_resp2 = client.get(
+            "/api/internal/settings/gemini-key",
+            headers={"X-Internal-Secret": auth.SECRET_KEY},
+        )
+        assert int_resp2.json()["gemini_default_model"] == "gemini-custom-model"
+        reset_resp = client.patch(
+            "/api/admin/settings", headers=headers, json={"gemini_default_model": ""}
+        )
+        assert reset_resp.json()["gemini_default_model"] == "gemini-3.8-flash"
 
         # Unauthorized internal call rejected
         unauth_resp = client.get(
@@ -286,8 +308,8 @@ def test_admin_settings_gemini_api_key_lifecycle_and_internal_endpoint():
             "test_gemini_api_key",
             return_value={
                 "ok": True,
-                "model": "gemini-2.5-flash",
-                "message": "Connected to gemini-2.5-flash successfully (OK).",
+                "model": "gemini-3.8-flash",
+                "message": "Connected to gemini-3.8-flash successfully (OK).",
             },
         ) as mock_test:
             test_resp = client.post(
@@ -297,7 +319,7 @@ def test_admin_settings_gemini_api_key_lifecycle_and_internal_endpoint():
             )
             assert test_resp.status_code == 200
             assert test_resp.json()["ok"] is True
-            mock_test.assert_called_once_with(api_key=raw_key, model="gemini-2.5-flash")
+            mock_test.assert_called_once_with(api_key=raw_key, model="gemini-3.8-flash")
 
         # 5. Clear GEMINI_API_KEY
         clear_resp = client.patch(

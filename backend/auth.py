@@ -19,6 +19,8 @@ SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "dev-secret-please-change-in-productio
 ALGORITHM = "HS256"
 COOKIE_NAME = "lake_token"
 GEMINI_API_KEY_SETTING = "gemini_api_key"
+GEMINI_MODEL_SETTING = "gemini_default_model"
+DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
 
 # Fallback TTL used when the DB is unavailable (e.g. during first startup).
 _FALLBACK_TTL = timedelta(hours=24)
@@ -139,6 +141,44 @@ def set_stored_gemini_api_key(
                 value_str=encrypted,
                 updated_by=user_id,
             )
+        )
+
+
+def get_stored_gemini_model(db: Session | None = None) -> str:
+    """Return the default Gemini model configured in the Admin Panel (or the built-in default)."""
+    owns_session = False
+    if db is None:
+        try:
+            db = SessionLocal()
+            owns_session = True
+        except Exception:
+            return DEFAULT_GEMINI_MODEL
+    try:
+        setting = db.query(SystemSetting).filter(SystemSetting.key == GEMINI_MODEL_SETTING).first()
+        value = (setting.value_str or "").strip() if setting else ""
+        return value or DEFAULT_GEMINI_MODEL
+    except Exception:
+        return DEFAULT_GEMINI_MODEL
+    finally:
+        if owns_session and db is not None:
+            db.close()
+
+
+def set_stored_gemini_model(
+    db: Session,
+    model: str | None,
+    user_id: uuid.UUID | None = None,
+) -> None:
+    """Store the default Gemini model in system_settings (empty/None resets to built-in default)."""
+    clean = (model or "").strip() or None
+    setting = db.query(SystemSetting).filter(SystemSetting.key == GEMINI_MODEL_SETTING).first()
+    if setting:
+        setting.value_str = clean
+        setting.updated_at = datetime.now(UTC)
+        setting.updated_by = user_id
+    else:
+        db.add(
+            SystemSetting(key=GEMINI_MODEL_SETTING, value=None, value_str=clean, updated_by=user_id)
         )
 
 

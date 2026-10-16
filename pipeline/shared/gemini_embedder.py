@@ -45,6 +45,26 @@ def get_gemini_api_key() -> str:
     )
 
 
+def get_gemini_default_model() -> str:
+    """Retrieve the default Gemini model configured in the Lake of Tears Admin Panel."""
+    backend_url = os.getenv("BACKEND_URL", "http://backend:8000").rstrip("/")
+    internal_secret = os.getenv("AUTH_SECRET_KEY", "dev-secret-please-change-in-production")
+    req = urllib.request.Request(
+        f"{backend_url}/api/internal/settings/gemini-key",
+        headers={"X-Internal-Secret": internal_secret},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+            model = str(payload.get("gemini_default_model") or "").strip()
+            if model:
+                return model
+    except Exception:
+        pass
+    return "gemini-3.8-flash"
+
+
 def get_gemini_client() -> genai.Client:
     """Create a Google GenAI client using the Admin Panel GEMINI_API_KEY."""
     return genai.Client(api_key=get_gemini_api_key())

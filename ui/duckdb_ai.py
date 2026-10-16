@@ -16,7 +16,72 @@ from google import genai
 
 logger = logging.getLogger("lake.ui.ai")
 
-AI_DEFAULT_MODEL = os.getenv("AI_DEFAULT_MODEL", "gemini-2.5-flash")
+DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
+_default_model_provider: Any = None
+
+
+class GenieCancelled(Exception):
+    """Raised when a user cancels an in-flight AI request."""
+
+
+class CancelToken:
+    """Cooperative cancellation handle for a single AI request.
+
+    Call ``check()`` between steps to abort early. ``cancel()`` also interrupts any DuckDB
+    connection attached via ``attach()`` so a running query stops immediately. An in-flight
+    Gemini call cannot be killed; its result is discarded at the next ``check()``.
+    """
+
+    def __init__(self) -> None:
+        self._event = threading.Event()
+        self._lock = threading.Lock()
+        self._con: Any = None
+
+    @property
+    def cancelled(self) -> bool:
+        return self._event.is_set()
+
+    def check(self) -> None:
+        if self._event.is_set():
+            raise GenieCancelled()
+
+    def attach(self, con: Any) -> None:
+        with self._lock:
+            self._con = con
+
+    def detach(self) -> None:
+        with self._lock:
+            self._con = None
+
+    def cancel(self) -> None:
+        self._event.set()
+        with self._lock:
+            con = self._con
+        if con is not None:
+            try:
+                con.interrupt()
+            except Exception:
+                pass
+
+
+def set_default_model_provider(provider: Any) -> None:
+    """Register a callable returning the Admin Panel default Gemini model."""
+    global _default_model_provider
+    _default_model_provider = provider
+
+
+def get_default_model() -> str:
+    """Default Gemini model from the Admin Panel setting, else the built-in default."""
+    if callable(_default_model_provider):
+        try:
+            val = _default_model_provider()
+            if val and str(val).strip():
+                return str(val).strip()
+        except Exception:
+            pass
+    return DEFAULT_GEMINI_MODEL
+
+
 AI_MAX_ROWS_PER_QUERY = int(os.getenv("AI_MAX_ROWS_PER_QUERY", "50"))
 AI_MAX_CONCURRENCY = int(os.getenv("AI_MAX_CONCURRENCY", "5"))
 AI_CACHE_MAX_SIZE = 1024
@@ -45,7 +110,7 @@ SQL_AI_FUNCTIONS: list[dict[str, str]] = [
         "name": "ai_query",
         "signature": "ai_query([model,] prompt)",
         "description": "Invoke a Gemini foundation model per row with a custom prompt (supports 1-arg prompt or 2-arg Databricks-style model + prompt).",
-        "example": "SELECT description, ai_query('gemini-2.5-flash', 'Classify sentiment in one word: ' || description) AS sentiment FROM read_parquet('s3://datalake/raw/stripe_charges/**/*.parquet') LIMIT 10",
+        "example": "SELECT description, ai_query('gemini-3.8-flash', 'Classify sentiment in one word: ' || description) AS sentiment FROM read_parquet('s3://datalake/raw/stripe_charges/**/*.parquet') LIMIT 10",
     },
     {
         "name": "ai_summarize",
@@ -178,8 +243,9 @@ def _is_model_identifier(text: str) -> bool:
 
 
 def resolve_model_and_prompt(
-    arg1: str, arg2: str | None = None, default_model: str = AI_DEFAULT_MODEL
+    arg1: str, arg2: str | None = None, default_model: str | None = None
 ) -> tuple[str, str]:
+    default_model = default_model or get_default_model()
     if arg2 is None:
         return default_model, str(arg1)
 
@@ -233,11 +299,12 @@ def _normalize_classification(raw_text: str, categories: list[str]) -> str:
 
 def call_gemini_text(
     prompt: str,
-    model: str = AI_DEFAULT_MODEL,
+    model: str | None = None,
     api_key: Any = None,
     client_factory: Any = None,
     max_retries: int = 2,
 ) -> str:
+    model = model or get_default_model()
     key = _resolve_key(api_key)
     if not key:
         raise RuntimeError(GEMINI_KEY_NOT_CONFIGURED_MSG)
@@ -388,7 +455,7 @@ def register_ai_functions(
                 "Return only the summary without preamble:\n\n"
                 f"{s}"
             )
-            row_items.append(("ai_summarize", AI_DEFAULT_MODEL, prompt))
+            row_items.append(("ai_summarize", get_default_model(), prompt))
 
         if valid_count > 0:
             _check_and_increment_rows(valid_count)
@@ -426,7 +493,7 @@ def register_ai_functions(
                 "Respond with ONLY the exact category label and nothing else.\n\n"
                 f"Text: {t}"
             )
-            key = ("ai_classify", AI_DEFAULT_MODEL, prompt)
+            key = ("ai_classify", get_default_model(), prompt)
             row_meta.append((key, clean_cats))
 
         if valid_count > 0:
@@ -472,7 +539,7 @@ def register_ai_functions(
                 "Respond with ONLY valid JSON and no markdown formatting.\n\n"
                 f"Text: {t}"
             )
-            key = ("ai_extract", AI_DEFAULT_MODEL, prompt)
+            key = ("ai_extract", get_default_model(), prompt)
             row_meta.append((key, clean_fields))
 
         if valid_count > 0:
@@ -674,7 +741,7 @@ def generate_sql_from_prompt(
     prompt: str,
     catalogs: list[dict[str, Any]] | None = None,
     current_sql: str | None = None,
-    model: str = AI_DEFAULT_MODEL,
+    model: str | None = None,
     api_key: Any = None,
     bucket: str = "datalake",
     client_factory: Any = None,
@@ -745,7 +812,7 @@ def fix_sql_query(
     sql: str,
     error_message: str,
     catalogs: list[dict[str, Any]] | None = None,
-    model: str = AI_DEFAULT_MODEL,
+    model: str | None = None,
     api_key: Any = None,
     bucket: str = "datalake",
     client_factory: Any = None,
@@ -792,7 +859,7 @@ def fix_sql_query(
 def explain_sql_query(
     sql: str,
     catalogs: list[dict[str, Any]] | None = None,
-    model: str = AI_DEFAULT_MODEL,
+    model: str | None = None,
     api_key: Any = None,
     bucket: str = "datalake",
     client_factory: Any = None,

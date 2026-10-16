@@ -12,7 +12,7 @@ from typing import Any
 
 import duckdb
 import pyarrow as pa
-from auth import get_stored_gemini_api_key
+from auth import DEFAULT_GEMINI_MODEL, get_stored_gemini_api_key, get_stored_gemini_model
 from google import genai
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -28,7 +28,30 @@ GEMINI_KEY_NOT_CONFIGURED_MSG = (
     "GEMINI_API_KEY is not set. A superadmin can configure it in Settings → Admin Panel."
 )
 
-AI_DEFAULT_MODEL = os.getenv("AI_DEFAULT_MODEL", "gemini-2.5-flash")
+_MODEL_CACHE_TTL = 30.0
+_MODEL_CACHE: tuple[str, float] | None = None
+
+
+def get_default_model() -> str:
+    """Default Gemini model from the Admin Panel setting (cached briefly), else built-in default."""
+    global _MODEL_CACHE
+    now = time.monotonic()
+    cached = _MODEL_CACHE
+    if cached is not None and now - cached[1] < _MODEL_CACHE_TTL:
+        return cached[0]
+    try:
+        model = get_stored_gemini_model() or DEFAULT_GEMINI_MODEL
+    except Exception:
+        model = DEFAULT_GEMINI_MODEL
+    _MODEL_CACHE = (model, now)
+    return model
+
+
+def clear_model_cache() -> None:
+    global _MODEL_CACHE
+    _MODEL_CACHE = None
+
+
 AI_MAX_ROWS_PER_QUERY = int(os.getenv("AI_MAX_ROWS_PER_QUERY", "50"))
 AI_MAX_CONCURRENCY = int(os.getenv("AI_MAX_CONCURRENCY", "5"))
 AI_CACHE_MAX_SIZE = 1024
@@ -48,9 +71,10 @@ def _resolve_api_key(api_key: str | None = None) -> str:
 
 def test_gemini_api_key(
     api_key: str | None = None,
-    model: str = AI_DEFAULT_MODEL,
+    model: str | None = None,
 ) -> dict[str, Any]:
     """Perform a lightweight live test of a Gemini API key."""
+    model = model or get_default_model()
     key = _resolve_api_key(api_key)
     if not key:
         return {
@@ -160,7 +184,7 @@ SQL_AI_FUNCTIONS: list[dict[str, str]] = [
         "name": "ai_query",
         "signature": "ai_query([model,] prompt)",
         "description": "Invoke a Gemini foundation model per row with a custom prompt (supports 1-arg prompt or 2-arg Databricks-style model + prompt).",
-        "example": "SELECT description, ai_query('gemini-2.5-flash', 'Classify sentiment in one word: ' || description) AS sentiment FROM read_parquet('s3://datalake/raw/stripe_charges/**/*.parquet') LIMIT 10",
+        "example": "SELECT description, ai_query('gemini-3.8-flash', 'Classify sentiment in one word: ' || description) AS sentiment FROM read_parquet('s3://datalake/raw/stripe_charges/**/*.parquet') LIMIT 10",
     },
     {
         "name": "ai_summarize",
@@ -208,6 +232,7 @@ def clear_ai_cache() -> None:
     """Clear the in-memory LRU cache for SQL AI UDF responses."""
     with _AI_CACHE_LOCK:
         _AI_CACHE.clear()
+    clear_model_cache()
 
 
 def _cache_get(key: tuple[str, str, str]) -> str | None:
@@ -234,7 +259,7 @@ def _is_model_identifier(text: str) -> bool:
 
 
 def resolve_model_and_prompt(
-    arg1: str, arg2: str | None = None, default_model: str = AI_DEFAULT_MODEL
+    arg1: str, arg2: str | None = None, default_model: str | None = None
 ) -> tuple[str, str]:
     """Resolve (model, prompt) from 1-arg or 2-arg ai_query calls.
 
@@ -243,6 +268,7 @@ def resolve_model_and_prompt(
     - ai_query(model, prompt)  [Databricks standard]
     - ai_query(prompt, model)  [Alternative 2-arg order]
     """
+    default_model = default_model or get_default_model()
     if arg2 is None:
         return default_model, str(arg1)
 
@@ -301,10 +327,11 @@ def _normalize_classification(raw_text: str, categories: list[str]) -> str:
 
 def _call_gemini_text(
     prompt: str,
-    model: str = AI_DEFAULT_MODEL,
+    model: str | None = None,
     api_key: str | None = None,
     max_retries: int = 2,
 ) -> str:
+    model = model or get_default_model()
     key = _resolve_api_key(api_key)
     if not key:
         raise RuntimeError(GEMINI_KEY_NOT_CONFIGURED_MSG)
@@ -454,7 +481,7 @@ def register_ai_functions(
                 "Return only the summary without preamble:\n\n"
                 f"{s}"
             )
-            row_items.append(("ai_summarize", AI_DEFAULT_MODEL, prompt))
+            row_items.append(("ai_summarize", get_default_model(), prompt))
 
         if valid_count > 0:
             _check_and_increment_rows(valid_count)
@@ -491,7 +518,7 @@ def register_ai_functions(
                 "Respond with ONLY the exact category label and nothing else.\n\n"
                 f"Text: {t}"
             )
-            key = ("ai_classify", AI_DEFAULT_MODEL, prompt)
+            key = ("ai_classify", get_default_model(), prompt)
             row_meta.append((key, clean_cats))
 
         if valid_count > 0:
@@ -536,7 +563,7 @@ def register_ai_functions(
                 "Respond with ONLY valid JSON and no markdown formatting.\n\n"
                 f"Text: {t}"
             )
-            key = ("ai_extract", AI_DEFAULT_MODEL, prompt)
+            key = ("ai_extract", get_default_model(), prompt)
             row_meta.append((key, clean_fields))
 
         if valid_count > 0:
@@ -914,7 +941,7 @@ def generate_sql_from_prompt(
     prompt: str,
     catalogs: list[dict[str, Any]] | None = None,
     current_sql: str | None = None,
-    model: str = AI_DEFAULT_MODEL,
+    model: str | None = None,
     api_key: str | None = None,
 ) -> dict[str, Any]:
     """Generate executable DuckDB SQL from natural language using workspace Catalog schemas."""
@@ -968,7 +995,7 @@ def fix_sql_query(
     sql: str,
     error_message: str,
     catalogs: list[dict[str, Any]] | None = None,
-    model: str = AI_DEFAULT_MODEL,
+    model: str | None = None,
     api_key: str | None = None,
 ) -> dict[str, Any]:
     """Diagnose and fix a failing DuckDB SQL query using the error message and Catalog schemas."""
@@ -1007,7 +1034,7 @@ def fix_sql_query(
 def explain_sql_query(
     sql: str,
     catalogs: list[dict[str, Any]] | None = None,
-    model: str = AI_DEFAULT_MODEL,
+    model: str | None = None,
     api_key: str | None = None,
 ) -> dict[str, Any]:
     """Explain a DuckDB SQL query step-by-step."""
@@ -1153,7 +1180,7 @@ def run_rag_search(question: str, api_key: str | None = None) -> dict[str, Any]:
             f"Question: {question}\n\nContext:\n{context_text}"
         )
         answer = client.models.generate_content(
-            model=AI_DEFAULT_MODEL,
+            model=get_default_model(),
             contents=prompt,
         ).text
         return {"ok": True, "answer": (answer or "").strip(), "snippets": snippets}
@@ -1166,7 +1193,7 @@ def run_genie_chat(
     mode: str = "genie",
     history: list[dict[str, Any]] | None = None,
     catalogs: list[dict[str, Any]] | None = None,
-    model: str = AI_DEFAULT_MODEL,
+    model: str | None = None,
     api_key: str | None = None,
 ) -> dict[str, Any]:
     """Execute the Databricks Genie-style conversational data analyst loop:

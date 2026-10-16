@@ -55,13 +55,13 @@ def test_ai_query_udf_single_and_two_arg_signatures():
         assert res1["rows"] == [("positive",)]
 
         res2 = main._run_query(
-            "SELECT ai_query('gemini-2.5-flash', 'Assess risk: chargeback') AS risk"
+            "SELECT ai_query('gemini-3.8-flash', 'Assess risk: chargeback') AS risk"
         )
         assert res2["ok"] is True
         assert res2["rows"] == [("high_risk",)]
 
         res3 = main._run_query(
-            "SELECT ai_query('Verify invoice #102', 'gemini-2.5-flash') AS status"
+            "SELECT ai_query('Verify invoice #102', 'gemini-3.8-flash') AS status"
         )
         assert res3["ok"] is True
         assert res3["rows"] == [("approved",)]

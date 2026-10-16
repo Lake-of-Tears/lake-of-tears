@@ -8,7 +8,7 @@ import os
 
 import duckdb
 import numpy as np
-from gemini_embedder import get_gemini_client
+from gemini_embedder import get_gemini_client, get_gemini_default_model
 from sklearn.ensemble import IsolationForest
 from storage_writer import _load_env
 
@@ -41,7 +41,7 @@ def detect_anomalies(source: str = "truenas", contamination: float = 0.05) -> st
 
     client = get_gemini_client()
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model=get_gemini_default_model(),
         contents=f"The following {source} entries were flagged as anomalies. "
         f"Summarize what's unusual about them:\n\n" + "\n".join(anomalies[:20]),
     )

@@ -19,10 +19,12 @@ from auth import (
     get_current_user,
     get_session_expires_delta,
     get_stored_gemini_api_key,
+    get_stored_gemini_model,
     hash_password,
     mask_secret,
     require_superadmin,
     set_stored_gemini_api_key,
+    set_stored_gemini_model,
     verify_password,
 )
 from dashboards_router import router as dashboards_router
@@ -1778,6 +1780,7 @@ def _system_setting_response(db: Session) -> SystemSettingResponse:
         session_max_hours=_get_session_max_hours(db),
         gemini_api_key_configured=bool(raw_key),
         gemini_api_key_masked=mask_secret(raw_key),
+        gemini_default_model=get_stored_gemini_model(db),
     )
 
 
@@ -1834,6 +1837,9 @@ def update_admin_settings(
             raise HTTPException(400, "GEMINI_API_KEY cannot be empty")
         set_stored_gemini_api_key(db, clean_key, current_user.id)
         ai_service.clear_ai_cache()
+    if req.gemini_default_model is not None:
+        set_stored_gemini_model(db, req.gemini_default_model, current_user.id)
+        ai_service.clear_ai_cache()
     db.commit()
     return _system_setting_response(db)
 
@@ -1845,7 +1851,7 @@ def test_admin_gemini_key(
     _: User = Depends(require_superadmin),
 ):
     candidate = (req.api_key or "").strip() or get_stored_gemini_api_key(db)
-    model = (req.model or "").strip() or ai_service.AI_DEFAULT_MODEL
+    model = (req.model or "").strip() or get_stored_gemini_model(db)
     if not candidate:
         return TestGeminiKeyResponse(
             ok=False,
@@ -1892,4 +1898,8 @@ def get_internal_gemini_key(
         raise HTTPException(401, "Not authorized")
 
     raw_key = get_stored_gemini_api_key(db)
-    return {"gemini_api_key": raw_key, "configured": bool(raw_key)}
+    return {
+        "gemini_api_key": raw_key,
+        "configured": bool(raw_key),
+        "gemini_default_model": get_stored_gemini_model(db),
+    }

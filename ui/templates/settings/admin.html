@@ -271,6 +271,20 @@
               </button>
             </div>
           </div>
+          <div>
+            <label for="gemini-model-input" class="block text-xs text-gray-400 font-medium mb-1">
+              Default Gemini model
+            </label>
+            <p class="text-[11px] text-gray-600 mb-2">
+              Used by SQL AI Functions, the SQL Assistant, Genie and pipelines unless a call specifies a model. Leave blank to reset to the built-in default (<code class="text-gray-400">gemini-3.8-flash</code>).
+            </p>
+            <input id="gemini-model-input" type="text" name="gemini_default_model"
+                   value="{{ admin_settings.gemini_default_model }}"
+                   autocomplete="off"
+                   placeholder="gemini-3.8-flash"
+                   class="w-full input-dark text-sm font-mono"
+                   style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+          </div>
         </form>
 
         {% if admin_settings.gemini_api_key_configured %}
@@ -324,7 +338,10 @@
       const resp = await fetch('/settings/admin/ai-settings/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ api_key: candidate || null })
+        body: JSON.stringify({
+          api_key: candidate || null,
+          model: (document.getElementById('gemini-model-input')?.value || '').trim() || null
+        })
       });
       const data = await resp.json();
       if (data.ok) {

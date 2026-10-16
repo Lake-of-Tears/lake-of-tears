@@ -86,7 +86,7 @@ git clone https://github.com/Lake-of-Tears/lake-of-tears.git
 cd lake-of-tears
 cp .env.example .env
 # Edit .env — at minimum set MINIO_ROOT_PASSWORD, AUTH_SECRET_KEY,
-# POSTGRES_AUTH_PASSWORD, and GEMINI_API_KEY
+# and POSTGRES_AUTH_PASSWORD. The Gemini API key is set later in Settings → Admin Panel.
 docker compose up -d
 ```
 
@@ -346,7 +346,6 @@ All configuration is driven by environment variables. Copy `.env.example` to `.e
 | `MINIO_ROOT_USER` | yes | — | MinIO root username (5–20 chars) |
 | `MINIO_ROOT_PASSWORD` | yes | — | MinIO root password (8–40 chars) |
 | `MINIO_ENDPOINT` | no | `minio:9000` | MinIO S3 API endpoint (internal Docker hostname) |
-| `GEMINI_API_KEY` | yes | — | Google AI Studio API key |
 | `JUPYTER_TOKEN` | yes | — | JupyterLab access token |
 | `SUPERSET_ADMIN_PASSWORD` | yes | — | Superset admin password |
 | `SUPERSET_SECRET_KEY` | no | auto | Superset Flask secret key |
@@ -739,15 +738,15 @@ Reads yesterday's Parquet files, builds a text representation of each row, and c
 
 ### 2. Summarize (`pipeline/embed/summarize.py`) — 07:00 daily
 
-Reads yesterday's raw data and generates a concise natural-language summary per source using `gemini-2.5-flash`. Summaries are stored back to MinIO and surfaced in the Lake UI dashboard.
+Reads yesterday's raw data and generates a concise natural-language summary per source using `gemini-3.8-flash`. Summaries are stored back to MinIO and surfaced in the Lake UI dashboard.
 
 ### 3. Anomaly Detection (`pipeline/embed/anomaly_detect.py`) — 08:00 daily
 
-Runs scikit-learn Isolation Forest over numerical columns to flag statistical outliers. Flagged rows are passed to `gemini-2.5-flash` for a plain-English explanation of what the anomaly might mean. Results appear in the Anomaly Detection page of the Lake UI.
+Runs scikit-learn Isolation Forest over numerical columns to flag statistical outliers. Flagged rows are passed to `gemini-3.8-flash` for a plain-English explanation of what the anomaly might mean. Results appear in the Anomaly Detection page of the Lake UI.
 
 ### RAG Query (`pipeline/query/rag_query.py`) — on-demand
 
-Given a natural-language question, embeds the query with `gemini-embedding-001`, performs cosine similarity search over the embeddings in DuckDB, retrieves the top-K most relevant rows, and passes them as context to `gemini-2.5-flash` to generate a grounded answer. Accessible from the **AI Query** page in the Lake UI.
+Given a natural-language question, embeds the query with `gemini-embedding-001`, performs cosine similarity search over the embeddings in DuckDB, retrieves the top-K most relevant rows, and passes them as context to `gemini-3.8-flash` to generate a grounded answer. Accessible from the **AI Query** page in the Lake UI.
 
 ---
 

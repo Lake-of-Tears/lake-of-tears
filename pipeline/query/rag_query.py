@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "shared"))
 import os
 
 import duckdb
-from gemini_embedder import embed_query, get_gemini_client
+from gemini_embedder import embed_query, get_gemini_client, get_gemini_default_model
 
 
 def rag(question: str, top_k: int = 10) -> str:
@@ -34,7 +34,7 @@ def rag(question: str, top_k: int = 10) -> str:
 
     client = get_gemini_client()
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model=get_gemini_default_model(),
         contents=f"You are an assistant that answers questions about home data.\n\n"
         f"Context from data lake:\n{context}\n\n"
         f"Question: {question}",

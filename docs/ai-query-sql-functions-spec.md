@@ -24,6 +24,7 @@ Upgrade Lake of Tears from a single-turn RAG snippet search into a comprehensive
 | **CLI-Ready API Layer** | **`/api/v1/ai/*` Router in `backend/` + `ui/` Integration** | Matches `storage_router.py`, `pipelines_router.py`, and `dashboards_router.py` so a future Lake of Tears CLI can invoke `/api/v1/ai/sql/*` and `/api/v1/ai/chat` using Bearer tokens. |
 | **API Key Storage & Precedence** | **Admin Panel Only (Encrypted in DB) — Remove `GEMINI_API_KEY` Env Var** | `GEMINI_API_KEY` is removed from `.env.example`, `docker-compose.yml`, Helm charts/values, and Terraform. All consumers (`backend`, `ui`, `pipeline`) resolve the key exclusively from the Admin Panel setting. |
 | **Secret Security & Validation** | **Encrypted at Rest (`AUTH_SECRET_KEY`) + Masked Display + Live Test Button** | Encrypted in `system_settings.value_str`; never returned in plaintext to browsers (`gemini_api_key_configured` + `••••1234`). Saves immediately without blocking on network I/O and provides an explicit **"Test Key"** button in `/settings/admin`. |
+| **Default Gemini Model** | **Admin Panel Setting `gemini_default_model` (plain text in `system_settings.value_str`) — No Model Env Var / Hardcoding** | Single instance-wide default (built-in fallback `gemini-3.8-flash`) used by SQL AI Functions, the SQL Assistant, Genie, and pipelines. An explicit per-call model (e.g. `ai_query('model', ...)` or a request `model`) overrides it. The embedding model (`gemini-embedding-001`) stays fixed because stored vectors are 768-dim and model-specific. `AI_DEFAULT_MODEL` env var is removed. |
 
 ---
 
@@ -32,7 +33,7 @@ Upgrade Lake of Tears from a single-turn RAG snippet search into a comprehensive
 All DuckDB connections created by Lake of Tears (`backend/ai_service.py` and `ui/main.py`) automatically register four scalar/vectorized AI functions:
 
 ### 3.1 `ai_query([model,] prompt) -> VARCHAR`
-Invokes a Gemini model per row with a custom prompt. Supports 1 argument (`prompt`, using default `gemini-2.5-flash`) or 2 arguments (`model, prompt` in Databricks order or `prompt, model`). Returns `NULL` if any argument is `NULL`.
+Invokes a Gemini model per row with a custom prompt. Supports 1 argument (`prompt`, using default `gemini-3.8-flash`) or 2 arguments (`model, prompt` in Databricks order or `prompt, model`). Returns `NULL` if any argument is `NULL`.
 
 ```sql
 -- Databricks 2-argument signature (model, prompt)
@@ -40,7 +41,7 @@ SELECT
     id,
     amount_usd,
     description,
-    ai_query('gemini-2.5-flash', 'Classify payment risk in one word: ' || description) AS risk_label
+    ai_query('gemini-3.8-flash', 'Classify payment risk in one word: ' || description) AS risk_label
 FROM read_parquet('s3://datalake/raw/stripe_charges/**/*.parquet')
 LIMIT 10;
 
@@ -111,6 +112,7 @@ All endpoints accept `Authorization: Bearer <jwt>` (or `lake_token` session cook
 | `POST` | `/api/v1/ai/sql/fix` | Diagnoses and fixes a failing DuckDB SQL query (`{sql, error, model}`). |
 | `POST` | `/api/v1/ai/sql/explain` | Explains a DuckDB SQL query step-by-step (`{sql, model}`). |
 | `POST` | `/api/v1/ai/chat` | Runs the multi-turn Genie conversational data analyst loop (`{question, mode, history, model}`). |
+| `POST` | `/api/v1/ai/chat/cancel` | Aborts an in-flight Genie request and interrupts underlying DuckDB execution (`{request_id}`). |
 
 ---
 
@@ -122,9 +124,26 @@ All endpoints accept `Authorization: Bearer <jwt>` (or `lake_token` session cook
 - Plaintext keys are never returned to the browser. `GET /api/admin/settings` returns:
   - `gemini_api_key_configured: bool`
   - `gemini_api_key_masked: str | None` (e.g., `••••ABCD`)
+  - `gemini_default_model: str` (stored value, or the built-in default if unset)
 
 ### 5.2 Admin Panel Endpoints & UI
 - `PATCH /api/admin/settings` accepts `gemini_api_key: str | None` (to set/replace) and `clear_gemini_api_key: bool = False` (to clear).
+- `PATCH /api/admin/settings` also accepts `gemini_default_model: str | None`; an empty string resets to the built-in default. Saving clears the in-memory AI cache and default-model caches (backend and UI use a 30 s TTL cache so per-row UDF calls do not hit the DB).
 - `POST /api/admin/settings/test-gemini-key` tests either a candidate `api_key` passed in the body or the currently stored `gemini_api_key` against the Gemini API and returns `{"ok": bool, "model": str, "message": str}`.
-- `GET /api/internal/settings/gemini-key` allows internal services (`ui`, `pipeline`) authenticated with `X-Internal-Secret: <AUTH_SECRET_KEY>` or a valid user JWT to retrieve the active key at runtime.
+- `GET /api/internal/settings/gemini-key` allows internal services (`ui`, `pipeline`) authenticated with `X-Internal-Secret: <AUTH_SECRET_KEY>` or a valid user JWT to retrieve the active key and `gemini_default_model` at runtime.
 
+
+---
+
+## 6. Genie Conversational Agent Cancellation & Stop Semantics
+
+### 6.1 Frontend UX (`/ai`)
+- While a query is running, the **Ask Genie** button switches state to a red **Stop** button.
+- Clicking **Stop** aborts the browser request immediately via `AbortController.abort()` and posts an asynchronous cancellation notification to `/api/v1/ai/chat/cancel`.
+- The UI appends a distinct, muted `"Request cancelled."` bubble in the chat transcript. Cancelled turns are excluded from subsequent multi-turn history payloads so failed/aborted queries do not distort conversational context.
+
+### 6.2 Backend & DuckDB Execution Engine
+- Genie's synchronous execution pipeline runs off the main event loop in a background thread via `run_in_threadpool`, keeping FastAPI fully responsive.
+- A client-disconnect watcher monitors socket status; navigating away, closing the tab, or aborting the request triggers immediate cooperative cancellation.
+- If DuckDB is actively executing a query during cancellation, `con.interrupt()` is called immediately to stop engine execution without hanging the server thread.
+- Checkpoints between schema discovery, SQL generation, and narrative synthesis halt execution immediately, preventing unnecessary downstream Gemini API calls.

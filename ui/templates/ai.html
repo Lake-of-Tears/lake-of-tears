@@ -216,6 +216,14 @@ function renderConversationThread() {
       return;
     }
 
+    if (turn.cancelled) {
+      const cancelDiv = document.createElement("div");
+      cancelDiv.className = "px-4 py-2 text-xs italic text-gray-500";
+      cancelDiv.textContent = "Request cancelled.";
+      container.appendChild(cancelDiv);
+      return;
+    }
+
     const msgDiv = document.createElement("div");
     msgDiv.className = "rounded-xl bg-gray-900/90 border border-gray-800 p-4 space-y-3 text-xs";
 
@@ -371,6 +379,36 @@ function renderGenieEChart(el, turn) {
   });
 }
 
+let activeGenieRequest = null;
+
+function setAskButtonRunning(running) {
+  const btn = document.getElementById("askBtn");
+  if (running) {
+    btn.dataset.idleHtml = btn.innerHTML;
+    btn.innerHTML = "Stop";
+    btn.classList.remove("btn-primary");
+    btn.classList.add("bg-red-600", "hover:bg-red-500", "text-white", "rounded-md");
+  } else {
+    if (btn.dataset.idleHtml) btn.innerHTML = btn.dataset.idleHtml;
+    btn.classList.remove("bg-red-600", "hover:bg-red-500", "text-white", "rounded-md");
+    btn.classList.add("btn-primary");
+  }
+}
+
+function cancelGenieRequest() {
+  if (!activeGenieRequest) return;
+  const { controller, requestId } = activeGenieRequest;
+  activeGenieRequest.cancelled = true;
+  // Tell the server to stop work (also covered by its client-disconnect detection).
+  fetch("/api/v1/ai/chat/cancel", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ request_id: requestId }),
+    keepalive: true
+  }).catch(() => {});
+  controller.abort();
+}
+
 async function submitGenieQuestion(questionText) {
   const input = document.getElementById("question");
   const btn = document.getElementById("askBtn");
@@ -378,7 +416,7 @@ async function submitGenieQuestion(questionText) {
   const q = (questionText || input.value || "").trim();
   if (!q) return;
 
-  const priorHistory = chatHistory.map(t => ({
+  const priorHistory = chatHistory.filter(t => !t.cancelled).map(t => ({
     role: t.role,
     content: t.content,
     sql: t.sql || null
@@ -388,21 +426,28 @@ async function submitGenieQuestion(questionText) {
   renderConversationThread();
   input.value = "";
 
-  btn.disabled = true;
-  btn.classList.add("opacity-60", "cursor-not-allowed");
+  const requestId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2);
+  const controller = new AbortController();
+  activeGenieRequest = { controller, requestId, cancelled: false };
+  setAskButtonRunning(true);
   hint.classList.remove("hidden");
 
   try {
     const resp = await fetch("/api/v1/ai/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
       body: JSON.stringify({
         question: q,
         mode: currentAiMode,
-        history: priorHistory
+        history: priorHistory,
+        request_id: requestId
       })
     });
     const data = await resp.json();
+    if (data.cancelled) {
+      throw new DOMException("cancelled", "AbortError");
+    }
     if (data.ok) {
       chatHistory.push({
         role: "assistant",
@@ -427,21 +472,32 @@ async function submitGenieQuestion(questionText) {
     saveConversation();
     renderConversationThread();
   } catch (err) {
-    chatHistory.push({
-      role: "assistant",
-      mode: currentAiMode,
-      content: "Request failed: " + err
-    });
+    if (err && err.name === "AbortError") {
+      // Mark the question and its reply as cancelled so neither is sent as history context.
+      for (let i = chatHistory.length - 1; i >= 0; i--) {
+        if (chatHistory[i].role === "user") { chatHistory[i].cancelled = true; break; }
+      }
+      chatHistory.push({ role: "assistant", mode: currentAiMode, cancelled: true, content: "" });
+    } else {
+      chatHistory.push({
+        role: "assistant",
+        mode: currentAiMode,
+        content: "Request failed: " + err
+      });
+    }
+    saveConversation();
     renderConversationThread();
   } finally {
+    activeGenieRequest = null;
+    setAskButtonRunning(false);
     btn.disabled = false;
-    btn.classList.remove("opacity-60", "cursor-not-allowed");
     hint.classList.add("hidden");
   }
 }
 
 document.getElementById("aiForm").addEventListener("submit", function(e) {
   e.preventDefault();
+  if (activeGenieRequest) { cancelGenieRequest(); return; }
   submitGenieQuestion();
 });
 
