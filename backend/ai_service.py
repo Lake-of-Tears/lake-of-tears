@@ -9,6 +9,7 @@ import time
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
+from urllib.parse import urlparse
 
 import duckdb
 import pyarrow as pa
@@ -624,6 +625,30 @@ def register_ai_functions(
     return state
 
 
+def _parse_s3_endpoint_and_ssl(
+    raw_endpoint: str | None = None,
+) -> tuple[str, bool]:
+    raw = (raw_endpoint or os.getenv("MINIO_ENDPOINT", "localhost:9000")).strip()
+    derived_ssl = False
+    clean_endpoint = raw
+    if "://" in raw:
+        parsed = urlparse(raw)
+        derived_ssl = parsed.scheme.lower() == "https"
+        clean_endpoint = parsed.netloc or parsed.path
+    elif raw.startswith("//"):
+        parsed = urlparse("http:" + raw)
+        clean_endpoint = parsed.netloc
+
+    env_secure = os.getenv("MINIO_SECURE") or os.getenv("MINIO_USE_SSL") or os.getenv("S3_USE_SSL")
+    if env_secure is not None:
+        use_ssl = env_secure.strip().lower() in ("true", "1", "yes")
+    else:
+        use_ssl = derived_ssl
+
+    clean_endpoint = clean_endpoint.split("/")[0]
+    return clean_endpoint, use_ssl
+
+
 def create_duckdb_connection(
     load_vss: bool = False,
     register_ai: bool = True,
@@ -632,17 +657,34 @@ def create_duckdb_connection(
     ai_state: dict[str, int] | None = None,
 ) -> duckdb.DuckDBPyConnection:
     """Create an in-process DuckDB connection configured for MinIO S3 and optional AI UDFs."""
+    s3_endpoint, s3_ssl = _parse_s3_endpoint_and_ssl(MINIO_ENDPOINT)
     config = {
-        "s3_endpoint": MINIO_ENDPOINT,
+        "s3_endpoint": s3_endpoint,
         "s3_access_key_id": MINIO_ACCESS_KEY,
         "s3_secret_access_key": MINIO_SECRET_KEY,
-        "s3_use_ssl": False,
-        "s3_url_style": "path",
+        "s3_use_ssl": s3_ssl,
+        "s3_url_style": os.getenv("S3_URL_STYLE", "path"),
+        "s3_region": os.getenv("AWS_REGION") or os.getenv("MINIO_REGION", "us-east-1"),
+        "enable_object_cache": True,
     }
     con = duckdb.connect(config=config)
-    con.execute("INSTALL httpfs; LOAD httpfs;")
+    try:
+        con.execute("LOAD httpfs;")
+    except Exception:
+        try:
+            con.execute("INSTALL httpfs; LOAD httpfs;")
+        except Exception as exc:
+            logger.warning("Failed to install/load httpfs: %s", exc)
+
     if load_vss:
-        con.execute("INSTALL vss; LOAD vss;")
+        try:
+            con.execute("LOAD vss;")
+        except Exception:
+            try:
+                con.execute("INSTALL vss; LOAD vss;")
+            except Exception as exc:
+                logger.warning("Failed to install/load vss: %s", exc)
+
     if register_ai:
         register_ai_functions(
             con,

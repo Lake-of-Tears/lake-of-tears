@@ -7,10 +7,12 @@ from unittest.mock import MagicMock, patch
 import duckdb
 import pytest
 
-# Ensure ui directory is in sys.path
-sys.path.insert(0, str(Path(__file__).parents[1] / "ui"))
+# Ensure repo root and ui directory are in sys.path
+repo_root = Path(__file__).parents[1]
+sys.path.insert(0, str(repo_root))
+sys.path.insert(0, str(repo_root / "ui"))
 
-import main  # noqa: E402
+import ui.main as main  # noqa: E402
 
 
 def test_duckdb_connection_config():
@@ -144,7 +146,7 @@ def test_ai_query_parameterized_execution():
 
     with (
         patch.object(main, "GEMINI_API_KEY", "dummy-key"),
-        patch("main.genai.Client", return_value=mock_client),
+        patch.object(main.genai, "Client", return_value=mock_client),
         patch.object(main, "MINIO_BUCKET", "mock-bucket"),
         patch.object(main, "_duckdb_connection", return_value=mock_con) as mock_get_conn,
     ):
@@ -173,3 +175,117 @@ def test_ai_query_sql_is_static_constant():
     assert "}" not in main.AI_VECTOR_SQL
     assert "?" in main.AI_VECTOR_SQL
     assert "array_cosine_similarity" in main.AI_VECTOR_SQL
+
+
+def test_parse_s3_endpoint_and_ssl():
+    """Verify parse_s3_endpoint_and_ssl parses schemes, subpaths, and SSL overrides."""
+    import duckdb_pool
+
+    # Default host:port without scheme
+    ep, ssl = duckdb_pool.parse_s3_endpoint_and_ssl("minio:9000")
+    assert ep == "minio:9000"
+    assert ssl is False
+
+    # http scheme
+    ep, ssl = duckdb_pool.parse_s3_endpoint_and_ssl("http://minio.local:9000")
+    assert ep == "minio.local:9000"
+    assert ssl is False
+
+    # https scheme
+    ep, ssl = duckdb_pool.parse_s3_endpoint_and_ssl("https://s3.us-east-1.amazonaws.com")
+    assert ep == "s3.us-east-1.amazonaws.com"
+    assert ssl is True
+
+    # explicit secure override
+    ep, ssl = duckdb_pool.parse_s3_endpoint_and_ssl("http://minio:9000", secure_flag=True)
+    assert ep == "minio:9000"
+    assert ssl is True
+
+    # trailing slash/subpath removal
+    ep, ssl = duckdb_pool.parse_s3_endpoint_and_ssl("http://minio:9000/datalake")
+    assert ep == "minio:9000"
+    assert ssl is False
+
+
+def test_duckdb_connection_pool_lifecycle():
+    """Verify DuckDBConnectionPool acquires, reuses, and closes warm connections."""
+    import duckdb_pool
+
+    pool = duckdb_pool.DuckDBConnectionPool(max_size=2, load_vss=False)
+    assert pool._created_count == 0
+
+    with pool.acquire() as c1:
+        res = c1.execute("SELECT 100 AS num").fetchone()[0]
+        assert res == 100
+        cache_setting = c1.execute("SELECT current_setting('enable_object_cache')").fetchone()[0]
+        assert cache_setting is True
+
+    assert pool._created_count == 1
+
+    # Re-acquire: should reuse the pooled connection without increasing count
+    with pool.acquire() as c2:
+        res2 = c2.execute("SELECT 200 AS num").fetchone()[0]
+        assert res2 == 200
+
+    assert pool._created_count == 1
+    pool.close_all()
+
+
+def test_classify_query_error_empty_dataset():
+    """Verify empty dataset IOException is classified with extracted storage prefix."""
+    import duckdb_pool
+
+    raw_err = Exception(
+        'IO Error: No files found that match the pattern "s3://datalake/raw/shopify/**/*.parquet"'
+    )
+    classified = duckdb_pool.classify_query_error(
+        raw_err,
+        sql="SELECT * FROM read_parquet('s3://datalake/raw/shopify/**/*.parquet')",
+        endpoint="minio:9000",
+        bucket="datalake",
+    )
+
+    assert classified["error_type"] == "EMPTY_DATASET"
+    assert classified["storage_prefix"] == "raw/shopify"
+    assert "No files were found matching" in classified["message"]
+    assert "Storage Browser" in classified["suggestion"]
+
+
+def test_classify_query_error_s3_connection():
+    """Verify S3 connection failures are identified with host guidance."""
+    import duckdb_pool
+
+    raw_err = Exception("IO Error: Could not establish connection to: minio:9000")
+    classified = duckdb_pool.classify_query_error(
+        raw_err,
+        endpoint="minio:9000",
+        bucket="datalake",
+    )
+
+    assert classified["error_type"] == "S3_CONNECTION"
+    assert "Could not access S3 storage at `minio:9000`" in classified["message"]
+    assert "MINIO_ACCESS_KEY" in classified["suggestion"]
+
+
+def test_classify_query_error_syntax():
+    """Verify SQL syntax / catalog binder errors recommend AI Fix."""
+    import duckdb_pool
+
+    raw_err = Exception('Catalog Error: Table with name "orders" does not exist!')
+    classified = duckdb_pool.classify_query_error(
+        raw_err,
+        sql="SELECT * FROM orders",
+    )
+
+    assert classified["error_type"] == "SYNTAX_OR_BINDER"
+    assert "Fix with AI" in classified["suggestion"]
+
+
+def test_run_query_returns_error_info_structure():
+    """Verify _run_query returns rich error_info alongside error string on failure."""
+    res = main._run_query("SELECT * FROM non_existent_catalog_table_xyz")
+    assert res["ok"] is False
+    assert "error" in res
+    assert "error_info" in res
+    assert res["error_info"]["error_type"] == "SYNTAX_OR_BINDER"
+    assert "non_existent_catalog_table_xyz" in res["error"]

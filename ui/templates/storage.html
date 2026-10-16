@@ -495,7 +495,8 @@
 
     // Folders
     folders.forEach(f => {
-      const folderQuerySql = encodeURIComponent(`SELECT * FROM read_parquet('s3://${BUCKET_NAME}/${f.prefix}**/*.parquet') LIMIT 50`);
+      const cleanPrefix = f.prefix.endsWith('/') ? f.prefix : (f.prefix ? f.prefix + '/' : '');
+      const folderQuerySql = encodeURIComponent(`SELECT * FROM read_parquet('s3://${BUCKET_NAME}/${cleanPrefix}**/*.parquet') LIMIT 50`);
       rowsHtml += `
         <tr class="hover:bg-white/[0.02] transition-colors group">
           <td class="px-5 py-3 text-gray-200">

@@ -6,6 +6,7 @@ import os
 import re
 import threading
 import time
+import weakref
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
@@ -381,6 +382,11 @@ def _execute_batch_prompts(
     return results
 
 
+_con_ai_contexts: weakref.WeakKeyDictionary[duckdb.DuckDBPyConnection, dict[str, Any]] = (
+    weakref.WeakKeyDictionary()
+)
+
+
 def register_ai_functions(
     con: duckdb.DuckDBPyConnection,
     api_key: str | None = None,
@@ -393,15 +399,42 @@ def register_ai_functions(
     if state is None:
         state = {"rows_processed": 0, "ai_calls": 0}
 
+    if con in _con_ai_contexts:
+        ctx = _con_ai_contexts[con]
+        ctx["state"] = state
+        if api_key is not None:
+            ctx["api_key"] = api_key
+        ctx["max_rows"] = max_rows
+        ctx["max_workers"] = max_workers
+        if client_factory is not None:
+            ctx["client_factory"] = client_factory
+        return state
+
+    ctx = {
+        "state": state,
+        "api_key": api_key,
+        "max_rows": max_rows,
+        "max_workers": max_workers,
+        "client_factory": client_factory,
+    }
+    _con_ai_contexts[con] = ctx
+
+    def _get_ctx() -> dict[str, Any]:
+        return _con_ai_contexts.get(con, ctx)
+
     def _check_and_increment_rows(count: int) -> None:
-        state["rows_processed"] = state.get("rows_processed", 0) + count
-        if state["rows_processed"] > max_rows:
+        cur_ctx = _get_ctx()
+        cur_state = cur_ctx["state"]
+        cur_max = cur_ctx["max_rows"]
+        cur_state["rows_processed"] = cur_state.get("rows_processed", 0) + count
+        if cur_state["rows_processed"] > cur_max:
             raise RuntimeError(
-                f"AI function row limit exceeded ({max_rows} rows max per query). "
+                f"AI function row limit exceeded ({cur_max} rows max per query). "
                 "Add a LIMIT clause or narrow your filter."
             )
 
     def _ai_query_arrow(*args: Any) -> pa.Array:
+        cur_ctx = _get_ctx()
         if len(args) not in (1, 2):
             raise ValueError(
                 "ai_query expects 1 or 2 arguments: ai_query(prompt) or ai_query(model, prompt)"
@@ -425,10 +458,10 @@ def register_ai_functions(
             _check_and_increment_rows(valid_count)
             batch_map = _execute_batch_prompts(
                 [item for item in row_items if item is not None],
-                api_key=api_key,
-                max_workers=max_workers,
-                state=state,
-                client_factory=client_factory,
+                api_key=cur_ctx["api_key"],
+                max_workers=cur_ctx["max_workers"],
+                state=cur_ctx["state"],
+                client_factory=cur_ctx["client_factory"],
             )
         else:
             batch_map = {}
@@ -437,6 +470,7 @@ def register_ai_functions(
         return pa.array(out, type=pa.string())
 
     def _ai_summarize_arrow(text_col: Any) -> pa.Array:
+        cur_ctx = _get_ctx()
         texts = text_col.to_pylist()
         row_items: list[tuple[str, str, str] | None] = []
         valid_count = 0
@@ -461,10 +495,10 @@ def register_ai_functions(
             _check_and_increment_rows(valid_count)
             batch_map = _execute_batch_prompts(
                 [item for item in row_items if item is not None],
-                api_key=api_key,
-                max_workers=max_workers,
-                state=state,
-                client_factory=client_factory,
+                api_key=cur_ctx["api_key"],
+                max_workers=cur_ctx["max_workers"],
+                state=cur_ctx["state"],
+                client_factory=cur_ctx["client_factory"],
             )
         else:
             batch_map = {}
@@ -473,6 +507,7 @@ def register_ai_functions(
         return pa.array(out, type=pa.string())
 
     def _ai_classify_arrow(text_col: Any, categories_col: Any) -> pa.Array:
+        cur_ctx = _get_ctx()
         texts = text_col.to_pylist()
         cats_list = categories_col.to_pylist()
         row_meta: list[tuple[tuple[str, str, str], list[str]] | None] = []
@@ -500,10 +535,10 @@ def register_ai_functions(
             _check_and_increment_rows(valid_count)
             batch_map = _execute_batch_prompts(
                 [m[0] for m in row_meta if m is not None],
-                api_key=api_key,
-                max_workers=max_workers,
-                state=state,
-                client_factory=client_factory,
+                api_key=cur_ctx["api_key"],
+                max_workers=cur_ctx["max_workers"],
+                state=cur_ctx["state"],
+                client_factory=cur_ctx["client_factory"],
             )
         else:
             batch_map = {}
@@ -518,6 +553,7 @@ def register_ai_functions(
         return pa.array(out, type=pa.string())
 
     def _ai_extract_arrow(text_col: Any, fields_col: Any) -> pa.Array:
+        cur_ctx = _get_ctx()
         texts = text_col.to_pylist()
         fields_list = fields_col.to_pylist()
         row_meta: list[tuple[tuple[str, str, str], list[str]] | None] = []
@@ -546,10 +582,10 @@ def register_ai_functions(
             _check_and_increment_rows(valid_count)
             batch_map = _execute_batch_prompts(
                 [m[0] for m in row_meta if m is not None],
-                api_key=api_key,
-                max_workers=max_workers,
-                state=state,
-                client_factory=client_factory,
+                api_key=cur_ctx["api_key"],
+                max_workers=cur_ctx["max_workers"],
+                state=cur_ctx["state"],
+                client_factory=cur_ctx["client_factory"],
             )
         else:
             batch_map = {}
