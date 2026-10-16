@@ -12,8 +12,20 @@ updates:
       interval: weekly
     labels: [dependencies]
 
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+    labels: [dependencies]
+
   - package-ecosystem: docker
     directory: /ui
+    schedule:
+      interval: weekly
+    labels: [dependencies]
+
+  - package-ecosystem: docker
+    directory: /backend
     schedule:
       interval: weekly
     labels: [dependencies]
