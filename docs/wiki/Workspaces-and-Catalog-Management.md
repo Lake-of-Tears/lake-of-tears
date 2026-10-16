@@ -2,8 +2,6 @@
 
 This guide explains how Lake of Tears isolates teams into **workspaces**, how **catalogs** organize data inside them, and how superadmins and workspace admins manage both from the Lake UI.
 
-> Draft for issue #79. Screenshots were captured from a local Docker Compose instance. Items marked **Needs confirmation** differ between the design specs in `docs/` and the current code and should be settled before publishing.
-
 ---
 
 ## 1. Workspace architecture
@@ -87,7 +85,7 @@ Catalog data lives in the MinIO bucket `datalake` as Hive-partitioned Parquet. T
 s3://datalake/<catalog>/<schema>/<table>/year=YYYY/month=MM/day=DD/
 ```
 
-> **Needs confirmation:** the code stores a free-form `s3_path_pattern` per table (`catalog_tables` table) rather than computing this layout from the catalog name, so the layout is a convention, not an enforced rule.
+> The layout above is a convention. Each table stores its own free-form `s3_path_pattern` (in the `catalog_tables` table), so it is not computed from the catalog name and is not enforced.
 
 ### Deleting a catalog
 
@@ -101,7 +99,7 @@ The grace period is `catalog_soft_delete_days` (0 to 365). When it is `0`, soft 
 
 The Airflow DAG `purge_deleted_catalogs` runs **daily at 02:00** and permanently removes catalogs past `scheduled_purge_at`, deleting their MinIO objects first.
 
-> **Needs confirmation:** the spec says hard delete removes MinIO data synchronously, but `purge_catalog` in `backend/main.py` only deletes database rows. Object cleanup is done by the DAG for scheduled purges; verify whether "Delete now" leaves objects behind.
+> "Delete now" removes the catalog's objects from MinIO first, then its database rows. If storage deletion fails the request returns `502` and the catalog is kept, so you can retry. Object prefixes also used by tables in other catalogs are left in place.
 
 ### Sharing catalogs between workspaces
 
@@ -141,7 +139,7 @@ The Airflow DAG `refresh_catalog_schemas` runs **nightly at 06:00**. For every c
 - Any change sets `schema_drift = true` on the table.
 - Descriptions you wrote on columns are preserved.
 
-> **Needs confirmation:** the issue mentions "catalog caching". The only cache found in the code is the UI's 60-second cache of session settings, not catalog metadata. Confirm what the ticket intends.
+> There is no separate cache of catalog metadata: column definitions are re-inferred nightly by the refresh DAG above. (The UI only caches session settings, for 60 seconds.)
 
 ---
 
