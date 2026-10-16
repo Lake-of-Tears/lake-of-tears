@@ -5,7 +5,7 @@ sqlalchemy==2.0.36
 psycopg2-binary==2.9.10
 PyJWT==2.15.1
 passlib[bcrypt]==1.7.4
-bcrypt==3.2.2
+bcrypt==5.0.0
 httpx==0.28.1
 python-multipart==0.0.32
 python-dotenv==1.2.2
