@@ -537,22 +537,6 @@ def update_workspace(
     return _workspace_response(ws, current_user)
 
 
-@app.delete("/api/workspaces/{workspace_id}")
-def delete_workspace(
-    workspace_id: str,
-    db: Session = Depends(get_db),
-    _: User = Depends(require_superadmin),
-):
-    ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
-    if not ws:
-        raise HTTPException(404, "Workspace not found")
-    if ws.slug == "default":
-        raise HTTPException(400, "Cannot delete the Default workspace")
-    db.delete(ws)
-    db.commit()
-    return {"ok": True}
-
-
 # ── Workspace members ─────────────────────────────────────────────────────────
 
 
