@@ -17,5 +17,8 @@ COPY --chown=appuser:appuser . .
 
 USER appuser
 
+# Pre-cache DuckDB extensions for airgapped and offline container execution
+RUN python3 -c "import duckdb; con = duckdb.connect(); con.execute('INSTALL httpfs; INSTALL vss;')"
+
 EXPOSE 8000
 CMD ["sh", "-c", "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000"]

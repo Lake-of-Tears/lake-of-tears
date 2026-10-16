@@ -24,9 +24,10 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 
 try:
-    from ui import duckdb_ai, notebook_proxy
+    from ui import duckdb_ai, duckdb_pool, notebook_proxy
 except ImportError:
     import duckdb_ai
+    import duckdb_pool
     import notebook_proxy
 
 logger = logging.getLogger("lake.ui")
@@ -210,12 +211,14 @@ app.add_middleware(AuthMiddleware)
 
 
 def _s3_client():
+    clean_endpoint, use_ssl = duckdb_pool.parse_s3_endpoint_and_ssl(MINIO_ENDPOINT)
+    scheme = "https" if use_ssl else "http"
     return boto3.client(
         "s3",
-        endpoint_url=f"http://{MINIO_ENDPOINT}",
+        endpoint_url=f"{scheme}://{clean_endpoint}",
         aws_access_key_id=MINIO_ACCESS_KEY,
         aws_secret_access_key=MINIO_SECRET_KEY,
-        region_name="us-east-1",
+        region_name=os.getenv("AWS_REGION", os.getenv("MINIO_REGION", "us-east-1")),
     )
 
 
@@ -371,17 +374,13 @@ def _duckdb_connection(
     max_ai_rows: int = 50,
     ai_state: dict[str, int] | None = None,
 ):
-    config = {
-        "s3_endpoint": MINIO_ENDPOINT,
-        "s3_access_key_id": MINIO_ACCESS_KEY,
-        "s3_secret_access_key": MINIO_SECRET_KEY,
-        "s3_use_ssl": False,
-        "s3_url_style": "path",
-    }
+    config = duckdb_pool.get_s3_duckdb_config(
+        endpoint=MINIO_ENDPOINT,
+        access_key=MINIO_ACCESS_KEY,
+        secret_key=MINIO_SECRET_KEY,
+    )
     con = duckdb.connect(config=config)
-    con.execute("INSTALL httpfs; LOAD httpfs;")
-    if load_vss:
-        con.execute("INSTALL vss; LOAD vss;")
+    duckdb_pool.load_duckdb_extensions(con, load_vss=load_vss)
     if register_ai:
         duckdb_ai.register_ai_functions(
             con,
@@ -391,6 +390,12 @@ def _duckdb_connection(
             client_factory=lambda api_key: genai.Client(api_key=api_key),
         )
     return con
+
+
+duckdb_pool_instance = duckdb_pool.DuckDBConnectionPool(
+    max_size=int(os.getenv("DUCKDB_POOL_SIZE", "4")),
+    connection_factory=lambda: _duckdb_connection(load_vss=True, register_ai=False),
+)
 
 
 def _run_query(
@@ -403,41 +408,52 @@ def _run_query(
     if read_only:
         allowed, reason = duckdb_ai.is_read_only_sql(sql)
         if not allowed:
-            return {"ok": False, "error": reason}
+            classified = duckdb_pool.classify_query_error(
+                Exception(reason),
+                sql=sql,
+                endpoint=MINIO_ENDPOINT,
+                bucket=MINIO_BUCKET,
+            )
+            return {"ok": False, "error": reason, "error_info": classified}
 
     ai_state = {"rows_processed": 0, "ai_calls": 0}
     start_ts = time.perf_counter()
-    con = None
     try:
-        con = _duckdb_connection(max_ai_rows=max_ai_rows, ai_state=ai_state)
-        if cancel is not None:
-            cancel.attach(con)
-            cancel.check()
-        registered_views = duckdb_ai.register_catalog_views(con, catalogs)
-        rel = con.execute(sql)
-        columns = [desc[0] for desc in (rel.description or [])]
-        rows = rel.fetchall()
-        con.close()
-        con = None
-        elapsed_ms = round((time.perf_counter() - start_ts) * 1000.0, 2)
-        return {
-            "ok": True,
-            "columns": columns,
-            "rows": rows,
-            "row_count": len(rows),
-            "execution_ms": elapsed_ms,
-            "ai_calls_made": ai_state.get("ai_calls", 0),
-            "registered_views": registered_views,
-        }
+        with duckdb_pool_instance.acquire() as con:
+            if cancel is not None:
+                cancel.attach(con)
+                cancel.check()
+            registered_views = duckdb_ai.register_catalog_views(con, catalogs)
+            duckdb_ai.register_ai_functions(
+                con,
+                api_key=_get_gemini_api_key,
+                max_rows=max_ai_rows,
+                state=ai_state,
+                client_factory=lambda api_key: genai.Client(api_key=api_key),
+            )
+            rel = con.execute(sql)
+            columns = [desc[0] for desc in (rel.description or [])]
+            rows = rel.fetchall()
+            elapsed_ms = round((time.perf_counter() - start_ts) * 1000.0, 2)
+            return {
+                "ok": True,
+                "columns": columns,
+                "rows": rows,
+                "row_count": len(rows),
+                "execution_ms": elapsed_ms,
+                "ai_calls_made": ai_state.get("ai_calls", 0),
+                "registered_views": registered_views,
+            }
     except Exception as exc:
-        if con is not None:
-            try:
-                con.close()
-            except Exception:
-                pass
         if cancel is not None and cancel.cancelled:
             raise duckdb_ai.GenieCancelled() from exc
-        return {"ok": False, "error": str(exc)}
+        classified = duckdb_pool.classify_query_error(
+            exc,
+            sql=sql,
+            endpoint=MINIO_ENDPOINT,
+            bucket=MINIO_BUCKET,
+        )
+        return {"ok": False, "error": str(exc), "error_info": classified}
     finally:
         if cancel is not None:
             cancel.detach()
