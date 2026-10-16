@@ -40,7 +40,7 @@ Everything a user touches is served from one address. In Docker Compose, an ngin
 
 JupyterLab has no public route of its own in Docker Compose. The Lake UI reaches it over the internal network (its base URL is `/jupyter`) and exposes notebooks through `/api/notebooks`. Having one origin keeps cookies, sign-in and the browser's same-origin rules simple. MinIO's S3 API (9000) and console (9001), and each service's direct port, are also published for administration, but day-to-day use goes through port 80. Note that a service's direct port does not include the proxy rules, so the Lake UI on port 3000 cannot reach `/api/`.
 
-On Kubernetes the same split is done by an Ingress: one host serves the UI, the API, `/jupyter/` and `/airflow`, and Superset and the MinIO console get their own hosts.
+On Kubernetes the same split is done by an Ingress: one host serves the UI, the API and `/airflow`, and Superset and the MinIO console get their own hosts. As in Compose, JupyterLab has no public route by default; a legacy `/jupyter/` Ingress exists but is off unless you set `jupyter.ingress.enabled: true`.
 
 ## 4. Component map
 
@@ -74,7 +74,7 @@ flowchart TB
 | **MinIO** | S3-compatible object storage holding all Parquet data in the `datalake` bucket. |
 | **DuckDB** | The embedded SQL engine, running inside the UI and in pipeline tasks, not as a separate server. |
 | **Apache Airflow** | Runs the ingest, embedding, anomaly-detection and maintenance DAGs (for example purging deleted catalogs and workspaces, and refreshing catalog schemas). |
-| **JupyterLab** | Interactive notebooks. In Compose the Lake UI proxies to it; with Helm it is also routed at `/jupyter/`. |
+| **JupyterLab** | Interactive notebooks. The Lake UI proxies to it over the internal network; it has no public route by default. |
 | **Apache Superset** | Business-intelligence dashboards, reachable at `/superset/`. |
 | **AI provider** | A hosted model service used for embeddings and natural-language answers. Google Gemini is the default; its key and models are configured in the Admin Panel. |
 
