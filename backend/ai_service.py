@@ -837,13 +837,13 @@ def is_read_only_sql(sql: str) -> tuple[bool, str | None]:
 
 
 def _serialize_cell(val: Any) -> Any:
-    if val is None or isinstance(val, (int, float, str, bool)):
+    if val is None or isinstance(val, int | float | str | bool):
         return val
     from decimal import Decimal
 
     if isinstance(val, Decimal):
         return float(val)
-    if isinstance(val, (list, tuple)):
+    if isinstance(val, list | tuple):
         return [_serialize_cell(v) for v in val]
     if isinstance(val, dict):
         return {str(k): _serialize_cell(v) for k, v in val.items()}
@@ -1089,7 +1089,7 @@ def infer_chart_config(
 
     if len(rows) == 1 and len(columns) <= 3:
         numeric_cols = [
-            col for idx, col in enumerate(columns) if isinstance(rows[0][idx], (int, float))
+            col for idx, col in enumerate(columns) if isinstance(rows[0][idx], int | float)
         ]
         if numeric_cols:
             return {
@@ -1106,7 +1106,7 @@ def infer_chart_config(
             continue
         sample_vals = [r[idx] for r in rows[:10] if idx < len(r) and r[idx] is not None]
         if sample_vals and all(
-            isinstance(v, (int, float)) and not isinstance(v, bool) for v in sample_vals
+            isinstance(v, int | float) and not isinstance(v, bool) for v in sample_vals
         ):
             numeric_cols.append(col)
 

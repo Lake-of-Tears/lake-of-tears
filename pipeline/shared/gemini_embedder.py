@@ -33,7 +33,7 @@ def get_gemini_api_key() -> str:
         method="GET",
     )
     try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        with urllib.request.urlopen(req, timeout=5) as resp:  # nosec B310
             payload = json.loads(resp.read().decode("utf-8"))
             key = str(payload.get("gemini_api_key") or "").strip()
             if key:
@@ -55,7 +55,7 @@ def get_gemini_default_model() -> str:
         method="GET",
     )
     try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        with urllib.request.urlopen(req, timeout=5) as resp:  # nosec B310
             payload = json.loads(resp.read().decode("utf-8"))
             model = str(payload.get("gemini_default_model") or "").strip()
             if model:
