@@ -16,6 +16,11 @@
       "file": "Data-Ingestion-and-Pipelines.md"
     },
     {
+      "slug": "duckdb-querying-and-analytics",
+      "title": "DuckDB Querying and Analytics",
+      "file": "DuckDB-Querying-and-Analytics.md"
+    },
+    {
       "slug": "workspaces-and-catalog-management",
       "title": "Workspaces and Catalog Management",
       "file": "Workspaces-and-Catalog-Management.md"
