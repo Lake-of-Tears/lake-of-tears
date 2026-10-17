@@ -121,13 +121,16 @@
               </svg>
               {% endif %}
 
-              <span class="text-sm font-medium shrink-0
+              <span class="text-sm font-mono font-medium shrink-0
                 {% if schema.tier == 'bronze' %}text-[#cd7f32]
                 {% elif schema.tier == 'silver' %}text-[#a8a9ad]
                 {% elif schema.tier == 'gold' %}text-[#b8860b]
                 {% else %}text-gray-300{% endif %}">
-                {{ schema.name }}
+                {{ schema.slug|sql_ident }}
               </span>
+              {% if schema.name and schema.name|lower != (schema.slug|sql_ident)|lower %}
+              <span class="text-xs text-gray-500 font-sans shrink-0">({{ schema.name }})</span>
+              {% endif %}
 
               <span class="ml-auto text-[11px] text-gray-600">
                 {{ schema.tables | length }} table{{ 's' if schema.tables | length != 1 }}
@@ -139,13 +142,22 @@
               {% if schema.tables %}
                 {% for table in schema.tables %}
                 <div class="flex items-center gap-3 pl-16 pr-4 py-2 hover:bg-white/[0.04] cursor-pointer group border-b border-white/[0.03] last:border-0"
-                     onclick="showTable('{{ catalog.id }}', '{{ schema.id }}', {{ table | tojson }})">
+                     data-cat="{{ catalog.slug|sql_ident }}"
+                     data-sch="{{ schema.slug|sql_ident }}"
+                     data-table-ident="{{ table.slug|sql_ident }}"
+                     data-table="{{ table | tojson | forceescape }}"
+                     onclick="openTablePanel(this)">
 
                   <svg class="w-3.5 h-3.5 text-gray-600 shrink-0" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                   </svg>
 
-                  <span class="text-sm text-gray-400 group-hover:text-gray-200 transition-colors flex-1">{{ table.name }}</span>
+                  <div class="flex items-baseline gap-2 flex-1 min-w-0">
+                    <span class="text-sm font-mono text-blue-400 font-medium group-hover:text-blue-300 transition-colors">{{ table.slug|sql_ident }}</span>
+                    {% if table.name and table.name|lower != (table.slug|sql_ident)|lower %}
+                    <span class="text-xs text-gray-500 truncate group-hover:text-gray-400 transition-colors">{{ table.name }}</span>
+                    {% endif %}
+                  </div>
 
                   {% if table.schema_drift %}
                   <span class="text-[10px] px-1.5 py-0.5 rounded bg-yellow-900/30 text-yellow-500 border border-yellow-800/40 shrink-0">drift</span>
@@ -178,18 +190,75 @@
 </div>
 
 <!-- Table detail side panel -->
-<div id="table-panel" class="fixed inset-y-0 right-0 w-[420px] bg-[#161616] border-l border-white/[0.08] shadow-2xl z-40 hidden" style="display:none;flex-direction:column">
-  <div class="flex items-center justify-between px-5 py-4 border-b border-white/[0.08] shrink-0">
-    <h2 class="font-semibold text-gray-100 text-sm" id="panel-title">Table detail</h2>
-    <button onclick="closePanel()" class="text-gray-500 hover:text-gray-200 transition-colors">
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
-      </svg>
-    </button>
+<div id="table-panel" class="fixed inset-y-0 right-0 w-[600px] max-w-[95vw] bg-[#161616] border-l border-white/[0.08] shadow-2xl z-50 hidden transition-all duration-150" style="display:none;flex-direction:column">
+  <!-- Header -->
+  <div class="px-5 py-4 border-b border-white/[0.08] shrink-0 space-y-3">
+    <div class="flex items-start justify-between">
+      <div class="min-w-0 flex-1 pr-3">
+        <div class="flex items-center gap-2">
+          <h2 class="font-semibold text-gray-100 text-sm truncate" id="panel-title">Table detail</h2>
+          <span id="panel-drift-badge" class="hidden text-[10px] px-1.5 py-0.5 rounded bg-yellow-900/30 text-yellow-500 border border-yellow-800/40 shrink-0">drift</span>
+        </div>
+        <div class="flex items-center gap-1.5 mt-1.5" id="panel-namespace-row">
+          <code class="text-xs font-mono text-blue-400 bg-blue-950/40 border border-blue-800/50 px-2 py-0.5 rounded truncate" id="panel-namespace"></code>
+          <button type="button" id="panel-copy-btn" onclick="copyFullNamespace(this)" class="text-gray-500 hover:text-gray-200 p-1 rounded transition-colors shrink-0" title="Copy full qualified name">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="flex items-center gap-1 shrink-0">
+        <button type="button" onclick="toggleMaximizePanel()" class="text-gray-500 hover:text-gray-200 p-1 rounded transition-colors" title="Toggle full width">
+          <svg id="panel-expand-icon" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>
+          </svg>
+        </button>
+        <button onclick="closePanel()" class="text-gray-500 hover:text-gray-200 p-1 rounded transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Quick action links -->
+    <div class="flex items-center gap-2 pt-1" id="panel-actions">
+      <a id="panel-query-btn" href="#" class="btn-primary text-xs py-1.5 flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        Query in SQL Editor
+      </a>
+      <a id="panel-parquet-btn" href="#" class="btn-ghost text-xs py-1.5 text-gray-400 hover:text-gray-200">Raw Parquet</a>
+    </div>
+
+    <!-- Tabs bar -->
+    <div class="flex border-b border-white/[0.06] -mb-4 pt-1">
+      <button type="button" onclick="switchDrawerTab('columns')" id="tab-btn-columns"
+              class="px-3.5 py-2 text-xs font-semibold border-b-2 border-blue-500 text-blue-400 transition-colors">
+        Columns
+      </button>
+      <button type="button" onclick="switchDrawerTab('sample')" id="tab-btn-sample"
+              class="px-3.5 py-2 text-xs font-semibold border-b-2 border-transparent text-gray-400 hover:text-gray-200 transition-colors">
+        Sample Data
+      </button>
+      <button type="button" onclick="switchDrawerTab('details')" id="tab-btn-details"
+              class="px-3.5 py-2 text-xs font-semibold border-b-2 border-transparent text-gray-400 hover:text-gray-200 transition-colors">
+        Details
+      </button>
+    </div>
   </div>
-  <div class="flex-1 overflow-y-auto p-5 text-sm" id="panel-body"></div>
+
+  <!-- Body Content -->
+  <div class="flex-1 overflow-y-auto p-5 text-sm" id="panel-body">
+    <!-- Tab 1: Columns -->
+    <div id="drawer-tab-columns" class="space-y-4"></div>
+    <!-- Tab 2: Sample Data -->
+    <div id="drawer-tab-sample" class="hidden space-y-4"></div>
+    <!-- Tab 3: Details -->
+    <div id="drawer-tab-details" class="hidden space-y-4"></div>
+  </div>
 </div>
-<div id="panel-overlay" class="hidden fixed inset-0 z-30 bg-black/40" onclick="closePanel()"></div>
+<div id="panel-overlay" class="hidden fixed inset-0 z-40 bg-black/40" onclick="closePanel()"></div>
 
 <!-- Create Catalog Modal -->
 <div id="create-catalog-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60">
@@ -269,47 +338,302 @@ document.querySelectorAll('[id^="tables-"]').forEach(el => {
   }
 });
 
-function showTable(catalogId, schemaId, table) {
+let currentFullNamespace = '';
+let currentDrawerTab = 'columns';
+let currentTableData = null;
+let currentCatIdent = '';
+let currentSchIdent = '';
+let currentTableIdent = '';
+let sampleDataCache = {};
+let isPanelMaximized = false;
+
+function toggleMaximizePanel() {
   const panel = document.getElementById('table-panel');
+  isPanelMaximized = !isPanelMaximized;
+  if (isPanelMaximized) {
+    panel.classList.remove('w-[600px]');
+    panel.classList.add('w-[92vw]');
+  } else {
+    panel.classList.remove('w-[92vw]');
+    panel.classList.add('w-[600px]');
+  }
+}
+
+function openTablePanel(el) {
+  const catIdent = el.getAttribute('data-cat') || 'default';
+  const schIdent = el.getAttribute('data-sch') || 'default';
+  const tableIdent = el.getAttribute('data-table-ident') || '';
+  let table = {};
+  try {
+    table = JSON.parse(el.getAttribute('data-table') || '{}');
+  } catch (err) {
+    console.error('Failed to parse table data:', err);
+  }
+  showTable(catIdent, schIdent, tableIdent, table);
+}
+
+function showTable(catIdent, schIdent, tableIdent, table) {
+  const panel = document.getElementById('table-panel');
+  panel.classList.remove('hidden');
   panel.style.display = 'flex';
   document.getElementById('panel-overlay').classList.remove('hidden');
-  document.getElementById('panel-title').textContent = table.name;
-  renderTablePanel(table, catalogId, schemaId);
+
+  currentTableData = table;
+  currentCatIdent = catIdent;
+  currentSchIdent = schIdent;
+  currentTableIdent = tableIdent;
+
+  const displayName = table.name || tableIdent;
+  document.getElementById('panel-title').textContent = displayName;
+
+  const fullNamespace = `${catIdent}.${schIdent}.${tableIdent}`;
+  currentFullNamespace = fullNamespace;
+  document.getElementById('panel-namespace').textContent = fullNamespace;
+
+  // Drift badge
+  const driftBadge = document.getElementById('panel-drift-badge');
+  if (table.schema_drift) {
+    driftBadge.classList.remove('hidden');
+  } else {
+    driftBadge.classList.add('hidden');
+  }
+
+  // Top action links
+  const viewName = `${schIdent}.${tableIdent}`;
+  const sqlPath = table.s3_path_pattern || '';
+  const querySQL = encodeURIComponent(`SELECT * FROM ${viewName} LIMIT 100`);
+  const parquetSQL = sqlPath ? encodeURIComponent(`SELECT * FROM read_parquet('${sqlPath}') LIMIT 100`) : '';
+
+  const queryBtn = document.getElementById('panel-query-btn');
+  queryBtn.href = `/sql?q=${querySQL}`;
+
+  const parquetBtn = document.getElementById('panel-parquet-btn');
+  if (parquetSQL) {
+    parquetBtn.href = `/sql?q=${parquetSQL}`;
+    parquetBtn.classList.remove('hidden');
+  } else {
+    parquetBtn.classList.add('hidden');
+  }
+
+  // Render initial columns and details
+  renderColumnsTab(table);
+  renderDetailsTab(table, catIdent, schIdent, tableIdent);
+
+  // Switch to default or currently active tab
+  switchDrawerTab(currentDrawerTab || 'columns');
+}
+
+function copyFullNamespace(btn) {
+  if (!currentFullNamespace) return;
+  navigator.clipboard.writeText(currentFullNamespace).then(() => {
+    const origHtml = btn.innerHTML;
+    btn.innerHTML = `<svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>`;
+    setTimeout(() => { btn.innerHTML = origHtml; }, 1500);
+  });
+}
+
+function copySnippet(text, btn) {
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(() => {
+    const origText = btn.textContent;
+    btn.textContent = 'Copied!';
+    btn.classList.add('text-emerald-400');
+    setTimeout(() => {
+      btn.textContent = origText;
+      btn.classList.remove('text-emerald-400');
+    }, 1500);
+  });
 }
 
 function closePanel() {
-  document.getElementById('table-panel').style.display = 'none';
+  const panel = document.getElementById('table-panel');
+  panel.classList.add('hidden');
+  panel.style.display = 'none';
   document.getElementById('panel-overlay').classList.add('hidden');
 }
 
-function renderTablePanel(t, catalogId, schemaId) {
+function switchDrawerTab(tab) {
+  currentDrawerTab = tab;
+  ['columns', 'sample', 'details'].forEach(t => {
+    const btn = document.getElementById('tab-btn-' + t);
+    const content = document.getElementById('drawer-tab-' + t);
+    if (!btn || !content) return;
+    if (t === tab) {
+      btn.className = 'px-3.5 py-2 text-xs font-semibold border-b-2 border-blue-500 text-blue-400 transition-colors';
+      content.classList.remove('hidden');
+    } else {
+      btn.className = 'px-3.5 py-2 text-xs font-semibold border-b-2 border-transparent text-gray-400 hover:text-gray-200 transition-colors';
+      content.classList.add('hidden');
+    }
+  });
+
+  if (tab === 'sample') {
+    loadSampleData();
+  }
+}
+
+function renderColumnsTab(t) {
+  const container = document.getElementById('drawer-tab-columns');
   const cols = (t.column_defs || []).map(c => `
-    <tr class="${c.deprecated ? 'opacity-40' : ''}">
-      <td class="py-1.5 pr-3 font-mono text-xs text-gray-300">${c.name}${c.deprecated ? ' <span class="text-gray-600 text-[10px]">(deprecated)</span>' : ''}</td>
-      <td class="py-1.5 pr-3 font-mono text-xs text-blue-400">${c.type}</td>
-      <td class="py-1.5 text-xs text-gray-500">${c.description || ''}</td>
+    <tr class="${c.deprecated ? 'opacity-40' : ''} hover:bg-white/[0.02] transition-colors">
+      <td class="py-2 px-3 font-mono text-xs text-gray-200">${c.name || ''}${c.deprecated ? ' <span class="text-gray-600 text-[10px]">(deprecated)</span>' : ''}</td>
+      <td class="py-2 px-3 font-mono text-xs text-blue-400">${c.type || 'VARCHAR'}</td>
+      <td class="py-2 px-3 text-xs text-gray-400">${c.description || '<span class="text-gray-600 italic">—</span>'}</td>
     </tr>`).join('');
 
   const noSchema = (!t.column_defs || !t.column_defs.length)
-    ? `<p class="text-gray-600 italic text-xs mt-1">Schema not yet available — data hasn't been ingested yet.</p>` : '';
+    ? `<div class="text-center py-8 text-gray-500 text-xs italic">Schema not yet registered — columns will auto-populate upon first ingest.</div>` : '';
 
+  container.innerHTML = `
+    ${t.description ? `<p class="text-xs text-gray-400 leading-relaxed">${t.description}</p>` : ''}
+    ${noSchema}
+    ${cols ? `
+      <div class="border border-white/[0.08] rounded-lg overflow-hidden">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-[#202020] border-b border-white/[0.08] text-gray-400 text-[11px]">
+            <tr>
+              <th class="py-2 px-3 font-medium">Column</th>
+              <th class="py-2 px-3 font-medium">Type</th>
+              <th class="py-2 px-3 font-medium">Description</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/[0.04]">
+            ${cols}
+          </tbody>
+        </table>
+      </div>
+    ` : ''}
+  `;
+}
+
+function loadSampleData() {
+  const container = document.getElementById('drawer-tab-sample');
+  const viewName = `${currentSchIdent}.${currentTableIdent}`;
+  if (sampleDataCache[viewName]) {
+    renderSampleDataGrid(sampleDataCache[viewName]);
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="flex flex-col items-center justify-center py-12 text-gray-500 space-y-3">
+      <svg class="animate-spin h-6 w-6 text-blue-500" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+      </svg>
+      <span class="text-xs">Fetching sample data from DuckDB...</span>
+    </div>
+  `;
+
+  fetch(`/catalog/preview?view=${encodeURIComponent(viewName)}&limit=15`)
+    .then(r => r.json())
+    .then(data => {
+      sampleDataCache[viewName] = data;
+      renderSampleDataGrid(data);
+    })
+    .catch(err => {
+      container.innerHTML = `
+        <div class="p-4 rounded-lg bg-red-950/20 border border-red-800/40 text-red-400 text-xs">
+          Failed to fetch preview: ${err}
+        </div>
+      `;
+    });
+}
+
+function renderSampleDataGrid(data) {
+  const container = document.getElementById('drawer-tab-sample');
+  if (!data.ok || !data.rows || data.rows.length === 0) {
+    container.innerHTML = `
+      <div class="text-center py-10 px-4 rounded-lg border border-dashed border-white/[0.08]">
+        <svg class="w-8 h-8 text-gray-600 mx-auto mb-2" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M3 14h18m-9-4v8m-7 4h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+        </svg>
+        <p class="text-xs text-gray-300 font-medium">No sample data available</p>
+        <p class="text-[11px] text-gray-500 mt-1 max-w-sm mx-auto">
+          ${data.error || "Data has not been ingested yet or the underlying Parquet path is empty."}
+        </p>
+      </div>
+    `;
+    return;
+  }
+
+  const columns = data.columns || [];
+  const rows = data.rows || [];
+
+  container.innerHTML = `
+    <div class="flex items-center justify-between text-xs text-gray-400 mb-2">
+      <span>Showing first ${rows.length} rows</span>
+      ${data.execution_ms ? `<span class="tabular-nums text-gray-500">${data.execution_ms} ms</span>` : ''}
+    </div>
+    <div class="border border-white/[0.08] rounded-lg overflow-x-auto max-h-[60vh]">
+      <table class="w-full text-left text-xs border-collapse">
+        <thead class="sticky top-0 bg-[#202020] border-b border-white/[0.08] text-gray-400 text-[11px]">
+          <tr>
+            <th class="py-2 px-3 font-mono font-medium text-gray-500 border-r border-white/[0.06] w-10 text-center">#</th>
+            ${columns.map(col => `<th class="py-2 px-3 font-mono whitespace-nowrap font-medium text-gray-300 border-r border-white/[0.06] last:border-0">${col}</th>`).join('')}
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-white/[0.04] font-mono text-[11px]">
+          ${rows.map((row, idx) => `
+            <tr class="hover:bg-white/[0.02] transition-colors">
+              <td class="py-1.5 px-3 text-gray-600 border-r border-white/[0.06] text-center select-none">${idx + 1}</td>
+              ${row.map(cell => `<td class="py-1.5 px-3 text-gray-300 whitespace-nowrap max-w-[240px] truncate border-r border-white/[0.06] last:border-0" title="${cell !== null ? String(cell) : 'NULL'}">${cell !== null ? String(cell) : '<span class="text-gray-600 italic">NULL</span>'}</td>`).join('')}
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderDetailsTab(t, catIdent, schIdent, tableIdent) {
+  const container = document.getElementById('drawer-tab-details');
+  const viewName = `${schIdent}.${tableIdent}`;
   const sqlPath = t.s3_path_pattern || '';
-  const querySQL = sqlPath ? encodeURIComponent(`SELECT * FROM read_parquet('${sqlPath}') LIMIT 100`) : '';
 
-  document.getElementById('panel-body').innerHTML = `
-    ${t.description ? `<p class="text-gray-400 mb-4 text-sm">${t.description}</p>` : ''}
-    ${t.schema_drift ? `<div class="mb-4 px-3 py-2 rounded-md bg-yellow-900/20 border border-yellow-800/40 text-yellow-400 text-xs">⚠ Schema drift detected — columns have changed since last refresh.</div>` : ''}
-    <div class="mb-4">
-      <p class="text-[10px] text-gray-600 uppercase tracking-wider font-semibold mb-1.5">S3 Path</p>
-      <code class="text-xs text-gray-400 bg-black/30 px-2 py-1.5 rounded block break-all">${sqlPath || '—'}</code>
-    </div>
-    <div class="mb-5">
-      <p class="text-[10px] text-gray-600 uppercase tracking-wider font-semibold mb-1.5">Columns</p>
-      ${noSchema}
-      ${cols ? `<table class="w-full"><tbody>${cols}</tbody></table>` : ''}
-    </div>
-    <div class="flex gap-2 pt-3 border-t border-white/[0.06]">
-      ${querySQL ? `<a href="/sql?q=${querySQL}" class="btn-primary text-xs py-1.5">Query in SQL Editor</a>` : ''}
+  container.innerHTML = `
+    <div class="space-y-4">
+      ${t.description ? `
+      <div>
+        <p class="text-[10px] text-gray-500 uppercase tracking-wider font-semibold mb-1">Description</p>
+        <p class="text-xs text-gray-300 leading-relaxed">${t.description}</p>
+      </div>` : ''}
+
+      <div class="grid grid-cols-2 gap-3 pt-1">
+        <div class="bg-black/30 border border-white/[0.06] rounded-md p-3">
+          <p class="text-[10px] text-gray-500 uppercase tracking-wider font-semibold mb-1">Medallion Tier</p>
+          <span class="text-xs font-medium text-gray-200 capitalize">${schIdent}</span>
+        </div>
+        <div class="bg-black/30 border border-white/[0.06] rounded-md p-3">
+          <p class="text-[10px] text-gray-500 uppercase tracking-wider font-semibold mb-1">Storage Format</p>
+          <span class="text-xs font-mono text-gray-200">DELTA / PARQUET</span>
+        </div>
+      </div>
+
+      <div>
+        <p class="text-[10px] text-gray-500 uppercase tracking-wider font-semibold mb-1.5">DuckDB View Identifier</p>
+        <div class="flex items-center gap-2 bg-black/30 border border-white/[0.06] rounded-md p-2">
+          <code class="text-xs font-mono text-blue-400 flex-1 truncate">${viewName}</code>
+          <button type="button" onclick="copySnippet('${viewName}', this)" class="text-gray-400 hover:text-white text-xs px-2 py-0.5 bg-white/[0.05] rounded shrink-0">
+            Copy
+          </button>
+        </div>
+      </div>
+
+      ${sqlPath ? `
+      <div>
+        <p class="text-[10px] text-gray-500 uppercase tracking-wider font-semibold mb-1.5">S3 Storage URI</p>
+        <div class="flex items-center gap-2 bg-black/30 border border-white/[0.06] rounded-md p-2">
+          <code class="text-xs font-mono text-gray-300 flex-1 break-all">${sqlPath}</code>
+          <button type="button" onclick="copySnippet('${sqlPath}', this)" class="text-gray-400 hover:text-white text-xs px-2 py-0.5 bg-white/[0.05] rounded shrink-0">
+            Copy
+          </button>
+        </div>
+      </div>` : ''}
+
+      <div class="pt-2 border-t border-white/[0.06] flex items-center justify-between text-xs text-gray-500">
+        <span>Created</span>
+        <span>${t.created_at ? new Date(t.created_at).toLocaleDateString() : '—'}</span>
+      </div>
     </div>
   `;
 }
