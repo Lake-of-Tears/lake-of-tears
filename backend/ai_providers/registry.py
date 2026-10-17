@@ -27,7 +27,16 @@ from ai_providers.gemini import (
     DEFAULT_EMBEDDING_MODEL,
     GeminiProvider,
 )
-from ai_providers.http_providers import OllamaProvider, OpenAICompatibleProvider
+from ai_providers.http_providers import (
+    AZURE_API_VERSION,
+    OPENAI_CHAT_MODEL,
+    OPENAI_DIMENSION,
+    OPENAI_EMBEDDING_MODEL,
+    AzureOpenAIProvider,
+    OllamaProvider,
+    OpenAICompatibleProvider,
+    OpenAIProvider,
+)
 
 AI_PROVIDER_SETTING = "ai_provider"
 AI_PROVIDER_CONFIG_SETTING = "ai_provider_config"
@@ -122,6 +131,26 @@ def _build_http(cls):
     return build
 
 
+def _build_openai(cfg: dict[str, Any]) -> AIProvider:
+    return OpenAIProvider(
+        api_key=str(cfg.get("api_key") or ""),
+        chat_model=str(cfg.get("chat_model") or OPENAI_CHAT_MODEL),
+        embedding_model=str(cfg.get("embedding_model") or OPENAI_EMBEDDING_MODEL),
+        dimension=int(cfg.get("dimension") or OPENAI_DIMENSION),
+    )
+
+
+def _build_azure(cfg: dict[str, Any]) -> AIProvider:
+    return AzureOpenAIProvider(
+        endpoint=str(cfg.get("endpoint") or ""),
+        api_key=str(cfg.get("api_key") or ""),
+        chat_deployment=str(cfg.get("chat_model") or ""),
+        embedding_deployment=str(cfg.get("embedding_model") or ""),
+        api_version=str(cfg.get("api_version") or AZURE_API_VERSION),
+        dimension=int(cfg["dimension"]) if cfg.get("dimension") else None,
+    )
+
+
 PROVIDERS: dict[str, ProviderSpec] = {
     "gemini": ProviderSpec(
         "gemini",
@@ -150,6 +179,76 @@ PROVIDERS: dict[str, ProviderSpec] = {
             ),
         ),
         _build_gemini,
+    ),
+    "openai": ProviderSpec(
+        "openai",
+        "OpenAI",
+        (
+            FieldSpec(
+                "api_key",
+                "API key",
+                "secret",
+                required=True,
+                help="From platform.openai.com. Stored encrypted; never shown again.",
+            ),
+            FieldSpec("chat_model", "Chat model", default=OPENAI_CHAT_MODEL),
+            FieldSpec("embedding_model", "Embedding model", default=OPENAI_EMBEDDING_MODEL),
+            FieldSpec(
+                "dimension",
+                "Embedding dimension",
+                "int",
+                default=OPENAI_DIMENSION,
+                help="Length of each vector. Searches only compare vectors of the same size.",
+            ),
+        ),
+        _build_openai,
+    ),
+    "azure": ProviderSpec(
+        "azure",
+        "Azure AI Foundry",
+        (
+            FieldSpec(
+                "endpoint",
+                "Endpoint",
+                required=True,
+                placeholder="https://my-resource.openai.azure.com",
+                help="Your Azure OpenAI / AI Foundry resource address.",
+            ),
+            FieldSpec(
+                "api_key",
+                "API key",
+                "secret",
+                required=True,
+                help="A key of that resource. Stored encrypted; never shown again.",
+            ),
+            FieldSpec(
+                "chat_model",
+                "Chat deployment name",
+                required=True,
+                placeholder="gpt-4o-mini",
+                help="The name you gave the chat model deployment in Azure.",
+            ),
+            FieldSpec(
+                "embedding_model",
+                "Embedding deployment name",
+                required=True,
+                placeholder="text-embedding-3-small",
+                help="The name you gave the embedding model deployment in Azure.",
+            ),
+            FieldSpec(
+                "api_version",
+                "API version",
+                default=AZURE_API_VERSION,
+                help="Azure OpenAI API version.",
+            ),
+            FieldSpec(
+                "dimension",
+                "Embedding dimension",
+                "int",
+                help="Optional. Leave blank to detect it from the deployment automatically.",
+            ),
+        ),
+        _build_azure,
     ),
     "ollama": ProviderSpec(
         "ollama",
@@ -261,6 +360,12 @@ def load_provider_config(
         "dimension": os.getenv("LLM_EMBEDDING_DIMENSION"),
         "base_url": os.getenv("LLM_BASE_URL"),
     }
+    if name == "azure":  # the variable names Azure's own tooling uses
+        env_defaults["endpoint"] = os.getenv("AZURE_OPENAI_ENDPOINT")
+        env_defaults["api_key"] = env_defaults["api_key"] or os.getenv("AZURE_OPENAI_API_KEY")
+        env_defaults["api_version"] = os.getenv("AZURE_OPENAI_API_VERSION")
+    elif name == "openai":
+        env_defaults["api_key"] = env_defaults["api_key"] or os.getenv("OPENAI_API_KEY")
     for field, value in env_defaults.items():
         if not cfg.get(field) and value:
             cfg[field] = value.strip() if isinstance(value, str) else value

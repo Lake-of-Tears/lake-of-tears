@@ -337,9 +337,15 @@ def test_environment_variables_can_bootstrap_a_provider(monkeypatch):
     assert "base_url" not in other
 
 
-def test_the_admin_description_lists_all_three_providers():
+def test_the_admin_description_lists_every_provider():
     info = describe_providers(FakeDB())
-    assert [p["name"] for p in info["providers"]] == ["gemini", "ollama", "openai_compatible"]
+    assert [p["name"] for p in info["providers"]] == [
+        "gemini",
+        "openai",
+        "azure",
+        "ollama",
+        "openai_compatible",
+    ]
     ollama_info = next(p for p in info["providers"] if p["name"] == "ollama")
     assert ollama_info["configured"] is False
     assert {f["name"] for f in ollama_info["fields"]} >= {

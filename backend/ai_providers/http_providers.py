@@ -236,3 +236,105 @@ class OllamaProvider(_HttpProvider):
             return [list(map(float, v)) for v in data["embeddings"]]
         except (KeyError, TypeError) as exc:
             raise ProviderError("Unexpected response from /api/embed") from exc
+
+
+OPENAI_BASE_URL = "https://api.openai.com/v1"
+OPENAI_CHAT_MODEL = "gpt-4o-mini"
+OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
+OPENAI_DIMENSION = 1536
+AZURE_API_VERSION = "2024-10-21"
+
+
+class OpenAIProvider(OpenAICompatibleProvider):
+    """OpenAI's hosted API. Same wire format as any OpenAI-compatible server, fixed address."""
+
+    name = "openai"
+    label = "OpenAI"
+
+    def __init__(
+        self,
+        api_key: str,
+        chat_model: str = OPENAI_CHAT_MODEL,
+        embedding_model: str = OPENAI_EMBEDDING_MODEL,
+        dimension: int | None = OPENAI_DIMENSION,
+        base_url: str = OPENAI_BASE_URL,
+        transport: httpx.BaseTransport | None = None,
+    ):
+        if not (api_key or "").strip():
+            raise ProviderNotConfigured("OpenAI: the API key is not set.")
+        super().__init__(
+            base_url=base_url or OPENAI_BASE_URL,
+            chat_model=chat_model or OPENAI_CHAT_MODEL,
+            embedding_model=embedding_model or OPENAI_EMBEDDING_MODEL,
+            api_key=api_key,
+            dimension=dimension,
+            transport=transport,
+        )
+
+
+class AzureOpenAIProvider(OpenAICompatibleProvider):
+    """Azure OpenAI / Azure AI Foundry. Models are addressed by *deployment name* and the key is
+    sent as an ``api-key`` header, so requests stay inside your Azure tenant."""
+
+    name = "azure"
+    label = "Azure AI Foundry"
+
+    def __init__(
+        self,
+        endpoint: str,
+        api_key: str,
+        chat_deployment: str,
+        embedding_deployment: str,
+        api_version: str = AZURE_API_VERSION,
+        dimension: int | None = None,
+        transport: httpx.BaseTransport | None = None,
+    ):
+        if not (api_key or "").strip():
+            raise ProviderNotConfigured("Azure AI Foundry: the API key is not set.")
+        super().__init__(
+            base_url=endpoint,
+            chat_model=chat_deployment,
+            embedding_model=embedding_deployment,
+            api_key=api_key,
+            dimension=dimension,
+            transport=transport,
+        )
+        self._api_version = (api_version or AZURE_API_VERSION).strip()
+
+    @staticmethod
+    def _normalise_base(url: str) -> str:
+        return url.rstrip("/")
+
+    def _headers(self) -> dict[str, str]:
+        return {"Content-Type": "application/json", "api-key": self._api_key}
+
+    def _path(self, deployment: str, op: str) -> str:
+        return f"/openai/deployments/{deployment}/{op}?api-version={self._api_version}"
+
+    def generate(
+        self,
+        prompt: str,
+        *,
+        system: str | None = None,
+        model: str | None = None,
+        temperature: float | None = None,
+    ) -> str:
+        messages = ([{"role": "system", "content": system}] if system else []) + [
+            {"role": "user", "content": prompt}
+        ]
+        body: dict[str, Any] = {"messages": messages}
+        if temperature is not None:
+            body["temperature"] = temperature
+        data = self._post(self._path(model or self._chat_model, "chat/completions"), body)
+        try:
+            return (data["choices"][0]["message"]["content"] or "").strip()
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ProviderError("Unexpected response from chat/completions") from exc
+
+    def _embed_raw(self, texts: list[str]) -> list[list[float]]:
+        data = self._post(self._path(self._embedding_model, "embeddings"), {"input": texts})
+        try:
+            items = sorted(data["data"], key=lambda d: d.get("index", 0))
+            return [list(map(float, d["embedding"])) for d in items]
+        except (KeyError, TypeError) as exc:
+            raise ProviderError("Unexpected response from embeddings") from exc

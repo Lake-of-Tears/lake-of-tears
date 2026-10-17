@@ -108,7 +108,7 @@ All services are accessible from the left sidebar. Direct ports are also availab
 
 ## AI providers and local models
 
-The AI features (AI Query, the SQL assistant, Genie, `ai_*` SQL functions and the embedding pipelines) use whichever provider a superadmin selects in **Settings → Admin Panel → AI Provider**: Google Gemini, **Ollama** (local models) or any **OpenAI-compatible server** (vLLM, LocalAI, LM Studio, Groq, DeepSeek, ...). Changes apply immediately and secrets are stored encrypted.
+The AI features (AI Query, the SQL assistant, Genie, `ai_*` SQL functions and the embedding pipelines) use whichever provider a superadmin selects in **Settings → Admin Panel → AI Provider**: Google Gemini, **OpenAI**, **Azure AI Foundry** (your own Azure tenant), **Ollama** (local models) or any **OpenAI-compatible server** (vLLM, LocalAI, LM Studio, Groq, DeepSeek, ...). Changes apply immediately and secrets are stored encrypted.
 
 To run fully offline, start Ollama next to Lake of Tears and pull a chat and an embedding model:
 
@@ -119,6 +119,8 @@ docker compose -f docker-compose.yml -f docker-compose.ollama.yml exec ollama ol
 ```
 
 Then choose **Ollama** in the Admin Panel, set the base URL to `http://ollama:11434`, enter the two model names and click **Test Connection**. See the header of [`docker-compose.ollama.yml`](docker-compose.ollama.yml) for the details. Each embedding file records which model made it, so you can switch providers without breaking search.
+
+For **OpenAI** enter an API key (defaults: `gpt-4o-mini`, `text-embedding-3-small`, 1536 dimensions). For **Azure AI Foundry** enter your resource endpoint, key, and the *deployment names* of your chat and embedding models. As an alternative to the Admin Panel you can set `LLM_PROVIDER=openai` with `OPENAI_API_KEY`, or `LLM_PROVIDER=azure` with `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_API_VERSION`, `LLM_MODEL` (chat deployment) and `LLM_EMBEDDING_MODEL` (embedding deployment). Azure authenticates with the API key; Entra ID / managed identity is not supported yet.
 
 ---
 
