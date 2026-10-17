@@ -2,6 +2,7 @@ import asyncio
 import logging
 import math
 import os
+import re
 import time
 import urllib.parse
 from datetime import UTC, datetime, timedelta
@@ -15,7 +16,7 @@ import httpx
 import jwt
 import websockets
 from dotenv import load_dotenv
-from fastapi import FastAPI, Form, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import FastAPI, Form, Query, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -63,7 +64,7 @@ templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 templates.env.filters["sql_ident"] = duckdb_ai._safe_identifier
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
-_PUBLIC_PREFIXES = ("/login", "/logout", "/api/", "/health", "/workspace/search")
+_PUBLIC_PREFIXES = ("/login", "/logout", "/api/", "/health", "/workspace/search", "/catalog/preview")
 _WORKSPACE_COOKIE = "lake_workspace_id"
 
 _SESSION_CONFIG_CACHE: dict | None = None
@@ -619,6 +620,51 @@ async def catalog(request: Request):
         name="catalog.html",
         context={"request": request, "catalogs": catalogs, "page": "catalog", "error": error},
     )
+
+
+def _json_safe(val: Any) -> Any:
+    if val is None:
+        return None
+    if isinstance(val, (int, float, bool, str)):
+        return val
+    if isinstance(val, (list, tuple)):
+        return [_json_safe(x) for x in val]
+    if isinstance(val, dict):
+        return {k: _json_safe(v) for k, v in val.items()}
+    return str(val)
+
+
+@app.get("/catalog/preview")
+@app.get("/api/catalog/preview")
+async def api_catalog_preview(
+    request: Request,
+    view: str = Query(..., description="DuckDB view name (e.g. bronze.tmdb_trending)"),
+    limit: int = Query(15, ge=1, le=100),
+):
+    token = request.cookies.get("lake_token")
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"ok": False, "error": "Not authenticated"}, status_code=401)
+
+    clean_view = view.strip()
+    if not re.match(r"^[A-Za-z0-9_]+\.[A-Za-z0-9_]+$", clean_view):
+        return JSONResponse({"ok": False, "error": "Invalid view identifier"}, status_code=400)
+
+    catalogs = _resolve_ui_catalogs(request)
+    sql = f"SELECT * FROM {clean_view} LIMIT {limit}"
+    result = _run_query(sql, catalogs=catalogs, read_only=True)
+    if result.get("ok"):
+        safe_rows = [[_json_safe(c) for c in r] for r in result.get("rows", [])]
+        return JSONResponse({
+            "ok": True,
+            "columns": result.get("columns", []),
+            "rows": safe_rows,
+            "row_count": result.get("row_count", 0),
+            "execution_ms": result.get("execution_ms", 0),
+        })
+    return JSONResponse({
+        "ok": False,
+        "error": result.get("error", "Failed to query preview"),
+    })
 
 
 @app.post("/catalog/create")

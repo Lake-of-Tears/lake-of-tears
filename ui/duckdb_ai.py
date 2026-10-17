@@ -637,8 +637,8 @@ def register_ai_functions(
     return state
 
 
-def _safe_identifier(name: str) -> str:
-    slug = re.sub(r"[^A-Za-z0-9_]", "_", name.strip())
+def _safe_identifier(name: str | None) -> str:
+    slug = re.sub(r"[^A-Za-z0-9_]", "_", (name or "").strip())
     if not slug or slug[0].isdigit():
         slug = f"t_{slug}"
     return slug
