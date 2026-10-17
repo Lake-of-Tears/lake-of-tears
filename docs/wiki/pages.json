@@ -16,6 +16,11 @@
       "file": "Data-Ingestion-and-Pipelines.md"
     },
     {
+      "slug": "airflow-orchestration",
+      "title": "Airflow Orchestration",
+      "file": "Airflow-Orchestration.md"
+    },
+    {
       "slug": "workspaces-and-catalog-management",
       "title": "Workspaces and Catalog Management",
       "file": "Workspaces-and-Catalog-Management.md"
