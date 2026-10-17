@@ -59,6 +59,8 @@ SOURCE_LABELS = {
 
 app = FastAPI(title="Lake of Tears")
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+# Catalog slugs use hyphens but the DuckDB views use underscores; templates show the SQL name.
+templates.env.filters["sql_ident"] = duckdb_ai._safe_identifier
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 _PUBLIC_PREFIXES = ("/login", "/logout", "/api/", "/health", "/workspace/search")

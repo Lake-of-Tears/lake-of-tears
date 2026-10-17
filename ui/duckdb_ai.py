@@ -706,8 +706,11 @@ def build_schema_prompt_context(
                         else "schema-on-read"
                     )
                     desc = f" — {table.get('description')}" if table.get("description") else ""
+                    # The views are created with _safe_identifier names (a slug like
+                    # "tmdb-trending" becomes tmdb_trending), so that is what queries must use.
+                    view = f"{_safe_identifier(schema_slug)}.{_safe_identifier(t_slug or '')}"
                     lines.append(
-                        f"- `{cat_slug}.{schema_slug}.{t_slug}` (View: `{schema_slug}.{t_slug}` or `read_parquet('{s3_path}')`){desc}\n"
+                        f"- `{cat_slug}.{schema_slug}.{t_slug}` (View: `{view}` or `read_parquet('{s3_path}')`){desc}\n"
                         f"  Columns: {col_str}"
                     )
 
