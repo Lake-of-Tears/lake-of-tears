@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 
 import ai_service
 import jwt as _jwt
+from ai_gateway_router import router as ai_gateway_router
 from ai_router import router as ai_router
 from auth import (
     COOKIE_NAME,
@@ -133,6 +134,7 @@ app.include_router(dashboards_router, prefix="/api/v1/dashboards", tags=["dashbo
 app.include_router(dashboards_router, prefix="/api/dashboards", tags=["dashboards"])
 app.include_router(ai_router, prefix="/api/v1/ai", tags=["ai"])
 app.include_router(ai_router, prefix="/api/ai", tags=["ai"])
+app.include_router(ai_gateway_router, prefix="/api/internal/ai", tags=["ai-internal"])
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
