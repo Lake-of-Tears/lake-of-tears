@@ -109,6 +109,8 @@ spec:
               value: "1"
             - name: AIRFLOW__WEBSERVER__PROXY_FIX_X_PREFIX
               value: "1"
+            - name: AIRFLOW__WEBSERVER__WORKERS
+              value: "2"
             - name: _AIRFLOW_WWW_USER_USERNAME
               value: admin
             - name: _AIRFLOW_WWW_USER_PASSWORD
