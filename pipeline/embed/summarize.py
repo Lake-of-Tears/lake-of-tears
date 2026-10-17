@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "shared"))
 from datetime import date, timedelta
 
 import pandas as pd
-from gemini_embedder import get_gemini_client, get_gemini_default_model
+from ai_gateway import generate
 from storage_writer import get_duckdb_con, write_to_storage
 
 SOURCES = {
@@ -30,14 +30,11 @@ def summarize_day(source: str, text_col: str, parquet_glob: str):
     if df.empty:
         return
 
-    client = get_gemini_client()
     content = "\n".join(df[text_col].dropna().astype(str).tolist())
-    response = client.models.generate_content(
-        model=get_gemini_default_model(),
-        contents=f"Summarize the following {source} activity from {yesterday} "
-        f"in 3-5 bullet points:\n\n{content}",
+    summary = generate(
+        f"Summarize the following {source} activity from {yesterday} "
+        f"in 3-5 bullet points:\n\n{content}"
     )
-    summary = response.text
 
     summary_df = pd.DataFrame([{"source": source, "date": yesterday, "summary": summary}])
     write_to_storage(summary_df, f"summaries/{source}", yesterday)

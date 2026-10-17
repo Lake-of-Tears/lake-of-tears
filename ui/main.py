@@ -19,13 +19,13 @@ from fastapi import FastAPI, Form, Request, WebSocket, WebSocketDisconnect, stat
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from google import genai
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 
 try:
-    from ui import duckdb_ai, duckdb_pool, notebook_proxy
+    from ui import ai_gateway_client, duckdb_ai, duckdb_pool, notebook_proxy
 except ImportError:
+    import ai_gateway_client
     import duckdb_ai
     import duckdb_pool
     import notebook_proxy
@@ -43,7 +43,6 @@ MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "datalake")
-GEMINI_API_KEY = ""
 MINIO_CONSOLE_URL = os.getenv("MINIO_CONSOLE_URL", "http://localhost:9001")
 SUPERSET_URL = os.getenv("SUPERSET_URL", "http://localhost:8088")
 JUPYTER_TOKEN = os.getenv("JUPYTER_TOKEN", "")
@@ -69,50 +68,25 @@ _SESSION_CONFIG_FETCHED_AT: float = 0.0
 _SESSION_CONFIG_TTL = 60.0  # seconds
 
 
-_GEMINI_MODEL_CACHE: tuple[str, float] | None = None
-_GEMINI_MODEL_TTL = 30.0
-
-
 def _get_gemini_default_model() -> str:
-    """Resolve the default Gemini model from the Admin Panel backend setting (cached briefly)."""
-    global _GEMINI_MODEL_CACHE
-    now = time.monotonic()
-    if _GEMINI_MODEL_CACHE is not None and now - _GEMINI_MODEL_CACHE[1] < _GEMINI_MODEL_TTL:
-        return _GEMINI_MODEL_CACHE[0]
-    model = duckdb_ai.DEFAULT_GEMINI_MODEL
-    try:
-        with httpx.Client(timeout=3) as client:
-            resp = client.get(
-                f"{BACKEND_URL}/api/internal/settings/gemini-key",
-                headers={"X-Internal-Secret": AUTH_SECRET_KEY},
-            )
-        if resp.status_code == 200:
-            model = str(resp.json().get("gemini_default_model") or "").strip() or model
-    except Exception:
-        pass
-    _GEMINI_MODEL_CACHE = (model, now)
-    return model
+    """Chat model of the active AI provider (from the backend gateway), else the built-in default."""
+    return ai_gateway_client.chat_model() or duckdb_ai.DEFAULT_GEMINI_MODEL
 
 
 duckdb_ai.set_default_model_provider(_get_gemini_default_model)
 
 
-def _get_gemini_api_key() -> str:
-    """Resolve the active GEMINI_API_KEY from the Admin Panel backend setting."""
-    if GEMINI_API_KEY and GEMINI_API_KEY.strip():
-        return GEMINI_API_KEY.strip()
-    try:
-        with httpx.Client(timeout=3) as client:
-            resp = client.get(
-                f"{BACKEND_URL}/api/internal/settings/gemini-key",
-                headers={"X-Internal-Secret": AUTH_SECRET_KEY},
-            )
-        if resp.status_code == 200:
-            data = resp.json()
-            return str(data.get("gemini_api_key") or "").strip()
-    except Exception:
-        pass
-    return ""
+def _get_ai_access() -> str:
+    """Non-empty when an AI provider is configured in the Admin Panel, else an empty string.
+
+    The UI holds no credentials: requests go through the backend AI gateway, so this is only an
+    availability check (the value is a placeholder, never a key).
+    """
+    return "gateway" if ai_gateway_client.is_configured() else ""
+
+
+def _ai_client(api_key: str | None = None) -> ai_gateway_client.GatewayClient:
+    return ai_gateway_client.GatewayClient()
 
 
 def _get_session_config() -> dict:
@@ -384,10 +358,10 @@ def _duckdb_connection(
     if register_ai:
         duckdb_ai.register_ai_functions(
             con,
-            api_key=_get_gemini_api_key,
+            api_key=_get_ai_access,
             max_rows=max_ai_rows,
             state=ai_state,
-            client_factory=lambda api_key: genai.Client(api_key=api_key),
+            client_factory=_ai_client,
         )
     return con
 
@@ -426,10 +400,10 @@ def _run_query(
             registered_views = duckdb_ai.register_catalog_views(con, catalogs)
             duckdb_ai.register_ai_functions(
                 con,
-                api_key=_get_gemini_api_key,
+                api_key=_get_ai_access,
                 max_rows=max_ai_rows,
                 state=ai_state,
-                client_factory=lambda api_key: genai.Client(api_key=api_key),
+                client_factory=_ai_client,
             )
             rel = con.execute(sql)
             columns = [desc[0] for desc in (rel.description or [])]
@@ -475,7 +449,7 @@ AI_VECTOR_SQL = """
 
 
 def _ai_query(question: str) -> dict[str, Any]:
-    active_key = _get_gemini_api_key()
+    active_key = _get_ai_access()
     if not active_key:
         return {"ok": False, "error": duckdb_ai.GEMINI_KEY_NOT_CONFIGURED_MSG}
     try:
@@ -2917,7 +2891,7 @@ def _ui_genie_chat(
         if cancel is not None:
             cancel.check()
 
-    active_key = _get_gemini_api_key()
+    active_key = _get_ai_access()
     if not active_key:
         return {"ok": False, "mode": mode, "error": duckdb_ai.GEMINI_KEY_NOT_CONFIGURED_MSG}
 
@@ -2976,7 +2950,7 @@ def _ui_genie_chat(
     )
 
     def _client_factory(api_key: str):
-        return genai.Client(api_key=api_key)
+        return _ai_client(api_key)
 
     try:
         raw_plan = duckdb_ai.call_gemini_text(
@@ -3154,9 +3128,9 @@ async def ui_ai_sql_generate(request: Request):
         catalogs=catalogs,
         current_sql=current_sql,
         model=model,
-        api_key=_get_gemini_api_key(),
+        api_key=_get_ai_access(),
         bucket=MINIO_BUCKET,
-        client_factory=lambda api_key: genai.Client(api_key=api_key),
+        client_factory=_ai_client,
     )
     return JSONResponse(res)
 
@@ -3174,9 +3148,9 @@ async def ui_ai_sql_fix(request: Request):
         error_message=error_msg,
         catalogs=catalogs,
         model=model,
-        api_key=_get_gemini_api_key(),
+        api_key=_get_ai_access(),
         bucket=MINIO_BUCKET,
-        client_factory=lambda api_key: genai.Client(api_key=api_key),
+        client_factory=_ai_client,
     )
     return JSONResponse(res)
 
@@ -3192,9 +3166,9 @@ async def ui_ai_sql_explain(request: Request):
         sql=sql,
         catalogs=catalogs,
         model=model,
-        api_key=_get_gemini_api_key(),
+        api_key=_get_ai_access(),
         bucket=MINIO_BUCKET,
-        client_factory=lambda api_key: genai.Client(api_key=api_key),
+        client_factory=_ai_client,
     )
     return JSONResponse(res)
 

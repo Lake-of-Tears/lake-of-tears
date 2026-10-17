@@ -13,7 +13,11 @@ from typing import Any
 
 import duckdb
 import pyarrow as pa
-from google import genai
+
+try:
+    from ui.ai_gateway_client import GatewayClient
+except ImportError:
+    from ai_gateway_client import GatewayClient
 
 logger = logging.getLogger("lake.ui.ai")
 
@@ -87,7 +91,7 @@ AI_MAX_ROWS_PER_QUERY = int(os.getenv("AI_MAX_ROWS_PER_QUERY", "50"))
 AI_MAX_CONCURRENCY = int(os.getenv("AI_MAX_CONCURRENCY", "5"))
 AI_CACHE_MAX_SIZE = 1024
 GEMINI_KEY_NOT_CONFIGURED_MSG = (
-    "GEMINI_API_KEY is not set. A superadmin can configure it in Settings → Admin Panel."
+    "No AI provider is configured. A superadmin can set one up in Settings → Admin Panel."
 )
 
 
@@ -310,7 +314,7 @@ def call_gemini_text(
     if not key:
         raise RuntimeError(GEMINI_KEY_NOT_CONFIGURED_MSG)
 
-    factory = client_factory or genai.Client
+    factory = client_factory or GatewayClient
     client = factory(api_key=key)
     last_exc: Exception | None = None
     for attempt in range(max_retries + 1):
