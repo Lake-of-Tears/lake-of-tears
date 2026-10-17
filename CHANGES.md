@@ -13,6 +13,7 @@ Every change made to this repo gets one row, newest first.
 
 | Date | Action | Ticket | Files | Summary |
 |---|---|---|---|---|
+| 20261016 | BUG FIX | #169 | `deploy/helm/lake-of-tears/templates/airflow.yaml`, `deploy/helm/values-local.yaml`, `ui/templates/pipelines.html` | Fixed pipeline drawer double scrollbar; tuned Airflow webserver workers and increased local memory limit to 4Gi |
 | 20261016 | ADD | #74 | `docs/wiki/Data-Ingestion-and-Pipelines.md`, `docs/wiki/Home.md`, `docs/wiki/pages.json` | Added Data Ingestion and Pipeline Authoring guide covering architecture, storage layout, tutorial and best practices (PR #160) |
 | 20261016 | IMPROVEMENT | #157 | `README.md`, `deploy/helm/lake-of-tears/templates/NOTES.txt`, `deploy/nginx/lake.conf`, `docker-compose.yml`, `CONTRIBUTING.md` | Removed stale references to public /jupyter/ route and port 8888; gated NOTES.txt credentials on jupyter.ingress.enabled (PR #159) |
 | 20261016 | IMPROVEMENT | #79 | `docs/wiki/images/admin-workspaces.jpg`, `docs/wiki/Workspaces-and-Catalog-Management.md` | Retook the Admin workspaces screenshot after #129 (Default shows System badge); replaced the known-issue note with the fixed behavior |

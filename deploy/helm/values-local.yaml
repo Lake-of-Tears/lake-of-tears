@@ -91,10 +91,10 @@ airflow:
   resources:
     requests:
       cpu: "200m"
-      memory: "512Mi"
+      memory: "1Gi"
     limits:
-      cpu: "1"
-      memory: "2Gi"
+      cpu: "2"
+      memory: "4Gi"
 
 backend:
   enabled: true
