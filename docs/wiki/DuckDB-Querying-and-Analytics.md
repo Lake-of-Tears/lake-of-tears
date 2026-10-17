@@ -4,6 +4,8 @@ Lake of Tears queries data **in place**: DuckDB reads the Parquet files in MinIO
 
 The queries in this guide were run against a local stack with three days of sample weather and storage data, and the results described are the real ones.
 
+> **AI providers.** With multi-provider support ([#68](https://github.com/Lake-of-Tears/lake-of-tears/issues/68) to [#71](https://github.com/Lake-of-Tears/lake-of-tears/issues/71)), the model, key and vector dimension described here depend on the provider chosen in the Admin Panel; the pipeline calls the backend AI gateway instead of `gemini_embedder`, and searches cast to the active dimension instead of a fixed 768. See [AI Providers](AI-Providers.md). The examples below show the Gemini defaults.
+
 ## 1. Where you can run SQL
 
 | Where | Good for | Notes |
