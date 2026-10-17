@@ -286,3 +286,53 @@ def test_catalog_create_success_redirects_to_catalog():
         )
         assert res.status_code == 302
         assert res.headers.get("location") == "/catalog"
+
+
+# ── /api/catalog/preview Tests ────────────────────────────────────────────────
+
+
+def test_catalog_preview_requires_auth():
+    with patch.object(main, "AUTH_ENABLED", True):
+        res = client.get("/catalog/preview?view=bronze.tmdb_trending")
+        assert res.status_code == 401
+        assert res.json()["ok"] is False
+
+
+def test_catalog_preview_rejects_invalid_view_name():
+    token = _make_token()
+    with patch.object(main, "AUTH_ENABLED", True):
+        res = client.get(
+            "/catalog/preview?view=invalid;drop table;--",
+            cookies={"lake_token": token},
+        )
+        assert res.status_code == 400
+        assert res.json()["ok"] is False
+        assert "Invalid view identifier" in res.json()["error"]
+
+
+def test_catalog_preview_success():
+    token = _make_token()
+    mock_query_result = {
+        "ok": True,
+        "columns": ["id", "title"],
+        "rows": [[1, "Inception"], [2, "Interstellar"]],
+        "row_count": 2,
+        "execution_ms": 1.25,
+    }
+
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_resolve_ui_catalogs", return_value=[]),
+        patch.object(main, "_run_query", return_value=mock_query_result),
+    ):
+        res = client.get(
+            "/catalog/preview?view=bronze.tmdb_trending&limit=10",
+            cookies={"lake_token": token},
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["ok"] is True
+        assert data["columns"] == ["id", "title"]
+        assert len(data["rows"]) == 2
+        assert data["row_count"] == 2
+        assert data["execution_ms"] == 1.25

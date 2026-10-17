@@ -733,8 +733,8 @@ def create_duckdb_connection(
     return con
 
 
-def _safe_identifier(name: str) -> str:
-    slug = re.sub(r"[^A-Za-z0-9_]", "_", name.strip())
+def _safe_identifier(name: str | None) -> str:
+    slug = re.sub(r"[^A-Za-z0-9_]", "_", (name or "").strip())
     if not slug or slug[0].isdigit():
         slug = f"t_{slug}"
     return slug
@@ -866,8 +866,11 @@ def build_schema_prompt_context(catalogs: list[dict[str, Any]] | None = None) ->
                         else "schema-on-read"
                     )
                     desc = f" — {table.get('description')}" if table.get("description") else ""
+                    # The views are created with _safe_identifier names (a slug like
+                    # "tmdb-trending" becomes tmdb_trending), so that is what queries must use.
+                    view = f"{_safe_identifier(schema_slug)}.{_safe_identifier(t_slug or '')}"
                     lines.append(
-                        f"- `{cat_slug}.{schema_slug}.{t_slug}` (View: `{schema_slug}.{t_slug}` or `read_parquet('{s3_path}')`){desc}\n"
+                        f"- `{cat_slug}.{schema_slug}.{t_slug}` (View: `{view}` or `read_parquet('{s3_path}')`){desc}\n"
                         f"  Columns: {col_str}"
                     )
 
@@ -1247,6 +1250,11 @@ def run_rag_search(question: str, api_key: str | None = None) -> dict[str, Any]:
             rows = con.execute(
                 vector_search_sql(embed_resp.dimension, has_model), params
             ).fetchall()
+        except Exception as exc:
+            if "No files found that match the pattern" in str(exc):
+                rows = []
+            else:
+                raise
         finally:
             con.close()
 
@@ -1259,16 +1267,26 @@ def run_rag_search(question: str, api_key: str | None = None) -> dict[str, Any]:
             }
             for r in rows
         ]
-        context_text = "\n\n".join(
-            f"[{s['source']} @ {s['ingested_at']} (score={s['score']})]:\n{s['summary']}"
-            for s in snippets
-        )
-        prompt = (
-            "You are an analyst for a business datalakehouse called Lake of Tears. "
-            "Answer the following question using the context snippets below. "
-            "Be concise and cite which data sources support your answer.\n\n"
-            f"Question: {question}\n\nContext:\n{context_text}"
-        )
+        if snippets:
+            context_text = "\n\n".join(
+                f"[{s['source']} @ {s['ingested_at']} (score={s['score']})]:\n{s['summary']}"
+                for s in snippets
+            )
+            prompt = (
+                "You are an analyst for a business datalakehouse called Lake of Tears. "
+                "Answer the following question using the context snippets below. "
+                "Be concise and cite which data sources support your answer.\n\n"
+                f"Question: {question}\n\nContext:\n{context_text}"
+            )
+        else:
+            prompt = (
+                "You are an analyst for a business datalakehouse called Lake of Tears. "
+                "Note: No semantic vector embeddings were found in s3://datalake/embeddings/**/*.parquet for this query. "
+                "Answer the user's question clearly and let them know that semantic embeddings have not yet been generated "
+                "for this dataset.\n\n"
+                f"Question: {question}"
+            )
+
         answer = client.models.generate_content(contents=prompt).text
         return {"ok": True, "answer": (answer or "").strip(), "snippets": snippets}
     except Exception as exc:

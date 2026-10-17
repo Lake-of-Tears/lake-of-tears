@@ -2,6 +2,7 @@ import asyncio
 import logging
 import math
 import os
+import re
 import time
 import urllib.parse
 from datetime import UTC, datetime, timedelta
@@ -15,7 +16,7 @@ import httpx
 import jwt
 import websockets
 from dotenv import load_dotenv
-from fastapi import FastAPI, Form, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import FastAPI, Form, Query, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -58,9 +59,18 @@ SOURCE_LABELS = {
 
 app = FastAPI(title="Lake of Tears")
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+# Catalog slugs use hyphens but the DuckDB views use underscores; templates show the SQL name.
+templates.env.filters["sql_ident"] = duckdb_ai._safe_identifier
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
-_PUBLIC_PREFIXES = ("/login", "/logout", "/api/", "/health", "/workspace/search")
+_PUBLIC_PREFIXES = (
+    "/login",
+    "/logout",
+    "/api/",
+    "/health",
+    "/workspace/search",
+    "/catalog/preview",
+)
 _WORKSPACE_COOKIE = "lake_workspace_id"
 
 _SESSION_CONFIG_CACHE: dict | None = None
@@ -448,18 +458,26 @@ def _ai_query(question: str) -> dict[str, Any]:
 
         s3_pattern = f"s3://{MINIO_BUCKET}/embeddings/**/*.parquet"
         con = _duckdb_connection()
-        columns = {
-            d[0]
-            for d in con.execute(
-                "SELECT * FROM read_parquet(?, union_by_name = true) LIMIT 0", [s3_pattern]
-            ).description
-        }
-        has_model = "model" in columns
-        params = [q_vec, s3_pattern] + ([embed_resp.model] if has_model else []) + [5]
-        rows = con.execute(
-            ai_gateway_client.vector_search_sql(embed_resp.dimension, has_model), params
-        ).fetchall()
-        con.close()
+        try:
+            columns = {
+                d[0]
+                for d in con.execute(
+                    "SELECT * FROM read_parquet(?, union_by_name = true) LIMIT 0", [s3_pattern]
+                ).description
+            }
+            has_model = "model" in columns
+            params = [q_vec, s3_pattern] + ([embed_resp.model] if has_model else []) + [5]
+            rows = con.execute(
+                ai_gateway_client.vector_search_sql(embed_resp.dimension, has_model), params
+            ).fetchall()
+        except Exception as exc:
+            if "No files found that match the pattern" in str(exc):
+                rows = []
+            else:
+                raise
+        finally:
+            con.close()
+
 
         context_snippets = [
             {
@@ -470,16 +488,25 @@ def _ai_query(question: str) -> dict[str, Any]:
             }
             for r in rows
         ]
-        context_text = "\n\n".join(
-            f"[{s['source']} @ {s['ingested_at']} (score={s['score']})]:\n{s['summary']}"
-            for s in context_snippets
-        )
-        prompt = (
-            "You are an analyst for a business datalakehouse called Lake of Tears. "
-            "Answer the following question using the context snippets below. "
-            "Be concise and cite which data sources support your answer.\n\n"
-            f"Question: {question}\n\nContext:\n{context_text}"
-        )
+        if context_snippets:
+            context_text = "\n\n".join(
+                f"[{s['source']} @ {s['ingested_at']} (score={s['score']})]:\n{s['summary']}"
+                for s in context_snippets
+            )
+            prompt = (
+                "You are an analyst for a business datalakehouse called Lake of Tears. "
+                "Answer the following question using the context snippets below. "
+                "Be concise and cite which data sources support your answer.\n\n"
+                f"Question: {question}\n\nContext:\n{context_text}"
+            )
+        else:
+            prompt = (
+                "You are an analyst for a business datalakehouse called Lake of Tears. "
+                "Note: No semantic vector embeddings were found in s3://datalake/embeddings/**/*.parquet for this query. "
+                "Answer the user's question clearly and let them know that semantic embeddings have not yet been generated "
+                "for this dataset.\n\n"
+                f"Question: {question}"
+            )
 
         answer = client.models.generate_content(contents=prompt).text
 
@@ -582,6 +609,103 @@ async def catalog(request: Request):
         name="catalog.html",
         context={"request": request, "catalogs": catalogs, "page": "catalog", "error": error},
     )
+
+
+def _json_safe(val: Any) -> Any:
+    if val is None:
+        return None
+    if isinstance(val, int | float | bool | str):
+        return val
+    if isinstance(val, list | tuple):
+        return [_json_safe(x) for x in val]
+    if isinstance(val, dict):
+        return {k: _json_safe(v) for k, v in val.items()}
+    return str(val)
+
+
+@app.get("/catalog/preview")
+@app.get("/api/catalog/preview")
+async def api_catalog_preview(
+    request: Request,
+    view: str = Query(..., description="DuckDB view name (e.g. bronze.tmdb_trending)"),
+    limit: int = Query(15, ge=1, le=100),
+):
+    token = request.cookies.get("lake_token")
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"ok": False, "error": "Not authenticated"}, status_code=401)
+
+    clean_view = view.strip()
+    if not re.match(r"^[A-Za-z0-9_]+\.[A-Za-z0-9_]+$", clean_view):
+        return JSONResponse({"ok": False, "error": "Invalid view identifier"}, status_code=400)
+
+    catalogs = _resolve_ui_catalogs(request)
+    sql = f"SELECT * FROM {clean_view} LIMIT {limit}"
+    result = _run_query(sql, catalogs=catalogs, read_only=True)
+    if result.get("ok"):
+        safe_rows = [[_json_safe(c) for c in r] for r in result.get("rows", [])]
+        return JSONResponse(
+            {
+                "ok": True,
+                "columns": result.get("columns", []),
+                "rows": safe_rows,
+                "row_count": result.get("row_count", 0),
+                "execution_ms": result.get("execution_ms", 0),
+            }
+        )
+    return JSONResponse(
+        {
+            "ok": False,
+            "error": result.get("error", "Failed to query preview"),
+        }
+    )
+
+
+@app.post("/catalog/vector-sync")
+async def catalog_vector_sync(request: Request):
+    token = request.cookies.get("lake_token")
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"ok": False, "error": "Not authenticated"}, status_code=401)
+
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Invalid JSON body"}, status_code=400)
+
+    catalog_id = data.get("catalog_id")
+    schema_id = data.get("schema_id")
+    table_id = data.get("table_id")
+    source_col = data.get("source_column")
+    format_template = data.get("format_template")
+
+    if not catalog_id or not schema_id or not table_id:
+        return JSONResponse(
+            {"ok": False, "error": "Missing catalog_id, schema_id, or table_id"},
+            status_code=400,
+        )
+
+    if source_col is not None:
+        patch_payload = {
+            "vector_index": {
+                "enabled": True,
+                "source_column": source_col,
+                "format_template": format_template or "",
+                "status": "syncing",
+            }
+        }
+        _backend_patch(
+            f"/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}",
+            token or "",
+            patch_payload,
+        )
+
+    sync_res, err = _backend_post_with_error(
+        f"/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}/vector-index/sync",
+        token or "",
+        {},
+    )
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=500)
+    return JSONResponse({"ok": True, "table": sync_res})
 
 
 @app.post("/catalog/create")

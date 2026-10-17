@@ -9,7 +9,6 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import duckdb
-import pandas as pd
 import pytest
 
 root = Path(__file__).parents[1]
@@ -18,7 +17,6 @@ for sub in ("pipeline/shared", "pipeline/embed"):
         sys.path.insert(0, str(root / sub))
 
 import ai_gateway  # noqa: E402
-import embed_sources  # noqa: E402
 
 
 class _Gateway:
@@ -142,6 +140,9 @@ def test_client_reports_an_unreachable_gateway(monkeypatch):
 
 
 def test_embed_source_writes_provider_model_and_dimension(gateway, monkeypatch):
+    pd = pytest.importorskip("pandas")
+    import embed_sources
+
     raw = pd.DataFrame(
         [{"timestamp": "2026-10-16T01:00", "temperature_2m": 50, "source_date": "2026-10-16"}]
     )

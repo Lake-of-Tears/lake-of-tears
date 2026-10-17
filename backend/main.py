@@ -1328,8 +1328,37 @@ def update_table(
         table.s3_path_pattern = req.s3_path_pattern
     if req.column_defs is not None:
         table.column_defs = [c.model_dump() for c in req.column_defs]
+    if req.vector_index is not None:
+        table.vector_index = req.vector_index
     db.commit()
     db.refresh(table)
+    return CatalogTableResponse.model_validate(table)
+
+
+@app.post(
+    "/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}/vector-index/sync",
+    response_model=CatalogTableResponse,
+)
+def sync_table_vector_index_endpoint(
+    catalog_id: str,
+    schema_id: str,
+    table_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    catalog = db.query(Catalog).filter(Catalog.id == catalog_id).first()
+    if not catalog:
+        raise HTTPException(404, "Catalog not found")
+    _assert_catalog_access(db, catalog, current_user, "write")
+    table = db.query(CatalogTable).filter_by(id=table_id, schema_id=schema_id).first()
+    if not table:
+        raise HTTPException(404, "Table not found")
+
+    import vector_index_service
+
+    res = vector_index_service.sync_table_vector_index(table, db)
+    if not res.get("ok"):
+        raise HTTPException(500, res.get("error", "Failed to sync vector index"))
     return CatalogTableResponse.model_validate(table)
 
 
