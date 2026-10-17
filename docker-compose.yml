@@ -210,6 +210,8 @@ services:
       AUTH_SECRET_KEY: ${AUTH_SECRET_KEY}
     volumes:
       - ${DATALAKE_DATA_DIR:-~}/notebooks:/home/jovyan/work
+      # Notebooks created in the Lake UI are stored under workspaces/ in Jupyter's root folder.
+      - ${DATALAKE_DATA_DIR:-~}/workspaces:/home/jovyan/workspaces
       - ${DATALAKE_DATA_DIR:-~}/datalake:/home/jovyan/datalake
     # base_url=/jupyter/: the Lake UI notebook proxy builds Jupyter API URLs from this prefix
     # (JUPYTER_BASE_URL); Jupyter is not exposed through nginx.
