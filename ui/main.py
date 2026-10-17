@@ -472,7 +472,7 @@ def _run_query(
 AI_VECTOR_SQL = """
     SELECT
         source,
-        ingested_at,
+        ingested_at::VARCHAR AS ingested_at,
         summary,
         array_cosine_similarity(
             embedding::DOUBLE[768],
@@ -494,14 +494,22 @@ def _ai_query(question: str) -> dict[str, Any]:
         embed_resp = client.models.embed_content(
             model="gemini-embedding-001",
             contents=question,
+            config={"output_dimensionality": 768, "task_type": "RETRIEVAL_QUERY"},
         )
         q_vec = embed_resp.embeddings[0].values
 
         s3_pattern = f"s3://{MINIO_BUCKET}/embeddings/**/*.parquet"
         con = _duckdb_connection(load_vss=True)
-        rel = con.execute(AI_VECTOR_SQL, [q_vec, s3_pattern])
-        rows = rel.fetchall()
-        con.close()
+        try:
+            rel = con.execute(AI_VECTOR_SQL, [q_vec, s3_pattern])
+            rows = rel.fetchall()
+        except Exception as exc:
+            if "No files found that match the pattern" in str(exc):
+                rows = []
+            else:
+                raise
+        finally:
+            con.close()
 
         context_snippets = [
             {
@@ -512,16 +520,25 @@ def _ai_query(question: str) -> dict[str, Any]:
             }
             for r in rows
         ]
-        context_text = "\n\n".join(
-            f"[{s['source']} @ {s['ingested_at']} (score={s['score']})]:\n{s['summary']}"
-            for s in context_snippets
-        )
-        prompt = (
-            "You are an analyst for a business datalakehouse called Lake of Tears. "
-            "Answer the following question using the context snippets below. "
-            "Be concise and cite which data sources support your answer.\n\n"
-            f"Question: {question}\n\nContext:\n{context_text}"
-        )
+        if context_snippets:
+            context_text = "\n\n".join(
+                f"[{s['source']} @ {s['ingested_at']} (score={s['score']})]:\n{s['summary']}"
+                for s in context_snippets
+            )
+            prompt = (
+                "You are an analyst for a business datalakehouse called Lake of Tears. "
+                "Answer the following question using the context snippets below. "
+                "Be concise and cite which data sources support your answer.\n\n"
+                f"Question: {question}\n\nContext:\n{context_text}"
+            )
+        else:
+            prompt = (
+                "You are an analyst for a business datalakehouse called Lake of Tears. "
+                "Note: No semantic vector embeddings were found in s3://datalake/embeddings/**/*.parquet for this query. "
+                "Answer the user's question clearly and let them know that semantic embeddings have not yet been generated "
+                "for this dataset.\n\n"
+                f"Question: {question}"
+            )
 
         answer = client.models.generate_content(
             model=_get_gemini_default_model(),
@@ -676,6 +693,54 @@ async def api_catalog_preview(
             "error": result.get("error", "Failed to query preview"),
         }
     )
+
+
+@app.post("/catalog/vector-sync")
+async def catalog_vector_sync(request: Request):
+    token = request.cookies.get("lake_token")
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"ok": False, "error": "Not authenticated"}, status_code=401)
+
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Invalid JSON body"}, status_code=400)
+
+    catalog_id = data.get("catalog_id")
+    schema_id = data.get("schema_id")
+    table_id = data.get("table_id")
+    source_col = data.get("source_column")
+    format_template = data.get("format_template")
+
+    if not catalog_id or not schema_id or not table_id:
+        return JSONResponse(
+            {"ok": False, "error": "Missing catalog_id, schema_id, or table_id"},
+            status_code=400,
+        )
+
+    if source_col is not None:
+        patch_payload = {
+            "vector_index": {
+                "enabled": True,
+                "source_column": source_col,
+                "format_template": format_template or "",
+                "status": "syncing",
+            }
+        }
+        _backend_patch(
+            f"/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}",
+            token or "",
+            patch_payload,
+        )
+
+    sync_res, err = _backend_post_with_error(
+        f"/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}/vector-index/sync",
+        token or "",
+        {},
+    )
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=500)
+    return JSONResponse({"ok": True, "table": sync_res})
 
 
 @app.post("/catalog/create")
