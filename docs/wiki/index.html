@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Docs — Lake of Tears</title>
+  <meta name="description" content="Guides and reference for Lake of Tears, the open-source, self-hosted Databricks alternative.">
+  <link rel="icon" type="image/png" href="../assets/logo.png">
+
+  <!-- Tailwind CSS CDN (same setup as the main site) -->
+  <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#ecfeff', 100: '#cffafe', 200: '#a5f3fc', 300: '#67e8f9', 400: '#22d3ee',
+              500: '#06b6d4', 600: '#0891b2', 700: '#0e7490', 800: '#155e75', 900: '#164e63', 950: '#082f49',
+            },
+            dark: { 850: '#121824', 900: '#0d111a', 950: '#070a10' }
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'Menlo', 'Monaco', 'Courier New', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    code, pre { font-family: 'JetBrains Mono', monospace; }
+    .prose code::before, .prose code::after { content: none !important; }
+    .prose :not(pre) > code {
+      background: rgba(148, 163, 184, 0.12); padding: 0.125rem 0.375rem; border-radius: 0.375rem; font-size: 0.85em;
+    }
+    .prose blockquote { font-style: normal; border-left-color: rgba(6, 182, 212, 0.5); }
+    .prose blockquote p::before, .prose blockquote p::after { content: none !important; }
+    .prose img { border-radius: 0.75rem; border: 1px solid rgba(255, 255, 255, 0.08); }
+    .prose pre.mermaid {
+      background: rgba(18, 24, 36, 0.7); border: 1px solid rgba(255, 255, 255, 0.08); text-align: center;
+    }
+    .prose table { display: block; overflow-x: auto; }
+    .prose h2, .prose h3 { scroll-margin-top: 5rem; }
+  </style>
+</head>
+<body class="bg-dark-950 text-slate-200 antialiased selection:bg-brand-500/30 selection:text-brand-200">
+
+  <header class="fixed top-0 left-0 right-0 z-50 bg-dark-950/90 backdrop-blur-md border-b border-slate-800/80">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+      <a href="../" class="flex items-center gap-2.5 shrink-0 group">
+        <img src="../assets/logo.png" alt="Lake of Tears Logo" class="w-8 h-8 rounded-lg shadow-sm group-hover:scale-105 transition-transform">
+        <span class="text-base sm:text-lg font-bold text-white tracking-tight whitespace-nowrap">Lake of Tears</span>
+        <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-brand-500/10 text-brand-400 border border-brand-500/20">Docs</span>
+      </a>
+      <nav class="flex items-center gap-4 text-sm font-medium text-slate-300">
+        <a href="../" class="hover:text-brand-400 transition-colors">Home</a>
+        <a href="https://github.com/Lake-of-Tears/lake-of-tears" target="_blank" rel="noopener noreferrer" class="hover:text-brand-400 transition-colors">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-24 pb-16 lg:grid lg:grid-cols-[16rem_minmax(0,1fr)_14rem] lg:gap-10">
+
+    <!-- Page list: sidebar on desktop, select on mobile -->
+    <aside class="mb-6 lg:mb-0">
+      <label for="page-select" class="lg:hidden block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Page</label>
+      <select id="page-select" class="lg:hidden w-full bg-dark-850 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200"></select>
+      <nav id="page-list" aria-label="Documentation pages" class="hidden lg:block lg:sticky lg:top-24">
+        <p class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">Guides</p>
+        <ul id="page-list-items" class="space-y-1"></ul>
+      </nav>
+    </aside>
+
+    <main class="min-w-0">
+      <article id="content" class="prose prose-invert prose-slate max-w-none prose-headings:text-white prose-a:text-brand-400 hover:prose-a:text-brand-300 prose-pre:bg-dark-850 prose-pre:border prose-pre:border-slate-800">
+        <p class="text-slate-500">Loading…</p>
+      </article>
+    </main>
+
+    <!-- On this page -->
+    <aside class="hidden lg:block">
+      <nav id="toc" aria-label="On this page" class="sticky top-24 text-sm hidden">
+        <p class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">On this page</p>
+        <ul id="toc-items" class="space-y-2 border-l border-slate-800"></ul>
+      </nav>
+    </aside>
+  </div>
+
+  <script>
+    const contentEl = document.getElementById('content');
+    const listEl = document.getElementById('page-list-items');
+    const selectEl = document.getElementById('page-select');
+    const tocEl = document.getElementById('toc');
+    const tocItemsEl = document.getElementById('toc-items');
+
+    let pages = [];
+
+    mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' });
+
+    function slugify(text) {
+      return text.toLowerCase().replace(/<[^>]+>/g, '').replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '-');
+    }
+
+    function escapeHtml(s) {
+      return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function currentSlug() {
+      const slug = decodeURIComponent(location.hash.replace(/^#\/?/, '').split('/')[0]);
+      return pages.some(p => p.slug === slug) ? slug : pages[0].slug;
+    }
+
+    function buildRenderer(headings) {
+      const renderer = new marked.Renderer();
+      renderer.heading = function (text, level) {
+        const id = slugify(text);
+        if (level === 2 || level === 3) headings.push({ id, text: text.replace(/<[^>]+>/g, ''), level });
+        return `<h${level} id="${id}">${text}</h${level}>`;
+      };
+      renderer.code = function (code, infostring) {
+        const lang = (infostring || '').split(/\s+/)[0];
+        if (lang === 'mermaid') return `<pre class="mermaid">${escapeHtml(code)}</pre>`;
+        return `<pre><code${lang ? ` class="language-${escapeHtml(lang)}"` : ''}>${escapeHtml(code)}</code></pre>`;
+      };
+      renderer.link = function (href, title, text) {
+        const t = title ? ` title="${escapeHtml(title)}"` : '';
+        const file = href && href.split('#')[0].split('/').pop();
+        const page = pages.find(p => p.file === file);
+        if (page) return `<a href="#/${page.slug}"${t}>${text}</a>`;
+        if (href && href.startsWith('#')) return `<a href="${href}" data-anchor="${href.slice(1)}"${t}>${text}</a>`;
+        const external = /^https?:\/\//.test(href || '');
+        return `<a href="${href}"${t}${external ? ' target="_blank" rel="noopener noreferrer"' : ''}>${text}</a>`;
+      };
+      return renderer;
+    }
+
+    function renderNav(active) {
+      listEl.innerHTML = pages.map(p => {
+        const on = p.slug === active;
+        const cls = on ? 'bg-brand-500/10 text-brand-300 border-brand-500/40' : 'text-slate-300 hover:text-brand-300 hover:bg-slate-800/50 border-transparent';
+        return `<li><a href="#/${p.slug}" class="block px-3 py-2 rounded-lg border text-sm font-medium ${cls}"${on ? ' aria-current="page"' : ''}>${escapeHtml(p.title)}</a></li>`;
+      }).join('');
+      selectEl.innerHTML = pages.map(p => `<option value="${p.slug}"${p.slug === active ? ' selected' : ''}>${escapeHtml(p.title)}</option>`).join('');
+    }
+
+    function renderToc(headings) {
+      if (!headings.length) { tocEl.classList.add('hidden'); return; }
+      tocItemsEl.innerHTML = headings.map(h =>
+        `<li><a href="#${h.id}" data-anchor="${h.id}" class="block -ml-px border-l border-transparent hover:border-brand-400 hover:text-brand-300 text-slate-400 ${h.level === 3 ? 'pl-6' : 'pl-3'}">${escapeHtml(h.text)}</a></li>`
+      ).join('');
+      tocEl.classList.remove('hidden');
+    }
+
+    async function showPage() {
+      const slug = currentSlug();
+      const page = pages.find(p => p.slug === slug);
+      renderNav(slug);
+      document.title = `${page.title} — Lake of Tears Docs`;
+      contentEl.innerHTML = '<p class="text-slate-500">Loading…</p>';
+      try {
+        const res = await fetch(page.file, { cache: 'no-cache' });
+        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+        const md = await res.text();
+        const headings = [];
+        const html = marked.parse(md, { renderer: buildRenderer(headings), gfm: true, mangle: false, headerIds: false });
+        contentEl.innerHTML = DOMPurify.sanitize(html, { ADD_ATTR: ['target', 'data-anchor'] });
+        renderToc(headings);
+        const nodes = contentEl.querySelectorAll('pre.mermaid');
+        if (nodes.length) await mermaid.run({ nodes });
+        window.scrollTo(0, 0);
+      } catch (err) {
+        contentEl.innerHTML = `<p class="text-red-300">Could not load this page (${escapeHtml(String(err.message || err))}).</p>`;
+        tocEl.classList.add('hidden');
+      }
+    }
+
+    // In-page anchors must not change the hash (it selects the page), so scroll manually.
+    document.addEventListener('click', (e) => {
+      const a = e.target.closest('a[data-anchor]');
+      if (!a) return;
+      e.preventDefault();
+      const el = document.getElementById(a.dataset.anchor);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+
+    selectEl.addEventListener('change', () => { location.hash = `#/${selectEl.value}`; });
+    window.addEventListener('hashchange', showPage);
+
+    (async () => {
+      try {
+        const res = await fetch('pages.json', { cache: 'no-cache' });
+        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+        pages = (await res.json()).pages || [];
+        if (!pages.length) throw new Error('no pages listed');
+        showPage();
+      } catch (err) {
+        contentEl.innerHTML = `<p class="text-red-300">Could not load the page list (${escapeHtml(String(err.message || err))}).</p>`;
+      }
+    })();
+  </script>
+</body>
+</html>
