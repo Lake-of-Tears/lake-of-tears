@@ -140,8 +140,15 @@ jupyter:
   ingress:
     enabled: false
 
+  # Notebooks (workspaces/) and work/ live on a PersistentVolumeClaim of this size, so they survive
+  # pod restarts. Upgrading an existing install mounts an empty volume over those folders:
+  # export any notebooks you want to keep first.
   persistence:
     size: 10Gi
+
+  # Lets the notebook user (jovyan, group users = 100) write to the volume.
+  podSecurityContext:
+    fsGroup: 100
 
   resources:
     requests:

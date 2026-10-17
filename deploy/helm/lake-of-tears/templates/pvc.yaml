@@ -52,3 +52,22 @@ spec:
   resources:
     requests:
       storage: {{ .Values.airflow.persistence.size }}
+
+---
+# Jupyter home: notebooks created through the Lake UI (workspaces/) and the user's own work/
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "lake-of-tears.fullname" . }}-jupyter-home
+  labels:
+    {{- include "lake-of-tears.labels" . | nindent 4 }}
+    app.kubernetes.io/component: jupyter
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- if .Values.global.storageClass }}
+  storageClassName: {{ .Values.global.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.jupyter.persistence.size }}
