@@ -18,19 +18,22 @@ MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "datalake")
 
 
-def _collect_s3_paths(db, catalog_id: str) -> list[str]:
+def _load_patterns(db) -> list[tuple[str, str]]:
+    """Return (catalog_id, s3_path_pattern) for every catalog table with a pattern."""
     from sqlalchemy import text
 
     rows = db.execute(
         text(
-            "SELECT s3_path_pattern FROM catalog_tables "
-            "WHERE schema_id IN ("
-            "  SELECT id FROM catalog_schemas WHERE catalog_id = :cid"
-            ") AND s3_path_pattern IS NOT NULL"
-        ),
-        {"cid": catalog_id},
+            "SELECT s.catalog_id, t.s3_path_pattern FROM catalog_tables t "
+            "JOIN catalog_schemas s ON t.schema_id = s.id "
+            "WHERE t.s3_path_pattern IS NOT NULL"
+        )
     ).fetchall()
-    return [r[0] for r in rows if r[0]]
+    return [(str(r[0]), r[1]) for r in rows if r[1]]
+
+
+def _overlaps(a: str, b: str) -> bool:
+    return a.startswith(b) or b.startswith(a)
 
 
 def _prefix_for_pattern(pattern: str) -> str | None:
@@ -88,20 +91,37 @@ def purge_deleted_catalogs():
 
         print(f"Found {len(due)} catalog(s) due for purge")
 
+        # Catalogs purged together may share data with each other; only catalogs that
+        # survive this run (including soft-deleted ones still in their grace period) count.
+        due_ids = {str(r[0]) for r in due}
+        patterns = _load_patterns(db)
+        kept_prefixes = [
+            p
+            for p in (_prefix_for_pattern(pat) for cid, pat in patterns if cid not in due_ids)
+            if p
+        ]
+
         for row in due:
             catalog_id, catalog_name = str(row[0]), row[1]
             print(f"Purging catalog '{catalog_name}' ({catalog_id})")
 
-            # Collect S3 paths before cascade-deleting DB records
-            s3_paths = _collect_s3_paths(db, catalog_id)
-
-            # Delete S3 data first; if this fails the task retries before touching DB
-            for path in s3_paths:
-                # Patterns look like s3://bucket/a/b/**/*.parquet; list by key prefix "a/b/"
-                prefix = _prefix_for_pattern(path)
-                if prefix is None:
-                    print(f"  Skipping unrecognised path pattern: {path}")
+            # Delete S3 data first; if this fails the task retries before touching DB.
+            # Patterns look like s3://bucket/a/b/**/*.parquet; list by key prefix "a/b/".
+            # Skip prefixes that overlap tables in catalogs NOT being purged in this run.
+            seen: set[str] = set()
+            for cid, pattern in patterns:
+                if cid != catalog_id:
                     continue
+                prefix = _prefix_for_pattern(pattern)
+                if prefix is None:
+                    print(f"  Skipping unrecognised path pattern: {pattern}")
+                    continue
+                if prefix in seen:
+                    continue
+                if any(_overlaps(prefix, o) for o in kept_prefixes):
+                    print(f"  Skipping prefix shared with another catalog: {prefix}")
+                    continue
+                seen.add(prefix)
                 try:
                     _delete_s3_prefix(prefix)
                     print(f"  Deleted S3 prefix: {prefix}")
