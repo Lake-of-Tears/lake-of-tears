@@ -478,7 +478,6 @@ def _ai_query(question: str) -> dict[str, Any]:
         finally:
             con.close()
 
-
         context_snippets = [
             {
                 "source": r[0],
