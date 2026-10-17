@@ -64,7 +64,14 @@ templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 templates.env.filters["sql_ident"] = duckdb_ai._safe_identifier
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
-_PUBLIC_PREFIXES = ("/login", "/logout", "/api/", "/health", "/workspace/search", "/catalog/preview")
+_PUBLIC_PREFIXES = (
+    "/login",
+    "/logout",
+    "/api/",
+    "/health",
+    "/workspace/search",
+    "/catalog/preview",
+)
 _WORKSPACE_COOKIE = "lake_workspace_id"
 
 _SESSION_CONFIG_CACHE: dict | None = None
@@ -625,9 +632,9 @@ async def catalog(request: Request):
 def _json_safe(val: Any) -> Any:
     if val is None:
         return None
-    if isinstance(val, (int, float, bool, str)):
+    if isinstance(val, int | float | bool | str):
         return val
-    if isinstance(val, (list, tuple)):
+    if isinstance(val, list | tuple):
         return [_json_safe(x) for x in val]
     if isinstance(val, dict):
         return {k: _json_safe(v) for k, v in val.items()}
@@ -654,17 +661,21 @@ async def api_catalog_preview(
     result = _run_query(sql, catalogs=catalogs, read_only=True)
     if result.get("ok"):
         safe_rows = [[_json_safe(c) for c in r] for r in result.get("rows", [])]
-        return JSONResponse({
-            "ok": True,
-            "columns": result.get("columns", []),
-            "rows": safe_rows,
-            "row_count": result.get("row_count", 0),
-            "execution_ms": result.get("execution_ms", 0),
-        })
-    return JSONResponse({
-        "ok": False,
-        "error": result.get("error", "Failed to query preview"),
-    })
+        return JSONResponse(
+            {
+                "ok": True,
+                "columns": result.get("columns", []),
+                "rows": safe_rows,
+                "row_count": result.get("row_count", 0),
+                "execution_ms": result.get("execution_ms", 0),
+            }
+        )
+    return JSONResponse(
+        {
+            "ok": False,
+            "error": result.get("error", "Failed to query preview"),
+        }
+    )
 
 
 @app.post("/catalog/create")

@@ -86,7 +86,11 @@ def test_catalog_page_renders_sql_ident_for_schema_and_table():
 
     client = TestClient(main.app)
     token = jwt.encode(
-        {"sub": "00000000-0000-0000-0000-000000000001", "email": "test@lake.local", "role": "admin"},
+        {
+            "sub": "00000000-0000-0000-0000-000000000001",
+            "email": "test@lake.local",
+            "role": "admin",
+        },
         main.AUTH_SECRET_KEY,
         algorithm="HS256",
     )
