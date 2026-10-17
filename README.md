@@ -106,6 +106,22 @@ All services are accessible from the left sidebar. Direct ports are also availab
 
 ---
 
+## AI providers and local models
+
+The AI features (AI Query, the SQL assistant, Genie, `ai_*` SQL functions and the embedding pipelines) use whichever provider a superadmin selects in **Settings → Admin Panel → AI Provider**: Google Gemini, **Ollama** (local models) or any **OpenAI-compatible server** (vLLM, LocalAI, LM Studio, Groq, DeepSeek, ...). Changes apply immediately and secrets are stored encrypted.
+
+To run fully offline, start Ollama next to Lake of Tears and pull a chat and an embedding model:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d ollama
+docker compose -f docker-compose.yml -f docker-compose.ollama.yml exec ollama ollama pull llama3.2
+docker compose -f docker-compose.yml -f docker-compose.ollama.yml exec ollama ollama pull nomic-embed-text
+```
+
+Then choose **Ollama** in the Admin Panel, set the base URL to `http://ollama:11434`, enter the two model names and click **Test Connection**. See the header of [`docker-compose.ollama.yml`](docker-compose.ollama.yml) for the details. Each embedding file records which model made it, so you can switch providers without breaking search.
+
+---
+
 ## Deploying with Helm (Kubernetes)
 
 ### Prerequisites

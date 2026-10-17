@@ -27,6 +27,7 @@ from ai_providers.gemini import (
     DEFAULT_EMBEDDING_MODEL,
     GeminiProvider,
 )
+from ai_providers.http_providers import OllamaProvider, OpenAICompatibleProvider
 
 AI_PROVIDER_SETTING = "ai_provider"
 AI_PROVIDER_CONFIG_SETTING = "ai_provider_config"
@@ -67,6 +68,60 @@ def _build_gemini(cfg: dict[str, Any]) -> AIProvider:
     )
 
 
+def _http_fields(base_url_placeholder: str, base_url_help: str) -> tuple[FieldSpec, ...]:
+    return (
+        FieldSpec(
+            "base_url",
+            "Base URL",
+            required=True,
+            placeholder=base_url_placeholder,
+            help=base_url_help,
+        ),
+        FieldSpec(
+            "api_key",
+            "API key / token",
+            "secret",
+            help="Optional. Sent as a bearer token, for servers behind an authenticating proxy.",
+        ),
+        FieldSpec("chat_model", "Chat model", required=True, placeholder="llama3.2"),
+        FieldSpec(
+            "embedding_model", "Embedding model", required=True, placeholder="nomic-embed-text"
+        ),
+        FieldSpec(
+            "dimension",
+            "Embedding dimension",
+            "int",
+            help="Optional. Leave blank to detect it from the model automatically.",
+        ),
+        FieldSpec(
+            "query_prefix",
+            "Query prefix",
+            help="Optional text put before search questions, for models trained with one "
+            "(for example `search_query: ` for nomic-embed-text).",
+        ),
+        FieldSpec(
+            "document_prefix",
+            "Document prefix",
+            help="Optional text put before stored documents (for example `search_document: `).",
+        ),
+    )
+
+
+def _build_http(cls):
+    def build(cfg: dict[str, Any]) -> AIProvider:
+        return cls(
+            base_url=str(cfg.get("base_url") or ""),
+            chat_model=str(cfg.get("chat_model") or ""),
+            embedding_model=str(cfg.get("embedding_model") or ""),
+            api_key=str(cfg.get("api_key") or ""),
+            dimension=int(cfg["dimension"]) if cfg.get("dimension") else None,
+            query_prefix=str(cfg.get("query_prefix") or ""),
+            document_prefix=str(cfg.get("document_prefix") or ""),
+        )
+
+    return build
+
+
 PROVIDERS: dict[str, ProviderSpec] = {
     "gemini": ProviderSpec(
         "gemini",
@@ -95,6 +150,25 @@ PROVIDERS: dict[str, ProviderSpec] = {
             ),
         ),
         _build_gemini,
+    ),
+    "ollama": ProviderSpec(
+        "ollama",
+        "Ollama (local models)",
+        _http_fields(
+            "http://ollama:11434",
+            "Where Ollama listens, as seen from the backend (for example http://ollama:11434).",
+        ),
+        _build_http(OllamaProvider),
+    ),
+    "openai_compatible": ProviderSpec(
+        "openai_compatible",
+        "OpenAI-compatible server",
+        _http_fields(
+            "http://vllm:8000/v1",
+            "Any server that implements the OpenAI API (vLLM, LocalAI, LM Studio, Groq, DeepSeek, ...). "
+            "`/v1` is added if missing.",
+        ),
+        _build_http(OpenAICompatibleProvider),
     ),
 }
 
@@ -185,6 +259,7 @@ def load_provider_config(
         "chat_model": os.getenv("LLM_MODEL"),
         "embedding_model": os.getenv("LLM_EMBEDDING_MODEL"),
         "dimension": os.getenv("LLM_EMBEDDING_DIMENSION"),
+        "base_url": os.getenv("LLM_BASE_URL"),
     }
     for field, value in env_defaults.items():
         if not cfg.get(field) and value:
