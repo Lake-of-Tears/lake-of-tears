@@ -17,7 +17,7 @@
 
 Lake of Tears is a self-hosted data platform inspired by Databricks — one URL, one sidebar, all your data tools in one place. It combines S3-compatible storage, a DuckDB SQL engine, AI-powered natural language search, automated pipelines, and business BI — without the enterprise price tag.
 
-**Everything runs behind a single nginx entry point.** JupyterLab, Apache Superset, and Apache Airflow are embedded as iframes within the Lake UI shell, so your team works from one consistent interface.
+**Everything runs behind a single nginx entry point.** Apache Superset and Apache Airflow are embedded as iframes within the Lake UI shell, and notebooks run in a native interface built into it (powered by the Jupyter Server API), so your team works from one consistent interface.
 
 ---
 
@@ -35,7 +35,7 @@ Lake of Tears is a self-hosted data platform inspired by Databricks — one URL,
 - RAG queries: ask questions in plain English, get AI answers grounded in your data
 - Anomaly detection via scikit-learn Isolation Forest + Gemini explanations
 - Built-in pipeline orchestration via Apache Airflow (embedded)
-- Interactive notebooks via JupyterLab (embedded)
+- Interactive notebooks: a native Lake UI interface backed by a JupyterLab server
 - BI dashboards via Apache Superset (embedded)
 - Deploy anywhere: Docker Compose (single node) or Kubernetes (Helm)
 
@@ -49,10 +49,10 @@ Lake of Tears is a self-hosted data platform inspired by Databricks — one URL,
                     ┌──────▼──────┐
                     │    nginx    │  ← single entry point
                     └──────┬──────┘
-       ┌────────┬──────────┼───────┬──────────┐
-       ▼        ▼          ▼       ▼          ▼
-   /api/    Lake UI  /jupyter/ /superset/ /airflow/
-  Backend   (shell)  JupyterLab Superset   Airflow
+       ┌────────┬──────────┴───────┬──────────┐
+       ▼        ▼                  ▼          ▼
+   /api/    Lake UI            /superset/ /airflow/
+  Backend   (shell)             Superset   Airflow
   (auth)                                   MinIO API :9000
 
 ┌──────────────┐    ┌──────────────────────────────────────┐
@@ -70,7 +70,7 @@ Lake of Tears is a self-hosted data platform inspired by Databricks — one URL,
                     │     │        Lake UI Shell          │   │
                     │     │  Home · Catalog · Storage     │   │
                     │     │  SQL Editor · AI Query        │   │
-                    │     │  Notebooks (Jupyter iframe)   │   │
+                    │     │  Notebooks (native UI)        │   │
                     │     │  Dashboards (Superset iframe) │   │
                     │     │  Pipelines  (Airflow  iframe) │   │
                     │     └──────────────────────────────┘   │
@@ -98,7 +98,7 @@ All services are accessible from the left sidebar. Direct ports are also availab
 |---------|-------------|-------------|
 | Lake UI shell | http://localhost | http://localhost:3000 |
 | Auth backend | http://localhost/api/ | http://localhost:8000 |
-| JupyterLab | http://localhost/jupyter/ | http://localhost:8888 |
+| JupyterLab | no public route; used through the Lake UI notebooks | not published |
 | Apache Superset | http://localhost/superset/ | http://localhost:8088 |
 | Apache Airflow | http://localhost/airflow/ | http://localhost:8080 |
 | MinIO Console | http://localhost:9001 | — |
@@ -140,7 +140,7 @@ Upon installation, Helm displays post-install notes (`NOTES.txt`) with access UR
 |---------|-------------------|----------------------|
 | **Lake UI shell** | http://localhost | Register first user (automatically granted `admin` role) |
 | **Auth API** | http://localhost/api/ | — |
-| **JupyterLab** | http://localhost/jupyter/ | Token: `jupytertoken123` |
+| **JupyterLab** | no public route; used through the Lake UI notebooks | Token: `jupytertoken123` (internal only) |
 | **Apache Airflow** | http://localhost/airflow/ | User: `admin` / Password: `airflowadminpassword` |
 | **Apache Superset** | http://superset.localhost | User: `admin` / Password: `supersetadminpassword` |
 | **MinIO Console** | http://minio.localhost | User: `minioadmin` / Password: `minioadminpassword` |
@@ -287,7 +287,6 @@ All services are routed through the nginx Ingress controller:
 |-----|---------|
 | `https://lake.example.com/` | Lake UI shell |
 | `https://lake.example.com/api/` | Auth backend |
-| `https://lake.example.com/jupyter/` | JupyterLab |
 | `https://superset.example.com/` | Apache Superset |
 | `https://lake.example.com/airflow/` | Apache Airflow |
 | `https://minio.example.com/` | MinIO Console |
@@ -764,7 +763,7 @@ Given a natural-language question, embeds the query with `gemini-embedding-001`,
 
 ## Architecture Notes
 
-- **Single entry point.** nginx sits in front of everything at port 80. JupyterLab (`/jupyter/`) and Airflow (`/airflow/`) are proxied at path prefixes. Superset runs on its own subdomain (`superset.*`) in the Helm deployment — its static assets are always served at `/static/…` with no prefix, which conflicts with the root Lake UI ingress. In Docker Compose, Superset is still proxied at `/superset/` via `APPLICATION_PREFIX_PATH`. MinIO Console is exposed separately at port 9001 (Docker Compose) or its own Ingress host (Kubernetes) due to SPA routing limitations.
+- **Single entry point.** nginx sits in front of everything at port 80. Airflow (`/airflow/`) is proxied at a path prefix, and JupyterLab has no public route: the Lake UI reaches it over the internal network and serves notebooks through `/api/notebooks`. (A legacy `/jupyter/` Ingress exists in the Helm chart but is disabled unless `jupyter.ingress.enabled=true`.) Superset runs on its own subdomain (`superset.*`) in the Helm deployment — its static assets are always served at `/static/…` with no prefix, which conflicts with the root Lake UI ingress. In Docker Compose, Superset is still proxied at `/superset/` via `APPLICATION_PREFIX_PATH`. MinIO Console is exposed separately at port 9001 (Docker Compose) or its own Ingress host (Kubernetes) due to SPA routing limitations.
 
 - **Visualizations page (Superset) requires no login.** `PUBLIC_ROLE_LIKE = "Gamma"` is set in `deploy/superset/superset_config.py`, granting anonymous users full read access to dashboards and charts. This is appropriate for a trusted internal network. Remove that setting if you need login enforcement.
 

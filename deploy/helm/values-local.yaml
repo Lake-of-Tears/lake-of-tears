@@ -9,7 +9,6 @@
 #
 # Access endpoints (via Ingress):
 #   - Lake UI / Shell:     http://localhost
-#   - JupyterLab:          http://localhost/jupyter/
 #   - Airflow:             http://localhost/airflow/
 #   - Auth API:            http://localhost/api/
 #   - MinIO Console:       http://minio.localhost

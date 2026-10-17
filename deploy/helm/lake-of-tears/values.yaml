@@ -395,7 +395,7 @@ ingress:
   enabled: true
   className: nginx
 
-  # Primary hostname — serves Lake UI, Notebooks (/jupyter/), Pipelines (/airflow/)
+  # Primary hostname — serves Lake UI (including notebooks) and Pipelines (/airflow/)
   host: lake.example.com
 
   # MinIO console is exposed on its own subdomain.
