@@ -18,6 +18,23 @@ MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "datalake")
 
 
+def _prefix_for_pattern(pattern: str) -> str | None:
+    import re
+
+    scheme = f"s3://{MINIO_BUCKET}/"
+    pattern = pattern.strip()
+    if not pattern.startswith(scheme):
+        return None
+    key = pattern[len(scheme) :]
+    glob = re.search(r"[*?\[]", key)
+    if glob:
+        key = key[: glob.start()]
+    if "/" not in key:
+        return None
+    prefix = key.rsplit("/", 1)[0].strip("/")
+    return f"{prefix}/" if prefix else None
+
+
 def _delete_s3_prefix(prefix: str) -> None:
     import boto3
 
@@ -60,33 +77,46 @@ def purge_inactive_workspaces():
             workspace_id, workspace_name = str(row[0]), row[1]
             print(f"Purging workspace '{workspace_name}' ({workspace_id})")
 
-            # Collect all S3 paths from all catalogs owned by this workspace
-            catalog_rows = db.execute(
-                text("SELECT id, name FROM catalogs WHERE owner_workspace_id = :wid"),
+            # Patterns look like s3://bucket/a/b/**/*.parquet; list by key prefix "a/b/".
+            # Skip prefixes that overlap tables in catalogs this workspace does not own.
+            own_rows = db.execute(
+                text(
+                    "SELECT t.s3_path_pattern FROM catalog_tables t "
+                    "JOIN catalog_schemas s ON t.schema_id = s.id "
+                    "JOIN catalogs c ON s.catalog_id = c.id "
+                    "WHERE c.owner_workspace_id = :wid AND t.s3_path_pattern IS NOT NULL"
+                ),
                 {"wid": workspace_id},
             ).fetchall()
+            other_rows = db.execute(
+                text(
+                    "SELECT t.s3_path_pattern FROM catalog_tables t "
+                    "JOIN catalog_schemas s ON t.schema_id = s.id "
+                    "JOIN catalogs c ON s.catalog_id = c.id "
+                    "WHERE c.owner_workspace_id <> :wid AND t.s3_path_pattern IS NOT NULL"
+                ),
+                {"wid": workspace_id},
+            ).fetchall()
+            others = [p for p in (_prefix_for_pattern(r[0]) for r in other_rows) if p]
 
-            for cat_row in catalog_rows:
-                catalog_id, catalog_name = str(cat_row[0]), cat_row[1]
-                s3_rows = db.execute(
-                    text(
-                        "SELECT s3_path_pattern FROM catalog_tables "
-                        "WHERE schema_id IN ("
-                        "  SELECT id FROM catalog_schemas WHERE catalog_id = :cid"
-                        ") AND s3_path_pattern IS NOT NULL"
-                    ),
-                    {"cid": catalog_id},
-                ).fetchall()
-                for s3_row in s3_rows:
-                    prefix = s3_row[0].rstrip("*").rstrip("/")
-                    try:
-                        _delete_s3_prefix(prefix)
-                        print(f"  Deleted S3 prefix: {prefix}")
-                    except Exception as exc:
-                        print(f"  S3 delete failed for {prefix}: {exc}")
-                        raise  # trigger retry
-
-                print(f"  S3 data cleared for catalog '{catalog_name}'")
+            seen: set[str] = set()
+            for (pattern,) in own_rows:
+                prefix = _prefix_for_pattern(pattern)
+                if prefix is None:
+                    print(f"  Skipping unrecognised path pattern: {pattern}")
+                    continue
+                if prefix in seen:
+                    continue
+                if any(prefix.startswith(o) or o.startswith(prefix) for o in others):
+                    print(f"  Skipping prefix shared with another workspace: {prefix}")
+                    continue
+                seen.add(prefix)
+                try:
+                    _delete_s3_prefix(prefix)
+                    print(f"  Deleted S3 prefix: {prefix}")
+                except Exception as exc:
+                    print(f"  S3 delete failed for {prefix}: {exc}")
+                    raise  # trigger retry
 
             # Hard-delete workspace (cascades to catalogs, schemas, tables, access grants, members)
             db.execute(text("DELETE FROM workspaces WHERE id = :id"), {"id": workspace_id})
