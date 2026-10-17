@@ -123,7 +123,9 @@ def vector_search_sql(dimension: int, has_model_column: bool) -> str:
     ``LEGACY_EMBEDDING_MODEL``. Keep identical to ``pipeline/shared/ai_gateway.py`` (a test checks).
     """
     dim = int(dimension)
-    model_filter = f"AND coalesce(model, '{LEGACY_EMBEDDING_MODEL}') = ?" if has_model_column else ""
+    model_filter = (
+        f"AND coalesce(model, '{LEGACY_EMBEDDING_MODEL}') = ?" if has_model_column else ""
+    )
     return f"""
         SELECT source, ingested_at, content,
                CASE WHEN len(embedding) = {dim}

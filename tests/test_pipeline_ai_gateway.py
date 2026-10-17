@@ -188,7 +188,9 @@ def mixed_lake(tmp_path: Path) -> str:
     con = duckdb.connect()
 
     def write(name: str, rows: list[tuple], with_meta: bool):
-        cols = "id VARCHAR, source VARCHAR, content VARCHAR, embedding DOUBLE[]"
+        cols = (
+            "id VARCHAR, source VARCHAR, content VARCHAR, embedding DOUBLE[], ingested_at TIMESTAMP"
+        )
         if with_meta:
             cols += ", model VARCHAR"
         con.execute(f"CREATE OR REPLACE TABLE t ({cols})")
@@ -196,13 +198,21 @@ def mixed_lake(tmp_path: Path) -> str:
             con.execute(f"INSERT INTO t VALUES ({', '.join('?' for _ in r)})", list(r))
         con.execute(f"COPY t TO '{tmp_path / name}' (FORMAT PARQUET)")
 
-    write("legacy.parquet", [("1", "w", "legacy row", _unit(1, 768))], with_meta=False)
+    write(
+        "legacy.parquet",
+        [("1", "w", "legacy row", _unit(1, 768), "2026-10-16 00:00:00")],
+        with_meta=False,
+    )
     write(
         "other768.parquet",
-        [("2", "w", "other 768 row", _unit(1, 768), "other-768")],
+        [("2", "w", "other 768 row", _unit(1, 768), "2026-10-16 00:00:00", "other-768")],
         with_meta=True,
     )
-    write("big.parquet", [("3", "w", "big row", _unit(1, 1536), "big-1536")], with_meta=True)
+    write(
+        "big.parquet",
+        [("3", "w", "big row", _unit(1, 1536), "2026-10-16 00:00:00", "big-1536")],
+        with_meta=True,
+    )
     return str(tmp_path / "*.parquet")
 
 
@@ -213,7 +223,7 @@ def _search(glob: str, dimension: int, model: str, has_model: bool = True) -> li
         .execute(ai_gateway.vector_search_sql(dimension, has_model), params)
         .fetchall()
     )
-    return [r[1] for r in rows]
+    return [r[2] for r in rows]
 
 
 def test_search_only_compares_vectors_of_the_active_model_and_dimension(mixed_lake):
@@ -225,7 +235,10 @@ def test_search_only_compares_vectors_of_the_active_model_and_dimension(mixed_la
 
 def test_search_works_when_no_file_has_a_model_column(tmp_path: Path):
     con = duckdb.connect()
-    con.execute("CREATE TABLE t (id VARCHAR, source VARCHAR, content VARCHAR, embedding DOUBLE[])")
-    con.execute("INSERT INTO t VALUES ('1', 'w', 'only legacy', ?)", [_unit(1, 768)])
+    con.execute(
+        "CREATE TABLE t (id VARCHAR, source VARCHAR, content VARCHAR, embedding DOUBLE[], "
+        "ingested_at TIMESTAMP)"
+    )
+    con.execute("INSERT INTO t VALUES ('1', 'w', 'only legacy', ?, now())", [_unit(1, 768)])
     con.execute(f"COPY t TO '{tmp_path / 'a.parquet'}' (FORMAT PARQUET)")
     assert _search(str(tmp_path / "*.parquet"), 768, "ignored", has_model=False) == ["only legacy"]

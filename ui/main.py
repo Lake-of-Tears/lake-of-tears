@@ -433,41 +433,32 @@ def _run_query(
             cancel.detach()
 
 
-AI_VECTOR_SQL = """
-    SELECT
-        source,
-        ingested_at,
-        content AS summary,
-        array_cosine_similarity(
-            embedding::DOUBLE[768],
-            ?::DOUBLE[768]
-        ) AS score
-    FROM read_parquet(?)
-    ORDER BY score DESC
-    LIMIT 5
-"""
-
-
 def _ai_query(question: str) -> dict[str, Any]:
-    active_key = _get_ai_access()
-    if not active_key:
+    if not _get_ai_access():
         return {"ok": False, "error": duckdb_ai.GEMINI_KEY_NOT_CONFIGURED_MSG}
     try:
-        client = genai.Client(api_key=active_key)
+        client = _ai_client()
 
-        # Same model, dimension and task type as pipeline/shared/gemini_embedder.embed_query,
-        # so the question vector can be compared with the stored 768-dimension vectors.
+        # The active provider decides the embedding model and dimension; only stored vectors made
+        # by the same model (and of the same length) are compared.
         embed_resp = client.models.embed_content(
-            model="gemini-embedding-001",
-            contents=question,
-            config={"task_type": "RETRIEVAL_QUERY", "output_dimensionality": 768},
+            contents=question, config={"task_type": "RETRIEVAL_QUERY"}
         )
         q_vec = embed_resp.embeddings[0].values
 
         s3_pattern = f"s3://{MINIO_BUCKET}/embeddings/**/*.parquet"
-        con = _duckdb_connection(load_vss=True)
-        rel = con.execute(AI_VECTOR_SQL, [q_vec, s3_pattern])
-        rows = rel.fetchall()
+        con = _duckdb_connection()
+        columns = {
+            d[0]
+            for d in con.execute(
+                "SELECT * FROM read_parquet(?, union_by_name = true) LIMIT 0", [s3_pattern]
+            ).description
+        }
+        has_model = "model" in columns
+        params = [q_vec, s3_pattern] + ([embed_resp.model] if has_model else []) + [5]
+        rows = con.execute(
+            ai_gateway_client.vector_search_sql(embed_resp.dimension, has_model), params
+        ).fetchall()
         con.close()
 
         context_snippets = [
@@ -490,10 +481,7 @@ def _ai_query(question: str) -> dict[str, Any]:
             f"Question: {question}\n\nContext:\n{context_text}"
         )
 
-        answer = client.models.generate_content(
-            model=_get_gemini_default_model(),
-            contents=prompt,
-        ).text
+        answer = client.models.generate_content(contents=prompt).text
 
         return {"ok": True, "answer": answer, "snippets": context_snippets}
     except Exception as exc:

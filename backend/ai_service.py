@@ -13,8 +13,10 @@ from urllib.parse import urlparse
 
 import duckdb
 import pyarrow as pa
-from auth import DEFAULT_GEMINI_MODEL, get_stored_gemini_api_key, get_stored_gemini_model
-from google import genai
+from ai_providers import AIProvider, ProviderNotConfigured, get_active_provider
+from ai_providers.compat import ProviderClient
+from ai_providers.gemini import GeminiProvider
+from auth import DEFAULT_GEMINI_MODEL
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -24,9 +26,8 @@ MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "datalake")
-GEMINI_API_KEY = ""
 GEMINI_KEY_NOT_CONFIGURED_MSG = (
-    "GEMINI_API_KEY is not set. A superadmin can configure it in Settings → Admin Panel."
+    "No AI provider is configured. A superadmin can set one up in Settings → Admin Panel."
 )
 
 _MODEL_CACHE_TTL = 30.0
@@ -41,7 +42,7 @@ def get_default_model() -> str:
     if cached is not None and now - cached[1] < _MODEL_CACHE_TTL:
         return cached[0]
     try:
-        model = get_stored_gemini_model() or DEFAULT_GEMINI_MODEL
+        model = get_active_provider().chat_model or DEFAULT_GEMINI_MODEL
     except Exception:
         model = DEFAULT_GEMINI_MODEL
     _MODEL_CACHE = (model, now)
@@ -58,16 +59,33 @@ AI_MAX_CONCURRENCY = int(os.getenv("AI_MAX_CONCURRENCY", "5"))
 AI_CACHE_MAX_SIZE = 1024
 
 
+_PROVIDER_ACCESS = "provider"
+
+
 def _resolve_api_key(api_key: str | None = None) -> str:
-    """Resolve the active Gemini API key from explicit override or Admin Panel DB setting."""
+    """Non-empty when AI can be used: an explicit Gemini key override, or a configured provider.
+
+    A configured provider is represented by a placeholder (never a credential); the credentials
+    stay inside the provider object returned by ``_provider_for``.
+    """
     if api_key is not None and api_key.strip():
         return api_key.strip()
-    stored = get_stored_gemini_api_key()
-    if stored:
-        return stored
-    if api_key is None and GEMINI_API_KEY:
-        return GEMINI_API_KEY.strip()
-    return ""
+    try:
+        get_active_provider()
+    except Exception:
+        return ""
+    return _PROVIDER_ACCESS
+
+
+def _provider_for(api_key: str | None = None) -> AIProvider:
+    """The provider to use: a Gemini one for an explicit key override, else the active provider."""
+    if api_key and api_key.strip() and api_key != _PROVIDER_ACCESS:
+        return GeminiProvider(api_key.strip(), chat_model=get_default_model())
+    return get_active_provider()
+
+
+def _client_for(api_key: str | None = None) -> ProviderClient:
+    return ProviderClient(_provider_for(api_key))
 
 
 def test_gemini_api_key(
@@ -84,12 +102,12 @@ def test_gemini_api_key(
             "message": GEMINI_KEY_NOT_CONFIGURED_MSG,
         }
     try:
-        client = genai.Client(api_key=key)
-        resp = client.models.generate_content(
-            model=model,
-            contents="Reply with the single word OK.",
+        provider = (
+            GeminiProvider(key, chat_model=model)
+            if key != _PROVIDER_ACCESS
+            else get_active_provider()
         )
-        reply = (resp.text or "").strip()
+        reply = provider.generate("Reply with the single word OK.", model=model).strip()
         return {
             "ok": True,
             "model": model,
@@ -170,13 +188,16 @@ DEFAULT_LAKEHOUSE_DATASETS: list[dict[str, Any]] = [
         "name": "embeddings",
         "schema": "gold",
         "s3_path": f"s3://{MINIO_BUCKET}/embeddings/**/*.parquet",
-        "description": "768-dim Gemini embeddings of each source's record text (content), written daily by the embed_sources pipeline.",
+        "description": "Embeddings of each source's record text (content), written daily by the embed_sources pipeline; provider, model and dimension record which model made them.",
         "columns": [
             {"name": "id", "type": "VARCHAR"},
             {"name": "source", "type": "VARCHAR"},
             {"name": "content", "type": "VARCHAR"},
             {"name": "embedding", "type": "DOUBLE[]"},
             {"name": "source_date", "type": "VARCHAR"},
+            {"name": "provider", "type": "VARCHAR"},
+            {"name": "model", "type": "VARCHAR"},
+            {"name": "dimension", "type": "BIGINT"},
             {"name": "ingested_at", "type": "TIMESTAMP"},
         ],
     },
@@ -209,19 +230,31 @@ SQL_AI_FUNCTIONS: list[dict[str, str]] = [
     },
 ]
 
-AI_VECTOR_SQL = """
-    SELECT
-        source,
-        ingested_at,
-        content AS summary,
-        array_cosine_similarity(
-            embedding::DOUBLE[768],
-            ?::DOUBLE[768]
-        ) AS score
-    FROM read_parquet(?)
-    ORDER BY score DESC
-    LIMIT 5
-"""
+LEGACY_EMBEDDING_MODEL = "gemini-embedding-001"
+
+
+def vector_search_sql(dimension: int, has_model_column: bool) -> str:
+    """Nearest-neighbour SQL over ``embeddings/**`` for one embedding dimension (and model).
+
+    Parameters, in order: query vector, parquet path, model name (only if ``has_model_column``),
+    row limit. Files written before models were recorded have no ``model`` column and count as
+    ``LEGACY_EMBEDDING_MODEL``. Keep identical to ``pipeline/shared/ai_gateway.py`` (a test checks).
+    """
+    dim = int(dimension)
+    model_filter = (
+        f"AND coalesce(model, '{LEGACY_EMBEDDING_MODEL}') = ?" if has_model_column else ""
+    )
+    return f"""
+        SELECT source, ingested_at, content,
+               CASE WHEN len(embedding) = {dim}
+                    THEN array_cosine_similarity(embedding::DOUBLE[{dim}], ?::DOUBLE[{dim}])
+               END AS score
+        FROM read_parquet(?, union_by_name = true)
+        WHERE len(embedding) = {dim} {model_filter}
+        ORDER BY score DESC
+        LIMIT ?
+    """
+
 
 _MODEL_NAME_RE = re.compile(r"^(models/)?(gemini|gemma|learnlm)-[a-z0-9._-]+$", re.IGNORECASE)
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -339,7 +372,10 @@ def _call_gemini_text(
     if not key:
         raise RuntimeError(GEMINI_KEY_NOT_CONFIGURED_MSG)
 
-    client = genai.Client(api_key=key)
+    try:
+        client = _client_for(key)
+    except ProviderNotConfigured as exc:
+        raise RuntimeError(GEMINI_KEY_NOT_CONFIGURED_MSG) from exc
     last_exc: Exception | None = None
     for attempt in range(max_retries + 1):
         try:
@@ -1189,21 +1225,28 @@ def run_rag_search(question: str, api_key: str | None = None) -> dict[str, Any]:
     if not effective_key:
         return {"ok": False, "error": GEMINI_KEY_NOT_CONFIGURED_MSG, "snippets": []}
     try:
-        client = genai.Client(api_key=effective_key)
-        # Same model, dimension and task type as pipeline/shared/gemini_embedder.embed_query,
-        # so the question vector can be compared with the stored 768-dimension vectors.
+        client = _client_for(effective_key)
+        # The active provider decides the embedding model and dimension; only stored vectors made
+        # by the same model (and of the same length) are compared.
         embed_resp = client.models.embed_content(
-            model="gemini-embedding-001",
-            contents=question,
-            config={"task_type": "RETRIEVAL_QUERY", "output_dimensionality": 768},
+            contents=question, config={"task_type": "RETRIEVAL_QUERY"}
         )
         q_vec = embed_resp.embeddings[0].values
 
         s3_pattern = f"s3://{MINIO_BUCKET}/embeddings/**/*.parquet"
-        con = create_duckdb_connection(load_vss=True, register_ai=False)
+        con = create_duckdb_connection(register_ai=False)
         try:
-            rel = con.execute(AI_VECTOR_SQL, [q_vec, s3_pattern])
-            rows = rel.fetchall()
+            columns = {
+                d[0]
+                for d in con.execute(
+                    "SELECT * FROM read_parquet(?, union_by_name = true) LIMIT 0", [s3_pattern]
+                ).description
+            }
+            has_model = "model" in columns
+            params = [q_vec, s3_pattern] + ([embed_resp.model] if has_model else []) + [5]
+            rows = con.execute(
+                vector_search_sql(embed_resp.dimension, has_model), params
+            ).fetchall()
         finally:
             con.close()
 
@@ -1226,10 +1269,7 @@ def run_rag_search(question: str, api_key: str | None = None) -> dict[str, Any]:
             "Be concise and cite which data sources support your answer.\n\n"
             f"Question: {question}\n\nContext:\n{context_text}"
         )
-        answer = client.models.generate_content(
-            model=get_default_model(),
-            contents=prompt,
-        ).text
+        answer = client.models.generate_content(contents=prompt).text
         return {"ok": True, "answer": (answer or "").strip(), "snippets": snippets}
     except Exception as exc:
         return {"ok": False, "error": str(exc), "snippets": []}

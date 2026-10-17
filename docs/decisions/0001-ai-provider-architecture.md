@@ -47,6 +47,12 @@ An alternative that was **not** offered but is implied by #68 alone is *environm
 | Against | More columns and a `WHERE` on every search; results only come from rows made by the active model until the rest is re-embedded | A provider switch makes all old embeddings unusable until a full re-embed finishes |
 | To revert | Stop writing the extra columns, drop the filter, and treat the dimension as a global setting. A one-off re-embed makes the data uniform. | n/a |
 
+## Implementation notes (kept up to date as slices land)
+
+- **Slice 1 (#179):** `backend/ai_providers` (interfaces, Gemini provider, registry, encrypted settings) and the internal gateway (`/api/internal/ai/info`, `/embed`, `/generate`, internal secret only).
+- **Slice 2:** the backend, UI and pipelines no longer import a vendor SDK; the UI and pipelines call the gateway (`ui/ai_gateway_client.py`, `pipeline/shared/ai_gateway.py`) and the backend uses its provider objects. `google-genai` is no longer installed in the UI image. Embedding files gain `provider`, `model` and `dimension` columns. Search compares only vectors of the active model's dimension and, when the files record it, the active model; files written before this change have no `model` column and count as `gemini-embedding-001`. The search SQL exists in three copies (backend, UI, pipeline) because the images are separate; tests keep them identical.
+- **To undo decision 3 later:** delete the `WHERE len(embedding) = N ...` filter and the `provider`/`model`/`dimension` columns in `embed_sources.py`, and fix the dimension as a setting. Existing files remain readable either way.
+
 ## Delivery plan (slices)
 
 1. **#68:** provider interfaces, `GeminiProvider`, provider registry and settings storage, internal gateway endpoints. No behaviour change.

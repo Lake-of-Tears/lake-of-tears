@@ -84,16 +84,16 @@ def test_run_query_error():
     assert "non_existent_table_12345" in result["error"]
 
 
-def test_ai_query_missing_api_key():
-    """Verify _ai_query returns clean error when GEMINI_API_KEY is unset."""
-    with patch.object(main, "GEMINI_API_KEY", ""):
+def test_ai_query_without_a_configured_provider():
+    """Verify _ai_query returns a clean error when no AI provider is configured."""
+    with patch.object(main, "_get_ai_access", return_value=""):
         result = main._ai_query("What was revenue in Q1?")
         assert result["ok"] is False
-        assert "GEMINI_API_KEY is not set" in result["error"]
+        assert "No AI provider is configured" in result["error"]
 
 
 def test_ai_vector_sql_executes_against_parquet(tmp_path: Path):
-    """Verify AI_VECTOR_SQL executes directly in DuckDB with parameters against a Parquet file."""
+    """Verify the vector search SQL runs in DuckDB against a Parquet file in the pipeline schema."""
     parquet_file = tmp_path / "mock_embeddings.parquet"
     test_vec = [0.1] * 768
 
@@ -118,7 +118,8 @@ def test_ai_vector_sql_executes_against_parquet(tmp_path: Path):
     con.execute(f"COPY mock_embed TO '{parquet_file}' (FORMAT PARQUET)")
 
     # Execute parameterized query
-    rows = con.execute(main.AI_VECTOR_SQL, [test_vec, str(parquet_file)]).fetchall()
+    sql = main.ai_gateway_client.vector_search_sql(768, has_model_column=False)
+    rows = con.execute(sql, [test_vec, str(parquet_file), 5]).fetchall()
     con.close()
 
     assert len(rows) == 1
@@ -129,61 +130,62 @@ def test_ai_vector_sql_executes_against_parquet(tmp_path: Path):
 
 
 def test_ai_query_parameterized_execution():
-    """Verify _ai_query executes with parameterized statements and expected prompt construction."""
-    test_vec = [0.1] * 768
-
-    mock_embed_obj = MagicMock()
-    mock_embed_obj.values = test_vec
+    """Verify _ai_query embeds the question, searches with a dimension-aware parameterized query
+    and builds the answer prompt from the matches."""
+    test_vec = [0.1] * 4
 
     mock_embed_resp = MagicMock()
-    mock_embed_resp.embeddings = [mock_embed_obj]
-
-    mock_gen_resp = MagicMock()
-    mock_gen_resp.text = "According to Stripe charges, total revenue was $5000."
+    mock_embed_resp.embeddings = [MagicMock(values=test_vec)]
+    mock_embed_resp.model = "stub-embed"
+    mock_embed_resp.dimension = 4
 
     mock_client = MagicMock()
     mock_client.models.embed_content.return_value = mock_embed_resp
-    mock_client.models.generate_content.return_value = mock_gen_resp
+    mock_client.models.generate_content.return_value = MagicMock(
+        text="According to Stripe charges, total revenue was $5000."
+    )
 
-    mock_rel = MagicMock()
-    mock_rel.fetchall.return_value = [
+    probe = MagicMock()
+    probe.description = [("source",), ("model",), ("embedding",)]  # files record the model
+    search = MagicMock()
+    search.fetchall.return_value = [
         ("stripe_charges", "2024-01-01 12:00:00", "Total revenue: $5000", 0.9999)
     ]
-
     mock_con = MagicMock()
-    mock_con.execute.return_value = mock_rel
+    mock_con.execute.side_effect = [probe, search]
 
     with (
-        patch.object(main, "GEMINI_API_KEY", "dummy-key"),
-        patch.object(main.genai, "Client", return_value=mock_client),
+        patch.object(main, "_get_ai_access", return_value="gateway"),
+        patch.object(main, "_ai_client", return_value=mock_client),
         patch.object(main, "MINIO_BUCKET", "mock-bucket"),
         patch.object(main, "_duckdb_connection", return_value=mock_con) as mock_get_conn,
     ):
         result = main._ai_query("What was total revenue?")
 
-        assert result["ok"] is True
-        assert result["answer"] == "According to Stripe charges, total revenue was $5000."
-        assert len(result["snippets"]) == 1
-        assert result["snippets"][0]["source"] == "stripe_charges"
-        assert result["snippets"][0]["score"] == 0.9999
+    assert result["ok"] is True
+    assert result["answer"] == "According to Stripe charges, total revenue was $5000."
+    assert result["snippets"][0]["source"] == "stripe_charges"
+    assert result["snippets"][0]["score"] == 0.9999
 
-        # Verify _duckdb_connection was called with load_vss=True
-        mock_get_conn.assert_called_once_with(load_vss=True)
+    mock_get_conn.assert_called_once_with()
+    s3 = "s3://mock-bucket/embeddings/**/*.parquet"
+    mock_client.models.embed_content.assert_called_once_with(
+        contents="What was total revenue?", config={"task_type": "RETRIEVAL_QUERY"}
+    )
+    # second call is the search: dimension 4, filtered to the embedding model, limit 5
+    search_sql, search_params = mock_con.execute.call_args_list[1].args
+    assert search_sql == main.ai_gateway_client.vector_search_sql(4, has_model_column=True)
+    assert search_params == [test_vec, s3, "stub-embed", 5]
+    mock_con.close.assert_called_once()
 
-        # Verify con.execute was called with AI_VECTOR_SQL and [q_vec, s3_pattern]
-        mock_con.execute.assert_called_once_with(
-            main.AI_VECTOR_SQL,
-            [test_vec, "s3://mock-bucket/embeddings/**/*.parquet"],
-        )
-        mock_con.close.assert_called_once()
 
-
-def test_ai_query_sql_is_static_constant():
-    """Verify AI_VECTOR_SQL does not contain f-string formatting or string interpolations."""
-    assert "{" not in main.AI_VECTOR_SQL
-    assert "}" not in main.AI_VECTOR_SQL
-    assert "?" in main.AI_VECTOR_SQL
-    assert "array_cosine_similarity" in main.AI_VECTOR_SQL
+def test_vector_search_sql_only_interpolates_an_integer_dimension():
+    """The dimension is the one value formatted into the SQL; everything else is a parameter."""
+    sql = main.ai_gateway_client.vector_search_sql(1536, has_model_column=True)
+    assert "DOUBLE[1536]" in sql
+    assert sql.count("?") == 4  # vector, path, model, limit
+    with pytest.raises(ValueError):
+        main.ai_gateway_client.vector_search_sql("768; DROP TABLE x", has_model_column=False)
 
 
 def test_parse_s3_endpoint_and_ssl():

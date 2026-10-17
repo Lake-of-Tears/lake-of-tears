@@ -25,24 +25,39 @@ def embeddings_file(tmp_path: Path) -> str:
     con = duckdb.connect()
     con.execute(
         "CREATE TABLE t (id VARCHAR, source VARCHAR, content VARCHAR, embedding DOUBLE[], "
-        "source_date VARCHAR, ingested_at TIMESTAMP)"
+        "source_date VARCHAR, provider VARCHAR, model VARCHAR, dimension BIGINT, "
+        "ingested_at TIMESTAMP)"
     )
     for i, text in enumerate(["Pool tank: ONLINE", "Weather 10:00: 55F", "Movie night"]):
         con.execute(
-            "INSERT INTO t VALUES (?, 'demo', ?, ?, '2026-10-16', now())", [f"id{i}", text, _vec(i)]
+            "INSERT INTO t VALUES (?, 'demo', ?, ?, '2026-10-16', 'gemini', "
+            "'gemini-embedding-001', 768, now())",
+            [f"id{i}", text, _vec(i)],
         )
     path = str(tmp_path / "data.parquet")
     con.execute(f"COPY t TO '{path}' (FORMAT PARQUET)")
     return path
 
 
-@pytest.mark.parametrize("module", [main, ai_service], ids=["ui", "backend"])
-def test_vector_sql_runs_against_pipeline_embeddings_schema(module, embeddings_file):
-    rows = duckdb.connect().execute(module.AI_VECTOR_SQL, [_vec(1), embeddings_file]).fetchall()
+@pytest.mark.parametrize(
+    "builder", [main.ai_gateway_client.vector_search_sql, ai_service.vector_search_sql]
+)
+@pytest.mark.parametrize("has_model", [True, False])
+def test_vector_sql_runs_against_pipeline_embeddings_schema(builder, has_model, embeddings_file):
+    params = [_vec(1), embeddings_file] + (["gemini-embedding-001"] if has_model else []) + [5]
+    rows = duckdb.connect().execute(builder(DIMS, has_model), params).fetchall()
     assert len(rows) == 3
     source, _ingested_at, text, score = rows[0]
     assert (source, text) == ("demo", "Weather 10:00: 55F")  # nearest to _vec(1)
     assert score == pytest.approx(1.0)
+
+
+def test_the_ui_and_backend_search_sql_stay_identical():
+    for dim in (768, 1536):
+        for has_model in (True, False):
+            assert main.ai_gateway_client.vector_search_sql(dim, has_model) == (
+                ai_service.vector_search_sql(dim, has_model)
+            )
 
 
 def _declared_embedding_columns(datasets: list[dict]) -> list[str]:
@@ -64,39 +79,31 @@ def test_declared_embeddings_schema_matches_the_pipeline_output(datasets):
         "content",
         "embedding",
         "source_date",
+        "provider",
+        "model",
+        "dimension",
         "ingested_at",
     ]
 
 
+def _embed_response() -> MagicMock:
+    resp = MagicMock()
+    resp.embeddings = [MagicMock(values=_vec(0))]
+    resp.model = "gemini-embedding-001"
+    resp.dimension = DIMS
+    return resp
+
+
 def _stub_client() -> MagicMock:
     client = MagicMock()
-    client.models.embed_content.return_value.embeddings = [MagicMock(values=_vec(0))]
+    client.models.embed_content.return_value = _embed_response()
     client.models.generate_content.return_value.text = "answer"
     return client
 
 
-def _assert_question_is_embedded_like_the_pipeline(client: MagicMock):
+def _assert_question_is_embedded_as_a_query(client: MagicMock):
     kwargs = client.models.embed_content.call_args.kwargs
-    assert kwargs["model"] == "gemini-embedding-001"
-    assert kwargs["config"] == {"task_type": "RETRIEVAL_QUERY", "output_dimensionality": 768}
-
-
-def test_ui_ai_query_embeds_the_question_with_768_dimensions(embeddings_file):
-    client = _stub_client()
-    with (
-        patch.object(main, "_get_gemini_api_key", return_value="key"),
-        patch.object(main, "_get_gemini_default_model", return_value="gemini-test"),
-        patch.object(main.genai, "Client", return_value=client),
-        patch.object(
-            main,
-            "_duckdb_connection",
-            side_effect=lambda **_: _LocalFileConnection(embeddings_file),
-        ),
-    ):
-        result = main._ai_query("What is the pool status?")
-    assert result["ok"], result
-    _assert_question_is_embedded_like_the_pipeline(client)
-    assert result["snippets"][0]["summary"]
+    assert kwargs["config"] == {"task_type": "RETRIEVAL_QUERY"}
 
 
 class _LocalFileConnection:
@@ -114,11 +121,28 @@ class _LocalFileConnection:
         self._con.close()
 
 
-def test_backend_rag_search_embeds_the_question_with_768_dimensions(embeddings_file):
+def test_ui_ai_query_finds_matches_through_the_gateway_client(embeddings_file):
     client = _stub_client()
     with (
-        patch.object(ai_service, "_resolve_api_key", return_value="key"),
-        patch.object(ai_service.genai, "Client", return_value=client),
+        patch.object(main, "_get_ai_access", return_value="gateway"),
+        patch.object(main, "_ai_client", return_value=client),
+        patch.object(
+            main,
+            "_duckdb_connection",
+            side_effect=lambda **_: _LocalFileConnection(embeddings_file),
+        ),
+    ):
+        result = main._ai_query("What is the pool status?")
+    assert result["ok"], result
+    _assert_question_is_embedded_as_a_query(client)
+    assert result["snippets"][0]["summary"] == "Pool tank: ONLINE"  # nearest to _vec(0)
+
+
+def test_backend_rag_search_finds_matches_through_the_provider_client(embeddings_file):
+    client = _stub_client()
+    with (
+        patch.object(ai_service, "_resolve_api_key", return_value="provider"),
+        patch.object(ai_service, "_client_for", return_value=client),
         patch.object(
             ai_service,
             "create_duckdb_connection",
@@ -127,5 +151,5 @@ def test_backend_rag_search_embeds_the_question_with_768_dimensions(embeddings_f
     ):
         result = ai_service.run_rag_search("What is the pool status?")
     assert result["ok"], result
-    _assert_question_is_embedded_like_the_pipeline(client)
-    assert result["snippets"][0]["summary"]
+    _assert_question_is_embedded_as_a_query(client)
+    assert result["snippets"][0]["summary"] == "Pool tank: ONLINE"
