@@ -99,12 +99,21 @@ def test_ai_vector_sql_executes_against_parquet(tmp_path: Path):
 
     con = duckdb.connect()
     con.execute("INSTALL vss; LOAD vss;")
+    # Same columns that pipeline/embed/embed_sources.py writes to embeddings/<source>/...
     con.execute(
-        "CREATE TABLE mock_embed (source VARCHAR, ingested_at VARCHAR, summary VARCHAR, embedding DOUBLE[])"
+        "CREATE TABLE mock_embed (id VARCHAR, source VARCHAR, content VARCHAR, "
+        "embedding DOUBLE[], source_date VARCHAR, ingested_at VARCHAR)"
     )
     con.execute(
-        "INSERT INTO mock_embed VALUES (?, ?, ?, ?)",
-        ["stripe_charges", "2024-01-01 12:00:00", "Total revenue: $5000", test_vec],
+        "INSERT INTO mock_embed VALUES (?, ?, ?, ?, ?, ?)",
+        [
+            "abc123",
+            "stripe_charges",
+            "Total revenue: $5000",
+            test_vec,
+            "2024-01-01",
+            "2024-01-01 12:00:00",
+        ],
     )
     con.execute(f"COPY mock_embed TO '{parquet_file}' (FORMAT PARQUET)")
 

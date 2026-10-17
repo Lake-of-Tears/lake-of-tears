@@ -170,12 +170,14 @@ DEFAULT_LAKEHOUSE_DATASETS: list[dict[str, Any]] = [
         "name": "embeddings",
         "schema": "gold",
         "s3_path": f"s3://{MINIO_BUCKET}/embeddings/**/*.parquet",
-        "description": "768-dim Gemini embeddings and daily natural-language summaries across sources.",
+        "description": "768-dim Gemini embeddings of each source's record text (content), written daily by the embed_sources pipeline.",
         "columns": [
+            {"name": "id", "type": "VARCHAR"},
             {"name": "source", "type": "VARCHAR"},
-            {"name": "ingested_at", "type": "TIMESTAMP"},
-            {"name": "summary", "type": "VARCHAR"},
+            {"name": "content", "type": "VARCHAR"},
             {"name": "embedding", "type": "DOUBLE[]"},
+            {"name": "source_date", "type": "VARCHAR"},
+            {"name": "ingested_at", "type": "TIMESTAMP"},
         ],
     },
 ]
@@ -191,7 +193,7 @@ SQL_AI_FUNCTIONS: list[dict[str, str]] = [
         "name": "ai_summarize",
         "signature": "ai_summarize(text)",
         "description": "Generate a concise 1–2 sentence summary of unstructured text per row.",
-        "example": "SELECT source, ai_summarize(summary) AS brief FROM read_parquet('s3://datalake/embeddings/**/*.parquet') LIMIT 5",
+        "example": "SELECT source, ai_summarize(content) AS brief FROM read_parquet('s3://datalake/embeddings/**/*.parquet') LIMIT 5",
     },
     {
         "name": "ai_classify",
@@ -203,7 +205,7 @@ SQL_AI_FUNCTIONS: list[dict[str, str]] = [
         "name": "ai_extract",
         "signature": "ai_extract(text, fields[])",
         "description": "Extract structured JSON object with the specified keys from unstructured text.",
-        "example": "SELECT ai_extract(summary, ['primary_metric', 'status', 'anomaly']) AS extracted_json FROM read_parquet('s3://datalake/embeddings/**/*.parquet') LIMIT 5",
+        "example": "SELECT ai_extract(content, ['primary_metric', 'status', 'anomaly']) AS extracted_json FROM read_parquet('s3://datalake/embeddings/**/*.parquet') LIMIT 5",
     },
 ]
 
@@ -211,7 +213,7 @@ AI_VECTOR_SQL = """
     SELECT
         source,
         ingested_at,
-        summary,
+        content AS summary,
         array_cosine_similarity(
             embedding::DOUBLE[768],
             ?::DOUBLE[768]
@@ -1188,9 +1190,12 @@ def run_rag_search(question: str, api_key: str | None = None) -> dict[str, Any]:
         return {"ok": False, "error": GEMINI_KEY_NOT_CONFIGURED_MSG, "snippets": []}
     try:
         client = genai.Client(api_key=effective_key)
+        # Same model, dimension and task type as pipeline/shared/gemini_embedder.embed_query,
+        # so the question vector can be compared with the stored 768-dimension vectors.
         embed_resp = client.models.embed_content(
             model="gemini-embedding-001",
             contents=question,
+            config={"task_type": "RETRIEVAL_QUERY", "output_dimensionality": 768},
         )
         q_vec = embed_resp.embeddings[0].values
 

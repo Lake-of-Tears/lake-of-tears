@@ -463,7 +463,7 @@ AI_VECTOR_SQL = """
     SELECT
         source,
         ingested_at,
-        summary,
+        content AS summary,
         array_cosine_similarity(
             embedding::DOUBLE[768],
             ?::DOUBLE[768]
@@ -481,9 +481,12 @@ def _ai_query(question: str) -> dict[str, Any]:
     try:
         client = genai.Client(api_key=active_key)
 
+        # Same model, dimension and task type as pipeline/shared/gemini_embedder.embed_query,
+        # so the question vector can be compared with the stored 768-dimension vectors.
         embed_resp = client.models.embed_content(
             model="gemini-embedding-001",
             contents=question,
+            config={"task_type": "RETRIEVAL_QUERY", "output_dimensionality": 768},
         )
         q_vec = embed_resp.embeddings[0].values
 
@@ -550,7 +553,7 @@ EXAMPLE_QUERIES = [
     },
     {
         "label": "✨ AI Summarize (ai_summarize)",
-        "sql": "SELECT source, ingested_at, ai_summarize(summary) AS executive_brief FROM read_parquet('s3://datalake/embeddings/**/*.parquet') LIMIT 5",
+        "sql": "SELECT source, ingested_at, ai_summarize(content) AS executive_brief FROM read_parquet('s3://datalake/embeddings/**/*.parquet') LIMIT 5",
     },
     {
         "label": "✨ AI Classify (ai_classify)",
@@ -558,7 +561,7 @@ EXAMPLE_QUERIES = [
     },
     {
         "label": "✨ AI Extract JSON (ai_extract)",
-        "sql": "SELECT source, ai_extract(summary, ['metric', 'value', 'status']) AS structured_json FROM read_parquet('s3://datalake/embeddings/**/*.parquet') LIMIT 5",
+        "sql": "SELECT source, ai_extract(content, ['metric', 'value', 'status']) AS structured_json FROM read_parquet('s3://datalake/embeddings/**/*.parquet') LIMIT 5",
     },
 ]
 
