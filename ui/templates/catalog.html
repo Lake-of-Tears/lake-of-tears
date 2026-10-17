@@ -145,6 +145,9 @@
                      data-cat="{{ catalog.slug|sql_ident }}"
                      data-sch="{{ schema.slug|sql_ident }}"
                      data-table-ident="{{ table.slug|sql_ident }}"
+                     data-cat-id="{{ catalog.id }}"
+                     data-sch-id="{{ schema.id }}"
+                     data-table-id="{{ table.id }}"
                      data-table="{{ table | tojson | forceescape }}"
                      onclick="openTablePanel(this)">
 
@@ -158,6 +161,10 @@
                     <span class="text-xs text-gray-500 truncate group-hover:text-gray-400 transition-colors">{{ table.name }}</span>
                     {% endif %}
                   </div>
+
+                  {% if table.vector_index and table.vector_index.status == 'synced' %}
+                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950/40 text-emerald-400 border border-emerald-800/40 shrink-0 font-mono">vector</span>
+                  {% endif %}
 
                   {% if table.schema_drift %}
                   <span class="text-[10px] px-1.5 py-0.5 rounded bg-yellow-900/30 text-yellow-500 border border-yellow-800/40 shrink-0">drift</span>
@@ -245,6 +252,10 @@
               class="px-3.5 py-2 text-xs font-semibold border-b-2 border-transparent text-gray-400 hover:text-gray-200 transition-colors">
         Details
       </button>
+      <button type="button" onclick="switchDrawerTab('vector')" id="tab-btn-vector"
+              class="px-3.5 py-2 text-xs font-semibold border-b-2 border-transparent text-gray-400 hover:text-gray-200 transition-colors">
+        Vector Index
+      </button>
     </div>
   </div>
 
@@ -256,6 +267,8 @@
     <div id="drawer-tab-sample" class="hidden space-y-4"></div>
     <!-- Tab 3: Details -->
     <div id="drawer-tab-details" class="hidden space-y-4"></div>
+    <!-- Tab 4: Vector Index -->
+    <div id="drawer-tab-vector" class="hidden space-y-4"></div>
   </div>
 </div>
 <div id="panel-overlay" class="hidden fixed inset-0 z-40 bg-black/40" onclick="closePanel()"></div>
@@ -344,6 +357,9 @@ let currentTableData = null;
 let currentCatIdent = '';
 let currentSchIdent = '';
 let currentTableIdent = '';
+let currentCatId = '';
+let currentSchId = '';
+let currentTableId = '';
 let sampleDataCache = {};
 let isPanelMaximized = false;
 
@@ -363,6 +379,9 @@ function openTablePanel(el) {
   const catIdent = el.getAttribute('data-cat') || 'default';
   const schIdent = el.getAttribute('data-sch') || 'default';
   const tableIdent = el.getAttribute('data-table-ident') || '';
+  currentCatId = el.getAttribute('data-cat-id') || '';
+  currentSchId = el.getAttribute('data-sch-id') || '';
+  currentTableId = el.getAttribute('data-table-id') || '';
   let table = {};
   try {
     table = JSON.parse(el.getAttribute('data-table') || '{}');
@@ -415,9 +434,10 @@ function showTable(catIdent, schIdent, tableIdent, table) {
     parquetBtn.classList.add('hidden');
   }
 
-  // Render initial columns and details
+  // Render tabs
   renderColumnsTab(table);
   renderDetailsTab(table, catIdent, schIdent, tableIdent);
+  renderVectorTab(table);
 
   // Switch to default or currently active tab
   switchDrawerTab(currentDrawerTab || 'columns');
@@ -454,7 +474,7 @@ function closePanel() {
 
 function switchDrawerTab(tab) {
   currentDrawerTab = tab;
-  ['columns', 'sample', 'details'].forEach(t => {
+  ['columns', 'sample', 'details', 'vector'].forEach(t => {
     const btn = document.getElementById('tab-btn-' + t);
     const content = document.getElementById('drawer-tab-' + t);
     if (!btn || !content) return;
@@ -636,6 +656,142 @@ function renderDetailsTab(t, catIdent, schIdent, tableIdent) {
       </div>
     </div>
   `;
+}
+
+function renderVectorTab(t) {
+  const container = document.getElementById('drawer-tab-vector');
+  if (!container) return;
+  const v = t.vector_index || {};
+  const status = v.status || 'not_configured';
+  const totalVectors = v.total_vectors !== undefined ? v.total_vectors : 0;
+  const sourceCol = v.source_column || 'overview';
+  const model = v.model || 'gemini-embedding-001';
+  const dim = v.dimension || 768;
+  const lastSynced = v.last_synced_at ? new Date(v.last_synced_at).toLocaleString() : 'Never';
+  const formatTpl = v.format_template || '';
+
+  const cols = (t.column_defs || []).map(c => c.name).filter(Boolean);
+
+  let statusBadge = `<span class="px-2 py-0.5 rounded text-xs bg-gray-800 text-gray-400 border border-gray-700">Not Configured</span>`;
+  if (status === 'synced') {
+    statusBadge = `<span class="px-2 py-0.5 rounded text-xs bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>Synced</span>`;
+  } else if (status === 'syncing') {
+    statusBadge = `<span class="px-2 py-0.5 rounded text-xs bg-amber-950/60 text-amber-400 border border-amber-800/60 flex items-center gap-1.5"><svg class="animate-spin h-3 w-3 text-amber-400" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg>Syncing</span>`;
+  }
+
+  container.innerHTML = `
+    <div class="space-y-4">
+      <!-- Status Card -->
+      <div class="bg-black/30 border border-white/[0.08] rounded-xl p-4 space-y-3">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-semibold text-gray-200">Vector Search Index</span>
+            ${statusBadge}
+          </div>
+          <button type="button" id="btn-vector-sync" onclick="triggerVectorSync(this)"
+                  class="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5 ${status === 'syncing' ? 'opacity-50 cursor-not-allowed' : ''}">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Index Now
+          </button>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2 text-xs">
+          <div class="bg-white/[0.02] border border-white/[0.04] rounded p-2.5">
+            <span class="text-[10px] text-gray-500 uppercase font-semibold block mb-0.5">Total Vectors</span>
+            <span class="text-sm font-semibold text-gray-100 font-mono">${totalVectors.toLocaleString()}</span>
+          </div>
+          <div class="bg-white/[0.02] border border-white/[0.04] rounded p-2.5">
+            <span class="text-[10px] text-gray-500 uppercase font-semibold block mb-0.5">Embedding Model</span>
+            <span class="text-xs font-mono text-blue-400 block truncate" title="${model}">${model} (${dim}d)</span>
+          </div>
+          <div class="bg-white/[0.02] border border-white/[0.04] rounded p-2.5">
+            <span class="text-[10px] text-gray-500 uppercase font-semibold block mb-0.5">Source Text Column</span>
+            <span class="text-xs font-mono text-emerald-400">${sourceCol}</span>
+          </div>
+          <div class="bg-white/[0.02] border border-white/[0.04] rounded p-2.5">
+            <span class="text-[10px] text-gray-500 uppercase font-semibold block mb-0.5">Last Synchronized</span>
+            <span class="text-xs text-gray-400">${lastSynced}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Configuration Card -->
+      <div class="bg-black/30 border border-white/[0.08] rounded-xl p-4 space-y-3">
+        <h4 class="text-xs font-semibold text-gray-200">Index Configuration</h4>
+        <div class="space-y-3 text-xs">
+          <div>
+            <label class="block text-gray-400 mb-1">Primary Text Column</label>
+            <select id="vector-cfg-column" class="input-dark text-xs w-full py-1.5">
+              ${cols.map(c => `<option value="${c}" ${c === sourceCol ? 'selected' : ''}>${c}</option>`).join('')}
+              ${!cols.includes(sourceCol) ? `<option value="${sourceCol}" selected>${sourceCol}</option>` : ''}
+            </select>
+            <p class="text-[11px] text-gray-500 mt-1">The primary text content to embed per row.</p>
+          </div>
+
+          <div>
+            <label class="block text-gray-400 mb-1">Format Template <span class="text-gray-600">(optional)</span></label>
+            <input type="text" id="vector-cfg-template" value="${formatTpl ? formatTpl.replace(/"/g, '&quot;') : ''}"
+                   placeholder="e.g. Movie: {title} | Overview: {overview}"
+                   class="input-dark text-xs w-full py-1.5 font-mono"/>
+            <p class="text-[11px] text-gray-500 mt-1">Use <code>{column_name}</code> placeholders to include contextual metadata.</p>
+          </div>
+
+          <button type="button" onclick="saveVectorConfig()" class="btn-ghost text-xs py-1 px-3 border border-white/[0.08] text-gray-300 hover:text-white">
+            Save Configuration
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function triggerVectorSync(btn) {
+  if (!currentCatId || !currentSchId || !currentTableId) {
+    alert('Table identifiers are not available for sync.');
+    return;
+  }
+  const origHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = `<svg class="animate-spin h-3.5 w-3.5 text-white inline mr-1" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg> Syncing...`;
+
+  const colEl = document.getElementById('vector-cfg-column');
+  const tplEl = document.getElementById('vector-cfg-template');
+  const payload = {
+    catalog_id: currentCatId,
+    schema_id: currentSchId,
+    table_id: currentTableId,
+    source_column: colEl ? colEl.value : (currentTableData.vector_index || {}).source_column || 'overview',
+    format_template: tplEl ? tplEl.value : (currentTableData.vector_index || {}).format_template || '',
+  };
+
+  fetch('/catalog/vector-sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  })
+  .then(r => r.json())
+  .then(res => {
+    btn.disabled = false;
+    btn.innerHTML = origHtml;
+    if (res.ok && res.table) {
+      currentTableData = res.table;
+      renderVectorTab(currentTableData);
+    } else {
+      alert('Vector sync failed: ' + (res.error || 'Unknown error'));
+    }
+  })
+  .catch(err => {
+    btn.disabled = false;
+    btn.innerHTML = origHtml;
+    alert('Network error: ' + err);
+  });
+}
+
+function saveVectorConfig() {
+  const btn = document.getElementById('btn-vector-sync');
+  if (btn) triggerVectorSync(btn);
 }
 </script>
 {% endblock %}

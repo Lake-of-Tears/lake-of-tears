@@ -167,6 +167,7 @@ class CatalogTable(Base):
     s3_path_pattern: Mapped[str | None] = mapped_column(Text, nullable=True)
     column_defs: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=list)
     schema_drift: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    vector_index: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )

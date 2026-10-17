@@ -210,7 +210,7 @@ SQL_AI_FUNCTIONS: list[dict[str, str]] = [
 AI_VECTOR_SQL = """
     SELECT
         source,
-        ingested_at,
+        ingested_at::VARCHAR AS ingested_at,
         summary,
         array_cosine_similarity(
             embedding::DOUBLE[768],
@@ -1194,6 +1194,7 @@ def run_rag_search(question: str, api_key: str | None = None) -> dict[str, Any]:
         embed_resp = client.models.embed_content(
             model="gemini-embedding-001",
             contents=question,
+            config={"output_dimensionality": 768, "task_type": "RETRIEVAL_QUERY"},
         )
         q_vec = embed_resp.embeddings[0].values
 
@@ -1202,6 +1203,11 @@ def run_rag_search(question: str, api_key: str | None = None) -> dict[str, Any]:
         try:
             rel = con.execute(AI_VECTOR_SQL, [q_vec, s3_pattern])
             rows = rel.fetchall()
+        except Exception as exc:
+            if "No files found that match the pattern" in str(exc):
+                rows = []
+            else:
+                raise
         finally:
             con.close()
 
@@ -1214,16 +1220,26 @@ def run_rag_search(question: str, api_key: str | None = None) -> dict[str, Any]:
             }
             for r in rows
         ]
-        context_text = "\n\n".join(
-            f"[{s['source']} @ {s['ingested_at']} (score={s['score']})]:\n{s['summary']}"
-            for s in snippets
-        )
-        prompt = (
-            "You are an analyst for a business datalakehouse called Lake of Tears. "
-            "Answer the following question using the context snippets below. "
-            "Be concise and cite which data sources support your answer.\n\n"
-            f"Question: {question}\n\nContext:\n{context_text}"
-        )
+        if snippets:
+            context_text = "\n\n".join(
+                f"[{s['source']} @ {s['ingested_at']} (score={s['score']})]:\n{s['summary']}"
+                for s in snippets
+            )
+            prompt = (
+                "You are an analyst for a business datalakehouse called Lake of Tears. "
+                "Answer the following question using the context snippets below. "
+                "Be concise and cite which data sources support your answer.\n\n"
+                f"Question: {question}\n\nContext:\n{context_text}"
+            )
+        else:
+            prompt = (
+                "You are an analyst for a business datalakehouse called Lake of Tears. "
+                "Note: No semantic vector embeddings were found in s3://datalake/embeddings/**/*.parquet for this query. "
+                "Answer the user's question clearly and let them know that semantic embeddings have not yet been generated "
+                "for this dataset.\n\n"
+                f"Question: {question}"
+            )
+
         answer = client.models.generate_content(
             model=get_default_model(),
             contents=prompt,
