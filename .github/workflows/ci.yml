@@ -107,7 +107,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install pytest==8.3.3 -r ui/requirements.txt -r backend/requirements.txt
+        run: pip install pytest==8.3.3 pandas -r ui/requirements.txt -r backend/requirements.txt
 
       - name: Run unit tests
         run: pytest tests/ -v

@@ -7,39 +7,46 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "shared"))
 import os
 
 import duckdb
-from gemini_embedder import embed_query, get_gemini_client, get_gemini_default_model
+from ai_gateway import embed_texts_with_meta, generate, vector_search_sql
+
+EMBEDDINGS_GLOB = "s3://datalake/embeddings/**/*.parquet"
 
 
-def rag(question: str, top_k: int = 10) -> str:
-    query_vec = embed_query(question)
-
+def _connect() -> duckdb.DuckDBPyConnection:
     con = duckdb.connect()
-    con.execute("INSTALL httpfs; LOAD httpfs; INSTALL vss; LOAD vss;")
+    con.execute("INSTALL httpfs; LOAD httpfs;")
     con.execute(f"""
         SET s3_endpoint='{os.environ["MINIO_ENDPOINT"]}';
         SET s3_access_key_id='{os.environ["MINIO_ACCESS_KEY"]}';
         SET s3_secret_access_key='{os.environ["MINIO_SECRET_KEY"]}';
         SET s3_use_ssl=false; SET s3_url_style='path';
     """)
+    return con
 
-    results = con.execute(f"""
-        SELECT source, content,
-               array_cosine_similarity(embedding::DOUBLE[768], {query_vec}::DOUBLE[768]) AS score
-        FROM read_parquet('s3://datalake/embeddings/**/*.parquet')
-        ORDER BY score DESC
-        LIMIT {top_k}
-    """).df()
+
+def rag(question: str, top_k: int = 10) -> str:
+    # Embed the question with the active provider; its dimension and model decide which stored
+    # vectors can be compared (older files without a "model" column count as the legacy Gemini model).
+    emb = embed_texts_with_meta([question], query=True)
+    query_vec, dimension, model = emb["embeddings"][0], emb["dimension"], emb["embedding_model"]
+
+    con = _connect()
+    columns = {
+        d[0]
+        for d in con.execute(
+            f"SELECT * FROM read_parquet('{EMBEDDINGS_GLOB}', union_by_name = true) LIMIT 0"
+        ).description
+    }
+    has_model = "model" in columns
+    params: list = [query_vec, EMBEDDINGS_GLOB] + ([model] if has_model else []) + [top_k]
+    results = con.execute(vector_search_sql(dimension, has_model), params).df()
 
     context = "\n".join(f"[{r.source}] {r.content}" for _, r in results.iterrows())
-
-    client = get_gemini_client()
-    response = client.models.generate_content(
-        model=get_gemini_default_model(),
-        contents=f"You are an assistant that answers questions about home data.\n\n"
+    return generate(
+        "You are an assistant that answers questions about home data.\n\n"
         f"Context from data lake:\n{context}\n\n"
-        f"Question: {question}",
+        f"Question: {question}"
     )
-    return response.text
 
 
 if __name__ == "__main__":

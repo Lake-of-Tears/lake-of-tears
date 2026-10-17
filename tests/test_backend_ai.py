@@ -135,8 +135,8 @@ def test_backend_ai_sql_generate_fix_and_explain():
     mock_resp = MagicMock()
     mock_resp.text = json.dumps(
         {
-            "sql": "SELECT ai_summarize(summary) FROM read_parquet('s3://datalake/embeddings/**/*.parquet') LIMIT 5",
-            "fixed_sql": "SELECT ai_summarize(summary) FROM read_parquet('s3://datalake/embeddings/**/*.parquet') LIMIT 5",
+            "sql": "SELECT ai_summarize(content) FROM read_parquet('s3://datalake/embeddings/**/*.parquet') LIMIT 5",
+            "fixed_sql": "SELECT ai_summarize(content) FROM read_parquet('s3://datalake/embeddings/**/*.parquet') LIMIT 5",
             "explanation": "Uses ai_summarize UDF on embeddings.",
             "summary": "Summarizes top 5 embeddings rows.",
             "steps": ["Scan embeddings parquet", "Apply ai_summarize UDF"],
@@ -150,8 +150,8 @@ def test_backend_ai_sql_generate_fix_and_explain():
     try:
         with (
             patch.object(ai_service, "get_workspace_catalogs_from_db", return_value=[]),
-            patch.object(ai_service, "GEMINI_API_KEY", "test-key"),
-            patch("ai_service.genai.Client", return_value=mock_client),
+            patch.object(ai_service, "_resolve_api_key", return_value="provider"),
+            patch.object(ai_service, "_client_for", return_value=mock_client),
         ):
             headers = {"Authorization": f"Bearer {token}", "X-Workspace-Slug": workspace.slug}
 
@@ -176,7 +176,7 @@ def test_backend_ai_sql_generate_fix_and_explain():
             exp_resp = client.post(
                 "/api/v1/ai/sql/explain",
                 headers=headers,
-                json={"sql": "SELECT ai_summarize(summary) FROM embeddings LIMIT 5"},
+                json={"sql": "SELECT ai_summarize(content) FROM embeddings LIMIT 5"},
             )
             assert exp_resp.status_code == 200
             assert exp_resp.json()["ok"] is True

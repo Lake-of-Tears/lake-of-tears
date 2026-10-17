@@ -47,8 +47,8 @@ def test_ai_query_udf_single_and_two_arg_signatures():
     """Verify ai_query supports 1-arg, 2-arg Databricks (model, prompt), and 2-arg (prompt, model)."""
     mock_client = _make_mock_genai_client(["positive", "high_risk", "approved"])
     with (
-        patch.object(main, "GEMINI_API_KEY", "test-gemini-key"),
-        patch("main.genai.Client", return_value=mock_client),
+        patch.object(main, "_get_ai_access", return_value="gateway"),
+        patch.object(main, "_ai_client", return_value=mock_client),
     ):
         res1 = main._run_query("SELECT ai_query('Classify sentiment: great service') AS s")
         assert res1["ok"] is True
@@ -71,8 +71,8 @@ def test_ai_udfs_null_handling():
     """Verify NULL inputs to ai_query, ai_summarize, ai_classify, and ai_extract return NULL without calling Gemini."""
     mock_client = _make_mock_genai_client("should-not-be-called")
     with (
-        patch.object(main, "GEMINI_API_KEY", "test-gemini-key"),
-        patch("main.genai.Client", return_value=mock_client),
+        patch.object(main, "_get_ai_access", return_value="gateway"),
+        patch.object(main, "_ai_client", return_value=mock_client),
     ):
         res = main._run_query(
             """
@@ -99,8 +99,8 @@ def test_ai_summarize_classify_and_extract_udfs():
         ]
     )
     with (
-        patch.object(main, "GEMINI_API_KEY", "test-gemini-key"),
-        patch("main.genai.Client", return_value=mock_client),
+        patch.object(main, "_get_ai_access", return_value="gateway"),
+        patch.object(main, "_ai_client", return_value=mock_client),
     ):
         s_res = main._run_query(
             "SELECT ai_summarize('Long detailed daily log about Stripe growth...') AS brief"
@@ -127,8 +127,8 @@ def test_ai_udf_lru_cache_deduplicates_identical_prompts():
     """Verify duplicate prompts within or across queries hit the LRU cache and only call Gemini once."""
     mock_client = _make_mock_genai_client("cached-sentiment")
     with (
-        patch.object(main, "GEMINI_API_KEY", "test-gemini-key"),
-        patch("main.genai.Client", return_value=mock_client),
+        patch.object(main, "_get_ai_access", return_value="gateway"),
+        patch.object(main, "_ai_client", return_value=mock_client),
     ):
         res = main._run_query(
             """
@@ -150,8 +150,8 @@ def test_ai_udf_row_limit_guardrail():
     """Verify queries exceeding max_ai_rows raise a clear SQL error."""
     mock_client = _make_mock_genai_client("ok")
     with (
-        patch.object(main, "GEMINI_API_KEY", "test-gemini-key"),
-        patch("main.genai.Client", return_value=mock_client),
+        patch.object(main, "_get_ai_access", return_value="gateway"),
+        patch.object(main, "_ai_client", return_value=mock_client),
     ):
         res = main._run_query(
             "SELECT ai_query('Row ' || i::VARCHAR) FROM range(10) AS t(i)",
@@ -213,7 +213,7 @@ def test_ui_sql_assistant_endpoints():
     """Verify /api/v1/ai/sql/generate, /api/v1/ai/sql/fix, and /api/v1/ai/sql/explain."""
     with (
         patch.object(main, "AUTH_ENABLED", False),
-        patch.object(main, "GEMINI_API_KEY", "test-key"),
+        patch.object(main, "_get_ai_access", return_value="gateway"),
     ):
         client = TestClient(main.app)
 
@@ -228,7 +228,7 @@ def test_ui_sql_assistant_endpoints():
                 }
             )
         )
-        with patch("main.genai.Client", return_value=gen_mock):
+        with patch.object(main, "_ai_client", return_value=gen_mock):
             resp = client.post(
                 "/api/v1/ai/sql/generate",
                 json={"prompt": "Show monthly revenue from Stripe charges"},
@@ -248,7 +248,7 @@ def test_ui_sql_assistant_endpoints():
                 }
             )
         )
-        with patch("main.genai.Client", return_value=fix_mock):
+        with patch.object(main, "_ai_client", return_value=fix_mock):
             resp = client.post(
                 "/api/v1/ai/sql/fix",
                 json={
@@ -272,7 +272,7 @@ def test_ui_sql_assistant_endpoints():
                 }
             )
         )
-        with patch("main.genai.Client", return_value=exp_mock):
+        with patch.object(main, "_ai_client", return_value=exp_mock):
             resp = client.post(
                 "/api/v1/ai/sql/explain",
                 json={"sql": "SELECT title, SUM(price_usd) FROM shopify GROUP BY 1"},
@@ -310,8 +310,8 @@ def test_ui_genie_chat_self_correction_and_chart_inference():
 
     with (
         patch.object(main, "AUTH_ENABLED", False),
-        patch.object(main, "GEMINI_API_KEY", "test-key"),
-        patch("main.genai.Client", return_value=mock_client),
+        patch.object(main, "_get_ai_access", return_value="gateway"),
+        patch.object(main, "_ai_client", return_value=mock_client),
     ):
         client = TestClient(main.app)
         resp = client.post(
@@ -332,20 +332,15 @@ def test_ui_genie_chat_self_correction_and_chart_inference():
         assert "$15,800" in data["answer"]
 
 
-def test_ui_resolves_gemini_key_from_backend_admin_setting():
-    """Verify UI resolves GEMINI_API_KEY from backend /api/internal/settings/gemini-key when not patched."""
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = {"gemini_api_key": "admin-panel-secret-key", "configured": True}
-
-    mock_http_client = MagicMock()
-    mock_http_client.__enter__.return_value.get.return_value = mock_resp
-
-    with (
-        patch.object(main, "GEMINI_API_KEY", ""),
-        patch("main.httpx.Client", return_value=mock_http_client),
-    ):
-        assert main._get_gemini_api_key() == "admin-panel-secret-key"
+def test_ui_asks_the_backend_gateway_whether_an_ai_provider_is_configured():
+    """The UI holds no AI credentials: availability and the chat model come from the gateway."""
+    info = {"provider": "stub", "chat_model": "stub-chat", "embedding_model": "e", "dimension": 4}
+    with patch.object(main.ai_gateway_client, "provider_info", return_value=info):
+        assert main._get_ai_access() == "gateway"
+        assert main._get_gemini_default_model() == "stub-chat"
+    with patch.object(main.ai_gateway_client, "provider_info", return_value=None):
+        assert main._get_ai_access() == ""
+        assert main._get_gemini_default_model() == duckdb_ai.DEFAULT_GEMINI_MODEL
 
 
 def test_ui_admin_panel_ai_settings_save_clear_and_test():

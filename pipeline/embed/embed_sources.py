@@ -7,7 +7,7 @@ import hashlib
 from datetime import date, timedelta
 
 import pandas as pd
-from gemini_embedder import embed_texts
+from ai_gateway import embed_texts_with_meta
 from storage_writer import get_duckdb_con
 
 
@@ -96,13 +96,25 @@ def embed_source(source: str, parquet_glob: str):
             lambda t: hashlib.md5(t.encode(), usedforsecurity=False).hexdigest()
         )
 
-    texts = df["content"].tolist()
-    embeddings = []
-    for i in range(0, len(texts), 100):
-        embeddings.extend(embed_texts(texts[i : i + 100]))
-    df["embedding"] = embeddings
+    result = embed_texts_with_meta(df["content"].tolist())
+    df["embedding"] = result["embeddings"]
+    # Record which model produced the vectors so searches only compare like with like.
+    df["provider"] = result["provider"]
+    df["model"] = result["embedding_model"]
+    df["dimension"] = result["dimension"]
 
-    out_df = df[["id", "source", "content", "embedding", "source_date"]].copy()
+    out_df = df[
+        [
+            "id",
+            "source",
+            "content",
+            "embedding",
+            "source_date",
+            "provider",
+            "model",
+            "dimension",
+        ]
+    ].copy()
     out_df["ingested_at"] = pd.Timestamp.now()
 
     con.register("out_df", out_df)
