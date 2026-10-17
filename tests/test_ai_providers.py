@@ -52,6 +52,9 @@ class FakeDB:
     def add(self, obj) -> None:
         self.rows[obj.key] = obj
 
+    def commit(self) -> None:
+        pass
+
 
 @pytest.fixture(autouse=True)
 def clean_env(monkeypatch):

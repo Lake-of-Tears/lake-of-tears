@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -76,19 +77,65 @@ class AIProvider(LLMProvider, EmbeddingProvider):
         )
 
     def test_connection(self) -> dict[str, Any]:
-        """Make one small live call and report the outcome without raising."""
+        """Exercise text generation and embeddings with one small call each and report the outcome.
+
+        Never raises: failures come back as ``ok: False`` with a message that holds no credentials.
+        """
+        result: dict[str, Any] = {
+            "ok": False,
+            "provider": self.name,
+            "model": self.chat_model,
+            "message": "",
+            "chat": {"ok": False, "model": self.chat_model, "latency_ms": None, "message": ""},
+            "embedding": {
+                "ok": False,
+                "model": self.embedding_model,
+                "dimension": self.dimension,
+                "latency_ms": None,
+                "message": "",
+            },
+        }
+        start = time.perf_counter()
         try:
             reply = self.generate("Reply with the single word OK.").strip()
-            return {
-                "ok": True,
-                "provider": self.name,
-                "model": self.chat_model,
-                "message": f"Connected to {self.chat_model} ({reply or 'OK'}).",
-            }
+            result["chat"].update(
+                ok=True,
+                latency_ms=round((time.perf_counter() - start) * 1000),
+                message=f"Replied: {reply or 'OK'}",
+            )
         except Exception as exc:
-            return {
-                "ok": False,
-                "provider": self.name,
-                "model": self.chat_model,
-                "message": f"{self.name} connection failed: {exc}",
-            }
+            result["chat"]["message"] = str(exc)
+
+        start = time.perf_counter()
+        try:
+            vector = self.embed_texts(["Lake of Tears connection test"])[0]
+            ok = len(vector) == self.dimension
+            result["embedding"].update(
+                ok=ok,
+                dimension=len(vector),
+                latency_ms=round((time.perf_counter() - start) * 1000),
+                message=(
+                    f"Returned {len(vector)} dimensions."
+                    if ok
+                    else f"Returned {len(vector)} dimensions but {self.dimension} are configured."
+                ),
+            )
+        except Exception as exc:
+            result["embedding"]["message"] = str(exc)
+
+        chat, emb = result["chat"], result["embedding"]
+        result["ok"] = bool(chat["ok"] and emb["ok"])
+        if result["ok"]:
+            result["message"] = (
+                f"Connected to {self.name}: {chat['model']} answered in {chat['latency_ms']} ms; "
+                f"{emb['model']} returned {emb['dimension']}-dimension vectors in "
+                f"{emb['latency_ms']} ms."
+            )
+        else:
+            problems = [
+                f"{label}: {part['message']}"
+                for label, part in (("chat", chat), ("embeddings", emb))
+                if not part["ok"]
+            ]
+            result["message"] = f"{self.name} connection failed. " + "; ".join(problems)
+        return result

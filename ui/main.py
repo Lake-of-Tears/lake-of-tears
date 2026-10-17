@@ -1267,6 +1267,8 @@ async def settings_admin_get(request: Request):
             "users": users_list,
             "workspaces": all_ws,
             "admin_settings": admin_settings,
+            "ai_provider": _backend_get("/api/admin/ai-provider", token),
+            "ai_error": request.query_params.get("ai_error"),
             "saved": request.query_params.get("saved"),
         },
     )
@@ -1367,41 +1369,54 @@ async def settings_admin_session_settings(
     return RedirectResponse(url="/settings/admin?saved=1", status_code=302)
 
 
-@app.post("/settings/admin/ai-settings")
-async def settings_admin_ai_settings(
-    request: Request,
-    action: str = Form("save"),
-    gemini_api_key: str = Form(""),
-    gemini_default_model: str | None = Form(None),
-):
-    global _GEMINI_MODEL_CACHE
+def _backend_put(path: str, token: str, payload: dict[str, Any]) -> tuple[int, Any]:
+    try:
+        with httpx.Client(timeout=15) as client:
+            resp = client.put(
+                f"{BACKEND_URL}{path}",
+                headers={"Authorization": f"Bearer {token}"},
+                json=payload,
+            )
+        try:
+            return resp.status_code, resp.json()
+        except Exception:
+            return resp.status_code, {"detail": resp.text}
+    except Exception as exc:
+        return 502, {"detail": f"Could not reach the backend: {exc}"}
+
+
+@app.post("/settings/admin/ai-provider")
+async def settings_admin_ai_provider(request: Request):
+    """Save the selected AI provider's settings. Secret values are encrypted by the backend."""
     user = request.state.user
     if not user or user.get("role") != "superadmin":
         return RedirectResponse(url="/", status_code=302)
     token = request.cookies.get("lake_token")
-    if action == "clear":
-        _backend_patch("/api/admin/settings", token, {"clear_gemini_api_key": True})
-        duckdb_ai.clear_ai_cache()
-    elif gemini_api_key.strip():
-        _backend_patch(
-            "/api/admin/settings",
-            token,
-            {"gemini_api_key": gemini_api_key.strip()},
-        )
-        duckdb_ai.clear_ai_cache()
-    if action != "clear" and gemini_default_model is not None:
-        _backend_patch(
-            "/api/admin/settings",
-            token,
-            {"gemini_default_model": gemini_default_model.strip()},
-        )
-        _GEMINI_MODEL_CACHE = None
-        duckdb_ai.clear_ai_cache()
-    return RedirectResponse(url="/settings/admin?saved=1", status_code=302)
+    form = await request.form()
+    provider = str(form.get("provider") or "")
+    if form.get("action") == "clear-secret":
+        payload = {
+            "provider": provider,
+            "config": {str(form.get("secret_field") or ""): None},
+            "activate": False,
+        }
+    else:
+        prefix = f"cfg__{provider}__"
+        config = {k[len(prefix) :]: str(v) for k, v in form.multi_items() if k.startswith(prefix)}
+        payload = {"provider": provider, "config": config, "activate": True}
+    status_code, data = _backend_put("/api/admin/ai-provider", token or "", payload)
+    ai_gateway_client.clear_cache()
+    duckdb_ai.clear_ai_cache()
+    if status_code == 200:
+        return RedirectResponse(url="/settings/admin?saved=1#ai-settings", status_code=302)
+    detail = data.get("detail") if isinstance(data, dict) else str(data)
+    message = urllib.parse.quote(str(detail or f"Backend error ({status_code})"))
+    return RedirectResponse(url=f"/settings/admin?ai_error={message}#ai-settings", status_code=302)
 
 
-@app.post("/settings/admin/ai-settings/test")
-async def settings_admin_ai_settings_test(request: Request):
+@app.post("/settings/admin/ai-provider/test")
+async def settings_admin_ai_provider_test(request: Request):
+    """Try the provider with the entered (unsaved) settings and report latency and models."""
     user = request.state.user
     if not user or user.get("role") != "superadmin":
         return JSONResponse(
@@ -1412,23 +1427,21 @@ async def settings_admin_ai_settings_test(request: Request):
         body = await request.json()
     except Exception:
         body = {}
-    payload = {
-        "api_key": body.get("api_key"),
-        "model": body.get("model") or None,
-    }
+    payload = {"provider": body.get("provider") or None, "config": body.get("config") or {}}
     try:
-        with httpx.Client(timeout=15) as client:
+        with httpx.Client(timeout=60) as client:
             resp = client.post(
-                f"{BACKEND_URL}/api/admin/settings/test-gemini-key",
+                f"{BACKEND_URL}/api/admin/ai-provider/test",
                 headers={"Authorization": f"Bearer {token}"} if token else {},
                 json=payload,
             )
         if resp.status_code == 200:
             return JSONResponse(resp.json())
-        return JSONResponse(
-            {"ok": False, "message": f"Backend error ({resp.status_code}): {resp.text}"},
-            status_code=resp.status_code,
-        )
+        try:
+            detail = resp.json().get("detail") or resp.text
+        except Exception:
+            detail = resp.text
+        return JSONResponse({"ok": False, "message": str(detail)}, status_code=resp.status_code)
     except Exception as exc:
         return JSONResponse({"ok": False, "message": f"Connection error: {exc}"}, status_code=502)
 
