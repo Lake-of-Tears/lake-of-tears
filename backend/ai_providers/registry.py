@@ -21,6 +21,13 @@ from models import SystemSetting
 from sqlalchemy.orm import Session
 
 from ai_providers.base import AIProvider, ProviderError
+from ai_providers.bedrock import (
+    DEFAULT_CHAT_MODEL as BEDROCK_CHAT_MODEL,
+)
+from ai_providers.bedrock import (
+    DEFAULT_EMBEDDING_MODEL as BEDROCK_EMBEDDING_MODEL,
+)
+from ai_providers.bedrock import BedrockProvider
 from ai_providers.gemini import (
     DEFAULT_CHAT_MODEL,
     DEFAULT_DIMENSION,
@@ -151,6 +158,18 @@ def _build_azure(cfg: dict[str, Any]) -> AIProvider:
     )
 
 
+def _build_bedrock(cfg: dict[str, Any]) -> AIProvider:
+    return BedrockProvider(
+        region=str(cfg.get("region") or ""),
+        chat_model=str(cfg.get("chat_model") or BEDROCK_CHAT_MODEL),
+        embedding_model=str(cfg.get("embedding_model") or BEDROCK_EMBEDDING_MODEL),
+        access_key_id=str(cfg.get("access_key_id") or ""),
+        secret_access_key=str(cfg.get("secret_access_key") or ""),
+        session_token=str(cfg.get("session_token") or ""),
+        dimension=int(cfg["dimension"]) if cfg.get("dimension") else None,
+    )
+
+
 PROVIDERS: dict[str, ProviderSpec] = {
     "gemini": ProviderSpec(
         "gemini",
@@ -249,6 +268,56 @@ PROVIDERS: dict[str, ProviderSpec] = {
             ),
         ),
         _build_azure,
+    ),
+    "bedrock": ProviderSpec(
+        "bedrock",
+        "Amazon Bedrock",
+        (
+            FieldSpec(
+                "region",
+                "AWS region",
+                required=True,
+                placeholder="us-east-1",
+                help="The region where your Bedrock models are enabled.",
+            ),
+            FieldSpec(
+                "access_key_id",
+                "Access key id",
+                help="Optional. Leave this and the secret blank to use the IAM role of the "
+                "workload (for example an EKS service-account role): no keys are stored.",
+            ),
+            FieldSpec(
+                "secret_access_key",
+                "Secret access key",
+                "secret",
+                help="Only with an access key id. Stored encrypted; never shown again.",
+            ),
+            FieldSpec(
+                "session_token",
+                "Session token",
+                "secret",
+                help="Optional, for temporary credentials.",
+            ),
+            FieldSpec(
+                "chat_model",
+                "Chat model id",
+                default=BEDROCK_CHAT_MODEL,
+                help="A model id or inference profile id enabled in your account.",
+            ),
+            FieldSpec(
+                "embedding_model",
+                "Embedding model id",
+                default=BEDROCK_EMBEDDING_MODEL,
+                help="Amazon Titan Text Embeddings or Cohere Embed.",
+            ),
+            FieldSpec(
+                "dimension",
+                "Embedding dimension",
+                "int",
+                help="Optional. Titan v2 supports 256, 512 or 1024; blank detects it.",
+            ),
+        ),
+        _build_bedrock,
     ),
     "ollama": ProviderSpec(
         "ollama",
