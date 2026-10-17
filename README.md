@@ -353,6 +353,14 @@ All configuration is driven by environment variables. Copy `.env.example` to `.e
 | `MINIO_CONSOLE_URL` | no | `http://localhost:9001` | URL for the "Open MinIO Console" link in the Storage page |
 | `DATALAKE_DATA_DIR` | yes | `~` | Host path for Docker volume mounts |
 
+> **Upgrading an older install: keep your notebooks.** Notebooks created in the Lake UI are saved in `$DATALAKE_DATA_DIR/workspaces` (earlier versions kept them only inside the Jupyter container, so recreating the container lost them). Before you recreate Jupyter with this version, copy any existing notebooks out of the old container, then restart:
+>
+> ```bash
+> mkdir -p "$DATALAKE_DATA_DIR/workspaces"
+> docker compose cp jupyter:/home/jovyan/workspaces/. "$DATALAKE_DATA_DIR/workspaces/"
+> docker compose up -d jupyter
+> ```
+
 **Authentication**
 
 | Variable | Required | Default | Description |
