@@ -27,6 +27,10 @@ def detect_anomalies(source: str = "truenas", contamination: float = 0.05) -> st
 
     # Only vectors from the active embedding model can be compared with each other.
     info = provider_info()
+    if not info.get("dimension"):
+        raise RuntimeError(
+            "Cannot tell which embedding dimension to compare: is the AI provider reachable?"
+        )
     glob = f"s3://datalake/embeddings/{source}/**/*.parquet"
     columns = {
         d[0]

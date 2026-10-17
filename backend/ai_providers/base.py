@@ -21,7 +21,7 @@ class ProviderInfo:
     provider: str
     chat_model: str
     embedding_model: str
-    dimension: int
+    dimension: int | None  # None when the provider cannot be reached to measure it
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -69,11 +69,15 @@ class AIProvider(LLMProvider, EmbeddingProvider):
     name: str
 
     def info(self) -> ProviderInfo:
+        try:
+            dimension: int | None = self.dimension
+        except ProviderError:
+            dimension = None  # a configured provider that is temporarily unreachable
         return ProviderInfo(
             provider=self.name,
             chat_model=self.chat_model,
             embedding_model=self.embedding_model,
-            dimension=self.dimension,
+            dimension=dimension,
         )
 
     def test_connection(self) -> dict[str, Any]:
@@ -90,7 +94,7 @@ class AIProvider(LLMProvider, EmbeddingProvider):
             "embedding": {
                 "ok": False,
                 "model": self.embedding_model,
-                "dimension": self.dimension,
+                "dimension": None,
                 "latency_ms": None,
                 "message": "",
             },
@@ -109,7 +113,8 @@ class AIProvider(LLMProvider, EmbeddingProvider):
         start = time.perf_counter()
         try:
             vector = self.embed_texts(["Lake of Tears connection test"])[0]
-            ok = len(vector) == self.dimension
+            expected = self.dimension
+            ok = len(vector) == expected
             result["embedding"].update(
                 ok=ok,
                 dimension=len(vector),
@@ -117,7 +122,7 @@ class AIProvider(LLMProvider, EmbeddingProvider):
                 message=(
                     f"Returned {len(vector)} dimensions."
                     if ok
-                    else f"Returned {len(vector)} dimensions but {self.dimension} are configured."
+                    else f"Returned {len(vector)} dimensions but {expected} are configured."
                 ),
             )
         except Exception as exc:
