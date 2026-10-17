@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 
 import ai_service
 import jwt as _jwt
+from ai_admin_router import router as ai_admin_router
 from ai_gateway_router import router as ai_gateway_router
 from ai_router import router as ai_router
 from auth import (
@@ -135,6 +136,7 @@ app.include_router(dashboards_router, prefix="/api/dashboards", tags=["dashboard
 app.include_router(ai_router, prefix="/api/v1/ai", tags=["ai"])
 app.include_router(ai_router, prefix="/api/ai", tags=["ai"])
 app.include_router(ai_gateway_router, prefix="/api/internal/ai", tags=["ai-internal"])
+app.include_router(ai_admin_router, prefix="/api/admin/ai-provider", tags=["ai-admin"])
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

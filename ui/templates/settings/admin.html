@@ -225,81 +225,111 @@
 
     <div class="border-t border-white/[0.06] pt-6" id="ai-settings">
       <div class="flex items-center justify-between gap-3 mb-1">
-        <h2 class="text-sm font-semibold text-gray-300">AI &amp; External API Keys</h2>
-        {% if admin_settings.gemini_api_key_configured %}
+        <h2 class="text-sm font-semibold text-gray-300">AI Provider</h2>
+        {% if ai_provider %}
+        {% set active = ai_provider.providers | selectattr('name', 'equalto', ai_provider.active) | first %}
+        {% if active and active.configured %}
         <span class="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-900/40 border border-emerald-700/50 text-emerald-400">
           <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-          Configured ({{ admin_settings.gemini_api_key_masked or '••••••••' }})
+          {{ active.label }} configured
         </span>
         {% else %}
         <span class="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-900/40 border border-amber-700/50 text-amber-400">
           <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-          Not Configured
+          Not configured
         </span>
+        {% endif %}
         {% endif %}
       </div>
       <p class="text-xs text-gray-500 mb-5">
-        Configure the instance-wide <code class="text-gray-400">GEMINI_API_KEY</code> used across SQL AI Functions (<code class="text-gray-400">ai_query</code>, <code class="text-gray-400">ai_summarize</code>, <code class="text-gray-400">ai_classify</code>, <code class="text-gray-400">ai_extract</code>), the SQL Editor Assistant, Genie Conversational Agent, and embedding pipelines. Stored encrypted at rest.
+        Choose the model provider used across SQL AI Functions (<code class="text-gray-400">ai_query</code>, <code class="text-gray-400">ai_summarize</code>, <code class="text-gray-400">ai_classify</code>, <code class="text-gray-400">ai_extract</code>), the SQL Editor Assistant, Genie, semantic search and the embedding pipelines. Changes apply immediately, with no restart. Secrets are stored encrypted and are never shown again.
       </p>
 
-      <div class="space-y-4">
-        <form action="/settings/admin/ai-settings" method="post" class="space-y-3">
-          <input type="hidden" name="action" value="save" />
+      {% if ai_error %}
+      <div class="mb-4 text-xs px-3 py-2 rounded-md border border-red-800/50 bg-red-900/20 text-red-300" role="alert">{{ ai_error }}</div>
+      {% endif %}
+
+      {% if not ai_provider %}
+      <div class="text-xs px-3 py-2 rounded-md border border-amber-800/50 bg-amber-900/20 text-amber-300">
+        The AI provider settings could not be loaded from the backend.
+      </div>
+      {% else %}
+      <form id="ai-provider-form" action="/settings/admin/ai-provider" method="post" class="space-y-4">
+        <div>
+          <label for="ai-provider-select" class="block text-xs text-gray-400 font-medium mb-1">Provider</label>
+          <select id="ai-provider-select" name="provider" onchange="aiProviderChanged()"
+                  class="w-full input-dark text-sm"
+                  style="background-color: var(--c-input-bg); border-color: var(--c-input-border);">
+            {% for p in ai_provider.providers %}
+            <option value="{{ p.name }}" {% if p.name == ai_provider.active %}selected{% endif %}>{{ p.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        {% for p in ai_provider.providers %}
+        <fieldset class="ai-provider-fields space-y-3 {% if p.name != ai_provider.active %}hidden{% endif %}"
+                  data-provider="{{ p.name }}" {% if p.name != ai_provider.active %}disabled{% endif %}>
+          {% for f in p.fields %}
           <div>
-            <label for="gemini-api-key-input" class="block text-xs text-gray-400 font-medium mb-1">
-              Google Gemini API Key (<code class="text-gray-400">GEMINI_API_KEY</code>)
+            <label for="ai-{{ p.name }}-{{ f.name }}" class="block text-xs text-gray-400 font-medium mb-1">
+              {{ f.label }}{% if f.required %} <span class="text-red-400">*</span>{% endif %}
             </label>
-            <p class="text-[11px] text-gray-600 mb-2">
-              {% if admin_settings.gemini_api_key_configured %}
-              Active key: <code class="text-gray-300">{{ admin_settings.gemini_api_key_masked }}</code>. Enter a new key below to replace it.
-              {% else %}
-              Enter a Google AI Studio API key to enable AI Query, SQL AI Functions, and Genie.
-              {% endif %}
-            </p>
-            <div class="flex items-center gap-2">
-              <input id="gemini-api-key-input" type="password" name="gemini_api_key"
-                     autocomplete="off"
-                     placeholder="{% if admin_settings.gemini_api_key_configured %}Enter new key to replace ({{ admin_settings.gemini_api_key_masked }}){% else %}AIzaSy...{% endif %}"
-                     class="flex-1 input-dark text-sm font-mono"
-                     style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
-              <button type="button" id="test-gemini-key-btn" onclick="testGeminiKey()"
-                      class="text-xs px-3 py-2 rounded-md border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition-colors shrink-0">
-                Test Key
-              </button>
-              <button type="submit" class="btn-primary shrink-0">
-                {{ 'Replace Key' if admin_settings.gemini_api_key_configured else 'Save Key' }}
-              </button>
-            </div>
-          </div>
-          <div>
-            <label for="gemini-model-input" class="block text-xs text-gray-400 font-medium mb-1">
-              Default Gemini model
-            </label>
-            <p class="text-[11px] text-gray-600 mb-2">
-              Used by SQL AI Functions, the SQL Assistant, Genie and pipelines unless a call specifies a model. Leave blank to reset to the built-in default (<code class="text-gray-400">gemini-3.8-flash</code>).
-            </p>
-            <input id="gemini-model-input" type="text" name="gemini_default_model"
-                   value="{{ admin_settings.gemini_default_model }}"
+            {% if f.help %}<p class="text-[11px] text-gray-600 mb-2">{{ f.help }}</p>{% endif %}
+            {% if f.kind == 'secret' %}
+            {% set configured = p.config.get(f.name ~ '_configured') %}
+            <input id="ai-{{ p.name }}-{{ f.name }}" type="password" name="cfg__{{ p.name }}__{{ f.name }}"
                    autocomplete="off"
-                   placeholder="gemini-3.8-flash"
+                   placeholder="{% if configured %}Enter a new value to replace ({{ p.config.get(f.name ~ '_masked') }}){% else %}{{ f.placeholder or 'Not set' }}{% endif %}"
                    class="w-full input-dark text-sm font-mono"
                    style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+            {% if configured %}
+            <p class="text-[11px] text-gray-600 mt-1">Stored value: <code class="text-gray-300">{{ p.config.get(f.name ~ '_masked') }}</code>. Leave blank to keep it.</p>
+            {% endif %}
+            {% elif f.kind == 'int' %}
+            <input id="ai-{{ p.name }}-{{ f.name }}" type="number" min="1" max="65536" name="cfg__{{ p.name }}__{{ f.name }}"
+                   value="{{ p.config.get(f.name) if p.config.get(f.name) is not none else '' }}"
+                   placeholder="{{ f.default if f.default is not none else '' }}"
+                   class="w-40 input-dark text-sm font-mono"
+                   style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+            {% else %}
+            <input id="ai-{{ p.name }}-{{ f.name }}" type="text" name="cfg__{{ p.name }}__{{ f.name }}"
+                   value="{{ p.config.get(f.name) or '' }}" autocomplete="off"
+                   placeholder="{{ f.default or f.placeholder or '' }}"
+                   class="w-full input-dark text-sm font-mono"
+                   style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+            {% endif %}
           </div>
-        </form>
+          {% endfor %}
+          <p class="text-[11px] text-gray-600">Blank text fields use their built-in default.</p>
+        </fieldset>
+        {% endfor %}
 
-        {% if admin_settings.gemini_api_key_configured %}
-        <form action="/settings/admin/ai-settings" method="post" class="flex justify-end"
-              onsubmit="return confirm('Clear the configured GEMINI_API_KEY? AI functions and Genie queries will stop working until a new key is saved.');">
-          <input type="hidden" name="action" value="clear" />
-          <button type="submit"
-                  class="text-xs px-3 py-1.5 rounded border border-red-800/50 text-red-400 hover:text-red-300 hover:border-red-600/50 transition-colors">
-            Clear Stored Key
+        <div class="flex items-center justify-end gap-2">
+          <button type="button" id="ai-test-btn" onclick="testAiProvider()"
+                  class="text-xs px-3 py-2 rounded-md border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition-colors">
+            Test Connection
           </button>
-        </form>
-        {% endif %}
+          <button type="submit" class="btn-primary">Save and activate</button>
+        </div>
+      </form>
 
-        <div id="gemini-key-test-status" class="hidden text-xs px-3 py-2 rounded-md border"></div>
-      </div>
+      {% for p in ai_provider.providers %}
+      {% for f in p.fields if f.kind == 'secret' and p.config.get(f.name ~ '_configured') %}
+      <form action="/settings/admin/ai-provider" method="post" class="flex justify-end mt-3"
+            onsubmit="return confirm('Clear the stored {{ f.label }} for {{ p.label }}? AI features that use it will stop working until a new value is saved.');">
+        <input type="hidden" name="provider" value="{{ p.name }}" />
+        <input type="hidden" name="action" value="clear-secret" />
+        <input type="hidden" name="secret_field" value="{{ f.name }}" />
+        <button type="submit"
+                class="text-xs px-3 py-1.5 rounded border border-red-800/50 text-red-400 hover:text-red-300 hover:border-red-600/50 transition-colors">
+          Clear stored {{ f.label | lower }} ({{ p.label }})
+        </button>
+      </form>
+      {% endfor %}
+      {% endfor %}
+
+      <div id="ai-test-status" class="hidden mt-3 text-xs px-3 py-2 rounded-md border" role="status"></div>
+      {% endif %}
     </div>
   </div>
 
@@ -320,43 +350,61 @@
     }
   }
 
-  async function testGeminiKey() {
-    const input = document.getElementById('gemini-api-key-input');
-    const btn = document.getElementById('test-gemini-key-btn');
-    const statusBox = document.getElementById('gemini-key-test-status');
-    const candidate = input ? input.value.trim() : '';
+  function aiProviderChanged() {
+    const chosen = document.getElementById('ai-provider-select').value;
+    document.querySelectorAll('.ai-provider-fields').forEach(function (box) {
+      const on = box.dataset.provider === chosen;
+      box.classList.toggle('hidden', !on);
+      box.disabled = !on;
+    });
+    document.getElementById('ai-test-status').classList.add('hidden');
+  }
 
+  async function testAiProvider() {
+    const chosen = document.getElementById('ai-provider-select').value;
+    const btn = document.getElementById('ai-test-btn');
+    const box = document.getElementById('ai-test-status');
+    const prefix = 'cfg__' + chosen + '__';
+    const config = {};
+    document.querySelectorAll('.ai-provider-fields[data-provider="' + chosen + '"] [name^="' + prefix + '"]').forEach(function (el) {
+      config[el.name.slice(prefix.length)] = el.value;
+    });
+    const paint = function (kind, text) {
+      const colours = {
+        info: 'border-blue-800/50 bg-blue-900/20 text-blue-300',
+        ok: 'border-emerald-800/50 bg-emerald-900/20 text-emerald-300',
+        bad: 'border-red-800/50 bg-red-900/20 text-red-300'
+      };
+      box.className = 'mt-3 text-xs px-3 py-2 rounded-md border ' + colours[kind];
+      box.textContent = text;
+    };
     btn.disabled = true;
     btn.textContent = 'Testing...';
-    statusBox.classList.remove('hidden');
-    statusBox.className = 'text-xs px-3 py-2 rounded-md border border-blue-800/50 bg-blue-900/20 text-blue-300';
-    statusBox.textContent = candidate
-      ? 'Testing entered API key against Gemini...'
-      : 'Testing stored API key against Gemini...';
-
+    paint('info', 'Testing the entered settings (nothing is saved)...');
     try {
-      const resp = await fetch('/settings/admin/ai-settings/test', {
+      const resp = await fetch('/settings/admin/ai-provider/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          api_key: candidate || null,
-          model: (document.getElementById('gemini-model-input')?.value || '').trim() || null
-        })
+        body: JSON.stringify({ provider: chosen, config: config })
       });
       const data = await resp.json();
-      if (data.ok) {
-        statusBox.className = 'text-xs px-3 py-2 rounded-md border border-emerald-800/50 bg-emerald-900/20 text-emerald-300';
-        statusBox.textContent = '✓ ' + (data.message || 'API key is valid.');
-      } else {
-        statusBox.className = 'text-xs px-3 py-2 rounded-md border border-red-800/50 bg-red-900/20 text-red-300';
-        statusBox.textContent = '✕ ' + (data.message || 'API key validation failed.');
+      const lines = [(data.ok ? '✓ ' : '✕ ') + (data.message || (data.ok ? 'Connected.' : 'Connection failed.'))];
+      if (data.chat) {
+        lines.push('Chat: ' + (data.chat.ok ? 'OK' : 'failed') + ' · ' + data.chat.model +
+          (data.chat.latency_ms != null ? ' · ' + data.chat.latency_ms + ' ms' : ''));
       }
+      if (data.embedding) {
+        lines.push('Embeddings: ' + (data.embedding.ok ? 'OK' : 'failed') + ' · ' + data.embedding.model +
+          (data.embedding.dimension ? ' · ' + data.embedding.dimension + ' dimensions' : '') +
+          (data.embedding.latency_ms != null ? ' · ' + data.embedding.latency_ms + ' ms' : ''));
+      }
+      paint(data.ok ? 'ok' : 'bad', lines.join('\n'));
+      box.style.whiteSpace = 'pre-line';
     } catch (err) {
-      statusBox.className = 'text-xs px-3 py-2 rounded-md border border-red-800/50 bg-red-900/20 text-red-300';
-      statusBox.textContent = '✕ Failed to test key: ' + err;
+      paint('bad', '✕ Could not run the test: ' + err);
     } finally {
       btn.disabled = false;
-      btn.textContent = 'Test Key';
+      btn.textContent = 'Test Connection';
     }
   }
   </script>
