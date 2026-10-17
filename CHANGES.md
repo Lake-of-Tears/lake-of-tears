@@ -13,6 +13,7 @@ Every change made to this repo gets one row, newest first.
 
 | Date | Action | Ticket | Files | Summary |
 |---|---|---|---|---|
+| 20261016 | BUG FIX | #151 | `pipeline/dags/purge_deleted_catalogs_dag.py`, `tests/test_purge_deleted_catalogs_dag.py` | Scheduled catalog purge DAG now skips S3 prefixes shared with surviving catalogs, preventing silent data deletion; added DAG unit tests (PR #152) |
 | 20261016 | BUG FIX | #132 | `backend/main.py` | Admin hard delete (`DELETE /api/admin/workspaces/{id}`, `mode=hard`) now deletes MinIO objects for every owned catalog before the DB rows (502 on storage failure); skips prefixes shared with other workspaces |
 | 20261016 | BUG FIX | #132 | `pipeline/dags/purge_inactive_workspaces_dag.py` | Prefix derivation never matched real `s3://bucket/.../*.parquet` patterns, so the DAG deleted nothing; now correct, with shared-prefix protection |
 | 20261016 | ADD | #132 | `tests/test_workspace_purge_objects.py` | Tests for workspace object purge, shared-prefix sparing, 502 path and ordering |

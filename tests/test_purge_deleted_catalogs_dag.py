@@ -37,7 +37,7 @@ def _run_purge(dag, monkeypatch, rows_due, patterns):
     sa.create_engine = lambda *a, **k: MagicMock()
     sa.text = lambda q: q
     orm = types.ModuleType("sqlalchemy.orm")
-    orm.sessionmaker = lambda **k: (lambda: db)
+    orm.sessionmaker = lambda **k: lambda: db
     monkeypatch.setitem(sys.modules, "sqlalchemy", sa)
     monkeypatch.setitem(sys.modules, "sqlalchemy.orm", orm)
     monkeypatch.setattr(dag, "_load_patterns", lambda _db: patterns)
