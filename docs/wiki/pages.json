@@ -11,6 +11,11 @@
       "file": "Architecture-Overview.md"
     },
     {
+      "slug": "data-ingestion-and-pipelines",
+      "title": "Data Ingestion and Pipelines",
+      "file": "Data-Ingestion-and-Pipelines.md"
+    },
+    {
       "slug": "workspaces-and-catalog-management",
       "title": "Workspaces and Catalog Management",
       "file": "Workspaces-and-Catalog-Management.md"

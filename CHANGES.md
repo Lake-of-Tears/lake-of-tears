@@ -13,6 +13,8 @@ Every change made to this repo gets one row, newest first.
 
 | Date | Action | Ticket | Files | Summary |
 |---|---|---|---|---|
+| 20261016 | ADD | #74 | `docs/wiki/Data-Ingestion-and-Pipelines.md`, `docs/wiki/Home.md`, `docs/wiki/pages.json` | Added Data Ingestion and Pipeline Authoring guide covering architecture, storage layout, tutorial and best practices (PR #160) |
+| 20261016 | IMPROVEMENT | #157 | `README.md`, `deploy/helm/lake-of-tears/templates/NOTES.txt`, `deploy/nginx/lake.conf`, `docker-compose.yml`, `CONTRIBUTING.md` | Removed stale references to public /jupyter/ route and port 8888; gated NOTES.txt credentials on jupyter.ingress.enabled (PR #159) |
 | 20261016 | IMPROVEMENT | #79 | `docs/wiki/images/admin-workspaces.jpg`, `docs/wiki/Workspaces-and-Catalog-Management.md` | Retook the Admin workspaces screenshot after #129 (Default shows System badge); replaced the known-issue note with the fixed behavior |
 | 20261016 | BUG FIX | #151 | `pipeline/dags/purge_deleted_catalogs_dag.py`, `tests/test_purge_deleted_catalogs_dag.py` | Scheduled catalog purge DAG now skips S3 prefixes shared with surviving catalogs, preventing silent data deletion; added DAG unit tests (PR #152) |
 | 20261016 | BUG FIX | #132 | `backend/main.py` | Admin hard delete (`DELETE /api/admin/workspaces/{id}`, `mode=hard`) now deletes MinIO objects for every owned catalog before the DB rows (502 on storage failure); skips prefixes shared with other workspaces |

@@ -16,9 +16,10 @@
 | Guide | What you will find |
 |---|---|
 | [Architecture Overview](Architecture-Overview.md) | How the pieces fit together: the DuckDB-first model, the storage layout, request routing, the component map and the two deployment models |
+| [Data Ingestion and Pipelines](Data-Ingestion-and-Pipelines.md) | How data flows from a source into MinIO as Parquet, a tested step-by-step tutorial for writing a new ingest script and Airflow DAG, and best practices for idempotency, backfills, schema changes and error handling |
 | [Workspaces and Catalog Management](Workspaces-and-Catalog-Management.md) | Workspace isolation, the workspace cookie, deletion and purge lifecycles, catalog sharing and administration |
 
-More guides, covering data ingestion, Airflow operations, embeddings, DuckDB analytics and deployment runbooks, are planned and will appear in this list as they are published.
+More guides, covering Airflow operations, embeddings, DuckDB analytics and deployment runbooks, are planned and will appear in this list as they are published.
 
 ## Quick start
 
