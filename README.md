@@ -140,7 +140,7 @@ Upon installation, Helm displays post-install notes (`NOTES.txt`) with access UR
 |---------|-------------------|----------------------|
 | **Lake UI shell** | http://localhost | Register first user (automatically granted `admin` role) |
 | **Auth API** | http://localhost/api/ | — |
-| **JupyterLab** | no public route; used through the Lake UI notebooks | Token: `jupytertoken123` |
+| **JupyterLab** | no public route; used through the Lake UI notebooks | Token: `jupytertoken123` (internal only) |
 | **Apache Airflow** | http://localhost/airflow/ | User: `admin` / Password: `airflowadminpassword` |
 | **Apache Superset** | http://superset.localhost | User: `admin` / Password: `supersetadminpassword` |
 | **MinIO Console** | http://minio.localhost | User: `minioadmin` / Password: `minioadminpassword` |

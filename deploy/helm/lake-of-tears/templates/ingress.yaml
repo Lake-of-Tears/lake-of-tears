@@ -7,9 +7,9 @@
 #
 # /api/       → Auth backend
 # /           → Lake UI shell
-# /jupyter/   → JupyterLab  (base_url=/jupyter/ — no path rewrite needed)
 # /superset/  → Superset    (APPLICATION_PREFIX_PATH=/superset — no rewrite)
 # /airflow/   → Airflow     (BASE_URL has /airflow/ prefix; nginx strips it)
+# (JupyterLab has no public route; legacy /jupyter/ ingress is opt-in below)
 
 {{- if .Values.backend.enabled }}
 ---

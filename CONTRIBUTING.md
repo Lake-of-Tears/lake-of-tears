@@ -75,7 +75,7 @@ Lake of Tears brings analytical compute, storage, vector search, orchestration, 
    - **Auth Backend:** `http://localhost/api/` (or direct port at `http://localhost:8000`)
    - **Apache Airflow:** `http://localhost/airflow/` (or direct port at `http://localhost:8080`)
    - **MinIO Console:** `http://localhost:9001`
-   - **JupyterLab:** `http://localhost/jupyter/` (or direct port at `http://localhost:8888`)
+   - **JupyterLab:** no public route; accessed through the Lake UI notebooks (not published)
    - **Apache Superset:** `http://localhost/superset/` (or direct port at `http://localhost:8088`)
 
 ### Install Development & Linting Tools

@@ -45,8 +45,10 @@ Default Credentials & Initial Setup:
   MinIO Console / S3:
     • Username: {{ .Values.minio.rootUser | default "minioadmin" }}
     • Password: {{ .Values.minio.rootPassword | default "(managed via secret)" }}
+{{- if and .Values.jupyter.ingress .Values.jupyter.ingress.enabled }}
   JupyterLab:
     • Token:    {{ .Values.jupyter.token | default "(managed via secret)" }}
+{{- end }}
 
   [NOTE] For production deployments, ensure sensitive passwords are supplied via
          values-secret.yaml or rotated regularly.
