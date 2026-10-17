@@ -83,6 +83,20 @@ The catalog and workspace maintenance DAGs are described in [Workspaces and Cata
 
 Keep the `dag_id` equal to the file name without `_dag.py`, so it is easy to find.
 
+### Which workspace sees a DAG
+
+The Pipelines page of a workspace lists a DAG when any of these is true:
+
+| Rule | Example for the workspace `default` |
+|---|---|
+| The `dag_id` starts with `ws_<slug>_` | `ws_default_daily_report` |
+| The DAG has the tag `workspace:<slug>` | `tags=["ingestion", "workspace:default"]` |
+| The DAG is `run_notebook` | always visible |
+
+A DAG that matches none of these (for example the shipped `purge_*` maintenance DAGs) is not listed for regular users.
+
+**Superadmins see every DAG in every workspace.** This is intentional: a superadmin administers the whole instance, so the workspace badge on the Pipelines page does not filter their list. The rule lives in one function, `is_dag_accessible_by_workspace` in `backend/pipeline_service.py`, and is the place to tighten if a dedicated access-control (AAA) solution is deployed later.
+
 ### Schedules, catchup and retries
 
 - **Fixed `start_date`** in the past (the shipped DAGs use `datetime(2026, 1, 1)`) with **`catchup=False`**. Airflow does not create runs for every missed interval; backfill on purpose with `airflow dags backfill` (see the ingestion guide).
