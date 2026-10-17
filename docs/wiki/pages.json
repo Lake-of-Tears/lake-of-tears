@@ -16,6 +16,11 @@
       "file": "Data-Ingestion-and-Pipelines.md"
     },
     {
+      "slug": "chunking-and-vector-embeddings",
+      "title": "Chunking and Vector Embeddings",
+      "file": "Chunking-and-Vector-Embeddings.md"
+    },
+    {
       "slug": "workspaces-and-catalog-management",
       "title": "Workspaces and Catalog Management",
       "file": "Workspaces-and-Catalog-Management.md"
