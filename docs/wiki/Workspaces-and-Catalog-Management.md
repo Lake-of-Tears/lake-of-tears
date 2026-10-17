@@ -10,7 +10,7 @@ A **workspace** is a tenant boundary. Users belong to one or more workspaces wit
 
 The first user to register becomes the superadmin and a **Default** workspace is created automatically (`is_system = true`). The Default workspace is meant to be undeletable.
 
-> **Known issue (#129, fix in #130):** before the fix, the Default workspace was created without `is_system = true`, so the admin API's system-workspace guard did not apply and the Admin panel offered **Mark inactive** and **Delete now** on it. Once #130 is merged, Default is flagged on creation (and existing installs are backfilled by migration `0007`), the API returns `409`, and the Admin panel shows a **System** badge instead. Update the Admin screenshot below after that release.
+> Installs created before fix #129 (PR #130) had the Default workspace unflagged; migration `0007` backfills them. Default is now created with `is_system = true`, the admin API returns `409` if you try to delete it, and the Admin panel shows a **System** badge with no delete actions.
 
 ![Workspace switcher showing Default and Analytics](images/workspace-switcher.jpg)
 
@@ -154,7 +154,7 @@ The Airflow DAG `refresh_catalog_schemas` runs **nightly at 06:00**. For every c
 | Mark inactive, restore, or delete workspaces | Settings > Admin > Workspaces | Superadmin |
 | Set grace periods (`catalog_soft_delete_days`, `workspace_inactive_grace_period_days`) and session limits | Settings > Admin | Superadmin |
 
-![Superadmin workspace list with Mark inactive and Delete now actions](images/admin-workspaces.jpg)
+![Superadmin workspace list: Default is protected with a System badge; other workspaces offer Mark inactive and Delete now](images/admin-workspaces.jpg)
 
 ---
 
