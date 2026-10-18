@@ -54,6 +54,10 @@ PRESET_MAP = {
     "@annually": "0 0 1 1 *",
 }
 
+KNOWN_PIPELINE_NOTEBOOKS: dict[str, str] = {
+    "ingest_tmdb_movies": "tmdb_daily_movies_ingest.ipynb",
+}
+
 
 def get_default_color_for_dag(dag_id: str) -> str:
     """Return a deterministic color from the master palette based on dag_id."""
@@ -262,6 +266,8 @@ async def list_workspace_dags(
                     if t.startswith("notebook:"):
                         nb_path = t[len("notebook:") :]
                         break
+                if not nb_path and dag_id in KNOWN_PIPELINE_NOTEBOOKS:
+                    nb_path = KNOWN_PIPELINE_NOTEBOOKS[dag_id]
 
                 meta = meta_map.get(dag_id)
                 color_hex = meta.color_hex if meta else get_default_color_for_dag(dag_id)
@@ -349,6 +355,8 @@ async def get_dag_details(
                 if t.startswith("notebook:"):
                     nb_path = t[len("notebook:") :]
                     break
+            if not nb_path and dag_id in KNOWN_PIPELINE_NOTEBOOKS:
+                nb_path = KNOWN_PIPELINE_NOTEBOOKS[dag_id]
 
             meta_map = get_pipeline_metadata_map(workspace_id, db) if workspace_id and db else {}
             meta = meta_map.get(dag_id)

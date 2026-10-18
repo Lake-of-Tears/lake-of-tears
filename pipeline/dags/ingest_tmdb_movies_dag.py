@@ -155,7 +155,7 @@ with DAG(
     schedule="0 2 * * *",  # Daily at 02:00 UTC
     start_date=datetime(2026, 1, 1),
     catchup=False,
-    tags=["ingestion", "tmdb", "notebooks", "movies"],
+    tags=["ingestion", "tmdb", "notebooks", "movies", "notebook:tmdb_daily_movies_ingest.ipynb"],
     doc_md="Daily ingestion of trending and popular movies from TheMovieDB into s3://datalake/raw/tmdb/movies/ via Papermill.",
     default_args=default_args,
 ) as dag:
