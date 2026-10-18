@@ -8,11 +8,11 @@ import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import bcrypt
 import jwt
 from database import SessionLocal, get_db
 from fastapi import Cookie, Depends, Header, HTTPException
 from models import SystemSetting, User, Workspace, WorkspaceMember
-from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
 SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "dev-secret-please-change-in-production")
@@ -25,7 +25,11 @@ DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
 # Fallback TTL used when the DB is unavailable (e.g. during first startup).
 _FALLBACK_TTL = timedelta(hours=24)
 
-_pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# bcrypt only uses the first 72 bytes of a password. passlib (used before) silently ignored the
+# rest; bcrypt >= 5 raises instead. Truncating the same way keeps every existing hash verifying and
+# long passwords (up to 128 characters are accepted) working.
+_BCRYPT_MAX_BYTES = 72
+_BCRYPT_ROUNDS = 12
 
 
 def _keystream(enc_key: bytes, nonce: bytes, length: int) -> bytes:
@@ -182,12 +186,21 @@ def set_stored_gemini_model(
         )
 
 
+def _bcrypt_input(password: str) -> bytes:
+    return password.encode("utf-8")[:_BCRYPT_MAX_BYTES]
+
+
 def hash_password(password: str) -> str:
-    return _pwd.hash(password)
+    return bcrypt.hashpw(_bcrypt_input(password), bcrypt.gensalt(rounds=_BCRYPT_ROUNDS)).decode(
+        "ascii"
+    )
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return _pwd.verify(plain, hashed)
+    try:
+        return bcrypt.checkpw(_bcrypt_input(plain), hashed.encode("utf-8"))
+    except ValueError:  # not a valid bcrypt hash: treat as a failed login, not a server error
+        return False
 
 
 def get_session_expires_delta(db: Session) -> timedelta:
