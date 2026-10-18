@@ -27,6 +27,99 @@ MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "datalake")
 
+WORKSPACES_DIR = os.getenv("WORKSPACES_DIR", "/data/workspaces")
+_FS_SCAN_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+_FS_SCAN_TTL_SECONDS = 30.0
+
+
+def clear_fs_scan_cache(workspace_slug: str | None = None) -> None:
+    """Clear in-memory filesystem scan cache."""
+    if workspace_slug:
+        try:
+            clean_slug = sanitize_notebook_path(workspace_slug) or "default"
+            _FS_SCAN_CACHE.pop(clean_slug, None)
+        except Exception:
+            _FS_SCAN_CACHE.clear()
+    else:
+        _FS_SCAN_CACHE.clear()
+
+
+def scan_workspace_filesystem(
+    workspace_slug: str,
+    max_depth: int = 10,
+    limit: int = 1000,
+    force_refresh: bool = False,
+) -> list[dict[str, Any]] | None:
+    """Scan local workspace directory using os.scandir with 30s in-memory TTL caching.
+
+    Returns None if WORKSPACES_DIR does not exist or workspace directory is not found,
+    signaling to fall back to Jupyter HTTP API.
+    """
+    try:
+        clean_slug = sanitize_notebook_path(workspace_slug) or "default"
+    except Exception:
+        clean_slug = "default"
+    ws_root = os.path.join(WORKSPACES_DIR, clean_slug)
+    if not os.path.isdir(ws_root):
+        return None
+
+    import time
+
+    now = time.time()
+    if not force_refresh and clean_slug in _FS_SCAN_CACHE:
+        cached_time, cached_items = _FS_SCAN_CACHE[clean_slug]
+        if now - cached_time < _FS_SCAN_TTL_SECONDS:
+            return cached_items
+
+    items: list[dict[str, Any]] = []
+
+    def _walk(current_dir: str, rel_prefix: str, depth: int) -> None:
+        if depth > max_depth or len(items) >= limit:
+            return
+        try:
+            with os.scandir(current_dir) as it:
+                entries = sorted(it, key=lambda e: (not e.is_dir(), e.name.lower()))
+                for entry in entries:
+                    if len(items) >= limit:
+                        break
+                    name = entry.name
+                    if name.startswith(".") or name in (
+                        "__pycache__",
+                        ".ipynb_checkpoints",
+                        "node_modules",
+                        ".git",
+                    ):
+                        continue
+                    rel_path = f"{rel_prefix}/{name}" if rel_prefix else name
+                    parent_dir = rel_prefix
+
+                    if entry.is_dir(follow_symlinks=False):
+                        items.append(
+                            {
+                                "name": name,
+                                "path": rel_path,
+                                "type": "directory",
+                                "parent_dir": parent_dir,
+                            }
+                        )
+                        _walk(entry.path, rel_path, depth + 1)
+                    elif entry.is_file(follow_symlinks=False):
+                        entry_type = "notebook" if name.endswith(".ipynb") else "file"
+                        items.append(
+                            {
+                                "name": name,
+                                "path": rel_path,
+                                "type": entry_type,
+                                "parent_dir": parent_dir,
+                            }
+                        )
+        except (PermissionError, FileNotFoundError, OSError) as exc:
+            logger.warning("Filesystem scan error at %s: %s", current_dir, exc)
+
+    _walk(ws_root, "", 0)
+    _FS_SCAN_CACHE[clean_slug] = (now, items)
+    return items
+
 
 def get_jupyter_api_base() -> str:
     """Return the absolute URL to Jupyter Server's API root."""
@@ -323,6 +416,7 @@ async def create_notebook(
     }
     status, data = await jupyter_request("PUT", f"contents/{target_path}", json_data=payload)
     if status in (200, 201) and isinstance(data, dict):
+        clear_fs_scan_cache(workspace_slug)
         prefix = get_workspace_dir(workspace_slug) + "/"
         raw_path = data.get("path", "")
         data["rel_path"] = raw_path[len(prefix) :] if raw_path.startswith(prefix) else raw_path
@@ -342,6 +436,7 @@ async def create_folder(
             auth_token=auth_token,
         )
         if backend_res is not None:
+            clear_fs_scan_cache(workspace_slug)
             return backend_res
 
     await ensure_workspace_dir(workspace_slug)
@@ -351,6 +446,8 @@ async def create_folder(
     target_ws = get_workspace_dir(workspace_slug, clean_path)
     payload = {"type": "directory"}
     status, data = await jupyter_request("PUT", f"contents/{target_ws}", json_data=payload)
+    if status in (200, 201):
+        clear_fs_scan_cache(workspace_slug)
     return status, data if isinstance(data, dict) else {"result": data}
 
 
@@ -415,6 +512,29 @@ async def search_workspace_items(
             status, data = backend_res
             if status == 200 and isinstance(data, dict) and "items" in data:
                 return data["items"]
+
+    # Fast path: check local filesystem scanner first if workspace directory exists on disk
+    fs_items = scan_workspace_filesystem(workspace_slug, max_depth=max_depth, limit=limit)
+    if fs_items is not None:
+        clean_subpath = sanitize_notebook_path(subpath) if subpath else ""
+        q = query.strip().lower()
+        results: list[dict[str, Any]] = []
+        for item in fs_items:
+            path = item["path"]
+            if clean_subpath and not (path == clean_subpath or path.startswith(clean_subpath + "/")):
+                continue
+            matches = True
+            if q:
+                if "/" in q:
+                    matches = q in path.lower()
+                else:
+                    matches = q in item["name"].lower()
+            if matches:
+                results.append(item)
+                if len(results) >= limit:
+                    break
+        results.sort(key=lambda x: (0 if x["type"] == "directory" else 1, x["name"].lower()))
+        return results
 
     await ensure_workspace_dir(workspace_slug)
     clean_subpath = sanitize_notebook_path(subpath) if subpath else ""
@@ -494,10 +614,13 @@ async def delete_item(
             "DELETE", clean_path, workspace_slug, auth_token=auth_token
         )
         if backend_res is not None:
+            clear_fs_scan_cache(workspace_slug)
             return backend_res
 
     ws_path = get_workspace_dir(workspace_slug, path)
     status, data = await jupyter_request("DELETE", f"contents/{ws_path}")
+    if status in (200, 204):
+        clear_fs_scan_cache(workspace_slug)
     return status, data if isinstance(data, dict) else {"status": status}
 
 
@@ -515,12 +638,15 @@ async def rename_item(
             auth_token=auth_token,
         )
         if backend_res is not None:
+            clear_fs_scan_cache(workspace_slug)
             return backend_res
 
     old_ws_path = get_workspace_dir(workspace_slug, old_path)
     new_ws_path = get_workspace_dir(workspace_slug, new_path)
     payload = {"path": new_ws_path}
     status, data = await jupyter_request("PATCH", f"contents/{old_ws_path}", json_data=payload)
+    if status in (200, 201):
+        clear_fs_scan_cache(workspace_slug)
     return status, data if isinstance(data, dict) else {"status": status}
 
 
