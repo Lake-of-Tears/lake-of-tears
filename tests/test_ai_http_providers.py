@@ -343,6 +343,7 @@ def test_the_admin_description_lists_every_provider():
         "gemini",
         "openai",
         "azure",
+        "bedrock",
         "ollama",
         "openai_compatible",
     ]
