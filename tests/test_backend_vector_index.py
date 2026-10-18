@@ -40,28 +40,35 @@ def test_sync_table_vector_index_no_s3_path():
     assert "no S3 storage path" in res["error"]
 
 
-def test_sync_table_vector_index_no_gemini_key():
-    mock_table = MagicMock(spec=CatalogTable)
-    mock_table.s3_path_pattern = "s3://datalake/raw/test/*.parquet"
-    mock_table.vector_index = {"enabled": True}
-    mock_db = MagicMock()
-    with patch("vector_index_service.get_stored_gemini_api_key", return_value=None):
-        res = vector_index_service.sync_table_vector_index(mock_table, mock_db)
-        assert res["ok"] is False
-        assert "Gemini API key is not configured" in res["error"]
+class FakeProvider:
+    """Stands in for the active AI provider: any name, model and vector length."""
+
+    name = "fake"
+
+    def __init__(self, dimension: int = 4, embedding_model: str = "fake-embed"):
+        self.dimension = dimension
+        self.embedding_model = embedding_model
+        self.calls: list[list[str]] = []
+
+    def embed_texts(self, texts, *, query=False):
+        self.calls.append(list(texts))
+        return [[0.1] * self.dimension for _ in texts]
 
 
-def test_sync_table_vector_index_success(tmp_path: Path):
-    parquet_path = tmp_path / "test_sync.parquet"
+def _movies_parquet(tmp_path: Path) -> Path:
     import duckdb
 
+    parquet_path = tmp_path / "test_sync.parquet"
     con = duckdb.connect()
     con.execute(f"""
         COPY (SELECT '1' as id, 'Inception' as title, 'Dream thief' as overview, '2010' as release_date)
         TO '{parquet_path}' (FORMAT PARQUET)
     """)
     con.close()
+    return parquet_path
 
+
+def _movies_table(parquet_path: Path) -> MagicMock:
     mock_table = MagicMock(spec=CatalogTable)
     mock_table.slug = "test-movies"
     mock_table.s3_path_pattern = str(parquet_path)
@@ -70,29 +77,84 @@ def test_sync_table_vector_index_success(tmp_path: Path):
         "source_column": "overview",
         "format_template": "Movie: {title} | Overview: {overview}",
     }
-    mock_db = MagicMock()
+    return mock_table
 
-    mock_genai_client = MagicMock()
-    mock_embed_resp = MagicMock()
-    mock_embedding = MagicMock()
-    mock_embedding.values = [0.1] * 768
-    mock_embed_resp.embeddings = [mock_embedding]
-    mock_genai_client.models.embed_content.return_value = mock_embed_resp
 
-    out_path = tmp_path / "out_vector.parquet"
-    with (
-        patch("vector_index_service.get_stored_gemini_api_key", return_value="dummy_key"),
-        patch("vector_index_service.genai.Client", return_value=mock_genai_client),
+def test_sync_table_vector_index_reports_an_unconfigured_provider():
+    from ai_providers import ProviderNotConfigured
+
+    mock_table = MagicMock(spec=CatalogTable)
+    mock_table.s3_path_pattern = "s3://datalake/raw/test/*.parquet"
+    mock_table.vector_index = {"enabled": True}
+    with patch(
+        "vector_index_service.get_active_provider",
+        side_effect=ProviderNotConfigured("OpenAI: the API key is not set."),
     ):
+        res = vector_index_service.sync_table_vector_index(mock_table, MagicMock())
+    assert res["ok"] is False
+    assert "API key is not set" in res["error"]
+    assert "Gemini" not in res["error"]
+
+
+def test_sync_table_vector_index_success_uses_the_active_provider(tmp_path: Path):
+    import duckdb
+
+    mock_table = _movies_table(_movies_parquet(tmp_path))
+    mock_db = MagicMock()
+    provider = FakeProvider(dimension=4)
+    out_path = tmp_path / "out_vector.parquet"
+    with patch("vector_index_service.get_active_provider", return_value=provider):
         res = vector_index_service.sync_table_vector_index(
             mock_table, mock_db, dest_s3=str(out_path)
         )
-        assert res["ok"] is True
-        assert res["status"] == "synced"
-        assert res["total_vectors"] == 1
-        assert "last_synced_at" in res
-        assert mock_db.commit.called
-        assert out_path.exists()
+    assert res["ok"] is True
+    assert res["status"] == "synced"
+    assert res["total_vectors"] == 1
+    assert "last_synced_at" in res
+    assert mock_db.commit.called
+    assert provider.calls == [["Movie: Inception | Overview: Dream thief"]]
+    row = (
+        duckdb.connect()
+        .execute(
+            f"SELECT provider, model, dimension, len(embedding) FROM read_parquet('{out_path}')"
+        )
+        .fetchone()
+    )
+    assert row == ("fake", "fake-embed", 4, 4)
+    assert mock_table.vector_index["provider"] == "fake"
+    assert mock_table.vector_index["model"] == "fake-embed"
+    assert mock_table.vector_index["dimension"] == 4
+
+
+def test_sync_table_vector_index_is_not_tied_to_768_dimensions(tmp_path: Path):
+    import duckdb
+
+    out_path = tmp_path / "out_1536.parquet"
+    provider = FakeProvider(dimension=1536, embedding_model="text-embedding-3-small")
+    res = vector_index_service.sync_table_vector_index(
+        _movies_table(_movies_parquet(tmp_path)),
+        MagicMock(),
+        dest_s3=str(out_path),
+        provider=provider,
+    )
+    assert res["ok"] is True
+    assert duckdb.connect().execute(
+        f"SELECT len(embedding), dimension FROM read_parquet('{out_path}')"
+    ).fetchone() == (1536, 1536)
+
+
+def test_sync_table_vector_index_surfaces_provider_errors(tmp_path: Path):
+    from ai_providers import ProviderError
+
+    provider = FakeProvider()
+    provider.embed_texts = MagicMock(side_effect=ProviderError("Ollama returned HTTP 404"))
+    res = vector_index_service.sync_table_vector_index(
+        _movies_table(_movies_parquet(tmp_path)),
+        MagicMock(),
+        dest_s3=str(tmp_path / "o.parquet"),
+        provider=provider,
+    )
+    assert res == {"ok": False, "error": "Ollama returned HTTP 404"}
 
 
 def test_backend_sync_endpoint():

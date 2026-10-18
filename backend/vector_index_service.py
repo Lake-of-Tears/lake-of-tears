@@ -6,9 +6,8 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 
+from ai_providers import AIProvider, ProviderError, get_active_provider
 from ai_service import create_duckdb_connection
-from auth import get_stored_gemini_api_key
-from google import genai
 from models import CatalogTable
 from sqlalchemy.orm import Session
 
@@ -30,15 +29,17 @@ def _safe_identifier(name: str | None) -> str:
 def sync_table_vector_index(
     table: CatalogTable,
     db: Session,
-    api_key: str | None = None,
     dest_s3: str | None = None,
     batch_size: int = 50,
+    provider: AIProvider | None = None,
 ) -> dict[str, Any]:
     """Incrementally synchronize vector embeddings for a catalog table.
 
     Reads raw data from `table.s3_path_pattern`, composes text chunks using
-    the configured source column or template, generates 768-dim embeddings via Gemini,
-    and writes Parquet files to `s3://datalake/embeddings/<table_slug>/...`.
+    the configured source column or template, embeds it with the AI provider selected in the
+    Admin Panel (or ``provider``), and writes Parquet files to
+    `s3://datalake/embeddings/<table_slug>/...` with the provider, model and dimension that made
+    each row. The model and dimension come from the provider, not from the table settings.
     """
     s3_path = (table.s3_path_pattern or "").strip()
     if not s3_path:
@@ -47,15 +48,15 @@ def sync_table_vector_index(
     vector_cfg = table.vector_index or {}
     source_col = (vector_cfg.get("source_column") or "overview").strip()
     format_template = (vector_cfg.get("format_template") or "").strip()
-    model = (vector_cfg.get("model") or "gemini-embedding-001").strip()
-    dim = int(vector_cfg.get("dimension") or 768)
 
-    active_key = api_key or get_stored_gemini_api_key(db)
-    if not active_key:
-        return {"ok": False, "error": "Gemini API key is not configured"}
+    try:
+        provider = provider or get_active_provider(db)
+        dim = provider.dimension
+    except ProviderError as exc:
+        return {"ok": False, "error": str(exc)}
+    model = provider.embedding_model
 
     con = create_duckdb_connection(load_vss=True, register_ai=False)
-    client = genai.Client(api_key=active_key)
 
     try:
         escaped_path = s3_path.replace("'", "''")
@@ -100,8 +101,11 @@ def sync_table_vector_index(
                 source VARCHAR,
                 summary VARCHAR,
                 content VARCHAR,
-                embedding DOUBLE[768],
+                embedding DOUBLE[],
                 source_date VARCHAR,
+                provider VARCHAR,
+                model VARCHAR,
+                dimension BIGINT,
                 ingested_at TIMESTAMP
             )
         """)
@@ -126,12 +130,11 @@ def sync_table_vector_index(
                     text = str(r[source_idx] or "")
                 texts.append(text)
 
-            embed_resp = client.models.embed_content(
-                model=model,
-                contents=texts,
-                config={"output_dimensionality": dim, "task_type": "RETRIEVAL_DOCUMENT"},
-            )
-            embeddings = [e.values for e in embed_resp.embeddings]
+            embeddings = provider.embed_texts(texts)
+            if len(embeddings) != len(texts):
+                raise ProviderError(
+                    f"{model} returned {len(embeddings)} vectors for {len(texts)} texts"
+                )
 
             insert_rows = []
             for idx, r in enumerate(batch):
@@ -139,13 +142,25 @@ def sync_table_vector_index(
                 chunk_text = texts[idx]
                 emb_vec = embeddings[idx]
                 insert_rows.append(
-                    (rec_id, table_slug, chunk_text, chunk_text, emb_vec, f"{y}-{m}-{d}")
+                    (
+                        rec_id,
+                        table_slug,
+                        chunk_text,
+                        chunk_text,
+                        emb_vec,
+                        f"{y}-{m}-{d}",
+                        provider.name,
+                        model,
+                        len(emb_vec),
+                    )
                 )
 
             con.executemany(
                 """
-                INSERT INTO _vector_sync_batch (id, source, summary, content, embedding, source_date, ingested_at)
-                VALUES (?, ?, ?, ?, ?, ?, now())
+                INSERT INTO _vector_sync_batch
+                    (id, source, summary, content, embedding, source_date, provider, model,
+                     dimension, ingested_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, now())
                 """,
                 insert_rows,
             )
@@ -158,6 +173,7 @@ def sync_table_vector_index(
         updated_cfg["enabled"] = True
         updated_cfg["source_column"] = source_col
         updated_cfg["format_template"] = format_template
+        updated_cfg["provider"] = provider.name
         updated_cfg["model"] = model
         updated_cfg["dimension"] = dim
         updated_cfg["status"] = "synced"
