@@ -2,9 +2,9 @@ resource "null_resource" "embed_scripts" {
   depends_on = [null_resource.ingestion_scripts]
 
   triggers = {
-    vm_host      = var.vm_host
-    vm_user      = var.vm_user
-    vm_password  = var.vm_password
+    vm_host     = var.vm_host
+    vm_user     = var.vm_user
+    vm_password = var.vm_password
     scripts_hash = join(",", [
       filemd5("${path.module}/../../scripts/gemini_embedder.py"),
       filemd5("${path.module}/../../scripts/jobs/pipeline/embed_sources.py"),

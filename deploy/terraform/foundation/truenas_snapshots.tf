@@ -2,7 +2,7 @@
 # snapshot_retention_days days. Uses midclt locally; idempotent.
 
 resource "null_resource" "datalake_snapshots" {
-  depends_on = [null_resource.datalake_dataset, null_resource.aistor_install]
+  depends_on = [null_resource.datalake_dataset]
 
   triggers = {
     dataset          = "${var.zfs_pool}/datalake"

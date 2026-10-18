@@ -7,7 +7,7 @@
 # to clear the old state entry before re-applying.
 
 resource "minio_s3_bucket" "datalake" {
-  depends_on = [null_resource.truenas_nfs_share]
+  depends_on = [null_resource.datalake_dataset]
   bucket     = "datalake"
   acl        = "private"
   lifecycle { prevent_destroy = true }

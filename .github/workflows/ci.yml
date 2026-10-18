@@ -112,3 +112,23 @@ jobs:
       - name: Run unit tests
         run: pytest tests/ -v
 
+  terraform:
+    name: Terraform Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.6.6"
+
+      - name: Check formatting
+        run: terraform fmt -check -recursive deploy/terraform/
+
+      # Only the foundation module is validated for now: the services module has stale file paths
+      # and references and does not validate yet (tracked in #227).
+      - name: Validate foundation module
+        working-directory: deploy/terraform/foundation
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate

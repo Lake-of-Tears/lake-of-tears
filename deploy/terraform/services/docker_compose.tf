@@ -19,7 +19,7 @@ resource "null_resource" "docker_compose_deploy" {
     vm_password  = var.vm_password
     compose_hash = filemd5("${path.module}/../../docker/docker-compose.yml")
     # Rotate compose when any credential changes
-    creds_hash   = sha256(join(",", [
+    creds_hash = sha256(join(",", [
       var.aistor_access_key,
       var.aistor_secret_key,
       var.jupyter_token,
@@ -28,11 +28,13 @@ resource "null_resource" "docker_compose_deploy" {
     ]))
   }
 
+  # Uses self.triggers (not var.*) because Terraform requires connections that the destroy-time
+  # provisioner can inherit to reference only the resource itself.
   connection {
     type     = "ssh"
-    host     = var.vm_host
-    user     = var.vm_user
-    password = var.vm_password
+    host     = self.triggers.vm_host
+    user     = self.triggers.vm_user
+    password = self.triggers.vm_password
   }
 
   # Step 1 — NFS: install nfs-common and mount TrueNAS ZFS dataset

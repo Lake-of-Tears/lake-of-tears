@@ -2,9 +2,9 @@ resource "null_resource" "ingestion_scripts" {
   depends_on = [null_resource.docker_setup]
 
   triggers = {
-    vm_host      = var.vm_host
-    vm_user      = var.vm_user
-    vm_password  = var.vm_password
+    vm_host     = var.vm_host
+    vm_user     = var.vm_user
+    vm_password = var.vm_password
     scripts_hash = join(",", [
       filemd5("${path.module}/../../scripts/storage_writer.py"),
       filemd5("${path.module}/../../scripts/jobs/pipeline/ingest_alexa.py"),
