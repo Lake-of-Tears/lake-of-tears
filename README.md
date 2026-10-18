@@ -368,7 +368,7 @@ All configuration is driven by environment variables. Copy `.env.example` to `.e
 | `JUPYTER_TOKEN` | yes | — | JupyterLab access token |
 | `SUPERSET_ADMIN_PASSWORD` | yes | — | Superset admin password |
 | `SUPERSET_SECRET_KEY` | no | auto | Superset Flask secret key |
-| `AIRFLOW_PASSWORD` | yes | — | Airflow admin password |
+| `AIRFLOW_PASSWORD` | yes | — | Airflow admin password (web UI and REST API); applied on every start of the Compose `airflow` service |
 | `AIRFLOW_SECRET_KEY` | no | auto | Airflow Flask secret key |
 | `MINIO_CONSOLE_URL` | no | `http://localhost:9001` | URL for the "Open MinIO Console" link in the Storage page |
 | `DATALAKE_DATA_DIR` | yes | `~` | Host path for Docker volume mounts |
