@@ -10,6 +10,8 @@ from datetime import UTC, datetime, timedelta
 
 import ai_service
 import jwt as _jwt
+from ai_admin_router import router as ai_admin_router
+from ai_gateway_router import router as ai_gateway_router
 from ai_router import router as ai_router
 from auth import (
     COOKIE_NAME,
@@ -133,6 +135,8 @@ app.include_router(dashboards_router, prefix="/api/v1/dashboards", tags=["dashbo
 app.include_router(dashboards_router, prefix="/api/dashboards", tags=["dashboards"])
 app.include_router(ai_router, prefix="/api/v1/ai", tags=["ai"])
 app.include_router(ai_router, prefix="/api/ai", tags=["ai"])
+app.include_router(ai_gateway_router, prefix="/api/internal/ai", tags=["ai-internal"])
+app.include_router(ai_admin_router, prefix="/api/admin/ai-provider", tags=["ai-admin"])
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1326,8 +1330,37 @@ def update_table(
         table.s3_path_pattern = req.s3_path_pattern
     if req.column_defs is not None:
         table.column_defs = [c.model_dump() for c in req.column_defs]
+    if req.vector_index is not None:
+        table.vector_index = req.vector_index
     db.commit()
     db.refresh(table)
+    return CatalogTableResponse.model_validate(table)
+
+
+@app.post(
+    "/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}/vector-index/sync",
+    response_model=CatalogTableResponse,
+)
+def sync_table_vector_index_endpoint(
+    catalog_id: str,
+    schema_id: str,
+    table_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    catalog = db.query(Catalog).filter(Catalog.id == catalog_id).first()
+    if not catalog:
+        raise HTTPException(404, "Catalog not found")
+    _assert_catalog_access(db, catalog, current_user, "write")
+    table = db.query(CatalogTable).filter_by(id=table_id, schema_id=schema_id).first()
+    if not table:
+        raise HTTPException(404, "Table not found")
+
+    import vector_index_service
+
+    res = vector_index_service.sync_table_vector_index(table, db)
+    if not res.get("ok"):
+        raise HTTPException(500, res.get("error", "Failed to sync vector index"))
     return CatalogTableResponse.model_validate(table)
 
 

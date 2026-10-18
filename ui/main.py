@@ -2,6 +2,7 @@ import asyncio
 import logging
 import math
 import os
+import re
 import time
 import urllib.parse
 from datetime import UTC, datetime, timedelta
@@ -15,17 +16,17 @@ import httpx
 import jwt
 import websockets
 from dotenv import load_dotenv
-from fastapi import FastAPI, Form, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import FastAPI, Form, Query, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from google import genai
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 
 try:
-    from ui import duckdb_ai, duckdb_pool, notebook_proxy
+    from ui import ai_gateway_client, duckdb_ai, duckdb_pool, notebook_proxy
 except ImportError:
+    import ai_gateway_client
     import duckdb_ai
     import duckdb_pool
     import notebook_proxy
@@ -43,7 +44,6 @@ MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "datalake")
-GEMINI_API_KEY = ""
 MINIO_CONSOLE_URL = os.getenv("MINIO_CONSOLE_URL", "http://localhost:9001")
 SUPERSET_URL = os.getenv("SUPERSET_URL", "http://localhost:8088")
 JUPYTER_TOKEN = os.getenv("JUPYTER_TOKEN", "")
@@ -59,9 +59,18 @@ SOURCE_LABELS = {
 
 app = FastAPI(title="Lake of Tears")
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+# Catalog slugs use hyphens but the DuckDB views use underscores; templates show the SQL name.
+templates.env.filters["sql_ident"] = duckdb_ai._safe_identifier
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
-_PUBLIC_PREFIXES = ("/login", "/logout", "/api/", "/health", "/workspace/search")
+_PUBLIC_PREFIXES = (
+    "/login",
+    "/logout",
+    "/api/",
+    "/health",
+    "/workspace/search",
+    "/catalog/preview",
+)
 _WORKSPACE_COOKIE = "lake_workspace_id"
 
 _SESSION_CONFIG_CACHE: dict | None = None
@@ -69,50 +78,25 @@ _SESSION_CONFIG_FETCHED_AT: float = 0.0
 _SESSION_CONFIG_TTL = 60.0  # seconds
 
 
-_GEMINI_MODEL_CACHE: tuple[str, float] | None = None
-_GEMINI_MODEL_TTL = 30.0
-
-
 def _get_gemini_default_model() -> str:
-    """Resolve the default Gemini model from the Admin Panel backend setting (cached briefly)."""
-    global _GEMINI_MODEL_CACHE
-    now = time.monotonic()
-    if _GEMINI_MODEL_CACHE is not None and now - _GEMINI_MODEL_CACHE[1] < _GEMINI_MODEL_TTL:
-        return _GEMINI_MODEL_CACHE[0]
-    model = duckdb_ai.DEFAULT_GEMINI_MODEL
-    try:
-        with httpx.Client(timeout=3) as client:
-            resp = client.get(
-                f"{BACKEND_URL}/api/internal/settings/gemini-key",
-                headers={"X-Internal-Secret": AUTH_SECRET_KEY},
-            )
-        if resp.status_code == 200:
-            model = str(resp.json().get("gemini_default_model") or "").strip() or model
-    except Exception:
-        pass
-    _GEMINI_MODEL_CACHE = (model, now)
-    return model
+    """Chat model of the active AI provider (from the backend gateway), else the built-in default."""
+    return ai_gateway_client.chat_model() or duckdb_ai.DEFAULT_GEMINI_MODEL
 
 
 duckdb_ai.set_default_model_provider(_get_gemini_default_model)
 
 
-def _get_gemini_api_key() -> str:
-    """Resolve the active GEMINI_API_KEY from the Admin Panel backend setting."""
-    if GEMINI_API_KEY and GEMINI_API_KEY.strip():
-        return GEMINI_API_KEY.strip()
-    try:
-        with httpx.Client(timeout=3) as client:
-            resp = client.get(
-                f"{BACKEND_URL}/api/internal/settings/gemini-key",
-                headers={"X-Internal-Secret": AUTH_SECRET_KEY},
-            )
-        if resp.status_code == 200:
-            data = resp.json()
-            return str(data.get("gemini_api_key") or "").strip()
-    except Exception:
-        pass
-    return ""
+def _get_ai_access() -> str:
+    """Non-empty when an AI provider is configured in the Admin Panel, else an empty string.
+
+    The UI holds no credentials: requests go through the backend AI gateway, so this is only an
+    availability check (the value is a placeholder, never a key).
+    """
+    return "gateway" if ai_gateway_client.is_configured() else ""
+
+
+def _ai_client(api_key: str | None = None) -> ai_gateway_client.GatewayClient:
+    return ai_gateway_client.GatewayClient()
 
 
 def _get_session_config() -> dict:
@@ -384,10 +368,10 @@ def _duckdb_connection(
     if register_ai:
         duckdb_ai.register_ai_functions(
             con,
-            api_key=_get_gemini_api_key,
+            api_key=_get_ai_access,
             max_rows=max_ai_rows,
             state=ai_state,
-            client_factory=lambda api_key: genai.Client(api_key=api_key),
+            client_factory=_ai_client,
         )
     return con
 
@@ -426,10 +410,10 @@ def _run_query(
             registered_views = duckdb_ai.register_catalog_views(con, catalogs)
             duckdb_ai.register_ai_functions(
                 con,
-                api_key=_get_gemini_api_key,
+                api_key=_get_ai_access,
                 max_rows=max_ai_rows,
                 state=ai_state,
-                client_factory=lambda api_key: genai.Client(api_key=api_key),
+                client_factory=_ai_client,
             )
             rel = con.execute(sql)
             columns = [desc[0] for desc in (rel.description or [])]
@@ -459,39 +443,40 @@ def _run_query(
             cancel.detach()
 
 
-AI_VECTOR_SQL = """
-    SELECT
-        source,
-        ingested_at,
-        summary,
-        array_cosine_similarity(
-            embedding::DOUBLE[768],
-            ?::DOUBLE[768]
-        ) AS score
-    FROM read_parquet(?)
-    ORDER BY score DESC
-    LIMIT 5
-"""
-
-
 def _ai_query(question: str) -> dict[str, Any]:
-    active_key = _get_gemini_api_key()
-    if not active_key:
+    if not _get_ai_access():
         return {"ok": False, "error": duckdb_ai.GEMINI_KEY_NOT_CONFIGURED_MSG}
     try:
-        client = genai.Client(api_key=active_key)
+        client = _ai_client()
 
+        # The active provider decides the embedding model and dimension; only stored vectors made
+        # by the same model (and of the same length) are compared.
         embed_resp = client.models.embed_content(
-            model="gemini-embedding-001",
-            contents=question,
+            contents=question, config={"task_type": "RETRIEVAL_QUERY"}
         )
         q_vec = embed_resp.embeddings[0].values
 
         s3_pattern = f"s3://{MINIO_BUCKET}/embeddings/**/*.parquet"
-        con = _duckdb_connection(load_vss=True)
-        rel = con.execute(AI_VECTOR_SQL, [q_vec, s3_pattern])
-        rows = rel.fetchall()
-        con.close()
+        con = _duckdb_connection()
+        try:
+            columns = {
+                d[0]
+                for d in con.execute(
+                    "SELECT * FROM read_parquet(?, union_by_name = true) LIMIT 0", [s3_pattern]
+                ).description
+            }
+            has_model = "model" in columns
+            params = [q_vec, s3_pattern] + ([embed_resp.model] if has_model else []) + [5]
+            rows = con.execute(
+                ai_gateway_client.vector_search_sql(embed_resp.dimension, has_model), params
+            ).fetchall()
+        except Exception as exc:
+            if "No files found that match the pattern" in str(exc):
+                rows = []
+            else:
+                raise
+        finally:
+            con.close()
 
         context_snippets = [
             {
@@ -502,21 +487,27 @@ def _ai_query(question: str) -> dict[str, Any]:
             }
             for r in rows
         ]
-        context_text = "\n\n".join(
-            f"[{s['source']} @ {s['ingested_at']} (score={s['score']})]:\n{s['summary']}"
-            for s in context_snippets
-        )
-        prompt = (
-            "You are an analyst for a business datalakehouse called Lake of Tears. "
-            "Answer the following question using the context snippets below. "
-            "Be concise and cite which data sources support your answer.\n\n"
-            f"Question: {question}\n\nContext:\n{context_text}"
-        )
+        if context_snippets:
+            context_text = "\n\n".join(
+                f"[{s['source']} @ {s['ingested_at']} (score={s['score']})]:\n{s['summary']}"
+                for s in context_snippets
+            )
+            prompt = (
+                "You are an analyst for a business datalakehouse called Lake of Tears. "
+                "Answer the following question using the context snippets below. "
+                "Be concise and cite which data sources support your answer.\n\n"
+                f"Question: {question}\n\nContext:\n{context_text}"
+            )
+        else:
+            prompt = (
+                "You are an analyst for a business datalakehouse called Lake of Tears. "
+                "Note: No semantic vector embeddings were found in s3://datalake/embeddings/**/*.parquet for this query. "
+                "Answer the user's question clearly and let them know that semantic embeddings have not yet been generated "
+                "for this dataset.\n\n"
+                f"Question: {question}"
+            )
 
-        answer = client.models.generate_content(
-            model=_get_gemini_default_model(),
-            contents=prompt,
-        ).text
+        answer = client.models.generate_content(contents=prompt).text
 
         return {"ok": True, "answer": answer, "snippets": context_snippets}
     except Exception as exc:
@@ -550,7 +541,7 @@ EXAMPLE_QUERIES = [
     },
     {
         "label": "✨ AI Summarize (ai_summarize)",
-        "sql": "SELECT source, ingested_at, ai_summarize(summary) AS executive_brief FROM read_parquet('s3://datalake/embeddings/**/*.parquet') LIMIT 5",
+        "sql": "SELECT source, ingested_at, ai_summarize(content) AS executive_brief FROM read_parquet('s3://datalake/embeddings/**/*.parquet') LIMIT 5",
     },
     {
         "label": "✨ AI Classify (ai_classify)",
@@ -558,7 +549,7 @@ EXAMPLE_QUERIES = [
     },
     {
         "label": "✨ AI Extract JSON (ai_extract)",
-        "sql": "SELECT source, ai_extract(summary, ['metric', 'value', 'status']) AS structured_json FROM read_parquet('s3://datalake/embeddings/**/*.parquet') LIMIT 5",
+        "sql": "SELECT source, ai_extract(content, ['metric', 'value', 'status']) AS structured_json FROM read_parquet('s3://datalake/embeddings/**/*.parquet') LIMIT 5",
     },
 ]
 
@@ -617,6 +608,103 @@ async def catalog(request: Request):
         name="catalog.html",
         context={"request": request, "catalogs": catalogs, "page": "catalog", "error": error},
     )
+
+
+def _json_safe(val: Any) -> Any:
+    if val is None:
+        return None
+    if isinstance(val, int | float | bool | str):
+        return val
+    if isinstance(val, list | tuple):
+        return [_json_safe(x) for x in val]
+    if isinstance(val, dict):
+        return {k: _json_safe(v) for k, v in val.items()}
+    return str(val)
+
+
+@app.get("/catalog/preview")
+@app.get("/api/catalog/preview")
+async def api_catalog_preview(
+    request: Request,
+    view: str = Query(..., description="DuckDB view name (e.g. bronze.tmdb_trending)"),
+    limit: int = Query(15, ge=1, le=100),
+):
+    token = request.cookies.get("lake_token")
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"ok": False, "error": "Not authenticated"}, status_code=401)
+
+    clean_view = view.strip()
+    if not re.match(r"^[A-Za-z0-9_]+\.[A-Za-z0-9_]+$", clean_view):
+        return JSONResponse({"ok": False, "error": "Invalid view identifier"}, status_code=400)
+
+    catalogs = _resolve_ui_catalogs(request)
+    sql = f"SELECT * FROM {clean_view} LIMIT {limit}"
+    result = _run_query(sql, catalogs=catalogs, read_only=True)
+    if result.get("ok"):
+        safe_rows = [[_json_safe(c) for c in r] for r in result.get("rows", [])]
+        return JSONResponse(
+            {
+                "ok": True,
+                "columns": result.get("columns", []),
+                "rows": safe_rows,
+                "row_count": result.get("row_count", 0),
+                "execution_ms": result.get("execution_ms", 0),
+            }
+        )
+    return JSONResponse(
+        {
+            "ok": False,
+            "error": result.get("error", "Failed to query preview"),
+        }
+    )
+
+
+@app.post("/catalog/vector-sync")
+async def catalog_vector_sync(request: Request):
+    token = request.cookies.get("lake_token")
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"ok": False, "error": "Not authenticated"}, status_code=401)
+
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Invalid JSON body"}, status_code=400)
+
+    catalog_id = data.get("catalog_id")
+    schema_id = data.get("schema_id")
+    table_id = data.get("table_id")
+    source_col = data.get("source_column")
+    format_template = data.get("format_template")
+
+    if not catalog_id or not schema_id or not table_id:
+        return JSONResponse(
+            {"ok": False, "error": "Missing catalog_id, schema_id, or table_id"},
+            status_code=400,
+        )
+
+    if source_col is not None:
+        patch_payload = {
+            "vector_index": {
+                "enabled": True,
+                "source_column": source_col,
+                "format_template": format_template or "",
+                "status": "syncing",
+            }
+        }
+        _backend_patch(
+            f"/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}",
+            token or "",
+            patch_payload,
+        )
+
+    sync_res, err = _backend_post_with_error(
+        f"/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}/vector-index/sync",
+        token or "",
+        {},
+    )
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=500)
+    return JSONResponse({"ok": True, "table": sync_res})
 
 
 @app.post("/catalog/create")
@@ -1179,6 +1267,8 @@ async def settings_admin_get(request: Request):
             "users": users_list,
             "workspaces": all_ws,
             "admin_settings": admin_settings,
+            "ai_provider": _backend_get("/api/admin/ai-provider", token),
+            "ai_error": request.query_params.get("ai_error"),
             "saved": request.query_params.get("saved"),
         },
     )
@@ -1279,41 +1369,54 @@ async def settings_admin_session_settings(
     return RedirectResponse(url="/settings/admin?saved=1", status_code=302)
 
 
-@app.post("/settings/admin/ai-settings")
-async def settings_admin_ai_settings(
-    request: Request,
-    action: str = Form("save"),
-    gemini_api_key: str = Form(""),
-    gemini_default_model: str | None = Form(None),
-):
-    global _GEMINI_MODEL_CACHE
+def _backend_put(path: str, token: str, payload: dict[str, Any]) -> tuple[int, Any]:
+    try:
+        with httpx.Client(timeout=15) as client:
+            resp = client.put(
+                f"{BACKEND_URL}{path}",
+                headers={"Authorization": f"Bearer {token}"},
+                json=payload,
+            )
+        try:
+            return resp.status_code, resp.json()
+        except Exception:
+            return resp.status_code, {"detail": resp.text}
+    except Exception as exc:
+        return 502, {"detail": f"Could not reach the backend: {exc}"}
+
+
+@app.post("/settings/admin/ai-provider")
+async def settings_admin_ai_provider(request: Request):
+    """Save the selected AI provider's settings. Secret values are encrypted by the backend."""
     user = request.state.user
     if not user or user.get("role") != "superadmin":
         return RedirectResponse(url="/", status_code=302)
     token = request.cookies.get("lake_token")
-    if action == "clear":
-        _backend_patch("/api/admin/settings", token, {"clear_gemini_api_key": True})
-        duckdb_ai.clear_ai_cache()
-    elif gemini_api_key.strip():
-        _backend_patch(
-            "/api/admin/settings",
-            token,
-            {"gemini_api_key": gemini_api_key.strip()},
-        )
-        duckdb_ai.clear_ai_cache()
-    if action != "clear" and gemini_default_model is not None:
-        _backend_patch(
-            "/api/admin/settings",
-            token,
-            {"gemini_default_model": gemini_default_model.strip()},
-        )
-        _GEMINI_MODEL_CACHE = None
-        duckdb_ai.clear_ai_cache()
-    return RedirectResponse(url="/settings/admin?saved=1", status_code=302)
+    form = await request.form()
+    provider = str(form.get("provider") or "")
+    if form.get("action") == "clear-secret":
+        payload = {
+            "provider": provider,
+            "config": {str(form.get("secret_field") or ""): None},
+            "activate": False,
+        }
+    else:
+        prefix = f"cfg__{provider}__"
+        config = {k[len(prefix) :]: str(v) for k, v in form.multi_items() if k.startswith(prefix)}
+        payload = {"provider": provider, "config": config, "activate": True}
+    status_code, data = _backend_put("/api/admin/ai-provider", token or "", payload)
+    ai_gateway_client.clear_cache()
+    duckdb_ai.clear_ai_cache()
+    if status_code == 200:
+        return RedirectResponse(url="/settings/admin?saved=1#ai-settings", status_code=302)
+    detail = data.get("detail") if isinstance(data, dict) else str(data)
+    message = urllib.parse.quote(str(detail or f"Backend error ({status_code})"))
+    return RedirectResponse(url=f"/settings/admin?ai_error={message}#ai-settings", status_code=302)
 
 
-@app.post("/settings/admin/ai-settings/test")
-async def settings_admin_ai_settings_test(request: Request):
+@app.post("/settings/admin/ai-provider/test")
+async def settings_admin_ai_provider_test(request: Request):
+    """Try the provider with the entered (unsaved) settings and report latency and models."""
     user = request.state.user
     if not user or user.get("role") != "superadmin":
         return JSONResponse(
@@ -1324,23 +1427,21 @@ async def settings_admin_ai_settings_test(request: Request):
         body = await request.json()
     except Exception:
         body = {}
-    payload = {
-        "api_key": body.get("api_key"),
-        "model": body.get("model") or None,
-    }
+    payload = {"provider": body.get("provider") or None, "config": body.get("config") or {}}
     try:
-        with httpx.Client(timeout=15) as client:
+        with httpx.Client(timeout=60) as client:
             resp = client.post(
-                f"{BACKEND_URL}/api/admin/settings/test-gemini-key",
+                f"{BACKEND_URL}/api/admin/ai-provider/test",
                 headers={"Authorization": f"Bearer {token}"} if token else {},
                 json=payload,
             )
         if resp.status_code == 200:
             return JSONResponse(resp.json())
-        return JSONResponse(
-            {"ok": False, "message": f"Backend error ({resp.status_code}): {resp.text}"},
-            status_code=resp.status_code,
-        )
+        try:
+            detail = resp.json().get("detail") or resp.text
+        except Exception:
+            detail = resp.text
+        return JSONResponse({"ok": False, "message": str(detail)}, status_code=resp.status_code)
     except Exception as exc:
         return JSONResponse({"ok": False, "message": f"Connection error: {exc}"}, status_code=502)
 
@@ -2917,7 +3018,7 @@ def _ui_genie_chat(
         if cancel is not None:
             cancel.check()
 
-    active_key = _get_gemini_api_key()
+    active_key = _get_ai_access()
     if not active_key:
         return {"ok": False, "mode": mode, "error": duckdb_ai.GEMINI_KEY_NOT_CONFIGURED_MSG}
 
@@ -2976,7 +3077,7 @@ def _ui_genie_chat(
     )
 
     def _client_factory(api_key: str):
-        return genai.Client(api_key=api_key)
+        return _ai_client(api_key)
 
     try:
         raw_plan = duckdb_ai.call_gemini_text(
@@ -3154,9 +3255,9 @@ async def ui_ai_sql_generate(request: Request):
         catalogs=catalogs,
         current_sql=current_sql,
         model=model,
-        api_key=_get_gemini_api_key(),
+        api_key=_get_ai_access(),
         bucket=MINIO_BUCKET,
-        client_factory=lambda api_key: genai.Client(api_key=api_key),
+        client_factory=_ai_client,
     )
     return JSONResponse(res)
 
@@ -3174,9 +3275,9 @@ async def ui_ai_sql_fix(request: Request):
         error_message=error_msg,
         catalogs=catalogs,
         model=model,
-        api_key=_get_gemini_api_key(),
+        api_key=_get_ai_access(),
         bucket=MINIO_BUCKET,
-        client_factory=lambda api_key: genai.Client(api_key=api_key),
+        client_factory=_ai_client,
     )
     return JSONResponse(res)
 
@@ -3192,9 +3293,9 @@ async def ui_ai_sql_explain(request: Request):
         sql=sql,
         catalogs=catalogs,
         model=model,
-        api_key=_get_gemini_api_key(),
+        api_key=_get_ai_access(),
         bucket=MINIO_BUCKET,
-        client_factory=lambda api_key: genai.Client(api_key=api_key),
+        client_factory=_ai_client,
     )
     return JSONResponse(res)
 

@@ -270,10 +270,10 @@
                 {% for tbl in sch.tables or [] %}
                 <div class="bg-gray-800/40 border border-gray-800 rounded p-2.5 hover:border-gray-700 transition-colors">
                   <div class="flex items-center justify-between gap-1">
-                    <span class="font-mono text-blue-400 font-medium truncate">{{ sch.slug }}.{{ tbl.slug }}</span>
+                    <span class="font-mono text-blue-400 font-medium truncate">{{ sch.slug|sql_ident }}.{{ tbl.slug|sql_ident }}</span>
                     <button
                       type="button"
-                      onclick="insertSqlSnippet('SELECT * FROM {{ sch.slug }}.{{ tbl.slug }} LIMIT 20')"
+                      onclick="insertSqlSnippet('SELECT * FROM {{ sch.slug|sql_ident }}.{{ tbl.slug|sql_ident }} LIMIT 20')"
                       class="text-[10px] text-gray-400 hover:text-white px-1.5 py-0.5 bg-gray-800 rounded"
                     >
                       Query

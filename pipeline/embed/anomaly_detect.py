@@ -8,7 +8,7 @@ import os
 
 import duckdb
 import numpy as np
-from gemini_embedder import get_gemini_client, get_gemini_default_model
+from ai_gateway import generate, provider_info
 from sklearn.ensemble import IsolationForest
 from storage_writer import _load_env
 
@@ -25,12 +25,33 @@ def detect_anomalies(source: str = "truenas", contamination: float = 0.05) -> st
         SET s3_use_ssl=false; SET s3_url_style='path';
     """)
 
+    # Only vectors from the active embedding model can be compared with each other.
+    info = provider_info()
+    if not info.get("dimension"):
+        raise RuntimeError(
+            "Cannot tell which embedding dimension to compare: is the AI provider reachable?"
+        )
+    glob = f"s3://datalake/embeddings/{source}/**/*.parquet"
+    columns = {
+        d[0]
+        for d in con.execute(
+            f"SELECT * FROM read_parquet('{glob}', union_by_name = true) LIMIT 0"
+        ).description
+    }
+    model_filter = (
+        f"AND coalesce(model, 'gemini-embedding-001') = '{info['embedding_model']}'"
+        if "model" in columns
+        else ""
+    )
     df = con.execute(f"""
         SELECT content, embedding, source_date
-        FROM read_parquet('s3://datalake/embeddings/{source}/**/*.parquet')
+        FROM read_parquet('{glob}', union_by_name = true)
+        WHERE len(embedding) = {int(info["dimension"])} {model_filter}
         ORDER BY source_date DESC LIMIT 5000
     """).df()
 
+    if df.empty:
+        return "No embeddings from the active model yet."
     vectors = np.array(df["embedding"].tolist())
     clf = IsolationForest(contamination=contamination, random_state=42)
     df["anomaly"] = clf.fit_predict(vectors)
@@ -39,13 +60,10 @@ def detect_anomalies(source: str = "truenas", contamination: float = 0.05) -> st
     if not anomalies:
         return "No anomalies detected."
 
-    client = get_gemini_client()
-    response = client.models.generate_content(
-        model=get_gemini_default_model(),
-        contents=f"The following {source} entries were flagged as anomalies. "
-        f"Summarize what's unusual about them:\n\n" + "\n".join(anomalies[:20]),
+    return generate(
+        f"The following {source} entries were flagged as anomalies. "
+        f"Summarize what's unusual about them:\n\n" + "\n".join(anomalies[:20])
     )
-    return response.text
 
 
 if __name__ == "__main__":

@@ -106,6 +106,26 @@ All services are accessible from the left sidebar. Direct ports are also availab
 
 ---
 
+## AI providers and local models
+
+The AI features (AI Query, the SQL assistant, Genie, `ai_*` SQL functions and the embedding pipelines) use whichever provider a superadmin selects in **Settings → Admin Panel → AI Provider**: Google Gemini, **OpenAI**, **Azure AI Foundry** (your own Azure tenant), **Amazon Bedrock**, **Ollama** (local models) or any **OpenAI-compatible server** (vLLM, LocalAI, LM Studio, Groq, DeepSeek, ...). Changes apply immediately and secrets are stored encrypted.
+
+To run fully offline, start Ollama next to Lake of Tears and pull a chat and an embedding model:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d ollama
+docker compose -f docker-compose.yml -f docker-compose.ollama.yml exec ollama ollama pull llama3.2
+docker compose -f docker-compose.yml -f docker-compose.ollama.yml exec ollama ollama pull nomic-embed-text
+```
+
+Then choose **Ollama** in the Admin Panel, set the base URL to `http://ollama:11434`, enter the two model names and click **Test Connection**. See the header of [`docker-compose.ollama.yml`](docker-compose.ollama.yml) for the details. Each embedding file records which model made it, so you can switch providers without breaking search.
+
+For **OpenAI** enter an API key (defaults: `gpt-4o-mini`, `text-embedding-3-small`, 1536 dimensions). For **Azure AI Foundry** enter your resource endpoint, key, and the *deployment names* of your chat and embedding models. As an alternative to the Admin Panel you can set `LLM_PROVIDER=openai` with `OPENAI_API_KEY`, or `LLM_PROVIDER=azure` with `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_API_VERSION`, `LLM_MODEL` (chat deployment) and `LLM_EMBEDDING_MODEL` (embedding deployment). Azure authenticates with the API key; Entra ID / managed identity is not supported yet.
+
+For **Amazon Bedrock** choose a region and model ids (defaults: Claude 3.5 Haiku and Titan Text Embeddings v2, 1024 dimensions; Cohere Embed also works). Leave the access keys blank to use the workload's IAM role, or enter an access key id and secret. The identity needs `bedrock:InvokeModel` and model access enabled in that region. The Helm chart does not create a service account yet, so an EKS role (IRSA) needs one added to the backend deployment.
+
+---
+
 ## Deploying with Helm (Kubernetes)
 
 ### Prerequisites
@@ -352,6 +372,14 @@ All configuration is driven by environment variables. Copy `.env.example` to `.e
 | `AIRFLOW_SECRET_KEY` | no | auto | Airflow Flask secret key |
 | `MINIO_CONSOLE_URL` | no | `http://localhost:9001` | URL for the "Open MinIO Console" link in the Storage page |
 | `DATALAKE_DATA_DIR` | yes | `~` | Host path for Docker volume mounts |
+
+> **Upgrading an older install: keep your notebooks.** Notebooks created in the Lake UI are saved in `$DATALAKE_DATA_DIR/workspaces` (earlier versions kept them only inside the Jupyter container, so recreating the container lost them). Before you recreate Jupyter with this version, copy any existing notebooks out of the old container, then restart:
+>
+> ```bash
+> mkdir -p "$DATALAKE_DATA_DIR/workspaces"
+> docker compose cp jupyter:/home/jovyan/workspaces/. "$DATALAKE_DATA_DIR/workspaces/"
+> docker compose up -d jupyter
+> ```
 
 **Authentication**
 

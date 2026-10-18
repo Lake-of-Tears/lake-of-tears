@@ -47,8 +47,8 @@ def test_ai_query_udf_single_and_two_arg_signatures():
     """Verify ai_query supports 1-arg, 2-arg Databricks (model, prompt), and 2-arg (prompt, model)."""
     mock_client = _make_mock_genai_client(["positive", "high_risk", "approved"])
     with (
-        patch.object(main, "GEMINI_API_KEY", "test-gemini-key"),
-        patch("main.genai.Client", return_value=mock_client),
+        patch.object(main, "_get_ai_access", return_value="gateway"),
+        patch.object(main, "_ai_client", return_value=mock_client),
     ):
         res1 = main._run_query("SELECT ai_query('Classify sentiment: great service') AS s")
         assert res1["ok"] is True
@@ -71,8 +71,8 @@ def test_ai_udfs_null_handling():
     """Verify NULL inputs to ai_query, ai_summarize, ai_classify, and ai_extract return NULL without calling Gemini."""
     mock_client = _make_mock_genai_client("should-not-be-called")
     with (
-        patch.object(main, "GEMINI_API_KEY", "test-gemini-key"),
-        patch("main.genai.Client", return_value=mock_client),
+        patch.object(main, "_get_ai_access", return_value="gateway"),
+        patch.object(main, "_ai_client", return_value=mock_client),
     ):
         res = main._run_query(
             """
@@ -99,8 +99,8 @@ def test_ai_summarize_classify_and_extract_udfs():
         ]
     )
     with (
-        patch.object(main, "GEMINI_API_KEY", "test-gemini-key"),
-        patch("main.genai.Client", return_value=mock_client),
+        patch.object(main, "_get_ai_access", return_value="gateway"),
+        patch.object(main, "_ai_client", return_value=mock_client),
     ):
         s_res = main._run_query(
             "SELECT ai_summarize('Long detailed daily log about Stripe growth...') AS brief"
@@ -127,8 +127,8 @@ def test_ai_udf_lru_cache_deduplicates_identical_prompts():
     """Verify duplicate prompts within or across queries hit the LRU cache and only call Gemini once."""
     mock_client = _make_mock_genai_client("cached-sentiment")
     with (
-        patch.object(main, "GEMINI_API_KEY", "test-gemini-key"),
-        patch("main.genai.Client", return_value=mock_client),
+        patch.object(main, "_get_ai_access", return_value="gateway"),
+        patch.object(main, "_ai_client", return_value=mock_client),
     ):
         res = main._run_query(
             """
@@ -150,8 +150,8 @@ def test_ai_udf_row_limit_guardrail():
     """Verify queries exceeding max_ai_rows raise a clear SQL error."""
     mock_client = _make_mock_genai_client("ok")
     with (
-        patch.object(main, "GEMINI_API_KEY", "test-gemini-key"),
-        patch("main.genai.Client", return_value=mock_client),
+        patch.object(main, "_get_ai_access", return_value="gateway"),
+        patch.object(main, "_ai_client", return_value=mock_client),
     ):
         res = main._run_query(
             "SELECT ai_query('Row ' || i::VARCHAR) FROM range(10) AS t(i)",
@@ -213,7 +213,7 @@ def test_ui_sql_assistant_endpoints():
     """Verify /api/v1/ai/sql/generate, /api/v1/ai/sql/fix, and /api/v1/ai/sql/explain."""
     with (
         patch.object(main, "AUTH_ENABLED", False),
-        patch.object(main, "GEMINI_API_KEY", "test-key"),
+        patch.object(main, "_get_ai_access", return_value="gateway"),
     ):
         client = TestClient(main.app)
 
@@ -228,7 +228,7 @@ def test_ui_sql_assistant_endpoints():
                 }
             )
         )
-        with patch("main.genai.Client", return_value=gen_mock):
+        with patch.object(main, "_ai_client", return_value=gen_mock):
             resp = client.post(
                 "/api/v1/ai/sql/generate",
                 json={"prompt": "Show monthly revenue from Stripe charges"},
@@ -248,7 +248,7 @@ def test_ui_sql_assistant_endpoints():
                 }
             )
         )
-        with patch("main.genai.Client", return_value=fix_mock):
+        with patch.object(main, "_ai_client", return_value=fix_mock):
             resp = client.post(
                 "/api/v1/ai/sql/fix",
                 json={
@@ -272,7 +272,7 @@ def test_ui_sql_assistant_endpoints():
                 }
             )
         )
-        with patch("main.genai.Client", return_value=exp_mock):
+        with patch.object(main, "_ai_client", return_value=exp_mock):
             resp = client.post(
                 "/api/v1/ai/sql/explain",
                 json={"sql": "SELECT title, SUM(price_usd) FROM shopify GROUP BY 1"},
@@ -310,8 +310,8 @@ def test_ui_genie_chat_self_correction_and_chart_inference():
 
     with (
         patch.object(main, "AUTH_ENABLED", False),
-        patch.object(main, "GEMINI_API_KEY", "test-key"),
-        patch("main.genai.Client", return_value=mock_client),
+        patch.object(main, "_get_ai_access", return_value="gateway"),
+        patch.object(main, "_ai_client", return_value=mock_client),
     ):
         client = TestClient(main.app)
         resp = client.post(
@@ -332,65 +332,231 @@ def test_ui_genie_chat_self_correction_and_chart_inference():
         assert "$15,800" in data["answer"]
 
 
-def test_ui_resolves_gemini_key_from_backend_admin_setting():
-    """Verify UI resolves GEMINI_API_KEY from backend /api/internal/settings/gemini-key when not patched."""
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = {"gemini_api_key": "admin-panel-secret-key", "configured": True}
-
-    mock_http_client = MagicMock()
-    mock_http_client.__enter__.return_value.get.return_value = mock_resp
-
-    with (
-        patch.object(main, "GEMINI_API_KEY", ""),
-        patch("main.httpx.Client", return_value=mock_http_client),
-    ):
-        assert main._get_gemini_api_key() == "admin-panel-secret-key"
+def test_ui_asks_the_backend_gateway_whether_an_ai_provider_is_configured():
+    """The UI holds no AI credentials: availability and the chat model come from the gateway."""
+    info = {"provider": "stub", "chat_model": "stub-chat", "embedding_model": "e", "dimension": 4}
+    with patch.object(main.ai_gateway_client, "provider_info", return_value=info):
+        assert main._get_ai_access() == "gateway"
+        assert main._get_gemini_default_model() == "stub-chat"
+    with patch.object(main.ai_gateway_client, "provider_info", return_value=None):
+        assert main._get_ai_access() == ""
+        assert main._get_gemini_default_model() == duckdb_ai.DEFAULT_GEMINI_MODEL
 
 
-def test_ui_admin_panel_ai_settings_save_clear_and_test():
-    """Verify /settings/admin/ai-settings saves/clears GEMINI_API_KEY and /settings/admin/ai-settings/test works."""
+def _superadmin_client(role: str = "superadmin") -> tuple[TestClient, str]:
     import jwt
 
     token = jwt.encode(
-        {"sub": "admin-1", "email": "admin@lake.local", "role": "superadmin"},
+        {"sub": "admin-1", "email": "admin@lake.local", "role": role},
         main.AUTH_SECRET_KEY,
         algorithm="HS256",
     )
+    return TestClient(main.app, cookies={"lake_token": token}), token
 
+
+_WS = [{"id": "ws-1", "slug": "default", "name": "Default"}]
+
+
+def test_admin_panel_saves_the_selected_providers_settings_through_the_backend():
+    client, token = _superadmin_client()
     with (
-        patch.object(
-            main,
-            "_fetch_workspaces",
-            return_value=[{"id": "ws-1", "slug": "default", "name": "Default"}],
-        ),
-        patch.object(main, "_backend_patch", return_value={"ok": True}) as mock_patch,
+        patch.object(main, "_fetch_workspaces", return_value=_WS),
+        patch.object(main, "_backend_put", return_value=(200, {})) as put,
     ):
-        client = TestClient(main.app, cookies={"lake_token": token})
-
-        # Save new GEMINI_API_KEY
-        save_resp = client.post(
-            "/settings/admin/ai-settings",
-            data={"action": "save", "gemini_api_key": "AIzaSyNewAdminKey1234"},
+        resp = client.post(
+            "/settings/admin/ai-provider",
+            data={
+                "provider": "gemini",
+                "cfg__gemini__api_key": "AIzaSyNewKey1234",
+                "cfg__gemini__chat_model": "m1",
+                "cfg__other__api_key": "ignored",  # another provider's field is not sent
+            },
             follow_redirects=False,
         )
-        assert save_resp.status_code == 302
-        assert save_resp.headers["location"] == "/settings/admin?saved=1"
-        mock_patch.assert_called_with(
-            "/api/admin/settings",
-            token,
-            {"gemini_api_key": "AIzaSyNewAdminKey1234"},
-        )
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "/settings/admin?saved=1#ai-settings"
+    put.assert_called_once_with(
+        "/api/admin/ai-provider",
+        token,
+        {
+            "provider": "gemini",
+            "config": {"api_key": "AIzaSyNewKey1234", "chat_model": "m1"},
+            "activate": True,
+        },
+    )
 
-        # Clear GEMINI_API_KEY
-        clear_resp = client.post(
-            "/settings/admin/ai-settings",
-            data={"action": "clear", "gemini_api_key": ""},
+
+def test_admin_panel_clears_one_secret_without_changing_the_active_provider():
+    client, token = _superadmin_client()
+    with (
+        patch.object(main, "_fetch_workspaces", return_value=_WS),
+        patch.object(main, "_backend_put", return_value=(200, {})) as put,
+    ):
+        client.post(
+            "/settings/admin/ai-provider",
+            data={"provider": "gemini", "action": "clear-secret", "secret_field": "api_key"},
             follow_redirects=False,
         )
-        assert clear_resp.status_code == 302
-        mock_patch.assert_called_with(
-            "/api/admin/settings",
-            token,
-            {"clear_gemini_api_key": True},
+    put.assert_called_once_with(
+        "/api/admin/ai-provider",
+        token,
+        {"provider": "gemini", "config": {"api_key": None}, "activate": False},
+    )
+
+
+def test_admin_panel_shows_a_backend_validation_error():
+    client, _ = _superadmin_client()
+    with (
+        patch.object(main, "_fetch_workspaces", return_value=_WS),
+        patch.object(
+            main, "_backend_put", return_value=(400, {"detail": "Dimension must be a whole number"})
+        ),
+    ):
+        resp = client.post(
+            "/settings/admin/ai-provider",
+            data={"provider": "gemini", "cfg__gemini__dimension": "abc"},
+            follow_redirects=False,
         )
+    assert resp.status_code == 302
+    assert "ai_error=Dimension%20must%20be%20a%20whole%20number" in resp.headers["location"]
+
+
+def test_admin_provider_routes_are_superadmin_only():
+    client, _ = _superadmin_client(role="user")
+    with (
+        patch.object(main, "_fetch_workspaces", return_value=_WS),
+        patch.object(main, "_backend_put") as put,
+    ):
+        resp = client.post(
+            "/settings/admin/ai-provider", data={"provider": "gemini"}, follow_redirects=False
+        )
+        test_resp = client.post("/settings/admin/ai-provider/test", json={"provider": "gemini"})
+    assert resp.status_code == 302 and resp.headers["location"] == "/"
+    assert test_resp.status_code == 403
+    put.assert_not_called()
+
+
+def test_admin_provider_test_route_passes_unsaved_settings_to_the_backend():
+    client, token = _superadmin_client()
+    reply = MagicMock(status_code=200)
+    reply.json.return_value = {"ok": True, "message": "Connected", "chat": {"latency_ms": 5}}
+    http = MagicMock()
+    http.__enter__.return_value.post.return_value = reply
+    with (
+        patch.object(main, "_fetch_workspaces", return_value=_WS),
+        patch("main.httpx.Client", return_value=http),
+    ):
+        resp = client.post(
+            "/settings/admin/ai-provider/test",
+            json={"provider": "gemini", "config": {"chat_model": "trial"}},
+        )
+    assert resp.json()["ok"] is True
+    call = http.__enter__.return_value.post.call_args
+    assert call.args[0].endswith("/api/admin/ai-provider/test")
+    assert call.kwargs["json"] == {"provider": "gemini", "config": {"chat_model": "trial"}}
+    assert call.kwargs["headers"] == {"Authorization": f"Bearer {token}"}
+
+
+_DESCRIBE = {
+    "active": "gemini",
+    "providers": [
+        {
+            "name": "gemini",
+            "label": "Google Gemini",
+            "configured": True,
+            "fields": [
+                {
+                    "name": "api_key",
+                    "label": "API key",
+                    "kind": "secret",
+                    "required": True,
+                    "default": None,
+                    "help": "From AI Studio.",
+                    "placeholder": "",
+                },
+                {
+                    "name": "chat_model",
+                    "label": "Chat model",
+                    "kind": "text",
+                    "required": False,
+                    "default": "gemini-3.8-flash",
+                    "help": "",
+                    "placeholder": "",
+                },
+                {
+                    "name": "dimension",
+                    "label": "Embedding dimension",
+                    "kind": "int",
+                    "required": False,
+                    "default": 768,
+                    "help": "",
+                    "placeholder": "",
+                },
+            ],
+            "config": {
+                "provider": "gemini",
+                "api_key_configured": True,
+                "api_key_masked": "\u2022\u2022\u2022\u20221234",
+                "chat_model": "my-model",
+                "dimension": 768,
+            },
+        },
+        {
+            "name": "other",
+            "label": "Other Provider",
+            "configured": False,
+            "fields": [
+                {
+                    "name": "base_url",
+                    "label": "Base URL",
+                    "kind": "text",
+                    "required": True,
+                    "default": None,
+                    "help": "",
+                    "placeholder": "http://host:11434",
+                },
+            ],
+            "config": {"provider": "other"},
+        },
+    ],
+}
+
+
+def _backend_get_for_admin(path, token):
+    if path == "/api/admin/ai-provider":
+        return _DESCRIBE
+    return None
+
+
+def test_admin_page_renders_every_provider_from_the_backend_schema():
+    client, _ = _superadmin_client()
+    with (
+        patch.object(main, "_fetch_workspaces", return_value=_WS),
+        patch.object(main, "_backend_get", side_effect=_backend_get_for_admin),
+    ):
+        html = client.get("/settings/admin?ai_error=Bad%20value").text
+    assert 'id="ai-provider-select"' in html
+    assert "Google Gemini" in html and "Other Provider" in html
+    assert 'name="cfg__gemini__api_key"' in html and 'type="password"' in html
+    assert 'name="cfg__gemini__chat_model"' in html and 'value="my-model"' in html
+    assert 'name="cfg__gemini__dimension"' in html and 'type="number"' in html
+    assert 'name="cfg__other__base_url"' in html
+    assert "\u2022\u2022\u2022\u20221234" in html  # masked secret only
+    assert "Test Connection" in html and "Save and activate" in html
+    assert "Bad value" in html  # error banner
+    # the inactive provider's fields are hidden and disabled so they are not submitted
+    other = html[
+        html.index('data-provider="other"') - 120 : html.index('data-provider="other"') + 160
+    ]
+    assert "hidden" in other and "disabled" in other
+
+
+def test_admin_page_survives_an_unavailable_backend():
+    client, _ = _superadmin_client()
+    with (
+        patch.object(main, "_fetch_workspaces", return_value=_WS),
+        patch.object(main, "_backend_get", return_value=None),
+    ):
+        resp = client.get("/settings/admin")
+    assert resp.status_code == 200
+    assert "could not be loaded" in resp.text

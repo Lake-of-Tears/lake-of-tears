@@ -90,7 +90,7 @@ Four things matter here:
 
 1. **Take the date as an argument.** The partition date is a parameter, not "now". That makes the script re-runnable and backfillable (section 3).
 2. **Return a pandas DataFrame** with flat columns. Use `pd.json_normalize()` for nested JSON.
-3. **Add a `source_date` column** holding the partition date, as the existing scripts do. The writer takes the partition from the date you pass in, not from this column, so it is there for people querying the data.
+3. **Add a `source_date` column** holding the partition date, as the existing scripts do. The writer takes the partition from the date you pass in, not from this column, but the embedding and summary jobs select rows with `WHERE source_date = <yesterday>`, so a missing or wrong `source_date` means that data is never embedded (see [Chunking and Vector Embeddings](Chunking-and-Vector-Embeddings.md)).
 4. **Read secrets from the environment** (`os.environ`), never from the source code.
 
 ### Step 2: write to storage

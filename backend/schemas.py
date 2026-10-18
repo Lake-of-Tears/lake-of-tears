@@ -224,6 +224,7 @@ class UpdateTableRequest(BaseModel):
     description: str | None = None
     s3_path_pattern: str | None = None
     column_defs: list[ColumnDef] | None = None
+    vector_index: dict | None = None
 
 
 class CatalogTableResponse(BaseModel):
@@ -235,6 +236,7 @@ class CatalogTableResponse(BaseModel):
     s3_path_pattern: str | None
     column_defs: list | None
     schema_drift: bool
+    vector_index: dict | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

@@ -13,7 +13,11 @@ from typing import Any
 
 import duckdb
 import pyarrow as pa
-from google import genai
+
+try:
+    from ui.ai_gateway_client import GatewayClient
+except ImportError:
+    from ai_gateway_client import GatewayClient
 
 logger = logging.getLogger("lake.ui.ai")
 
@@ -87,7 +91,7 @@ AI_MAX_ROWS_PER_QUERY = int(os.getenv("AI_MAX_ROWS_PER_QUERY", "50"))
 AI_MAX_CONCURRENCY = int(os.getenv("AI_MAX_CONCURRENCY", "5"))
 AI_CACHE_MAX_SIZE = 1024
 GEMINI_KEY_NOT_CONFIGURED_MSG = (
-    "GEMINI_API_KEY is not set. A superadmin can configure it in Settings → Admin Panel."
+    "No AI provider is configured. A superadmin can set one up in Settings → Admin Panel."
 )
 
 
@@ -117,7 +121,7 @@ SQL_AI_FUNCTIONS: list[dict[str, str]] = [
         "name": "ai_summarize",
         "signature": "ai_summarize(text)",
         "description": "Generate a concise 1–2 sentence summary of unstructured text per row.",
-        "example": "SELECT source, ai_summarize(summary) AS brief FROM read_parquet('s3://datalake/embeddings/**/*.parquet') LIMIT 5",
+        "example": "SELECT source, ai_summarize(content) AS brief FROM read_parquet('s3://datalake/embeddings/**/*.parquet') LIMIT 5",
     },
     {
         "name": "ai_classify",
@@ -129,7 +133,7 @@ SQL_AI_FUNCTIONS: list[dict[str, str]] = [
         "name": "ai_extract",
         "signature": "ai_extract(text, fields[])",
         "description": "Extract structured JSON object with the specified keys from unstructured text.",
-        "example": "SELECT ai_extract(summary, ['primary_metric', 'status', 'anomaly']) AS extracted_json FROM read_parquet('s3://datalake/embeddings/**/*.parquet') LIMIT 5",
+        "example": "SELECT ai_extract(content, ['primary_metric', 'status', 'anomaly']) AS extracted_json FROM read_parquet('s3://datalake/embeddings/**/*.parquet') LIMIT 5",
     },
 ]
 
@@ -197,12 +201,17 @@ def get_default_datasets(bucket: str = "datalake") -> list[dict[str, Any]]:
             "name": "embeddings",
             "schema": "gold",
             "s3_path": f"s3://{bucket}/embeddings/**/*.parquet",
-            "description": "768-dim Gemini embeddings and daily natural-language summaries across sources.",
+            "description": "Embeddings of each source's record text (content), written daily by the embed_sources pipeline; provider, model and dimension record which model made them.",
             "columns": [
+                {"name": "id", "type": "VARCHAR"},
                 {"name": "source", "type": "VARCHAR"},
-                {"name": "ingested_at", "type": "TIMESTAMP"},
-                {"name": "summary", "type": "VARCHAR"},
+                {"name": "content", "type": "VARCHAR"},
                 {"name": "embedding", "type": "DOUBLE[]"},
+                {"name": "source_date", "type": "VARCHAR"},
+                {"name": "provider", "type": "VARCHAR"},
+                {"name": "model", "type": "VARCHAR"},
+                {"name": "dimension", "type": "BIGINT"},
+                {"name": "ingested_at", "type": "TIMESTAMP"},
             ],
         },
     ]
@@ -310,7 +319,7 @@ def call_gemini_text(
     if not key:
         raise RuntimeError(GEMINI_KEY_NOT_CONFIGURED_MSG)
 
-    factory = client_factory or genai.Client
+    factory = client_factory or GatewayClient
     client = factory(api_key=key)
     last_exc: Exception | None = None
     for attempt in range(max_retries + 1):
@@ -637,8 +646,8 @@ def register_ai_functions(
     return state
 
 
-def _safe_identifier(name: str) -> str:
-    slug = re.sub(r"[^A-Za-z0-9_]", "_", name.strip())
+def _safe_identifier(name: str | None) -> str:
+    slug = re.sub(r"[^A-Za-z0-9_]", "_", (name or "").strip())
     if not slug or slug[0].isdigit():
         slug = f"t_{slug}"
     return slug
@@ -706,8 +715,11 @@ def build_schema_prompt_context(
                         else "schema-on-read"
                     )
                     desc = f" — {table.get('description')}" if table.get("description") else ""
+                    # The views are created with _safe_identifier names (a slug like
+                    # "tmdb-trending" becomes tmdb_trending), so that is what queries must use.
+                    view = f"{_safe_identifier(schema_slug)}.{_safe_identifier(t_slug or '')}"
                     lines.append(
-                        f"- `{cat_slug}.{schema_slug}.{t_slug}` (View: `{schema_slug}.{t_slug}` or `read_parquet('{s3_path}')`){desc}\n"
+                        f"- `{cat_slug}.{schema_slug}.{t_slug}` (View: `{view}` or `read_parquet('{s3_path}')`){desc}\n"
                         f"  Columns: {col_str}"
                     )
 

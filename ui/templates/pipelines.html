@@ -47,17 +47,22 @@
   </div>
 
   <style>
-    .timeline-scrollbar::-webkit-scrollbar {
+    .timeline-scrollbar::-webkit-scrollbar,
+    .log-scrollbar::-webkit-scrollbar {
+      width: 6px;
       height: 6px;
     }
-    .timeline-scrollbar::-webkit-scrollbar-track {
+    .timeline-scrollbar::-webkit-scrollbar-track,
+    .log-scrollbar::-webkit-scrollbar-track {
       background: rgba(0, 0, 0, 0.25);
     }
-    .timeline-scrollbar::-webkit-scrollbar-thumb {
+    .timeline-scrollbar::-webkit-scrollbar-thumb,
+    .log-scrollbar::-webkit-scrollbar-thumb {
       background: rgba(255, 255, 255, 0.15);
       border-radius: 9999px;
     }
-    .timeline-scrollbar::-webkit-scrollbar-thumb:hover {
+    .timeline-scrollbar::-webkit-scrollbar-thumb:hover,
+    .log-scrollbar::-webkit-scrollbar-thumb:hover {
       background: rgba(255, 255, 255, 0.3);
     }
 
@@ -144,13 +149,16 @@
     html[data-theme="light"] .timeline-swimlane-row:hover {
       background-color: #f9fafb !important;
     }
-    html[data-theme="light"] .timeline-scrollbar::-webkit-scrollbar-track {
+    html[data-theme="light"] .timeline-scrollbar::-webkit-scrollbar-track,
+    html[data-theme="light"] .log-scrollbar::-webkit-scrollbar-track {
       background: rgba(0, 0, 0, 0.05) !important;
     }
-    html[data-theme="light"] .timeline-scrollbar::-webkit-scrollbar-thumb {
+    html[data-theme="light"] .timeline-scrollbar::-webkit-scrollbar-thumb,
+    html[data-theme="light"] .log-scrollbar::-webkit-scrollbar-thumb {
       background: rgba(0, 0, 0, 0.2) !important;
     }
-    html[data-theme="light"] .timeline-scrollbar::-webkit-scrollbar-thumb:hover {
+    html[data-theme="light"] .timeline-scrollbar::-webkit-scrollbar-thumb:hover,
+    html[data-theme="light"] .log-scrollbar::-webkit-scrollbar-thumb:hover {
       background: rgba(0, 0, 0, 0.35) !important;
     }
     html[data-theme="light"] #color-picker-popover,
@@ -540,10 +548,10 @@
       </div>
 
       <!-- Drawer Content -->
-      <div class="flex-1 overflow-y-auto p-4 space-y-4">
+      <div id="drawer-content-container" class="flex-1 min-h-0 flex flex-col p-4 overflow-hidden">
 
         <!-- Runs Tab Pane -->
-        <div id="drawer-pane-runs" class="space-y-4">
+        <div id="drawer-pane-runs" class="flex-1 min-h-0 overflow-y-auto space-y-4 pr-1">
           <div class="flex items-center justify-between text-xs text-gray-400">
             <span>Historical runs for this pipeline</span>
             <button onclick="loadDrawerRuns(currentDrawerDagId)" class="hover:text-gray-200 flex items-center gap-1">
@@ -558,7 +566,7 @@
         </div>
 
         <!-- Logs Tab Pane -->
-        <div id="drawer-pane-logs" class="hidden flex flex-col h-full space-y-3">
+        <div id="drawer-pane-logs" class="hidden flex-1 min-h-0 flex flex-col space-y-3">
           <div class="flex items-center justify-between text-xs text-gray-400 shrink-0">
             <div class="flex items-center gap-2">
               <span id="log-target-task" class="font-mono text-gray-300">task: execute_and_archive_notebook</span>
@@ -573,7 +581,7 @@
           </div>
 
           <!-- Log Viewer Terminal -->
-          <div class="flex-1 bg-black/60 border border-white/[0.08] rounded-lg p-3 font-mono text-[11px] leading-relaxed overflow-y-auto max-h-[500px]" id="log-terminal">
+          <div class="flex-1 min-h-0 bg-black/60 border border-white/[0.08] rounded-lg p-3 font-mono text-[11px] leading-relaxed overflow-y-auto log-scrollbar" id="log-terminal">
             <pre id="log-pre" class="whitespace-pre-wrap break-all text-gray-300">Select a run and task to inspect logs.</pre>
           </div>
         </div>

@@ -6,7 +6,6 @@ Every change made to this repo gets one row, newest first.
 
 | Action | Use when |
 |---|---|
-| 20261016 | IMPROVEMENT | #161 | `CHANGES.md` | Added the missing tracker rows for #73 and #154 |
 | ADD | New file, feature, doc or capability |
 | REMOVE | Deleted file, feature or dead code |
 | BUG FIX | Corrects incorrect behavior |
@@ -28,6 +27,8 @@ Every change made to this repo gets one row, newest first.
 | 20261017 | BUG FIX | #165 | `docker-compose.yml`, `deploy/helm/lake-of-tears/templates/airflow.yaml`, `.env.example`, `README.md`, `tests/test_airflow_admin_password_config.py` | Airflow admin password from `AIRFLOW_PASSWORD` is applied on every start (reset-password, stale pid file removed) (PR #167) |
 | 20261017 | BUG FIX | #163 | `docker-compose.yml`, `deploy/nginx/lake.conf`, `deploy/helm/lake-of-tears/templates/airflow.yaml`, `tests/test_airflow_proxy_config.py` | Airflow web UI now starts and keeps its `/airflow` prefix through nginx, fixing the 502 (PR #164) |
 | 20261017 | IMPROVEMENT | #193 | `CHANGES.md` | Added the tracker rows for the open fixes, wiki guides and AI provider PRs |
+| 20261016 | BUG FIX | #169 | `deploy/helm/lake-of-tears/templates/airflow.yaml`, `deploy/helm/values-local.yaml`, `ui/templates/pipelines.html` | Fixed pipeline drawer double scrollbar; tuned Airflow webserver workers and increased local memory limit to 4Gi |
+| 20261016 | IMPROVEMENT | #161 | `CHANGES.md` | Added the missing tracker rows for #73 and #154 |
 | 20261016 | ADD | #74 | `docs/wiki/Data-Ingestion-and-Pipelines.md`, `docs/wiki/Home.md`, `docs/wiki/pages.json` | Added Data Ingestion and Pipeline Authoring guide covering architecture, storage layout, tutorial and best practices (PR #160) |
 | 20261016 | IMPROVEMENT | #157 | `README.md`, `deploy/helm/lake-of-tears/templates/NOTES.txt`, `deploy/nginx/lake.conf`, `docker-compose.yml`, `CONTRIBUTING.md` | Removed stale references to public /jupyter/ route and port 8888; gated NOTES.txt credentials on jupyter.ingress.enabled (PR #159) |
 | 20261016 | IMPROVEMENT | #79 | `docs/wiki/images/admin-workspaces.jpg`, `docs/wiki/Workspaces-and-Catalog-Management.md` | Retook the Admin workspaces screenshot after #129 (Default shows System badge); replaced the known-issue note with the fixed behavior |

@@ -69,8 +69,20 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.jupyter.service.port }}
+          volumeMounts:
+            # The Lake UI creates notebooks under workspaces/ in Jupyter's root folder.
+            - name: jupyter-home
+              mountPath: /home/jovyan/workspaces
+              subPath: workspaces
+            - name: jupyter-home
+              mountPath: /home/jovyan/work
+              subPath: work
           resources:
             {{- toYaml .Values.jupyter.resources | nindent 12 }}
+      volumes:
+        - name: jupyter-home
+          persistentVolumeClaim:
+            claimName: {{ include "lake-of-tears.fullname" . }}-jupyter-home
 
 ---
 apiVersion: v1

@@ -76,7 +76,7 @@ flowchart TB
 | **Apache Airflow** | Runs the ingest, embedding, anomaly-detection and maintenance DAGs (for example purging deleted catalogs and workspaces, and refreshing catalog schemas). |
 | **JupyterLab** | Interactive notebooks. The Lake UI proxies to it over the internal network; it has no public route by default. |
 | **Apache Superset** | Business-intelligence dashboards, reachable at `/superset/`. |
-| **AI provider** | A hosted model service used for embeddings and natural-language answers. Google Gemini is the default; its key and models are configured in the Admin Panel. |
+| **AI provider** | A hosted model service used for embeddings and natural-language answers. Google Gemini is the default (see [AI Providers](AI-Providers.md) for the others); its key and models are configured in the Admin Panel. |
 
 ## 5. Deployment models
 
