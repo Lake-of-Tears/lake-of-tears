@@ -41,7 +41,7 @@ Edit `.env`. At minimum set strong values for these (the rest have usable defaul
 | `AIRFLOW_SECRET_KEY`, `AIRFLOW_PASSWORD` | Airflow |
 | `DATALAKE_DATA_DIR` | A host folder for notebooks, Airflow DAGs and pipeline code. It defaults to `~`; point it at a dedicated folder |
 
-The Gemini API key is not in `.env`: a superadmin adds it later in **Settings, Admin Panel**.
+The Gemini API key is not in `.env`: a superadmin adds it later in **Settings, Admin Panel**. Other providers are covered in [AI Providers](AI-Providers.md).
 
 Create the host folders that the containers mount (otherwise Docker creates them owned by root):
 
@@ -300,7 +300,7 @@ Rotate on a schedule and whenever a secret may have been exposed. Edit `.env` (C
 | `AIRFLOW_PASSWORD` | Update `.env`; `docker compose up -d airflow` | Applied on every start once [#165](https://github.com/Lake-of-Tears/lake-of-tears/issues/165) is merged; until then Compose Airflow uses a generated password in `$DATALAKE_DATA_DIR/airflow/standalone_admin_password.txt` |
 | `AIRFLOW_SECRET_KEY` | Update `.env`; restart Airflow | Airflow web sessions end |
 | `SUPERSET_SECRET_KEY` | Update `.env`; restart Superset | Sessions end. Superset also encrypts stored database passwords with this key, so follow Superset's `superset re-encrypt-secrets` procedure when changing it (not tested here) |
-| Gemini API key | Superadmin: Settings, Admin Panel | Stored encrypted; takes effect immediately, no restart |
+| AI provider and its key (Gemini by default) | Superadmin: Settings, Admin Panel, AI Provider | Stored encrypted; takes effect immediately, no restart |
 | SSO client secrets | Rotate at the provider, update `.env`, restart the backend | Users re-authenticate |
 
 After any rotation, run the health checks in section 4 and sign in once.

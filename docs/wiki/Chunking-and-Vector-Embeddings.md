@@ -4,6 +4,8 @@ Lake of Tears turns text from your data into **vector embeddings** so you can se
 
 > **Status of chunking.** Today every row becomes exactly one embedding (one row = one chunk). The pluggable chunking strategies (`recursive`, `document`, `agentic`) are a **planned design** tracked in [#72](https://github.com/Lake-of-Tears/lake-of-tears/issues/72) and are **not implemented yet**; section 4 separates what works now from what is planned.
 
+> **AI providers.** With multi-provider support ([#68](https://github.com/Lake-of-Tears/lake-of-tears/issues/68) to [#71](https://github.com/Lake-of-Tears/lake-of-tears/issues/71)), the model, key and vector dimension described here depend on the provider chosen in the Admin Panel; the pipeline calls the backend AI gateway instead of `gemini_embedder`, and searches cast to the active dimension instead of a fixed 768. See [AI Providers](AI-Providers.md). The examples below show the Gemini defaults.
+
 The embedding pipeline and queries in this guide were run against a local stack, using a stand-in embedder instead of the real model, so no API key is needed to reproduce them.
 
 ## 1. How embeddings flow through the lake

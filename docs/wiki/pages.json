@@ -31,6 +31,11 @@
       "file": "Chunking-and-Vector-Embeddings.md"
     },
     {
+      "slug": "ai-providers",
+      "title": "AI Providers",
+      "file": "AI-Providers.md"
+    },
+    {
       "slug": "duckdb-querying-and-analytics",
       "title": "DuckDB Querying and Analytics",
       "file": "DuckDB-Querying-and-Analytics.md"
