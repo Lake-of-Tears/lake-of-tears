@@ -866,3 +866,130 @@ def test_notebooks_page_contains_url_path_and_selection_sync():
         assert "data-notebook-path" in response.text
         assert "history.replaceState" in response.text
         assert "scrollIntoView" in response.text
+
+
+def test_notebooks_page_renders_import_and_download_controls():
+    token = jwt.encode(
+        {"sub": "user@lake.local", "email": "user@lake.local", "role": "user"},
+        main.AUTH_SECRET_KEY,
+        algorithm="HS256",
+    )
+    mock_workspaces = [{"id": "ws-1", "name": "Default", "slug": "default", "my_role": "member"}]
+
+    with patch.object(main, "_fetch_workspaces", return_value=mock_workspaces):
+        response = client.get(
+            "/notebooks",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
+        )
+        assert response.status_code == 200
+        # Import button and file input
+        assert "btn-import-notebook" in response.text
+        assert 'id="notebook-file-input"' in response.text
+        assert 'accept=".ipynb"' in response.text
+        assert "triggerImportNotebook" in response.text
+        assert "handleNotebookFileSelect" in response.text
+        # Download button and functions
+        assert "btn-download" in response.text
+        assert "downloadCurrentNotebook" in response.text
+        assert "downloadNotebook" in response.text
+        # Conflict modal
+        assert "import-conflict-modal" in response.text
+        assert "import-conflict-filename" in response.text
+        assert "import-conflict-newname" in response.text
+        assert "resolveImportConflict" in response.text
+        assert "cancelImportConflict" in response.text
+
+
+def test_notebooks_page_viewer_mode_disables_import_allows_download():
+    token = jwt.encode(
+        {"sub": "viewer@lake.local", "email": "viewer@lake.local", "role": "viewer"},
+        main.AUTH_SECRET_KEY,
+        algorithm="HS256",
+    )
+    mock_workspaces = [{"id": "ws-1", "name": "Default", "slug": "default", "my_role": "viewer"}]
+
+    with patch.object(main, "_fetch_workspaces", return_value=mock_workspaces):
+        response = client.get(
+            "/notebooks",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
+        )
+        assert response.status_code == 200
+        # Import controls must not be rendered for viewers
+        assert "btn-import-notebook" not in response.text
+        assert 'id="notebook-file-input"' not in response.text
+        # Download controls should still be rendered for viewers
+        assert "btn-download" in response.text
+        assert "downloadCurrentNotebook" in response.text
+        assert "downloadNotebook" in response.text
+
+
+def test_api_get_notebook_download_attachment():
+    token = jwt.encode(
+        {"sub": "user@lake.local", "email": "user@lake.local", "role": "user"},
+        main.AUTH_SECRET_KEY,
+        algorithm="HS256",
+    )
+    mock_workspaces = [{"id": "ws-1", "name": "Default", "slug": "default", "my_role": "member"}]
+    fake_nb = {
+        "nbformat": 4,
+        "nbformat_minor": 5,
+        "cells": [{"cell_type": "code", "source": ["print('hello')"], "outputs": []}],
+    }
+
+    with (
+        patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
+        patch.object(
+            notebook_proxy,
+            "get_notebook",
+            new_callable=AsyncMock,
+            return_value=(200, {"content": fake_nb}),
+        ),
+    ):
+        response = client.get(
+            "/notebooks/api/analysis.ipynb?download=true",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
+        )
+        assert response.status_code == 200
+        assert response.headers["Content-Disposition"] == 'attachment; filename="analysis.ipynb"'
+        assert response.headers["Content-Type"].startswith("application/x-ipynb+json")
+        data = response.json()
+        assert data["nbformat"] == 4
+        assert len(data["cells"]) == 1
+
+
+def test_api_save_imported_notebook():
+    token = jwt.encode(
+        {"sub": "user@lake.local", "email": "user@lake.local", "role": "user"},
+        main.AUTH_SECRET_KEY,
+        algorithm="HS256",
+    )
+    mock_workspaces = [{"id": "ws-1", "name": "Default", "slug": "default", "my_role": "member"}]
+    nb_content = {
+        "nbformat": 4,
+        "nbformat_minor": 5,
+        "cells": [
+            {"cell_type": "markdown", "source": ["# Imported Notebook"]},
+            {"cell_type": "code", "source": ["import duckdb"], "outputs": []},
+        ],
+    }
+
+    with (
+        patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
+        patch.object(
+            notebook_proxy,
+            "save_notebook",
+            new_callable=AsyncMock,
+            return_value=(200, {"status": "ok"}),
+        ) as mock_save,
+    ):
+        response = client.put(
+            "/notebooks/api/imported_nb.ipynb",
+            json={"content": nb_content},
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "ok"
+        mock_save.assert_called_once_with(
+            "default", "imported_nb.ipynb", {"content": nb_content}, auth_token=token
+        )
+
