@@ -846,3 +846,23 @@ def test_base_template_renders_search_dropdown_components():
         assert "handleNotebookFileFilterInput" in response.text
         # Ensure modal is not rendered
         assert "quick-open-modal" not in response.text
+
+
+def test_notebooks_page_contains_url_path_and_selection_sync():
+    token = jwt.encode(
+        {"sub": "user@lake.local", "email": "user@lake.local", "role": "user"},
+        main.AUTH_SECRET_KEY,
+        algorithm="HS256",
+    )
+    mock_workspaces = [{"id": "ws-1", "name": "Default", "slug": "default", "my_role": "member"}]
+
+    with patch.object(main, "_fetch_workspaces", return_value=mock_workspaces):
+        response = client.get(
+            "/notebooks",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
+        )
+        assert response.status_code == 200
+        assert "currentNotebookPath = targetPath;" in response.text
+        assert "data-notebook-path" in response.text
+        assert "history.replaceState" in response.text
+        assert "scrollIntoView" in response.text

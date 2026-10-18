@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import importlib.util
 import os
 import sys
@@ -816,3 +817,43 @@ def test_pipeline_settings_patch_description_and_name():
             mock_upsert.assert_called_once()
     finally:
         backend_main.app.dependency_overrides.clear()
+
+
+def test_pipeline_service_resolves_known_pipeline_notebooks():
+    dag = {
+        "dag_id": "ingest_tmdb_movies",
+        "tags": [{"name": "ingestion"}, {"name": "notebooks"}],
+        "is_paused": False,
+    }
+    with (
+        patch("pipeline_service.get_airflow_server_url", return_value="http://mock:8080"),
+        patch("pipeline_service.get_airflow_auth", return_value=("admin", "pass")),
+        patch("pipeline_service.httpx.AsyncClient") as mock_client,
+    ):
+        mock_instance = AsyncMock()
+        mock_instance.get.return_value = MagicMock(status_code=200, json=lambda: {"dags": [dag]})
+        mock_client.return_value.__aenter__.return_value = mock_instance
+        res = asyncio.run(pipeline_service.list_workspace_dags("default", is_superadmin=True))
+        assert len(res) == 1
+        assert res[0]["dag_id"] == "ingest_tmdb_movies"
+        assert res[0]["is_notebook_job"] is True
+        assert res[0]["notebook_path"] == "tmdb_daily_movies_ingest.ipynb"
+
+
+def test_pipeline_service_resolves_notebook_tag():
+    dag = {
+        "dag_id": "ws_default_custom",
+        "tags": [{"name": "workspace:default"}, {"name": "notebook:custom.ipynb"}],
+        "is_paused": False,
+    }
+    with (
+        patch("pipeline_service.get_airflow_server_url", return_value="http://mock:8080"),
+        patch("pipeline_service.get_airflow_auth", return_value=("admin", "pass")),
+        patch("pipeline_service.httpx.AsyncClient") as mock_client,
+    ):
+        mock_instance = AsyncMock()
+        mock_instance.get.return_value = MagicMock(status_code=200, json=lambda: {"dags": [dag]})
+        mock_client.return_value.__aenter__.return_value = mock_instance
+        res = asyncio.run(pipeline_service.list_workspace_dags("default", is_superadmin=True))
+        assert len(res) == 1
+        assert res[0]["notebook_path"] == "custom.ipynb"

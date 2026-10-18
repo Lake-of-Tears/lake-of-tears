@@ -507,6 +507,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const targetFolder = urlParams.get('folder');
 
   if (targetPath) {
+    currentNotebookPath = targetPath;
     const parts = targetPath.split('/');
     if (parts.length > 1) {
       parts.pop();
@@ -733,6 +734,7 @@ function renderNotebookSearchResults(query, items) {
 
     return `
       <div class="group flex items-center justify-between px-2 py-1.5 rounded text-xs cursor-pointer transition-colors ${isCurrent ? 'bg-blue-600/20 text-blue-300 font-medium' : 'text-gray-300 hover:bg-white/[0.04]'}"
+           data-notebook-path="${escapeHtml(item.path)}"
            draggable="true"
            ondragstart="handleDragStart(event, '${escapeHtml(item.path)}', '${escapeHtml(item.type)}')"
            ${isDir ? `ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, '${escapeHtml(item.path)}')"` : ''}
@@ -837,6 +839,7 @@ function renderFileList() {
     const isCurrent = item.path === currentNotebookPath;
     return `
       <div class="group flex items-center justify-between px-2 py-1.5 rounded text-xs cursor-pointer transition-colors ${isCurrent ? 'bg-blue-600/20 text-blue-300 font-medium' : 'text-gray-300 hover:bg-white/[0.04]'}"
+           data-notebook-path="${escapeHtml(item.path)}"
            draggable="true"
            ondragstart="handleDragStart(event, '${escapeHtml(item.path)}', '${escapeHtml(item.type)}')"
            ${isDir ? `ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, '${escapeHtml(item.path)}')"` : ''}
@@ -1186,6 +1189,24 @@ async function openNotebook(path) {
   document.getElementById('notebook-canvas').classList.remove('hidden');
 
   try {
+    const url = new URL(window.location);
+    if (url.searchParams.get('path') !== path) {
+      url.searchParams.set('path', path);
+      window.history.replaceState({}, '', url);
+    }
+  } catch (e) {}
+
+  renderFileList();
+  setTimeout(() => {
+    try {
+      const activeEl = document.querySelector(`[data-notebook-path="${CSS.escape(path)}"]`);
+      if (activeEl) {
+        activeEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+    } catch (e) {}
+  }, 50);
+
+  try {
     const res = await fetch(`${API_BASE}/${encodeURIComponent(path)}`);
     if (!res.ok) throw new Error('Could not open notebook');
     const data = await res.json();
@@ -1206,6 +1227,15 @@ function closeNotebook() {
   document.getElementById('current-filename').textContent = 'No notebook selected';
   document.getElementById('notebook-canvas').classList.add('hidden');
   document.getElementById('empty-state').classList.remove('hidden');
+
+  try {
+    const url = new URL(window.location);
+    if (url.searchParams.has('path')) {
+      url.searchParams.delete('path');
+      window.history.replaceState({}, '', url);
+    }
+  } catch (e) {}
+
   renderFileList();
   disconnectKernel();
 }
