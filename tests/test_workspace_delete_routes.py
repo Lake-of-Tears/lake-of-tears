@@ -32,6 +32,6 @@ def test_workspace_deletion_goes_through_the_admin_route_only():
         p for p in _delete_paths() if p.startswith(("/api/workspaces/", "/api/admin/workspaces"))
     }
     assert "/api/admin/workspaces/{workspace_id}" in paths
-    assert not any(p.count("/") == 3 and p.startswith("/api/workspaces/") for p in paths), (
-        "a bare DELETE /api/workspaces/{id} route would bypass the admin safeguards"
-    )
+    assert not any(
+        p.count("/") == 3 and p.startswith("/api/workspaces/") for p in paths
+    ), "a bare DELETE /api/workspaces/{id} route would bypass the admin safeguards"
