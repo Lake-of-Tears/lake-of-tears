@@ -2197,6 +2197,43 @@ function switchAirflowTab(tab) {
       const baseName = currentNotebookPath.split('/').pop().replace('.ipynb', '').replace(/[_-]/g, ' ');
       titleInput.value = baseName.replace(/\b\w/g, l => l.toUpperCase());
     }
+    loadExistingPipelineForNotebook(currentNotebookPath);
+  }
+}
+
+async function loadExistingPipelineForNotebook(path) {
+  if (!path) return;
+  try {
+    const res = await fetch('/api/pipelines');
+    if (!res.ok) return;
+    const data = await res.json();
+    const pipelines = data.pipelines || [];
+    const cleanP = path.replace(/^\//, '');
+    const match = pipelines.find(p => p.notebook_path === cleanP || (p.tags && p.tags.includes(`notebook:${cleanP}`)));
+    if (match) {
+      const titleInput = document.getElementById('airflow-sched-title');
+      if (titleInput && match.display_label) {
+        titleInput.value = match.display_label;
+      }
+      const cadenceSelect = document.getElementById('airflow-sched-cadence');
+      const cronInput = document.getElementById('airflow-sched-cron');
+      const sched = match.schedule_interval || '';
+      if (['@hourly', '@daily', '@weekly'].includes(sched)) {
+        if (cadenceSelect) cadenceSelect.value = sched;
+        toggleCustomCron();
+      } else if (sched && sched !== 'None (Manual)') {
+        if (cadenceSelect) cadenceSelect.value = 'custom';
+        if (cronInput) cronInput.value = sched;
+        toggleCustomCron();
+      }
+      const submitBtn = document.getElementById('btn-submit-schedule');
+      if (submitBtn) submitBtn.textContent = 'Update Pipeline Schedule';
+    } else {
+      const submitBtn = document.getElementById('btn-submit-schedule');
+      if (submitBtn) submitBtn.textContent = 'Save Pipeline Schedule';
+    }
+  } catch (e) {
+    console.debug('Failed to check existing pipeline for notebook:', e);
   }
 }
 
@@ -2250,14 +2287,19 @@ async function submitNotebookSchedule() {
     });
     const data = await res.json();
     if (res.ok) {
-      showToast(`Pipeline schedule created! (${data.dag_id})`, 'success');
+      showToast(`Pipeline schedule saved! (${data.dag_id})`, 'success');
       closeAirflowModal();
+      btn.textContent = 'Saved! Redirecting...';
+      setTimeout(() => {
+        window.location.href = `/pipelines?open=${encodeURIComponent(data.dag_id)}`;
+      }, 400);
     } else {
       showToast(data.detail || data.error || 'Failed to save schedule', 'error');
+      btn.disabled = false;
+      btn.textContent = 'Save Pipeline Schedule';
     }
   } catch (err) {
     showToast(err.message, 'error');
-  } finally {
     btn.disabled = false;
     btn.textContent = 'Save Pipeline Schedule';
   }

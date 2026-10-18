@@ -1477,7 +1477,7 @@
       const isViewer = (userRole === 'viewer');
 
       return `
-        <tr class="hover:bg-white/[0.02] transition-colors">
+        <tr id="pipeline-row-${p.dag_id}" class="hover:bg-white/[0.02] transition-colors">
           <!-- Pause/Resume Toggle -->
           <td class="py-3 px-4 text-center">
             <button onclick="togglePipelinePause('${p.dag_id}', ${!isPaused})"
@@ -2043,17 +2043,31 @@
     if (term) term.scrollTop = term.scrollHeight;
   }
 
+  function highlightPipelineRow(dagId) {
+    setTimeout(() => {
+      const row = document.getElementById(`pipeline-row-${dagId}`);
+      if (row) {
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        row.classList.add('bg-blue-600/20', 'ring-1', 'ring-blue-500/50');
+        setTimeout(() => {
+          row.classList.remove('bg-blue-600/20', 'ring-1', 'ring-blue-500/50');
+        }, 3500);
+      }
+    }, 150);
+  }
+
   // Initial load
   document.addEventListener('DOMContentLoaded', async () => {
     initTimelineCollapseState();
     await fetchPipelines();
     fetchTimeline();
 
-    // Auto-open pipeline inspector if ?open=<dag_id> is present
+    // Auto-open pipeline inspector if ?open=<dag_id> or ?dag_id= or ?selected= is present
     const urlParams = new URLSearchParams(window.location.search);
-    const openDagId = urlParams.get('open');
+    const openDagId = urlParams.get('open') || urlParams.get('dag_id') || urlParams.get('selected');
     if (openDagId) {
       openInspector(openDagId);
+      highlightPipelineRow(openDagId);
     }
   });
 </script>

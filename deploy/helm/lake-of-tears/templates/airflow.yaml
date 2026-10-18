@@ -88,6 +88,12 @@ spec:
                   key: AIRFLOW_DB_CONN
             - name: AIRFLOW__CORE__LOAD_EXAMPLES
               value: "False"
+            - name: AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION
+              value: "False"
+            - name: AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL
+              value: "5"
+            - name: AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL
+              value: "5"
             - name: AIRFLOW__CORE__DAGS_FOLDER
               value: /opt/airflow/dags
             - name: AIRFLOW__API__AUTH_BACKENDS
