@@ -67,6 +67,9 @@
     }
 
     /* Grab to Pan cursors */
+    #timeline-viewport {
+      overscroll-behavior: contain;
+    }
     #timeline-viewport.cursor-grab {
       cursor: grab;
     }
@@ -1020,7 +1023,45 @@
   }
 
   // ── Timeline Zoom & Centering ──────────────────────────────────────────────
-  function setTimelineZoom(level) {
+  const ZOOM_LEVELS = ['24h', '12h', '6h', '1h'];
+
+  function setTimelineZoom(level, anchorClientX = null) {
+    if (!ZOOM_LEVELS.includes(level)) return;
+    if (level === timelineZoom) return;
+
+    const viewport = document.getElementById('timeline-viewport');
+    const canvas = document.getElementById('timeline-canvas');
+    const ruler = document.getElementById('timeline-ruler');
+    const stickyHeader = document.querySelector('.timeline-sticky-corner-header');
+
+    const stickyWidth = stickyHeader ? stickyHeader.offsetWidth : 240;
+    const oldTrackWidth = ruler ? ruler.offsetWidth : (canvas ? canvas.offsetWidth - stickyWidth : 900);
+
+    let anchorRatio = 0.5;
+    let anchorOffsetInViewport = 0;
+
+    if (viewport && canvas && ruler && oldTrackWidth > 0) {
+      if (anchorClientX !== null) {
+        const vRect = viewport.getBoundingClientRect();
+        const cursorX = anchorClientX - vRect.left;
+        if (cursorX <= stickyWidth) {
+          anchorRatio = 0;
+          anchorOffsetInViewport = 0;
+        } else {
+          const trackCursorX = cursorX - stickyWidth;
+          anchorOffsetInViewport = trackCursorX;
+          const contentX = viewport.scrollLeft + trackCursorX;
+          anchorRatio = Math.max(0, Math.min(1, contentX / oldTrackWidth));
+        }
+      } else {
+        // Centered around currently visible track portion when using toolbar buttons
+        const visibleTrackWidth = Math.max(0, viewport.clientWidth - stickyWidth);
+        anchorOffsetInViewport = visibleTrackWidth / 2;
+        const contentX = viewport.scrollLeft + anchorOffsetInViewport;
+        anchorRatio = Math.max(0, Math.min(1, contentX / oldTrackWidth));
+      }
+    }
+
     timelineZoom = level;
     document.querySelectorAll('.zoom-btn').forEach(b => {
       b.classList.remove('active', 'bg-white/[0.08]', 'text-white');
@@ -1032,7 +1073,6 @@
       btn.classList.remove('text-gray-400');
     }
 
-    const canvas = document.getElementById('timeline-canvas');
     if (!canvas) return;
 
     if (level === '24h') {
@@ -1051,9 +1091,26 @@
 
     renderTimelineRuler();
     renderTimelineGridOverlay();
-    setTimeout(() => {
-      centerTimelineOnNowOrFirstRun();
-    }, 50);
+
+    if (viewport && ruler) {
+      const newTrackWidth = ruler.offsetWidth;
+      if (anchorRatio === 0) {
+        viewport.scrollLeft = 0;
+      } else {
+        const newContentX = anchorRatio * newTrackWidth;
+        viewport.scrollLeft = Math.max(0, newContentX - anchorOffsetInViewport);
+      }
+    }
+  }
+
+  function stepTimelineZoom(zoomIn, anchorClientX = null) {
+    const currentIndex = ZOOM_LEVELS.indexOf(timelineZoom || '24h');
+    if (currentIndex === -1) return;
+    const nextIndex = zoomIn ? currentIndex + 1 : currentIndex - 1;
+    if (nextIndex < 0 || nextIndex >= ZOOM_LEVELS.length) {
+      return; // Boundary reached
+    }
+    setTimelineZoom(ZOOM_LEVELS[nextIndex], anchorClientX);
   }
 
   function centerTimelineOnNowOrFirstRun() {
@@ -1117,12 +1174,39 @@
     if (!viewport || mouseInteractionsInitialized) return;
     mouseInteractionsInitialized = true;
 
-    // 1. Mouse wheel horizontal scrolling
+    // 1. Mouse wheel zooming & horizontal scrolling
+    let accumulatedDeltaY = 0;
+    let lastWheelTime = 0;
+    const WHEEL_ZOOM_THRESHOLD = 50;
+    const WHEEL_COOLDOWN_MS = 120;
+
     viewport.addEventListener('wheel', (e) => {
-      // If mostly vertical scroll delta and Shift not already held, convert to horizontal scroll
-      if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+      // Horizontal swipe or tilt wheel: smoothly pan timeline horizontally
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
         e.preventDefault();
-        viewport.scrollLeft += e.deltaY;
+        viewport.scrollLeft += e.deltaX;
+        accumulatedDeltaY = 0;
+        return;
+      }
+
+      // Vertical wheel / swipe: handle zooming
+      e.preventDefault();
+
+      const now = performance.now();
+      if (now - lastWheelTime > 300) {
+        accumulatedDeltaY = 0;
+      }
+      accumulatedDeltaY += e.deltaY;
+
+      if (now - lastWheelTime < WHEEL_COOLDOWN_MS) {
+        return;
+      }
+
+      if (Math.abs(accumulatedDeltaY) >= WHEEL_ZOOM_THRESHOLD) {
+        const zoomIn = accumulatedDeltaY < 0;
+        accumulatedDeltaY = 0;
+        lastWheelTime = now;
+        stepTimelineZoom(zoomIn, e.clientX);
       }
     }, { passive: false });
 
@@ -1172,18 +1256,117 @@
     if (!rulerEl) return;
     rulerEl.innerHTML = '';
 
-    for (let h = 0; h <= 24; h++) {
-      const pct = (h / 24) * 100;
-      const hh = String(h % 24).padStart(2, '0') + ':00';
-      const tick = document.createElement('div');
-      tick.className = 'absolute top-0 bottom-0 flex flex-col items-center pointer-events-none';
-      tick.style.left = `${pct}%`;
-      tick.innerHTML = `
-        <span class="timeline-ruler-tick-label text-[10px] font-mono text-gray-500 transform -translate-x-1/2 pt-1 select-none">${hh}</span>
-        <div class="timeline-ruler-tick w-px h-2 bg-white/[0.15] mt-auto"></div>
-      `;
-      rulerEl.appendChild(tick);
+    const level = timelineZoom || '24h';
+    const fragment = document.createDocumentFragment();
+
+    if (level === '1h') {
+      // 5-min intervals over 24h = 288 intervals
+      for (let m = 0; m <= 24 * 60; m += 5) {
+        const pct = (m / (24 * 60)) * 100;
+        const h = Math.floor(m / 60) % 24;
+        const mins = m % 60;
+        const isHour = (mins === 0);
+        const isQuarter = (mins % 15 === 0);
+
+        const tick = document.createElement('div');
+        tick.className = 'absolute top-0 bottom-0 flex flex-col items-center pointer-events-none';
+        tick.style.left = `${pct}%`;
+
+        let labelHtml = '';
+        let tickClass = 'w-px h-1 bg-white/[0.06] mt-auto';
+
+        if (isHour) {
+          const hh = String(h).padStart(2, '0') + ':00';
+          labelHtml = `<span class="timeline-ruler-tick-label text-[10px] font-mono text-gray-300 font-semibold transform -translate-x-1/2 pt-1 select-none">${hh}</span>`;
+          tickClass = 'w-px h-2 bg-white/[0.25] mt-auto';
+        } else if (isQuarter) {
+          const hhmm = String(h).padStart(2, '0') + ':' + String(mins).padStart(2, '0');
+          labelHtml = `<span class="timeline-ruler-tick-label text-[9px] font-mono text-gray-500 transform -translate-x-1/2 pt-1 select-none">${hhmm}</span>`;
+          tickClass = 'w-px h-1.5 bg-white/[0.15] mt-auto';
+        }
+
+        tick.innerHTML = `
+          ${labelHtml}
+          <div class="timeline-ruler-tick ${tickClass}"></div>
+        `;
+        fragment.appendChild(tick);
+      }
+    } else if (level === '6h') {
+      // 15-min intervals over 24h = 96 intervals
+      for (let m = 0; m <= 24 * 60; m += 15) {
+        const pct = (m / (24 * 60)) * 100;
+        const h = Math.floor(m / 60) % 24;
+        const mins = m % 60;
+        const isHour = (mins === 0);
+        const isHalf = (mins === 30);
+
+        const tick = document.createElement('div');
+        tick.className = 'absolute top-0 bottom-0 flex flex-col items-center pointer-events-none';
+        tick.style.left = `${pct}%`;
+
+        let labelHtml = '';
+        let tickClass = 'w-px h-1 bg-white/[0.06] mt-auto';
+
+        if (isHour) {
+          const hh = String(h).padStart(2, '0') + ':00';
+          labelHtml = `<span class="timeline-ruler-tick-label text-[10px] font-mono text-gray-400 font-semibold transform -translate-x-1/2 pt-1 select-none">${hh}</span>`;
+          tickClass = 'w-px h-2 bg-white/[0.2] mt-auto';
+        } else if (isHalf) {
+          const hhmm = String(h).padStart(2, '0') + ':30';
+          labelHtml = `<span class="timeline-ruler-tick-label text-[9px] font-mono text-gray-500 transform -translate-x-1/2 pt-1 select-none">${hhmm}</span>`;
+          tickClass = 'w-px h-1.5 bg-white/[0.12] mt-auto';
+        }
+
+        tick.innerHTML = `
+          ${labelHtml}
+          <div class="timeline-ruler-tick ${tickClass}"></div>
+        `;
+        fragment.appendChild(tick);
+      }
+    } else if (level === '12h') {
+      // 30-min intervals over 24h = 48 intervals
+      for (let m = 0; m <= 24 * 60; m += 30) {
+        const pct = (m / (24 * 60)) * 100;
+        const h = Math.floor(m / 60) % 24;
+        const mins = m % 60;
+        const isHour = (mins === 0);
+
+        const tick = document.createElement('div');
+        tick.className = 'absolute top-0 bottom-0 flex flex-col items-center pointer-events-none';
+        tick.style.left = `${pct}%`;
+
+        let labelHtml = '';
+        let tickClass = 'w-px h-1 bg-white/[0.08] mt-auto';
+
+        if (isHour) {
+          const hh = String(h).padStart(2, '0') + ':00';
+          labelHtml = `<span class="timeline-ruler-tick-label text-[10px] font-mono text-gray-500 transform -translate-x-1/2 pt-1 select-none">${hh}</span>`;
+          tickClass = 'w-px h-2 bg-white/[0.15] mt-auto';
+        }
+
+        tick.innerHTML = `
+          ${labelHtml}
+          <div class="timeline-ruler-tick ${tickClass}"></div>
+        `;
+        fragment.appendChild(tick);
+      }
+    } else {
+      // 24h: hourly intervals
+      for (let h = 0; h <= 24; h++) {
+        const pct = (h / 24) * 100;
+        const hh = String(h % 24).padStart(2, '0') + ':00';
+        const tick = document.createElement('div');
+        tick.className = 'absolute top-0 bottom-0 flex flex-col items-center pointer-events-none';
+        tick.style.left = `${pct}%`;
+        tick.innerHTML = `
+          <span class="timeline-ruler-tick-label text-[10px] font-mono text-gray-500 transform -translate-x-1/2 pt-1 select-none">${hh}</span>
+          <div class="timeline-ruler-tick w-px h-2 bg-white/[0.15] mt-auto"></div>
+        `;
+        fragment.appendChild(tick);
+      }
     }
+
+    rulerEl.appendChild(fragment);
   }
 
   function renderTimelineGridOverlay() {
@@ -1191,13 +1374,24 @@
     if (!overlay) return;
     overlay.innerHTML = '';
 
-    for (let h = 0; h <= 24; h++) {
-      const pct = (h / 24) * 100;
+    const level = timelineZoom || '24h';
+    const fragment = document.createDocumentFragment();
+
+    let stepMinutes = 60;
+    if (level === '1h') stepMinutes = 15;
+    else if (level === '6h') stepMinutes = 30;
+    else if (level === '12h') stepMinutes = 30;
+
+    for (let m = 0; m <= 24 * 60; m += stepMinutes) {
+      const pct = (m / (24 * 60)) * 100;
+      const isHour = (m % 60 === 0);
       const line = document.createElement('div');
-      line.className = 'timeline-grid-line absolute top-0 bottom-0 w-px bg-white/[0.03] pointer-events-none';
+      const opacityClass = isHour ? 'bg-white/[0.04]' : 'bg-white/[0.015]';
+      line.className = `timeline-grid-line absolute top-0 bottom-0 w-px ${opacityClass} pointer-events-none`;
       line.style.left = `${pct}%`;
-      overlay.appendChild(line);
+      fragment.appendChild(line);
     }
+    overlay.appendChild(fragment);
 
     if (timelineData && timelineData.is_today) {
       renderTimelineNowIndicator(timelineData.current_time, timelineData.window_start, timelineData.window_end);

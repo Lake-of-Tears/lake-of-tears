@@ -301,6 +301,13 @@ def test_get_pipelines_page_renders_timeline_container_and_controls():
         assert 'id="calendar-days-grid"' in response.text
         assert 'html[data-theme="light"]' in response.text
 
+        # Verify mouse wheel zoom and cursor anchoring script definitions
+        assert "const ZOOM_LEVELS = ['24h', '12h', '6h', '1h'];" in response.text
+        assert "function setTimelineZoom(level, anchorClientX = null)" in response.text
+        assert "function stepTimelineZoom(zoomIn, anchorClientX = null)" in response.text
+        assert "WHEEL_ZOOM_THRESHOLD = 50" in response.text
+        assert "overscroll-behavior: contain" in response.text
+
 
 @pytest.mark.anyio
 async def test_ui_timeline_proxy():
