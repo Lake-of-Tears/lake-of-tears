@@ -801,7 +801,15 @@ def get_workspace_catalogs_from_db(db: Session, workspace_id: Any) -> list[dict[
     result: list[dict[str, Any]] = []
     for c in catalogs:
         schemas_list: list[dict[str, Any]] = []
-        for s in c.schemas:
+        _tier_order = {"bronze": 1, "silver": 2, "gold": 3}
+        sorted_schemas = sorted(
+            c.schemas,
+            key=lambda s: (
+                _tier_order.get((s.tier or s.slug or "").lower(), 99),
+                (s.name or s.slug or "").lower(),
+            ),
+        )
+        for s in sorted_schemas:
             tables_list: list[dict[str, Any]] = []
             for t in s.tables:
                 tables_list.append(

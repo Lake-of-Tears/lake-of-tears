@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 from typing import Any
@@ -21,7 +22,7 @@ from fastapi import (
     WebSocketDisconnect,
     status,
 )
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from models import User
 from sqlalchemy.orm import Session
 
@@ -281,6 +282,7 @@ async def list_runs(
 @router.get("/{path:path}")
 async def get_notebook_item(
     path: str,
+    download: bool = Query(False),
     workspace_slug: str | None = Query(None),
     x_workspace_slug: str | None = Header(None, alias="X-Workspace-Slug"),
     x_workspace_id: str | None = Header(None, alias="X-Workspace-Id"),
@@ -302,6 +304,19 @@ async def get_notebook_item(
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
     status_code, data = await notebook_service.get_notebook(ws.slug, clean_path)
+    if status_code != 200:
+        return JSONResponse(data, status_code=status_code)
+
+    if download:
+        filename = clean_path.split("/")[-1]
+        if not filename.endswith(".ipynb"):
+            filename = f"{filename}.ipynb"
+        content = data.get("content", data)
+        return Response(
+            content=json.dumps(content, indent=2),
+            media_type="application/x-ipynb+json",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
     return JSONResponse(data, status_code=status_code)
 
 

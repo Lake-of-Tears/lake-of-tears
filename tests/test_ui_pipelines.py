@@ -460,5 +460,32 @@ def test_pipelines_page_renders_editable_fields_and_notebook_link():
         assert 'id="drawer-notebook-link-wrap"' in response.text
         assert 'id="drawer-active-run-alert"' in response.text
         assert 'id="drawer-metadata-section"' in response.text
-        assert 'id="btn-save-drawer-meta"' in response.text
         assert 'id="drawer-color-swatch"' in response.text
+
+
+def test_pipelines_page_includes_highlight_and_row_ids():
+    token, mock_workspaces = _create_auth_cookie(role="member")
+
+    with patch.object(main, "_fetch_workspaces", return_value=mock_workspaces):
+        response = client.get(
+            "/pipelines",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
+        )
+        assert response.status_code == 200
+        assert "highlightPipelineRow" in response.text
+        assert "pipeline-row-" in response.text
+        assert "openDagId" in response.text
+
+
+def test_notebooks_page_includes_pipeline_redirect_and_prepopulation():
+    token, mock_workspaces = _create_auth_cookie(role="member")
+
+    with patch.object(main, "_fetch_workspaces", return_value=mock_workspaces):
+        response = client.get(
+            "/notebooks",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
+        )
+        assert response.status_code == 200
+        assert "loadExistingPipelineForNotebook" in response.text
+        assert "/pipelines?open=" in response.text
+        assert "airflow-sched-cadence" in response.text

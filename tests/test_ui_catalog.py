@@ -336,3 +336,164 @@ def test_catalog_preview_success():
         assert len(data["rows"]) == 2
         assert data["row_count"] == 2
         assert data["execution_ms"] == 1.25
+
+
+# ── Schema Ordering Tests ───────────────────────────────────────────────────────
+
+
+def test_sort_schemas_orders_bronze_silver_gold_then_custom():
+    schemas = [
+        {"slug": "gold", "tier": "gold", "name": "Gold"},
+        {"slug": "analytics", "tier": None, "name": "Analytics"},
+        {"slug": "bronze", "tier": "bronze", "name": "Bronze"},
+        {"slug": "silver", "tier": "silver", "name": "Silver"},
+    ]
+    sorted_s = main._sort_schemas(schemas)
+    slugs = [s["slug"] for s in sorted_s]
+    assert slugs == ["bronze", "silver", "gold", "analytics"]
+
+
+def test_catalog_page_renders_schemas_in_bronze_silver_gold_order():
+    token = _make_token()
+    mock_workspaces = [{"id": "ws-1", "name": "Default", "slug": "default"}]
+    # Backend returns schemas in unordered/alphabetical (bronze, gold, silver) order
+    mock_catalogs = [
+        {
+            "id": "cat-1",
+            "name": "Default",
+            "slug": "default",
+            "schemas": [
+                {"id": "sch-gold", "slug": "gold", "tier": "gold", "name": "Gold", "tables": []},
+                {
+                    "id": "sch-bronze",
+                    "slug": "bronze",
+                    "tier": "bronze",
+                    "name": "Bronze",
+                    "tables": [],
+                },
+                {
+                    "id": "sch-silver",
+                    "slug": "silver",
+                    "tier": "silver",
+                    "name": "Silver",
+                    "tables": [],
+                },
+            ],
+            "my_access": "owner",
+        }
+    ]
+
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
+        patch.object(main, "_backend_get", return_value=mock_catalogs),
+    ):
+        res = client.get(
+            "/catalog",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
+        )
+        assert res.status_code == 200
+        # In the rendered HTML, bronze must appear before silver, and silver before gold
+        pos_bronze = res.text.find("sch-bronze")
+        pos_silver = res.text.find("sch-silver")
+        pos_gold = res.text.find("sch-gold")
+        assert pos_bronze != -1
+        assert pos_silver != -1
+        assert pos_gold != -1
+        assert pos_bronze < pos_silver < pos_gold
+
+
+# ── Workspace Search for Schemas and Tables Tests ───────────────────────────────
+
+
+def test_workspace_search_finds_schemas_and_tables():
+    token = _make_token()
+    cookies = {"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"}
+    mock_workspaces = [{"id": "ws-1", "name": "Default", "slug": "default"}]
+    mock_catalogs = [
+        {
+            "id": "cat-1",
+            "name": "Finance",
+            "slug": "finance",
+            "description": "Financial Data",
+            "schemas": [
+                {
+                    "id": "sch-bronze",
+                    "slug": "bronze",
+                    "tier": "bronze",
+                    "name": "Bronze Ingest",
+                    "description": "Raw ingest tier",
+                    "tables": [
+                        {
+                            "id": "tbl-loans",
+                            "slug": "loans-data",
+                            "name": "Lending Club Loans",
+                            "description": "Underwriting and loan metrics",
+                            "s3_path_pattern": "s3://datalake/raw/loans/**/*.parquet",
+                            "column_defs": [
+                                {"name": "loan_id", "type": "BIGINT"},
+                                {"name": "loan_amnt", "type": "DOUBLE"},
+                                {"name": "fico_score", "type": "INTEGER"},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
+        patch.object(main, "_backend_get", return_value=mock_catalogs),
+        patch.object(main.notebook_proxy, "search_workspace_items", return_value=[]),
+    ):
+        # 1. Search for schema
+        resp = client.get("/api/workspace/search?q=bronze", cookies=cookies)
+        assert resp.status_code == 200
+        schema_results = [r for r in resp.json()["results"] if r["type"] == "schema"]
+        assert len(schema_results) >= 1
+        assert schema_results[0]["category"] == "Schemas"
+        assert schema_results[0]["title"] == "Bronze Ingest"
+        assert schema_results[0]["url"] == "/catalog?catalog_id=cat-1&schema_id=sch-bronze"
+
+        # 2. Search for table by name
+        resp = client.get("/api/workspace/search?q=lending", cookies=cookies)
+        assert resp.status_code == 200
+        table_results = [r for r in resp.json()["results"] if r["type"] == "table"]
+        assert len(table_results) >= 1
+        assert table_results[0]["category"] == "Tables"
+        assert table_results[0]["title"] == "Lending Club Loans"
+        assert (
+            table_results[0]["url"]
+            == "/catalog?catalog_id=cat-1&schema_id=sch-bronze&table_id=tbl-loans"
+        )
+
+        # 3. Deep search by column name (fico_score)
+        resp = client.get("/api/workspace/search?q=fico_score", cookies=cookies)
+        assert resp.status_code == 200
+        deep_table_results = [r for r in resp.json()["results"] if r["type"] == "table"]
+        assert len(deep_table_results) >= 1
+        assert deep_table_results[0]["title"] == "Lending Club Loans"
+        assert "Matched column: fico_score" in deep_table_results[0]["subtitle"]
+        assert (
+            deep_table_results[0]["url"]
+            == "/catalog?catalog_id=cat-1&schema_id=sch-bronze&table_id=tbl-loans"
+        )
+
+
+def test_catalog_page_includes_deep_link_and_navigation_handlers():
+    token = _make_token()
+    mock_workspaces = [{"id": "ws-1", "name": "Default", "slug": "default"}]
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
+        patch.object(main, "_backend_get", return_value=[]),
+    ):
+        res = client.get(
+            "/catalog",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
+        )
+        assert res.status_code == 200
+        assert "window.navigateCatalogTo" in res.text
+        assert "initCatalogDeepLink" in res.text

@@ -7,6 +7,7 @@ import threading
 import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import ai_service
 import jwt as _jwt
@@ -688,6 +689,25 @@ def health():
 # ── Catalog helpers ───────────────────────────────────────────────────────────
 
 _MEDALLION_TIERS = ("bronze", "silver", "gold")
+_SCHEMA_TIER_ORDER = {t: i for i, t in enumerate(_MEDALLION_TIERS, start=1)}
+
+
+def _schema_sort_key(schema: Any) -> tuple[int, str]:
+    tier = (
+        getattr(schema, "tier", None)
+        or (schema.get("tier") if isinstance(schema, dict) else None)
+        or getattr(schema, "slug", None)
+        or (schema.get("slug") if isinstance(schema, dict) else None)
+        or ""
+    ).lower()
+    name = (
+        getattr(schema, "name", None)
+        or (schema.get("name") if isinstance(schema, dict) else None)
+        or getattr(schema, "slug", None)
+        or (schema.get("slug") if isinstance(schema, dict) else None)
+        or ""
+    ).lower()
+    return (_SCHEMA_TIER_ORDER.get(tier, 99), name)
 
 
 def _slugify(name: str) -> str:
@@ -834,7 +854,7 @@ def _catalog_response(catalog: Catalog, user: User, db: Session) -> CatalogRespo
                 created_at=s.created_at,
                 tables=[CatalogTableResponse.model_validate(t) for t in s.tables],
             )
-            for s in catalog.schemas
+            for s in sorted(catalog.schemas, key=_schema_sort_key)
         ],
         my_access=access,
     )
@@ -1158,7 +1178,7 @@ def list_schemas(
             created_at=s.created_at,
             tables=[CatalogTableResponse.model_validate(t) for t in s.tables],
         )
-        for s in catalog.schemas
+        for s in sorted(catalog.schemas, key=_schema_sort_key)
     ]
 
 

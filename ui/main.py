@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import math
 import os
@@ -17,7 +18,13 @@ import jwt
 import websockets
 from dotenv import load_dotenv
 from fastapi import FastAPI, Form, Query, Request, WebSocket, WebSocketDisconnect, status
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
@@ -59,8 +66,36 @@ SOURCE_LABELS = {
 
 app = FastAPI(title="Lake of Tears")
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+_SCHEMA_TIER_ORDER = {"bronze": 1, "silver": 2, "gold": 3}
+
+
+def _sort_schemas(schemas: Any) -> list[dict[str, Any]]:
+    if not isinstance(schemas, list):
+        return []
+
+    def _key(s: Any) -> tuple[int, str]:
+        tier = (
+            getattr(s, "tier", None)
+            or (s.get("tier") if isinstance(s, dict) else None)
+            or getattr(s, "slug", None)
+            or (s.get("slug") if isinstance(s, dict) else None)
+            or ""
+        ).lower()
+        name = (
+            getattr(s, "name", None)
+            or (s.get("name") if isinstance(s, dict) else None)
+            or getattr(s, "slug", None)
+            or (s.get("slug") if isinstance(s, dict) else None)
+            or ""
+        ).lower()
+        return (_SCHEMA_TIER_ORDER.get(tier, 99), name)
+
+    return sorted(schemas, key=_key)
+
+
 # Catalog slugs use hyphens but the DuckDB views use underscores; templates show the SQL name.
 templates.env.filters["sql_ident"] = duckdb_ai._safe_identifier
+templates.env.filters["sort_schemas"] = _sort_schemas
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 _PUBLIC_PREFIXES = (
@@ -602,6 +637,10 @@ async def catalog(request: Request):
         catalogs = _backend_get(f"/api/workspaces/{ws['id']}/catalogs", token) or []
     elif token:
         catalogs = _backend_get("/api/catalogs", token) or []
+    if isinstance(catalogs, list):
+        for cat in catalogs:
+            if isinstance(cat, dict) and "schemas" in cat and isinstance(cat["schemas"], list):
+                cat["schemas"] = _sort_schemas(cat["schemas"])
     error = request.query_params.get("error")
     return templates.TemplateResponse(
         request=request,
@@ -787,15 +826,19 @@ async def storage(request: Request):
 def _resolve_ui_catalogs(request: Request) -> list[dict[str, Any]]:
     token = request.cookies.get("lake_token")
     ws = getattr(request.state, "workspace", None)
+    catalogs: list[dict[str, Any]] = []
     if token and ws and isinstance(ws, dict) and ws.get("id"):
         res = _backend_get(f"/api/workspaces/{ws['id']}/catalogs", token)
         if isinstance(res, list):
-            return res
-    if token:
+            catalogs = res
+    elif token:
         res = _backend_get("/api/catalogs", token)
         if isinstance(res, list):
-            return res
-    return []
+            catalogs = res
+    for cat in catalogs:
+        if isinstance(cat, dict) and "schemas" in cat and isinstance(cat["schemas"], list):
+            cat["schemas"] = _sort_schemas(cat["schemas"])
+    return catalogs
 
 
 @app.get("/sql", response_class=HTMLResponse)
@@ -1852,7 +1895,7 @@ async def api_workspace_search(request: Request, q: str = ""):
     except Exception as exc:
         logger.warning("Error searching notebooks in workspace search: %s", exc)
 
-    # 2. Catalog Tables & Datasets
+    # 2. Catalogs, Schemas & Tables
     try:
         catalogs = []
         if token and ws.get("id") != "default":
@@ -1860,19 +1903,109 @@ async def api_workspace_search(request: Request, q: str = ""):
         elif token:
             catalogs = _backend_get("/api/catalogs", token) or []
         for cat in catalogs:
+            cat_id = cat.get("id", "")
             cat_name = cat.get("name", "")
+            cat_slug = cat.get("slug", "")
             cat_desc = cat.get("description") or "Data Catalog"
-            if not query or query in cat_name.lower() or query in cat_desc.lower():
+            if (
+                not query
+                or query in cat_name.lower()
+                or query in cat_slug.lower()
+                or query in cat_desc.lower()
+            ):
                 results.append(
                     {
                         "category": "Catalog",
                         "title": cat_name,
                         "subtitle": cat_desc,
-                        "url": "/catalog",
+                        "url": f"/catalog?catalog_id={cat_id}",
                         "type": "catalog",
+                        "catalog_id": str(cat_id),
                         "path": cat_name,
                     }
                 )
+
+            for schema in cat.get("schemas") or []:
+                sch_id = schema.get("id", "")
+                sch_name = schema.get("name", "")
+                sch_slug = schema.get("slug", "")
+                sch_desc = schema.get("description") or ""
+                sch_tier = (schema.get("tier") or "").lower()
+                tables = schema.get("tables") or []
+
+                schema_matches = (
+                    not query
+                    or query in sch_name.lower()
+                    or query in sch_slug.lower()
+                    or query in sch_desc.lower()
+                    or query in sch_tier
+                )
+
+                if schema_matches:
+                    tier_label = (
+                        f"{schema.get('tier').capitalize()} tier • " if schema.get("tier") else ""
+                    )
+                    table_count_label = f"{len(tables)} table{'s' if len(tables) != 1 else ''}"
+                    results.append(
+                        {
+                            "category": "Schemas",
+                            "title": sch_name or sch_slug,
+                            "subtitle": f"Schema in {cat_name} • {tier_label}{table_count_label}",
+                            "url": f"/catalog?catalog_id={cat_id}&schema_id={sch_id}",
+                            "type": "schema",
+                            "catalog_id": str(cat_id),
+                            "schema_id": str(sch_id),
+                            "path": f"{cat_slug}.{sch_slug}",
+                        }
+                    )
+
+                for table in tables:
+                    tbl_id = table.get("id", "")
+                    tbl_name = table.get("name", "")
+                    tbl_slug = table.get("slug", "")
+                    tbl_desc = table.get("description") or ""
+                    tbl_s3 = table.get("s3_path_pattern") or ""
+                    cols = table.get("column_defs") or []
+
+                    direct_match = (
+                        not query
+                        or query in tbl_name.lower()
+                        or query in tbl_slug.lower()
+                        or query in tbl_desc.lower()
+                        or query in tbl_s3.lower()
+                    )
+
+                    col_match = None
+                    if not direct_match and query:
+                        for col in cols:
+                            if isinstance(col, dict) and query in str(col.get("name", "")).lower():
+                                col_match = col.get("name")
+                                break
+
+                    if direct_match or col_match:
+                        sql_sch = duckdb_ai._safe_identifier(sch_slug)
+                        sql_tbl = duckdb_ai._safe_identifier(tbl_slug)
+                        if col_match:
+                            sub = f"Table in {cat_name}.{sql_sch} • Matched column: {col_match} • {len(cols)} cols"
+                        elif tbl_desc:
+                            sub = f"Table in {cat_name}.{sql_sch} • {len(cols)} cols • {tbl_desc}"
+                        else:
+                            sub = f"Table in {cat_name}.{sql_sch} • {len(cols)} cols"
+
+                        results.append(
+                            {
+                                "category": "Tables",
+                                "title": tbl_name or sql_tbl,
+                                "subtitle": sub,
+                                "url": f"/catalog?catalog_id={cat_id}&schema_id={sch_id}&table_id={tbl_id}",
+                                "type": "table",
+                                "catalog_id": str(cat_id),
+                                "schema_id": str(sch_id),
+                                "table_id": str(tbl_id),
+                                "table_ident": sql_tbl,
+                                "path": f"{sql_sch}.{sql_tbl}",
+                            }
+                        )
     except Exception as exc:
         logger.warning("Error searching catalog in workspace search: %s", exc)
 
@@ -1997,7 +2130,7 @@ async def api_workspace_search(request: Request, q: str = ""):
 
 @app.get("/api/notebooks/{path:path}")
 @app.get("/notebooks/api/{path:path}")
-async def api_get_notebook(request: Request, path: str):
+async def api_get_notebook(request: Request, path: str, download: bool = False):
     auth_res = _get_notebook_auth_and_workspace(request, require_write=False)
     if isinstance(auth_res, JSONResponse):
         return auth_res
@@ -2008,6 +2141,20 @@ async def api_get_notebook(request: Request, path: str):
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
     status_code, data = await notebook_proxy.get_notebook(ws["slug"], clean_path, auth_token=token)
+    if status_code != 200:
+        return JSONResponse(data, status_code=status_code)
+
+    if download:
+        filename = clean_path.split("/")[-1]
+        if not filename.endswith(".ipynb"):
+            filename = f"{filename}.ipynb"
+        content = data.get("content", data)
+        return Response(
+            content=json.dumps(content, indent=2),
+            media_type="application/x-ipynb+json",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
     return JSONResponse(data, status_code=status_code)
 
 
