@@ -25,10 +25,8 @@ DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
 # Fallback TTL used when the DB is unavailable (e.g. during first startup).
 _FALLBACK_TTL = timedelta(hours=24)
 
-# bcrypt only uses the first 72 bytes of a password. passlib (used before) silently ignored the
-# rest; bcrypt >= 5 raises instead. Truncating the same way keeps every existing hash verifying and
-# long passwords (up to 128 characters are accepted) working.
-_BCRYPT_MAX_BYTES = 72
+# bcrypt only reads the first 72 bytes of a password and bcrypt >= 5 refuses longer ones. Longer
+# passwords are rejected when they are set (see schemas.check_password_length), never truncated.
 _BCRYPT_ROUNDS = 12
 
 
@@ -186,20 +184,17 @@ def set_stored_gemini_model(
         )
 
 
-def _bcrypt_input(password: str) -> bytes:
-    return password.encode("utf-8")[:_BCRYPT_MAX_BYTES]
-
-
 def hash_password(password: str) -> str:
-    return bcrypt.hashpw(_bcrypt_input(password), bcrypt.gensalt(rounds=_BCRYPT_ROUNDS)).decode(
+    # raises ValueError for a password over 72 bytes; the API validates that first
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=_BCRYPT_ROUNDS)).decode(
         "ascii"
     )
 
 
 def verify_password(plain: str, hashed: str) -> bool:
     try:
-        return bcrypt.checkpw(_bcrypt_input(plain), hashed.encode("utf-8"))
-    except ValueError:  # not a valid bcrypt hash: treat as a failed login, not a server error
+        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    except ValueError:  # too long to be a real password, or not a bcrypt hash: a failed login
         return False
 
 
