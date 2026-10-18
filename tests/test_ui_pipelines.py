@@ -53,6 +53,8 @@ def test_get_pipelines_page_renders_native_template():
         assert 'id="filter-running"' in response.text
         assert 'id="filter-failed"' in response.text
         assert 'id="inspector-drawer"' in response.text
+        assert 'id="btn-delete-pipeline-drawer"' in response.text
+        assert 'id="pipeline-delete-modal"' in response.text
         assert 'id="trigger-modal"' in response.text
         assert "Schedule Notebook" in response.text
 
@@ -78,8 +80,9 @@ def test_get_pipelines_page_viewer_mode_restrictions():
         )
         assert response.status_code == 200
         assert "Read-Only Viewer" in response.text
-        # Viewer should not have "+ Schedule Notebook" header button
+        # Viewer should not have "+ Schedule Notebook" header button or delete button
         assert "Schedule Notebook" not in response.text
+        assert 'id="btn-delete-pipeline-drawer"' not in response.text
 
 
 def test_notebooks_page_contains_enhanced_schedule_modal():
@@ -212,6 +215,33 @@ async def test_ui_pipeline_proxy_delete_schedule():
     ):
         res = client.delete(
             "/api/pipelines/schedule-notebook/ws_analytics_forecast",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
+        )
+        assert res.status_code == 200
+        assert res.json()["status"] == "deleted"
+        assert mock_del.called
+
+
+@pytest.mark.anyio
+async def test_ui_pipeline_proxy_delete_pipeline():
+    token, mock_workspaces = _create_auth_cookie(role="editor")
+
+    mock_resp = httpx.Response(
+        200,
+        json={"dag_id": "ws_analytics_forecast", "status": "deleted"},
+        request=httpx.Request(
+            "DELETE", "http://backend:8000/api/v1/pipelines/ws_analytics_forecast"
+        ),
+    )
+
+    with (
+        patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
+        patch(
+            "httpx.AsyncClient.delete", new_callable=AsyncMock, return_value=mock_resp
+        ) as mock_del,
+    ):
+        res = client.delete(
+            "/api/pipelines/ws_analytics_forecast",
             cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
         )
         assert res.status_code == 200

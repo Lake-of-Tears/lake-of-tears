@@ -2687,7 +2687,9 @@ async def ui_schedule_notebook(request: Request):
 
 @app.delete("/api/pipelines/schedule-notebook/{dag_id}")
 @app.delete("/api/v1/pipelines/schedule-notebook/{dag_id}")
-async def ui_delete_schedule_notebook(request: Request, dag_id: str):
+@app.delete("/api/pipelines/{dag_id}")
+@app.delete("/api/v1/pipelines/{dag_id}")
+async def ui_delete_pipeline(request: Request, dag_id: str):
     token = _get_request_token(request)
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     ws = getattr(request.state, "workspace", None)
@@ -2698,7 +2700,7 @@ async def ui_delete_schedule_notebook(request: Request, dag_id: str):
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.delete(
-                f"{BACKEND_URL}/api/v1/pipelines/schedule-notebook/{dag_id}",
+                f"{BACKEND_URL}/api/v1/pipelines/{dag_id}",
                 headers=headers,
                 params=params,
                 cookies=request.cookies,
@@ -2706,6 +2708,9 @@ async def ui_delete_schedule_notebook(request: Request, dag_id: str):
             return JSONResponse(resp.json(), status_code=resp.status_code)
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+ui_delete_schedule_notebook = ui_delete_pipeline
 
 
 @app.get("/api/pipelines/timeline")

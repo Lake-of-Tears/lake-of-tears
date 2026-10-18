@@ -219,6 +219,28 @@
       border-color: #d1d5db !important;
       color: #111827 !important;
     }
+    html[data-theme="light"] #btn-delete-pipeline-drawer {
+      color: #e11d48 !important;
+      background-color: #ffe4e6 !important;
+      border-color: #fecdd3 !important;
+    }
+    html[data-theme="light"] #btn-delete-pipeline-drawer:hover {
+      color: #ffffff !important;
+      background-color: #e11d48 !important;
+    }
+    html[data-theme="light"] #pipeline-delete-modal > div {
+      background-color: #ffffff !important;
+      border-color: #e5e7eb !important;
+    }
+    html[data-theme="light"] #pipeline-delete-modal h3 {
+      color: #e11d48 !important;
+    }
+    html[data-theme="light"] #pipeline-delete-modal p {
+      color: #374151 !important;
+    }
+    html[data-theme="light"] #pipeline-delete-modal #delete-pipeline-name {
+      color: #111827 !important;
+    }
     html[data-theme="light"] .filter-pill-container {
       background-color: #ffffff !important;
       border-color: #e5e7eb !important;
@@ -524,6 +546,14 @@
         </div>
         <div class="flex items-center gap-2 shrink-0">
           {% if my_role != 'viewer' %}
+          <button id="btn-delete-pipeline-drawer" onclick="openDeletePipelineModal(currentDrawerDagId)"
+                  class="hidden px-2.5 py-1.5 text-xs font-medium rounded-lg text-rose-300 hover:text-white bg-rose-500/10 hover:bg-rose-600 border border-rose-500/30 transition-all flex items-center gap-1.5 shadow-sm"
+                  title="Delete Pipeline">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+            <span>Delete</span>
+          </button>
           <button onclick="savePipelineMetadata(currentDrawerDagId)" id="btn-save-drawer-meta"
                   class="btn-primary text-xs py-1.5 px-3 flex items-center gap-1">
             <span>Save</span>
@@ -641,6 +671,55 @@
 
       </div>
 
+    </div>
+  </div>
+</div>
+
+<!-- ── Delete Pipeline Confirmation Modal ───────────────────────────────── -->
+<div id="pipeline-delete-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+  <div class="bg-[#1c1c1c] border border-white/[0.1] rounded-xl shadow-2xl w-full max-w-md p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-sm font-semibold text-rose-400 flex items-center gap-2">
+        <svg class="w-4 h-4 text-rose-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+        </svg>
+        Delete Pipeline
+      </h3>
+      <button onclick="closeDeletePipelineModal()" class="text-gray-500 hover:text-gray-300">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    <div class="space-y-3 mb-6">
+      <p class="text-xs text-gray-300">
+        Are you sure you want to delete <span id="delete-pipeline-name" class="font-semibold text-gray-100"></span> (<code id="delete-dag-id" class="text-rose-300 font-mono">dag_id</code>)?
+      </p>
+      <div class="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300 space-y-1">
+        <div class="font-medium flex items-center gap-1.5">
+          <svg class="w-4 h-4 text-rose-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+          </svg>
+          Warning: This action cannot be undone.
+        </div>
+        <p class="text-[11px] text-rose-200/80">
+          Deleting this pipeline will remove its schedule DAG file, purge upcoming scheduled executions, and delete all historical run records.
+        </p>
+      </div>
+    </div>
+
+    <div class="flex items-center justify-end gap-3">
+      <button onclick="closeDeletePipelineModal()" class="btn-ghost text-xs">Cancel</button>
+      <button onclick="confirmDeletePipeline()" id="btn-confirm-delete-pipeline"
+              class="px-3.5 py-1.5 text-xs font-medium rounded-lg text-white bg-rose-600 hover:bg-rose-500 transition-colors flex items-center gap-1.5 shadow-sm">
+        <span id="delete-pipeline-btn-spinner" class="hidden">
+          <svg class="animate-spin -ml-0.5 mr-1 h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+        </span>
+        <span id="delete-pipeline-btn-text">Delete Pipeline</span>
+      </button>
     </div>
   </div>
 </div>
@@ -2016,6 +2095,9 @@
   function closeInspector() {
     document.getElementById('inspector-drawer').classList.add('hidden');
     stopLogPolling();
+    const deleteBtn = document.getElementById('btn-delete-pipeline-drawer');
+    if (deleteBtn) deleteBtn.classList.add('hidden');
+    currentDrawerDagId = null;
   }
 
   function setDrawerTab(tab) {
@@ -2145,6 +2227,16 @@
         nbWrap.classList.add('hidden');
       }
     }
+
+    const deleteBtn = document.getElementById('btn-delete-pipeline-drawer');
+    if (deleteBtn) {
+      const isDeletable = userRole !== 'viewer' && !isSystemPipeline(dagId) && (dagId.startsWith('ws_') || Boolean(p && (p.is_notebook_job || p.notebook_path)));
+      if (isDeletable) {
+        deleteBtn.classList.remove('hidden');
+      } else {
+        deleteBtn.classList.add('hidden');
+      }
+    }
   }
 
   async function togglePipelinePauseFromDrawer() {
@@ -2205,6 +2297,106 @@
         btn.disabled = false;
         btn.textContent = 'Save';
       }
+    }
+  }
+
+  // ── Pipeline Deletion ──────────────────────────────────────────────────────
+  let pipelinePendingDeleteDagId = null;
+
+  function isSystemPipeline(dagId) {
+    if (!dagId) return false;
+    if (dagId.startsWith('ingest_')) return true;
+    const systemDags = [
+      'run_notebook',
+      'refresh_catalog_schemas_dag',
+      'embed_sources_dag',
+      'summarize_dag',
+      'anomaly_detect_dag',
+      'generate_embeddings_dag',
+    ];
+    return systemDags.includes(dagId);
+  }
+
+  function openDeletePipelineModal(dagId) {
+    if (!dagId || userRole === 'viewer') return;
+    pipelinePendingDeleteDagId = dagId;
+    const p = allPipelines.find(item => item.dag_id === dagId);
+    const displayName = p ? (p.display_label || p.pipeline_name || dagId) : dagId;
+
+    const nameEl = document.getElementById('delete-pipeline-name');
+    if (nameEl) nameEl.textContent = displayName;
+    const dagEl = document.getElementById('delete-dag-id');
+    if (dagEl) dagEl.textContent = dagId;
+
+    const modal = document.getElementById('pipeline-delete-modal');
+    if (modal) modal.classList.remove('hidden');
+  }
+
+  function closeDeletePipelineModal() {
+    const modal = document.getElementById('pipeline-delete-modal');
+    if (modal) modal.classList.add('hidden');
+    pipelinePendingDeleteDagId = null;
+  }
+
+  async function confirmDeletePipeline() {
+    const dagId = pipelinePendingDeleteDagId || currentDrawerDagId;
+    if (!dagId || userRole === 'viewer') return;
+
+    const btn = document.getElementById('btn-confirm-delete-pipeline');
+    const spinner = document.getElementById('delete-pipeline-btn-spinner');
+    const btnText = document.getElementById('delete-pipeline-btn-text');
+
+    if (btn) btn.disabled = true;
+    if (spinner) spinner.classList.remove('hidden');
+    if (btnText) btnText.textContent = 'Deleting...';
+
+    try {
+      const res = await fetch(`/api/pipelines/${encodeURIComponent(dagId)}`, {
+        method: 'DELETE',
+      });
+
+      if (!res.ok) {
+        let errMsg = 'Failed to delete pipeline';
+        try {
+          const errData = await res.json();
+          errMsg = errData.detail || errData.message || errMsg;
+        } catch (_) {}
+        throw new Error(errMsg);
+      }
+
+      closeDeletePipelineModal();
+      closeInspector();
+
+      // Clean up URL query parameters
+      try {
+        const url = new URL(window.location.href);
+        let urlChanged = false;
+        ['open', 'dag_id', 'selected'].forEach(param => {
+          if (url.searchParams.has(param)) {
+            url.searchParams.delete(param);
+            urlChanged = true;
+          }
+        });
+        if (urlChanged) {
+          window.history.replaceState({}, '', url.pathname + (url.search ? url.search : ''));
+        }
+      } catch (e) {
+        console.error('Failed to update URL after deletion:', e);
+      }
+
+      showToast(`Pipeline ${dagId} deleted successfully`, 'success');
+
+      await Promise.all([
+        typeof fetchPipelines === 'function' ? fetchPipelines() : Promise.resolve(),
+        typeof fetchTimeline === 'function' ? fetchTimeline() : Promise.resolve()
+      ]);
+    } catch (err) {
+      console.error('Delete pipeline error:', err);
+      showToast(err.message || 'Error deleting pipeline', 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+      if (spinner) spinner.classList.add('hidden');
+      if (btnText) btnText.textContent = 'Delete Pipeline';
     }
   }
 
