@@ -119,7 +119,9 @@ The pipeline calls a function named `embed_texts`. For a quick local test you ca
 
 ```python
 import hashlib, math, sys
+
 sys.path[:0] = ["pipeline/shared", "pipeline/embed"]
+
 
 def fake_vec(text, dims=768):
     vals, i = [], 0
@@ -130,10 +132,15 @@ def fake_vec(text, dims=768):
     norm = math.sqrt(sum(v * v for v in vals))
     return [v / norm for v in vals]
 
+
 import gemini_embedder
-gemini_embedder.embed_texts = lambda texts, task_type="RETRIEVAL_DOCUMENT": [fake_vec(t) for t in texts]
+
+gemini_embedder.embed_texts = lambda texts, task_type="RETRIEVAL_DOCUMENT": [
+    fake_vec(t) for t in texts
+]
 
 import embed_sources
+
 embed_sources.embed_source("example_orders", "raw/example_orders/**/*.parquet")
 ```
 
@@ -194,11 +201,12 @@ LIMIT 20;
 
 ```python
 import duckdb
+
 # run with PYTHONPATH=pipeline/shared so that gemini_embedder can be imported
 from gemini_embedder import embed_query
 
 question = "Was it hot yesterday?"
-vec = embed_query(question)          # 768 numbers, task type RETRIEVAL_QUERY
+vec = embed_query(question)  # 768 numbers, task type RETRIEVAL_QUERY
 
 con = duckdb.connect()
 con.execute("INSTALL httpfs; LOAD httpfs;")

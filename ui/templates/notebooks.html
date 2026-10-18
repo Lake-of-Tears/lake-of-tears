@@ -85,6 +85,9 @@
         <button onclick="openNewNotebookModal()" title="New Notebook" class="p-1 text-gray-400 hover:text-white hover:bg-white/[0.08] rounded transition-colors">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
         </button>
+        <button onclick="triggerImportNotebook()" title="Import Notebook (.ipynb)" id="btn-import-notebook" class="p-1 text-gray-400 hover:text-white hover:bg-white/[0.08] rounded transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+        </button>
         <button onclick="openNewFolderModal()" title="New Folder" class="p-1 text-gray-400 hover:text-white hover:bg-white/[0.08] rounded transition-colors">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
         </button>
@@ -92,6 +95,7 @@
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
         </button>
       </div>
+      <input type="file" id="notebook-file-input" accept=".ipynb" class="hidden" onchange="handleNotebookFileSelect(event)" />
       {% endif %}
     </div>
 
@@ -178,6 +182,12 @@
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>
           Save
         </button>
+        {% endif %}
+        <button onclick="downloadCurrentNotebook()" id="btn-download" title="Download Notebook (.ipynb)" class="btn-ghost text-xs py-1 px-2.5 text-gray-300 hover:text-white">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+          Download
+        </button>
+        {% if my_role != 'viewer' %}
         <button onclick="openAirflowModal()" title="Run in Apache Airflow" class="btn-ghost text-xs py-1 px-2.5 text-blue-400 hover:text-blue-300">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
           Schedule / Run
@@ -209,6 +219,10 @@
       <div class="flex items-center gap-3">
         <button onclick="openNewNotebookModal()" class="btn-primary text-xs">
           + New Notebook
+        </button>
+        <button onclick="triggerImportNotebook()" class="btn-ghost text-xs flex items-center gap-1.5 border border-white/[0.1] hover:border-white/[0.2] text-gray-300 hover:text-white">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+          Import Notebook
         </button>
       </div>
       {% endif %}
@@ -468,6 +482,38 @@
         <button type="button" onclick="confirmDelete()" id="btn-confirm-delete" class="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white text-xs font-medium rounded-md transition-colors cursor-pointer">
           Delete Permanently
         </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Import Conflict Modal ──────────────────────────────────────────────── -->
+  <div id="import-conflict-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-[#1c1c1c] border border-white/[0.1] rounded-xl shadow-2xl w-full max-w-md p-6">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-sm font-semibold text-gray-100 flex items-center gap-2">
+          <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+          File Already Exists
+        </h3>
+        <button onclick="cancelImportConflict()" class="text-gray-500 hover:text-gray-300">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <p class="text-xs text-gray-300 mb-2">
+        A notebook named <span id="import-conflict-filename" class="font-mono text-amber-300 bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-800/40"></span> already exists in <span id="import-conflict-location" class="font-mono text-gray-200"></span>.
+      </p>
+      <p class="text-xs text-gray-400 mb-4">Would you like to overwrite the existing file or save it with a new name?</p>
+
+      <div class="mb-5">
+        <label class="block text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-1.5">New Name</label>
+        <input type="text" id="import-conflict-newname" placeholder="notebook_copy.ipynb" class="input-dark text-xs w-full bg-[#141414] border border-white/[0.08] rounded-lg px-3 py-2 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500" />
+      </div>
+
+      <div class="flex items-center justify-between gap-2">
+        <button type="button" onclick="cancelImportConflict()" class="btn-ghost text-xs">Cancel</button>
+        <div class="flex items-center gap-2">
+          <button type="button" onclick="resolveImportConflict('overwrite')" class="btn-ghost text-xs text-amber-400 hover:text-amber-300 border border-amber-500/30 hover:border-amber-500/50">Overwrite</button>
+          <button type="button" onclick="resolveImportConflict('rename')" class="btn-primary text-xs">Save as New File</button>
+        </div>
       </div>
     </div>
   </div>
@@ -750,11 +796,18 @@ function renderNotebookSearchResults(query, items) {
             ${parent ? `<div class="text-[10px] text-gray-500 truncate leading-tight font-mono">📁 /${escapeHtml(parent)}</div>` : '<div class="text-[10px] text-gray-500 truncate leading-tight font-mono">📁 /</div>'}
           </div>
         </div>
-        ${!IS_VIEWER ? `
         <div class="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity shrink-0" onclick="event.stopPropagation()">
+          ${!isDir ? `
+          <button onclick="downloadNotebook('${escapeHtml(item.path)}')" title="Download notebook (.ipynb)" class="p-0.5 text-gray-500 hover:text-blue-400">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+          </button>` : ''}
+          ${!IS_VIEWER ? `
           ${isDir ? `
           <button onclick="openNewNotebookModal('${escapeHtml(item.path)}')" title="New notebook in this folder" class="p-0.5 text-gray-500 hover:text-blue-400">
             <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+          </button>
+          <button onclick="triggerImportNotebook('${escapeHtml(item.path)}')" title="Import notebook into this folder" class="p-0.5 text-gray-500 hover:text-blue-400">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
           </button>` : ''}
           <button onclick="openMoveModal('${escapeHtml(item.path)}', ${isDir})" title="Move to folder" class="p-0.5 text-gray-500 hover:text-purple-400">
             <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
@@ -764,8 +817,8 @@ function renderNotebookSearchResults(query, items) {
           </button>
           <button onclick="openDeleteModal('${escapeHtml(item.path)}')" title="Delete" class="p-0.5 text-gray-500 hover:text-red-400">
             <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-          </button>
-        </div>` : ''}
+          </button>` : ''}
+        </div>
       </div>
     `;
   }).join('');
@@ -852,11 +905,18 @@ function renderFileList() {
           </svg>
           <span class="truncate">${escapeHtml(item.name)}</span>
         </div>
-        ${!IS_VIEWER ? `
         <div class="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity shrink-0" onclick="event.stopPropagation()">
+          ${!isDir ? `
+          <button onclick="downloadNotebook('${escapeHtml(item.path)}')" title="Download notebook (.ipynb)" class="p-0.5 text-gray-500 hover:text-blue-400">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+          </button>` : ''}
+          ${!IS_VIEWER ? `
           ${isDir ? `
           <button onclick="openNewNotebookModal('${escapeHtml(item.path)}')" title="New notebook in this folder" class="p-0.5 text-gray-500 hover:text-blue-400">
             <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+          </button>
+          <button onclick="triggerImportNotebook('${escapeHtml(item.path)}')" title="Import notebook into this folder" class="p-0.5 text-gray-500 hover:text-blue-400">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
           </button>` : ''}
           <button onclick="openMoveModal('${escapeHtml(item.path)}', ${isDir})" title="Move to folder" class="p-0.5 text-gray-500 hover:text-purple-400">
             <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
@@ -866,8 +926,8 @@ function renderFileList() {
           </button>
           <button onclick="openDeleteModal('${escapeHtml(item.path)}')" title="Delete" class="p-0.5 text-gray-500 hover:text-red-400">
             <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-          </button>
-        </div>` : ''}
+          </button>` : ''}
+        </div>
       </div>
     `;
   }).join('');
@@ -1111,6 +1171,197 @@ async function confirmDelete() {
     showToast(err.message, 'error');
   } finally {
     btn.disabled = false;
+  }
+}
+
+// ── Import & Download Notebooks (.ipynb) ──────────────────────────────────
+
+let pendingImport = null;
+let importTargetFolder = '';
+
+function triggerImportNotebook(targetFolder = currentFolder) {
+  if (IS_VIEWER) {
+    showToast('Viewer mode: Importing notebooks is disabled', 'error');
+    return;
+  }
+  importTargetFolder = targetFolder || '';
+  const fileInput = document.getElementById('notebook-file-input');
+  if (fileInput) {
+    fileInput.value = '';
+    fileInput.click();
+  }
+}
+
+async function handleNotebookFileSelect(e) {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+
+  if (!file.name.toLowerCase().endsWith('.ipynb')) {
+    showToast('Only .ipynb Jupyter notebook files are supported', 'error');
+    return;
+  }
+
+  try {
+    const text = await file.text();
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch (parseErr) {
+      showToast('Invalid JSON in notebook file', 'error');
+      return;
+    }
+
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.cells)) {
+      showToast('Invalid notebook structure: missing "cells" array', 'error');
+      return;
+    }
+
+    const originalName = file.name.replace(/\\/g, '/').split('/').pop();
+    const targetFolder = (importTargetFolder || '').replace(/^\/+|\/+$/g, '');
+    const candidatePath = targetFolder ? `${targetFolder}/${originalName}` : originalName;
+
+    let exists = false;
+    if (targetFolder === currentFolder && Array.isArray(fileTreeItems)) {
+      exists = fileTreeItems.some(item => item.name === originalName);
+    }
+    if (!exists) {
+      try {
+        const checkRes = await fetch(`${API_BASE}/${encodeURIComponent(candidatePath)}`);
+        if (checkRes.ok) {
+          exists = true;
+        }
+      } catch (err) {
+        // ignore check error
+      }
+    }
+
+    if (exists) {
+      pendingImport = {
+        targetFolder: targetFolder,
+        originalName: originalName,
+        content: parsed,
+      };
+      document.getElementById('import-conflict-filename').textContent = originalName;
+      document.getElementById('import-conflict-location').textContent = targetFolder ? `/${targetFolder}` : '/';
+
+      const baseName = originalName.replace(/\.ipynb$/i, '');
+      document.getElementById('import-conflict-newname').value = `${baseName} (1).ipynb`;
+      openModal('import-conflict-modal');
+      return;
+    }
+
+    await performNotebookImport(candidatePath, parsed, originalName);
+  } catch (err) {
+    showToast(`Failed to read file: ${err.message}`, 'error');
+  }
+}
+
+async function performNotebookImport(targetPath, parsedContent, displayName) {
+  try {
+    const res = await fetch(`${API_BASE}/${encodeURIComponent(targetPath)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: parsedContent }),
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || errData.detail || 'Failed to save notebook');
+    }
+
+    showToast(`Imported ${displayName || targetPath} successfully`, 'success');
+    await loadFiles(currentFolder);
+    await openNotebook(targetPath);
+  } catch (err) {
+    showToast(`Import error: ${err.message}`, 'error');
+  }
+}
+
+function cancelImportConflict() {
+  pendingImport = null;
+  closeModal('import-conflict-modal');
+}
+
+async function resolveImportConflict(action) {
+  if (!pendingImport) {
+    closeModal('import-conflict-modal');
+    return;
+  }
+
+  const { targetFolder, originalName, content } = pendingImport;
+  let finalPath = '';
+  let displayName = '';
+
+  if (action === 'overwrite') {
+    finalPath = targetFolder ? `${targetFolder}/${originalName}` : originalName;
+    displayName = originalName;
+  } else if (action === 'rename') {
+    let newName = document.getElementById('import-conflict-newname').value.trim();
+    if (!newName) {
+      showToast('Please enter a valid file name', 'error');
+      return;
+    }
+    if (!newName.toLowerCase().endsWith('.ipynb')) {
+      newName += '.ipynb';
+    }
+    finalPath = targetFolder ? `${targetFolder}/${newName}` : newName;
+    displayName = newName;
+  }
+
+  closeModal('import-conflict-modal');
+  pendingImport = null;
+  await performNotebookImport(finalPath, content, displayName);
+}
+
+function triggerBrowserDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  showToast(`Downloaded ${filename}`, 'success');
+}
+
+function downloadCurrentNotebook() {
+  if (!notebookModel || !currentNotebookPath) {
+    showToast('No notebook open to download', 'info');
+    return;
+  }
+  if (Array.isArray(notebookModel.cells)) {
+    notebookModel.cells.forEach((cell, idx) => {
+      if (codeMirrorInstances[idx]) {
+        cell.source = codeMirrorInstances[idx].getValue();
+      }
+    });
+  }
+
+  const rawName = currentNotebookPath.split('/').pop() || 'notebook.ipynb';
+  const filename = rawName.toLowerCase().endsWith('.ipynb') ? rawName : `${rawName}.ipynb`;
+  const blob = new Blob([JSON.stringify(notebookModel, null, 2)], { type: 'application/x-ipynb+json' });
+  triggerBrowserDownload(blob, filename);
+}
+
+async function downloadNotebook(path) {
+  if (!path) return;
+  if (currentNotebookPath === path && notebookModel) {
+    downloadCurrentNotebook();
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/${encodeURIComponent(path)}`);
+    if (!res.ok) throw new Error('Could not retrieve notebook');
+    const data = await res.json();
+    const content = data.content || data;
+    const rawName = path.split('/').pop() || 'notebook.ipynb';
+    const filename = rawName.toLowerCase().endsWith('.ipynb') ? rawName : `${rawName}.ipynb`;
+    const blob = new Blob([JSON.stringify(content, null, 2)], { type: 'application/x-ipynb+json' });
+    triggerBrowserDownload(blob, filename);
+  } catch (err) {
+    showToast(`Download failed: ${err.message}`, 'error');
   }
 }
 

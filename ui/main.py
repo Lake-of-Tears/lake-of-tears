@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import math
 import os
@@ -17,7 +18,13 @@ import jwt
 import websockets
 from dotenv import load_dotenv
 from fastapi import FastAPI, Form, Query, Request, WebSocket, WebSocketDisconnect, status
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
@@ -1997,7 +2004,7 @@ async def api_workspace_search(request: Request, q: str = ""):
 
 @app.get("/api/notebooks/{path:path}")
 @app.get("/notebooks/api/{path:path}")
-async def api_get_notebook(request: Request, path: str):
+async def api_get_notebook(request: Request, path: str, download: bool = False):
     auth_res = _get_notebook_auth_and_workspace(request, require_write=False)
     if isinstance(auth_res, JSONResponse):
         return auth_res
@@ -2008,6 +2015,20 @@ async def api_get_notebook(request: Request, path: str):
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
     status_code, data = await notebook_proxy.get_notebook(ws["slug"], clean_path, auth_token=token)
+    if status_code != 200:
+        return JSONResponse(data, status_code=status_code)
+
+    if download:
+        filename = clean_path.split("/")[-1]
+        if not filename.endswith(".ipynb"):
+            filename = f"{filename}.ipynb"
+        content = data.get("content", data)
+        return Response(
+            content=json.dumps(content, indent=2),
+            media_type="application/x-ipynb+json",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
     return JSONResponse(data, status_code=status_code)
 
 
