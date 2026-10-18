@@ -102,9 +102,11 @@ def test_test_connection_reports_both_parts():
     assert result["ok"] and result["embedding"]["dimension"] == 1024
 
 
-def test_credentials_must_be_both_or_neither():
+def test_credentials_must_be_both_or_neither(monkeypatch):
     with pytest.raises(ProviderNotConfigured):
         BedrockProvider(region="us-east-1", access_key_id="AKIA", client=FakeRuntime())
+    monkeypatch.delenv("AWS_REGION", raising=False)
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
     with pytest.raises(ProviderNotConfigured, match="region"):
         BedrockProvider(region="")
 
