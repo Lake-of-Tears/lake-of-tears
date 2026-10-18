@@ -7,6 +7,7 @@ import threading
 import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import ai_service
 import jwt as _jwt

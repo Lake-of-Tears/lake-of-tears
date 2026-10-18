@@ -1907,7 +1907,12 @@ async def api_workspace_search(request: Request, q: str = ""):
             cat_name = cat.get("name", "")
             cat_slug = cat.get("slug", "")
             cat_desc = cat.get("description") or "Data Catalog"
-            if not query or query in cat_name.lower() or query in cat_slug.lower() or query in cat_desc.lower():
+            if (
+                not query
+                or query in cat_name.lower()
+                or query in cat_slug.lower()
+                or query in cat_desc.lower()
+            ):
                 results.append(
                     {
                         "category": "Catalog",
@@ -1937,7 +1942,9 @@ async def api_workspace_search(request: Request, q: str = ""):
                 )
 
                 if schema_matches:
-                    tier_label = f"{schema.get('tier').capitalize()} tier • " if schema.get("tier") else ""
+                    tier_label = (
+                        f"{schema.get('tier').capitalize()} tier • " if schema.get("tier") else ""
+                    )
                     table_count_label = f"{len(tables)} table{'s' if len(tables) != 1 else ''}"
                     results.append(
                         {

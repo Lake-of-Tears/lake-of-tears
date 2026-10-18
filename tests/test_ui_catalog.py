@@ -364,8 +364,20 @@ def test_catalog_page_renders_schemas_in_bronze_silver_gold_order():
             "slug": "default",
             "schemas": [
                 {"id": "sch-gold", "slug": "gold", "tier": "gold", "name": "Gold", "tables": []},
-                {"id": "sch-bronze", "slug": "bronze", "tier": "bronze", "name": "Bronze", "tables": []},
-                {"id": "sch-silver", "slug": "silver", "tier": "silver", "name": "Silver", "tables": []},
+                {
+                    "id": "sch-bronze",
+                    "slug": "bronze",
+                    "tier": "bronze",
+                    "name": "Bronze",
+                    "tables": [],
+                },
+                {
+                    "id": "sch-silver",
+                    "slug": "silver",
+                    "tier": "silver",
+                    "name": "Silver",
+                    "tables": [],
+                },
             ],
             "my_access": "owner",
         }
@@ -452,7 +464,10 @@ def test_workspace_search_finds_schemas_and_tables():
         assert len(table_results) >= 1
         assert table_results[0]["category"] == "Tables"
         assert table_results[0]["title"] == "Lending Club Loans"
-        assert table_results[0]["url"] == "/catalog?catalog_id=cat-1&schema_id=sch-bronze&table_id=tbl-loans"
+        assert (
+            table_results[0]["url"]
+            == "/catalog?catalog_id=cat-1&schema_id=sch-bronze&table_id=tbl-loans"
+        )
 
         # 3. Deep search by column name (fico_score)
         resp = client.get("/api/workspace/search?q=fico_score", cookies=cookies)
@@ -461,7 +476,10 @@ def test_workspace_search_finds_schemas_and_tables():
         assert len(deep_table_results) >= 1
         assert deep_table_results[0]["title"] == "Lending Club Loans"
         assert "Matched column: fico_score" in deep_table_results[0]["subtitle"]
-        assert deep_table_results[0]["url"] == "/catalog?catalog_id=cat-1&schema_id=sch-bronze&table_id=tbl-loans"
+        assert (
+            deep_table_results[0]["url"]
+            == "/catalog?catalog_id=cat-1&schema_id=sch-bronze&table_id=tbl-loans"
+        )
 
 
 def test_catalog_page_includes_deep_link_and_navigation_handlers():
@@ -479,5 +497,3 @@ def test_catalog_page_includes_deep_link_and_navigation_handlers():
         assert res.status_code == 200
         assert "window.navigateCatalogTo" in res.text
         assert "initCatalogDeepLink" in res.text
-
-
