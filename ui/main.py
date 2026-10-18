@@ -438,7 +438,7 @@ def _run_query(
     ai_state = {"rows_processed": 0, "ai_calls": 0}
     start_ts = time.perf_counter()
     try:
-        with duckdb_pool_instance.acquire() as con:
+        with duckdb_pool_instance.acquire(sql=sql) as con:
             if cancel is not None:
                 cancel.attach(con)
                 cancel.check()
