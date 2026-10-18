@@ -56,6 +56,17 @@ def test_get_pipelines_page_renders_native_template():
         assert 'id="trigger-modal"' in response.text
         assert "Schedule Notebook" in response.text
 
+        # Verify pipelines pagination elements (#239)
+        assert 'id="pipelines-pagination-toolbar"' in response.text
+        assert 'id="pipelines-pagination-info"' in response.text
+        assert 'id="pipelines-page-size"' in response.text
+        assert 'id="btn-pipelines-prev"' in response.text
+        assert 'id="btn-pipelines-next"' in response.text
+        assert 'id="pipelines-page-numbers"' in response.text
+        assert '<option value="10">10</option>' in response.text
+        assert '<option value="25">25</option>' in response.text
+        assert '<option value="50">50</option>' in response.text
+
 
 def test_get_pipelines_page_viewer_mode_restrictions():
     token, mock_workspaces = _create_auth_cookie(role="viewer")
