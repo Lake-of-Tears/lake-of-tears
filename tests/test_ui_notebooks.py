@@ -992,4 +992,3 @@ def test_api_save_imported_notebook():
         mock_save.assert_called_once_with(
             "default", "imported_nb.ipynb", {"content": nb_content}, auth_token=token
         )
-
