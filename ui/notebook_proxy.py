@@ -521,7 +521,9 @@ async def search_workspace_items(
         results: list[dict[str, Any]] = []
         for item in fs_items:
             path = item["path"]
-            if clean_subpath and not (path == clean_subpath or path.startswith(clean_subpath + "/")):
+            if clean_subpath and not (
+                path == clean_subpath or path.startswith(clean_subpath + "/")
+            ):
                 continue
             matches = True
             if q:

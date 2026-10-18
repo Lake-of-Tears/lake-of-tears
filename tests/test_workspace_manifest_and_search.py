@@ -38,7 +38,9 @@ def _compile_jsonb_sqlite(type_, compiler, **kw):
 client = TestClient(main.app)
 
 
-def _make_auth_cookie(role="member", ws_slug="default", ws_id="00000000-0000-0000-0000-000000000001"):
+def _make_auth_cookie(
+    role="member", ws_slug="default", ws_id="00000000-0000-0000-0000-000000000001"
+):
     token = jwt.encode(
         {"sub": "00000000-0000-0000-0000-000000000002", "email": "dev@lake.local", "role": role},
         main.AUTH_SECRET_KEY,
@@ -275,6 +277,7 @@ def test_ui_workspace_manifest_aggregation():
         patch.object(main, "_backend_get_async") as mock_backend_get,
         patch.object(notebook_proxy, "scan_workspace_filesystem", return_value=mock_nb_items),
     ):
+
         async def _mock_get(path, tok):
             if "catalog-manifest" in path or "catalogs" in path:
                 return mock_catalogs
@@ -333,7 +336,9 @@ def test_backward_compatibility_workspace_search():
     with (
         patch.object(main, "AUTH_ENABLED", True),
         patch.object(main, "_fetch_workspaces", return_value=workspaces),
-        patch.object(notebook_proxy, "search_workspace_items", new_callable=AsyncMock, return_value=[]),
+        patch.object(
+            notebook_proxy, "search_workspace_items", new_callable=AsyncMock, return_value=[]
+        ),
         patch.object(main, "_backend_get", return_value=[]),
     ):
         resp = client.get("/api/workspace/search?q=catalog", cookies=cookies)

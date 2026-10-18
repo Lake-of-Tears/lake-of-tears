@@ -1980,9 +1980,7 @@ async def api_workspace_manifest(request: Request):
             sch_name = schema.get("name", "")
             sch_slug = schema.get("slug", "")
             tables = schema.get("tables") or []
-            tier_label = (
-                f"{schema.get('tier').capitalize()} tier • " if schema.get("tier") else ""
-            )
+            tier_label = f"{schema.get('tier').capitalize()} tier • " if schema.get("tier") else ""
             table_count_label = f"{len(tables)} table{'s' if len(tables) != 1 else ''}"
 
             items.append(
