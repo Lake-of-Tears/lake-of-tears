@@ -132,7 +132,7 @@ with DAG(
     schedule="0 6 * * *",
     start_date=datetime(2026, 1, 1),
     catchup=False,
-    tags=["ingestion"],
+    tags=["ingestion", "workspace:default"],
     default_args={"retries": 2, "retry_delay": timedelta(minutes=5)},
     doc_md="Ingest example orders into s3://datalake/raw/example_orders/",
 ) as dag:

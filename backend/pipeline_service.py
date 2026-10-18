@@ -136,12 +136,12 @@ def resolve_workspace_dag_id(workspace_slug: str, pipeline_title: str) -> str:
     return f"ws_{clean_slug}_{clean_title}"
 
 
-def is_dag_accessible_by_workspace(
-    dag_data: dict[str, Any], workspace_slug: str, is_superadmin: bool = False
-) -> bool:
-    """Check if a DAG belongs to the specified workspace or if caller is superadmin."""
-    if is_superadmin:
-        return True
+def is_dag_accessible_by_workspace(dag_data: dict[str, Any], workspace_slug: str) -> bool:
+    """Check whether a DAG belongs to the workspace: ``ws_<slug>_`` prefix, ``workspace:<slug>``
+    tag, or the shared ``run_notebook`` DAG. The caller's role does not widen this: even a
+    superadmin only sees a workspace's own pipelines through that workspace. (The
+    ``is_superadmin`` arguments of the functions below are kept so callers did not change; they no
+    longer grant extra access.)"""
     dag_id = dag_data.get("dag_id", "")
     prefix = f"ws_{workspace_slug}_"
     if dag_id.startswith(prefix) or dag_id == "run_notebook":
@@ -230,9 +230,7 @@ async def list_workspace_dags(
 
             # Filter DAGs by workspace
             matching_dags = [
-                d
-                for d in raw_dags
-                if is_dag_accessible_by_workspace(d, workspace_slug, is_superadmin)
+                d for d in raw_dags if is_dag_accessible_by_workspace(d, workspace_slug)
             ]
 
             meta_map = get_pipeline_metadata_map(workspace_id, db) if workspace_id and db else {}
@@ -328,7 +326,7 @@ async def get_dag_details(
                 raise HTTPException(502, f"Failed to get DAG from Airflow: {resp.text}")
             dag = resp.json()
 
-            if not is_dag_accessible_by_workspace(dag, workspace_slug, is_superadmin):
+            if not is_dag_accessible_by_workspace(dag, workspace_slug):
                 raise HTTPException(404, f"Pipeline {dag_id} not found")
 
             last_run = await _fetch_latest_dag_run(client, api_base, auth, dag_id)
@@ -860,7 +858,7 @@ async def delete_scheduled_notebook(
 ) -> dict[str, Any]:
     """Delete a dynamically generated notebook schedule DAG."""
     clean_id = sanitize_dag_id(dag_id)
-    if not is_superadmin and not clean_id.startswith(f"ws_{workspace_slug}_"):
+    if not clean_id.startswith(f"ws_{workspace_slug}_"):
         raise HTTPException(404, f"Pipeline {dag_id} not found in this workspace")
 
     dags_dir = get_airflow_dags_dir()

@@ -8,7 +8,7 @@ with DAG(
     schedule="0 * * * *",
     start_date=datetime(2026, 1, 1),
     catchup=False,
-    tags=["ingestion"],
+    tags=["workspace:default", "ingestion"],
     doc_md="Ingest TrueNAS pool stats and SMART metrics into s3://datalake/raw/truenas/",
 ) as dag:
     BashOperator(

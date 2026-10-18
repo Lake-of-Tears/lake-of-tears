@@ -8,7 +8,7 @@ with DAG(
     schedule="0 6 * * *",
     start_date=datetime(2026, 1, 1),
     catchup=False,
-    tags=["ingestion"],
+    tags=["workspace:default", "ingestion"],
     doc_md="Ingest hourly Open-Meteo weather forecast into s3://datalake/raw/weather/",
 ) as dag:
     BashOperator(

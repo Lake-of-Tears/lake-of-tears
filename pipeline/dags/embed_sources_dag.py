@@ -8,7 +8,7 @@ with DAG(
     schedule="30 6 * * *",
     start_date=datetime(2026, 1, 1),
     catchup=False,
-    tags=["ai", "embeddings"],
+    tags=["workspace:default", "ai", "embeddings"],
     doc_md="Generate Gemini 768-dim embeddings for yesterday's raw data into s3://datalake/embeddings/",
 ) as dag:
     BashOperator(

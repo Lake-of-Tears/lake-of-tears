@@ -8,7 +8,7 @@ with DAG(
     schedule="0 7 * * *",
     start_date=datetime(2026, 1, 1),
     catchup=False,
-    tags=["ai"],
+    tags=["workspace:default", "ai"],
     doc_md="Generate daily Gemini summaries from yesterday's raw data into s3://datalake/raw/",
 ) as dag:
     BashOperator(

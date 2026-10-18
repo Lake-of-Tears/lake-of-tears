@@ -8,7 +8,7 @@ with DAG(
     schedule="0 */6 * * *",
     start_date=datetime(2026, 1, 1),
     catchup=False,
-    tags=["ingestion"],
+    tags=["workspace:default", "ingestion"],
     doc_md="Ingest Jellyfin play history into s3://datalake/raw/jellyfin/",
 ) as dag:
     BashOperator(

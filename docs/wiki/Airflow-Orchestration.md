@@ -77,15 +77,15 @@ The catalog and workspace maintenance DAGs are described in [Workspaces and Cata
 
 | Kind | `dag_id` | File | Tags |
 |---|---|---|---|
-| Ingestion | `ingest_<source>` | `ingest_<source>_dag.py` | `ingestion` |
-| Embeddings and AI | `embed_sources`, `summarize`, `anomaly_detect` | `<dag_id>_dag.py` | `ai`, `embeddings` |
+| Ingestion | `ingest_<source>` | `ingest_<source>_dag.py` | `ingestion`, `workspace:<slug>` |
+| Embeddings and AI | `embed_sources`, `summarize`, `anomaly_detect` | `<dag_id>_dag.py` | `ai`, `embeddings`, `workspace:<slug>` |
 | Catalog and workspace upkeep | `purge_*`, `refresh_*` | `<dag_id>_dag.py` | `catalog`, `workspace`, `maintenance` |
 
 Keep the `dag_id` equal to the file name without `_dag.py`, so it is easy to find.
 
 ### Which workspace sees a DAG
 
-The Pipelines page of a workspace lists a DAG when any of these is true:
+A pipeline shows up only in the workspaces it is associated with. The Pipelines page of a workspace lists a DAG when any of these is true:
 
 | Rule | Example for the workspace `default` |
 |---|---|
@@ -93,9 +93,11 @@ The Pipelines page of a workspace lists a DAG when any of these is true:
 | The DAG has the tag `workspace:<slug>` | `tags=["ingestion", "workspace:default"]` |
 | The DAG is `run_notebook` | always visible |
 
-A DAG that matches none of these (for example the shipped `purge_*` maintenance DAGs) is not listed for regular users.
+This applies to **every role, including superadmins**: a superadmin sees a workspace's pipelines by switching to that workspace, and cannot open, pause, trigger or delete a pipeline through a workspace it does not belong to (the API answers 404).
 
-**Superadmins see every DAG in every workspace.** This is intentional: a superadmin administers the whole instance, so the workspace badge on the Pipelines page does not filter their list. The rule lives in one function, `is_dag_accessible_by_workspace` in `backend/pipeline_service.py`, and is the place to tighten if a dedicated access-control (AAA) solution is deployed later.
+**Give every new pipeline a workspace tag.** A DAG with none of the above is listed nowhere. The shipped ingestion, embedding and AI DAGs carry `workspace:default`. The platform maintenance DAGs (`purge_*`, `refresh_*`) are deliberately unassigned and are managed in the Airflow UI.
+
+The rule lives in one function, `is_dag_accessible_by_workspace` in `backend/pipeline_service.py`.
 
 ### Schedules, catchup and retries
 
@@ -135,7 +137,7 @@ with DAG(
     schedule="0 6 * * *",
     start_date=datetime(2026, 1, 1),
     catchup=False,
-    tags=["ingestion"],
+    tags=["ingestion", "workspace:default"],
     default_args={"retries": 2, "retry_delay": timedelta(minutes=5)},
     doc_md="One-line description shown in the Airflow UI.",
 ) as dag:
