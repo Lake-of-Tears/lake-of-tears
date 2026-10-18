@@ -857,3 +857,112 @@ def test_pipeline_service_resolves_notebook_tag():
         res = asyncio.run(pipeline_service.list_workspace_dags("default", is_superadmin=True))
         assert len(res) == 1
         assert res[0]["notebook_path"] == "custom.ipynb"
+
+
+def test_extract_pending_dag_metadata_from_file():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        dag_file = Path(tmpdir) / "ws_default_clinical_trials_ingest.py"
+        dag_file.write_text(
+            """
+with DAG(
+    dag_id="ws_default_clinical_trials_ingest",
+    schedule="@hourly",
+    start_date=datetime(2026, 1, 1),
+    catchup=False,
+    tags=["workspace:default", "notebook", "scheduled", "notebook:test-pipelines/clinical_trials_ingest.ipynb"],
+    doc_md="Clinical Trials Ingest",
+) as dag:
+    pass
+""",
+            encoding="utf-8",
+        )
+        meta = pipeline_service._extract_pending_dag_metadata_from_file(dag_file, "default")
+        assert meta is not None
+        assert meta["dag_id"] == "ws_default_clinical_trials_ingest"
+        assert meta["description"] == "Clinical Trials Ingest"
+        assert meta["schedule_interval"] == {"__type": "CronExpression", "value": "@hourly"}
+        assert meta["timetable_description"] == "@hourly"
+        assert any(
+            t["name"] == "notebook:test-pipelines/clinical_trials_ingest.ipynb"
+            for t in meta["tags"]
+        )
+
+
+def test_list_workspace_dags_merges_pending_file_on_disk():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        dags_dir = Path(tmpdir)
+        ws_dir = dags_dir / "workspaces" / "analytics"
+        ws_dir.mkdir(parents=True)
+        py_file = ws_dir / "ws_analytics_hourly_job.py"
+        py_file.write_text(
+            """
+with DAG(
+    dag_id="ws_analytics_hourly_job",
+    schedule="@hourly",
+    tags=["workspace:analytics", "notebook", "scheduled", "notebook:test.ipynb"],
+    doc_md="Hourly Test Job",
+) as dag:
+    pass
+""",
+            encoding="utf-8",
+        )
+        with (
+            patch("pipeline_service.get_airflow_dags_dir", return_value=dags_dir),
+            patch("pipeline_service.get_airflow_server_url", return_value="http://mock:8080"),
+            patch("pipeline_service.get_airflow_auth", return_value=("admin", "pass")),
+            patch("pipeline_service.httpx.AsyncClient") as mock_client,
+        ):
+            mock_instance = AsyncMock()
+            # Airflow API returns empty list of dags (hasn't parsed the new file yet)
+            mock_instance.get.return_value = MagicMock(status_code=200, json=lambda: {"dags": []})
+            mock_client.return_value.__aenter__.return_value = mock_instance
+
+            res = asyncio.run(
+                pipeline_service.list_workspace_dags("analytics", is_superadmin=False)
+            )
+            assert len(res) == 1
+            assert res[0]["dag_id"] == "ws_analytics_hourly_job"
+            assert res[0]["schedule_interval"] == "@hourly"
+            assert res[0]["is_notebook_job"] is True
+            assert res[0]["notebook_path"] == "test.ipynb"
+
+
+def test_get_dag_details_disk_fallback():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        dags_dir = Path(tmpdir)
+        ws_dir = dags_dir / "workspaces" / "analytics"
+        ws_dir.mkdir(parents=True)
+        py_file = ws_dir / "ws_analytics_pending_job.py"
+        py_file.write_text(
+            """
+with DAG(
+    dag_id="ws_analytics_pending_job",
+    schedule="@daily",
+    tags=["workspace:analytics", "notebook", "scheduled", "notebook:pending.ipynb"],
+    doc_md="Pending Job Title",
+) as dag:
+    pass
+""",
+            encoding="utf-8",
+        )
+        with (
+            patch("pipeline_service.get_airflow_dags_dir", return_value=dags_dir),
+            patch("pipeline_service.get_airflow_server_url", return_value="http://mock:8080"),
+            patch("pipeline_service.get_airflow_auth", return_value=("admin", "pass")),
+            patch("pipeline_service.httpx.AsyncClient") as mock_client,
+        ):
+            mock_instance = AsyncMock()
+            # Airflow API returns 404 (not yet parsed)
+            mock_instance.get.return_value = MagicMock(status_code=404, text="Not Found")
+            mock_client.return_value.__aenter__.return_value = mock_instance
+
+            details = asyncio.run(
+                pipeline_service.get_dag_details(
+                    "analytics", "ws_analytics_pending_job", is_superadmin=False
+                )
+            )
+            assert details["dag_id"] == "ws_analytics_pending_job"
+            assert details["pipeline_name"] == "Pending Job Title"
+            assert details["schedule_interval"] == "@daily"
+            assert details["notebook_path"] == "pending.ipynb"
+            assert details["last_run"] is None

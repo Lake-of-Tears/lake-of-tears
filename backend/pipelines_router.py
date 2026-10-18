@@ -138,6 +138,9 @@ async def schedule_notebook_pipeline(
         parameters=req.parameters,
         compute_resources=req.compute_resources,
         is_superadmin=is_superadmin,
+        workspace_id=ws.id,
+        user_id=current_user.id,
+        db=db,
     )
 
 
@@ -166,6 +169,8 @@ async def delete_scheduled_notebook_pipeline(
         workspace_slug=ws.slug,
         dag_id=dag_id,
         is_superadmin=is_superadmin,
+        workspace_id=ws.id,
+        db=db,
     )
 
 
