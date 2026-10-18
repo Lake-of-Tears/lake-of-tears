@@ -290,7 +290,8 @@ services:
       AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session"
       AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:-please_change_me}
       # base_url tells Airflow to generate links prefixed with /airflow/
-      AIRFLOW__WEBSERVER__BASE_URL: http://localhost/airflow/
+      # Must NOT end with a slash (Airflow refuses to start); nginx keeps the /airflow prefix.
+      AIRFLOW__WEBSERVER__BASE_URL: http://localhost/airflow
       _AIRFLOW_WWW_USER_USERNAME: admin
       _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_PASSWORD}
       JUPYTER_SERVER_URL: http://jupyter:8888
