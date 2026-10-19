@@ -100,3 +100,8 @@ def test_password_change_rejects_a_new_password_over_72_bytes():
 def test_password_change_still_requires_8_characters():
     with pytest.raises(ValidationError, match="at least 8"):
         ChangePasswordRequest(current_password="OldPassword1!", new_password="short")
+
+
+def test_registration_requires_8_characters():
+    with pytest.raises(ValidationError, match="at least 8"):
+        RegisterRequest(email="a@b.com", password="short")

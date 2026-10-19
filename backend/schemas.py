@@ -8,6 +8,7 @@ from pydantic import BaseModel, EmailStr, field_validator, model_validator
 
 # bcrypt only reads the first 72 bytes of a password, so a longer one would be silently cut and a
 # change made past that point would not change anything. Passwords that long are refused instead.
+PASSWORD_MIN_LENGTH = 8
 PASSWORD_MAX_BYTES = 72
 
 
@@ -28,6 +29,8 @@ class RegisterRequest(BaseModel):
     @field_validator("password")
     @classmethod
     def validate_password(cls, v: str) -> str:
+        if len(v) < PASSWORD_MIN_LENGTH:
+            raise ValueError(f"Password must be at least {PASSWORD_MIN_LENGTH} characters long")
         return check_password_length(v)
 
 
@@ -43,8 +46,8 @@ class ChangePasswordRequest(BaseModel):
     @field_validator("new_password")
     @classmethod
     def validate_new_password(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError("New password must be at least 8 characters long")
+        if len(v) < PASSWORD_MIN_LENGTH:
+            raise ValueError(f"New password must be at least {PASSWORD_MIN_LENGTH} characters long")
         return check_password_length(v)
 
     @model_validator(mode="after")
