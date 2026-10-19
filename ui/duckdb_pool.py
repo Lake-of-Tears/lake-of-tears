@@ -13,6 +13,7 @@ import logging
 import os
 import queue
 import re
+import threading
 from collections.abc import Generator
 from typing import Any
 from urllib.parse import urlparse
@@ -121,8 +122,106 @@ def load_duckdb_extensions(con: duckdb.DuckDBPyConnection, load_vss: bool = Fals
                 logger.warning("Failed to install/load vss extension: %s", inst_exc)
 
 
+_MACRO_WORDS = re.compile(r"macro|function", re.IGNORECASE)
+
+
+def _qident(name: str) -> str:
+    return '"' + str(name).replace('"', '""') + '"'
+
+
+def _qstr(value: Any) -> str:
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def snapshot_settings(con: duckdb.DuckDBPyConnection) -> dict[str, str]:
+    """Current value of every DuckDB setting, used to undo changes a query made."""
+    return {
+        name: str(value)
+        for name, value in con.execute("SELECT name, value FROM duckdb_settings()").fetchall()
+    }
+
+
+def snapshot_secrets(con: duckdb.DuckDBPyConnection) -> set[str]:
+    return {row[0] for row in con.execute("SELECT name FROM duckdb_secrets()").fetchall()}
+
+
+def reset_connection_state(
+    con: duckdb.DuckDBPyConnection,
+    baseline_settings: dict[str, str] | None = None,
+    baseline_secrets: set[str] | None = None,
+    sweep_macros: bool = True,
+) -> None:
+    """Remove everything a request left on a pooled connection so the next user starts clean.
+
+    SQL Editor users can create schemas, tables, views and macros, attach databases, create secrets
+    and change settings, and every request registers its catalog views on the connection. Without
+    this, those objects would be visible to whoever gets the connection next. Raises if anything
+    cannot be undone, in which case the caller must discard the connection.
+
+    Listing macros scans every built-in function (about 5 ms, ten times the rest of the reset), so
+    callers that know a request's SQL contained no macro or function statement may skip it with
+    ``sweep_macros=False``.
+    """
+    current = con.execute("SELECT current_database()").fetchone()[0]
+    con.execute(
+        f"USE {_qident(current)}.main"
+    )  # so the schema being dropped is never the current one
+
+    for (name,) in con.execute(
+        "SELECT database_name FROM duckdb_databases() WHERE NOT internal AND database_name <> ?",
+        [current],
+    ).fetchall():
+        con.execute(f"DETACH DATABASE IF EXISTS {_qident(name)}")
+
+    for (name,) in con.execute(
+        "SELECT schema_name FROM duckdb_schemas() "
+        "WHERE database_name = ? AND NOT internal AND schema_name <> 'main'",
+        [current],
+    ).fetchall():
+        con.execute(f"DROP SCHEMA IF EXISTS {_qident(name)} CASCADE")
+
+    objects = (
+        ("VIEW", "duckdb_views()", "view_name", "NOT internal"),
+        ("TABLE", "duckdb_tables()", "table_name", "NOT internal"),
+        ("SEQUENCE", "duckdb_sequences()", "sequence_name", "TRUE"),
+        ("TYPE", "duckdb_types()", "type_name", "NOT internal"),
+    )
+    for kind, source, column, where in objects:
+        for database, schema, name in con.execute(
+            f"SELECT database_name, schema_name, {column} FROM {source} WHERE {where}"
+        ).fetchall():
+            con.execute(
+                f"DROP {kind} IF EXISTS {_qident(database)}.{_qident(schema)}.{_qident(name)}"
+            )
+    if sweep_macros:
+        for database, schema, name, kind in con.execute(
+            "SELECT database_name, schema_name, function_name, function_type FROM duckdb_functions() "
+            "WHERE NOT internal AND function_type IN ('macro', 'table_macro')"
+        ).fetchall():
+            what = "MACRO TABLE" if kind == "table_macro" else "MACRO"
+            con.execute(
+                f"DROP {what} IF EXISTS {_qident(database)}.{_qident(schema)}.{_qident(name)}"
+            )
+
+    if baseline_secrets is not None:
+        for name in snapshot_secrets(con) - baseline_secrets:
+            con.execute(f"DROP SECRET IF EXISTS {_qident(name)}")
+
+    if baseline_settings is not None:
+        now = snapshot_settings(con)
+        for name, old in baseline_settings.items():
+            if name in now and now[name] != old:
+                con.execute(f"SET {name} = {_qstr(old)}")
+
+    con.execute("SELECT 1").fetchall()  # the connection must still answer
+
+
 class DuckDBConnectionPool:
-    """Thread-safe pool of warm DuckDB connections with S3 and object caching enabled."""
+    """Thread-safe pool of warm DuckDB connections with S3 and object caching enabled.
+
+    Connections are reused across requests, so each is cleaned (``reset_connection_state``) when
+    it goes back; one that cannot be cleaned or no longer answers is closed and replaced.
+    """
 
     def __init__(
         self,
@@ -136,91 +235,136 @@ class DuckDBConnectionPool:
         self.custom_config = config
         self.connection_factory = connection_factory
         self._pool: queue.Queue[duckdb.DuckDBPyConnection] = queue.Queue(maxsize=max_size)
-        self._created_count = 0
-        self._lock = contextlib.nullcontext()
+        self._created_count = 0  # pooled connections that exist (idle or in use); guarded by _lock
+        self._lock = threading.Lock()
+        self._baselines: dict[int, tuple[dict[str, str], set[str]]] = {}
 
     def _create_connection(self) -> duckdb.DuckDBPyConnection:
         """Create and warm up a fresh DuckDB connection."""
         if self.connection_factory is not None:
-            return self.connection_factory()
-
-        cfg = get_s3_duckdb_config()
-        if self.custom_config:
-            cfg.update(self.custom_config)
-
-        con = duckdb.connect(config=cfg)
-        load_duckdb_extensions(con, load_vss=self.load_vss)
+            con = self.connection_factory()
+        else:
+            cfg = get_s3_duckdb_config()
+            if self.custom_config:
+                cfg.update(self.custom_config)
+            con = duckdb.connect(config=cfg)
+            load_duckdb_extensions(con, load_vss=self.load_vss)
+        self._baselines[id(con)] = (snapshot_settings(con), snapshot_secrets(con))
         return con
+
+    def _reserve_slot(self) -> bool:
+        with self._lock:
+            if self._created_count < self.max_size:
+                self._created_count += 1
+                return True
+            return False
+
+    def _release_slot(self) -> None:
+        with self._lock:
+            if self._created_count > 0:
+                self._created_count -= 1
+
+    def _discard(self, con: duckdb.DuckDBPyConnection, counted: bool) -> None:
+        self._baselines.pop(id(con), None)
+        try:
+            con.close()
+        except Exception:
+            pass
+        if counted:
+            self._release_slot()
 
     def prewarm(self, count: int | None = None) -> None:
         """Pre-populate warm connections in the pool."""
         target = min(count or self.max_size, self.max_size)
-        while self._created_count < target:
-            try:
-                con = self._create_connection()
-                self._pool.put_nowait(con)
+        while True:
+            with self._lock:
+                if self._created_count >= target:
+                    return
                 self._created_count += 1
+            try:
+                self._pool.put_nowait(self._create_connection())
             except Exception as exc:
+                self._release_slot()
                 logger.error("Error pre-warming DuckDB connection: %s", exc)
-                break
+                return
+
+    def _take(self, timeout: float) -> tuple[duckdb.DuckDBPyConnection, bool]:
+        """Return ``(connection, counted)``; ``counted`` is False for a temporary overflow one."""
+        try:
+            return self._pool.get_nowait(), True
+        except queue.Empty:
+            pass
+        if self._reserve_slot():
+            try:
+                return self._create_connection(), True
+            except Exception:
+                self._release_slot()
+                raise
+        try:
+            return self._pool.get(timeout=timeout), True
+        except queue.Empty:
+            logger.warning("DuckDB pool exhausted; creating temporary overflow connection")
+            return self._create_connection(), False
 
     @contextlib.contextmanager
-    def acquire(self, timeout: float = 10.0) -> Generator[duckdb.DuckDBPyConnection, None, None]:
-        """Acquire a warm connection from the pool, creating on-demand up to max_size."""
-        con: duckdb.DuckDBPyConnection | None = None
-        should_recycle = False
+    def acquire(
+        self, timeout: float = 10.0, sql: str | None = None
+    ) -> Generator[duckdb.DuckDBPyConnection, None, None]:
+        """Acquire a warm connection, creating one on demand up to ``max_size``.
 
-        # Try to get an idle connection from the pool
+        ``sql`` is the text about to be run on it: when it cannot define a macro or function the
+        slow macro sweep is skipped on release. Leave it out to always sweep.
+        """
+        sweep_macros = sql is None or bool(_MACRO_WORDS.search(sql))
+        con, counted = self._take(timeout)
         try:
-            con = self._pool.get_nowait()
-        except queue.Empty:
-            if self._created_count < self.max_size:
-                con = self._create_connection()
-                self._created_count += 1
-            else:
-                try:
-                    con = self._pool.get(timeout=timeout)
-                except queue.Empty:
-                    # Fallback temporary connection if pool is completely exhausted
-                    logger.warning("DuckDB pool exhausted; creating temporary overflow connection")
-                    con = self._create_connection()
-                    should_recycle = True
-
-        try:
-            # Quick healthcheck
-            con.execute("SELECT 1")
-            yield con
+            con.execute("SELECT 1")  # quick health check before handing it out
         except Exception:
-            # If connection was interrupted or failed fundamentally, do not return to pool
-            should_recycle = True
-            raise
-        finally:
-            if con is not None:
-                if should_recycle:
-                    try:
-                        con.close()
-                    except Exception:
-                        pass
-                    if self._created_count > 0 and not should_recycle:
-                        self._created_count -= 1
-                else:
-                    try:
-                        self._pool.put_nowait(con)
-                    except queue.Full:
-                        try:
-                            con.close()
-                        except Exception:
-                            pass
-
-    def close_all(self) -> None:
-        """Drain and close all pooled connections."""
-        while not self._pool.empty():
+            self._baselines.pop(id(con), None)
             try:
-                con = self._pool.get_nowait()
                 con.close()
             except Exception:
                 pass
-        self._created_count = 0
+            try:  # the slot stays reserved for the replacement
+                con = self._create_connection()
+            except Exception:
+                if counted:
+                    self._release_slot()
+                raise
+        try:
+            yield con
+        finally:
+            self._give_back(con, counted, sweep_macros)
+
+    def _give_back(
+        self, con: duckdb.DuckDBPyConnection, counted: bool, sweep_macros: bool = True
+    ) -> None:
+        if not counted:
+            self._discard(con, counted=False)
+            return
+        try:
+            settings, secrets = self._baselines.get(id(con), (None, None))
+            reset_connection_state(con, settings, secrets, sweep_macros)
+        except Exception as exc:
+            # a connection that cannot be cleaned or no longer answers is replaced, never reused
+            logger.warning("Discarding DuckDB connection that could not be reset: %s", exc)
+            self._discard(con, counted=True)
+            return
+        try:
+            self._pool.put_nowait(con)
+        except queue.Full:
+            self._discard(con, counted=True)
+
+    def close_all(self) -> None:
+        """Drain and close all pooled connections."""
+        while True:
+            try:
+                con = self._pool.get_nowait()
+            except queue.Empty:
+                break
+            self._discard(con, counted=True)
+        with self._lock:
+            self._created_count = 0
 
 
 def classify_query_error(
