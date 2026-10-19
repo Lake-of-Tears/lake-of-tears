@@ -17,7 +17,8 @@ async def _roundtrip():
     async with websockets.serve(echo, "127.0.0.1", 0) as server:
         port = server.sockets[0].getsockname()[1]
         async with websockets.connect(
-            f"ws://127.0.0.1:{port}/api/kernels/k1/channels?token=t"
+            f"ws://127.0.0.1:{port}/api/kernels/k1/channels?token=t",
+            proxy=None,
         ) as up:
             await up.send('{"msg_type": "kernel_info_request"}')
             text = await up.recv()
@@ -34,7 +35,7 @@ def test_text_and_binary_frames_round_trip_as_the_proxies_expect():
 
 def test_connection_refused_raises_an_exception_the_proxies_catch():
     async def attempt():
-        async with websockets.connect("ws://127.0.0.1:9/x", open_timeout=2):
+        async with websockets.connect("ws://127.0.0.1:9/x", open_timeout=2, proxy=None):
             pass
 
     try:
