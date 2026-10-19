@@ -2561,7 +2561,7 @@ async def websocket_kernel_proxy(websocket: WebSocket, kernel_id: str):
         upstream_url += f"?token={notebook_proxy.JUPYTER_TOKEN}"
 
     try:
-        async with websockets.connect(upstream_url) as upstream:
+        async with websockets.connect(upstream_url, proxy=None) as upstream:
 
             async def client_to_upstream():
                 try:

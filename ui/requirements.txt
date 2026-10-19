@@ -8,6 +8,6 @@ python-dotenv==1.2.2
 httpx==0.28.1
 PyJWT==2.15.1
 aiofiles==25.1.0
-websockets==14.2
+websockets==16.1.1
 numpy>=2.5.4
 pyarrow>=15.0.0
