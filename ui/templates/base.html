@@ -269,10 +269,16 @@
             <!-- Results will be injected here -->
           </div>
           <div class="px-3 py-1.5 border-t border-white/[0.06] bg-[#10131a] text-[11px] text-gray-500 flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <span><kbd class="font-mono text-gray-400 bg-white/[0.06] px-1 rounded text-[10px]">↑↓</kbd> navigate</span>
-              <span><kbd class="font-mono text-gray-400 bg-white/[0.06] px-1 rounded text-[10px]">↵</kbd> open</span>
-              <span><kbd class="font-mono text-gray-400 bg-white/[0.06] px-1 rounded text-[10px]">esc</kbd> close</span>
+            <div class="flex items-center gap-3">
+              <span class="flex items-center gap-1"><kbd class="font-mono text-gray-400 bg-white/[0.06] px-1 rounded text-[10px]">↑↓</kbd> navigate</span>
+              <span class="flex items-center gap-1"><kbd class="font-mono text-gray-400 bg-white/[0.06] px-1 rounded text-[10px]">↵</kbd> open</span>
+              <span class="flex items-center gap-1"><kbd class="font-mono text-gray-400 bg-white/[0.06] px-1 rounded text-[10px]">esc</kbd> close</span>
+              <span class="hidden md:inline-flex items-center gap-2 pl-2 border-l border-white/[0.08] text-[10px]">
+                <span><code class="text-blue-400 font-mono">#</code> catalog</span>
+                <span><code class="text-amber-400 font-mono">/</code> files</span>
+                <span><code class="text-purple-400 font-mono">%</code> pipelines</span>
+                <span><code class="text-teal-400 font-mono">&gt;</code> pages</span>
+              </span>
             </div>
             <span id="workspace-search-count" class="text-gray-400 font-mono text-[10px]">0 items</span>
           </div>
@@ -517,11 +523,16 @@
   {% endif %}
 
   <script>
-    // ── Workspace Search Dropdown Controller ──────────────────────────────────
+    // ── Workspace Search Controller with Client-Side Fuzzy Engine ─────────────
     let workspaceSearchResults = [];
     let workspaceSearchSelectedIndex = 0;
     let workspaceSearchDebounceTimer = null;
     let workspaceSearchSeq = 0;
+    let workspaceManifest = null;
+    let workspaceManifestLoading = false;
+    let workspaceManifestLoadedAt = 0;
+    let workspaceActivePrefixFilter = null;
+    const MANIFEST_TTL_MS = 60000;
 
     function openWorkspaceSearchDropdown() {
       const dropdown = document.getElementById('workspace-search-dropdown');
@@ -531,15 +542,40 @@
     function closeWorkspaceSearchDropdown() {
       const dropdown = document.getElementById('workspace-search-dropdown');
       if (dropdown) dropdown.classList.add('hidden');
+      workspaceActivePrefixFilter = null;
+    }
+
+    async function ensureWorkspaceManifest(forceRefresh = false) {
+      const now = Date.now();
+      if (!forceRefresh && workspaceManifest && (now - workspaceManifestLoadedAt < MANIFEST_TTL_MS)) {
+        return workspaceManifest;
+      }
+      if (workspaceManifestLoading) {
+        return;
+      }
+      workspaceManifestLoading = true;
+      try {
+        const res = await fetch('/api/workspace/manifest', { credentials: 'include' });
+        if (res.ok) {
+          const data = await res.json();
+          workspaceManifest = data.items || [];
+          workspaceManifestLoadedAt = Date.now();
+        }
+      } catch (err) {
+        console.warn('Failed to load workspace manifest, using live search fallback:', err);
+      } finally {
+        workspaceManifestLoading = false;
+      }
+      return workspaceManifest;
     }
 
     function handleWorkspaceSearchFocus() {
+      ensureWorkspaceManifest();
       const input = document.getElementById('workspace-search-input');
       const query = (input ? input.value : '').trim();
-      // Only activate when there is input (no blank search on click)
       if (query.length > 0) {
         openWorkspaceSearchDropdown();
-        fetchWorkspaceSearchResults(query);
+        handleWorkspaceSearchInput();
       }
     }
 
@@ -547,18 +583,237 @@
       const input = document.getElementById('workspace-search-input');
       const query = (input ? input.value : '').trim();
 
-      // Deactivate immediately if input is cleared
       if (query.length === 0) {
         closeWorkspaceSearchDropdown();
         workspaceSearchResults = [];
+        workspaceActivePrefixFilter = null;
         return;
       }
 
       openWorkspaceSearchDropdown();
+
+      // Ultra-fast path: if manifest is loaded, search client-side with 0 network calls (< 1ms)
+      if (workspaceManifest && workspaceManifest.length > 0) {
+        clearTimeout(workspaceSearchDebounceTimer);
+        executeClientFuzzySearch(query);
+        return;
+      }
+
+      // If manifest is still loading, trigger eager load and fallback to debounced server search
+      ensureWorkspaceManifest().then((items) => {
+        if (items && items.length > 0) {
+          const curInput = document.getElementById('workspace-search-input');
+          const curVal = (curInput ? curInput.value : '').trim();
+          if (curVal.length > 0) {
+            executeClientFuzzySearch(curVal);
+          }
+        }
+      });
+
       clearTimeout(workspaceSearchDebounceTimer);
       workspaceSearchDebounceTimer = setTimeout(() => {
         fetchWorkspaceSearchResults(query);
       }, 120);
+    }
+
+    // ── Zero-Dependency Fuzzy Subsequence Scorer ──────────────────────────────
+    function scoreSubsequence(pattern, text) {
+      if (!pattern || !text) return null;
+      const pLen = pattern.length;
+      const tLen = text.length;
+      if (pLen > tLen) return null;
+
+      let pIdx = 0;
+      let tIdx = 0;
+      const matches = [];
+
+      while (pIdx < pLen && tIdx < tLen) {
+        if (pattern[pIdx] === text[tIdx]) {
+          matches.push(tIdx);
+          pIdx++;
+        }
+        tIdx++;
+      }
+
+      if (pIdx < pLen) return null;
+
+      let score = 100;
+      if (pLen === tLen) score += 200; // Exact match bonus
+      if (matches[0] === 0) score += 70; // Prefix match bonus
+
+      let consecutive = 0;
+      for (let i = 0; i < matches.length; i++) {
+        const idx = matches[i];
+        if (i > 0 && idx === matches[i - 1] + 1) {
+          consecutive++;
+          score += 25 * consecutive;
+        } else {
+          consecutive = 0;
+        }
+
+        // Word boundary bonus (after _, -, /, ., space)
+        if (idx === 0 || ['_', '-', '/', '.', ' '].includes(text[idx - 1])) {
+          score += 40;
+        }
+      }
+
+      // Length penalty to favor concise matches
+      score -= Math.min(60, tLen - pLen);
+
+      return { score, matches };
+    }
+
+    function executeClientFuzzySearch(rawQuery) {
+      if (!workspaceManifest || !workspaceManifest.length) return;
+
+      let q = rawQuery.trim();
+      let prefixMode = null;
+      let prefixLabel = null;
+      let allowedTypes = null;
+
+      // Check prefix triggers: # (catalog), / (notebooks), > (navigation), % (pipelines)
+      if (q.startsWith('#')) {
+        prefixMode = '#';
+        prefixLabel = 'Catalogs & Tables';
+        allowedTypes = new Set(['catalog', 'schema', 'table']);
+        q = q.slice(1).trim();
+      } else if (q.startsWith('/')) {
+        prefixMode = '/';
+        prefixLabel = 'Notebooks & Files';
+        allowedTypes = new Set(['notebook', 'folder', 'file']);
+        q = q.slice(1).trim();
+      } else if (q.startsWith('>')) {
+        prefixMode = '>';
+        prefixLabel = 'Navigation & Pages';
+        allowedTypes = new Set(['page']);
+        q = q.slice(1).trim();
+      } else if (q.startsWith('%')) {
+        prefixMode = '%';
+        prefixLabel = 'Airflow Pipelines';
+        allowedTypes = new Set(['pipeline']);
+        q = q.slice(1).trim();
+      }
+
+      workspaceActivePrefixFilter = prefixLabel;
+
+      let candidates = workspaceManifest;
+      if (allowedTypes) {
+        candidates = candidates.filter(item => allowedTypes.has(item.type));
+      }
+
+      // If user typed only the prefix symbol (e.g. '#' or '>'), show category items
+      if (!q) {
+        workspaceSearchResults = candidates.slice(0, 50).map(item => ({
+          ...item,
+          _titleMatches: null,
+          _matchedColumn: null,
+        }));
+        workspaceSearchSelectedIndex = 0;
+        updateWorkspaceSearchCount(workspaceSearchResults.length);
+        renderWorkspaceSearchList(rawQuery);
+        return;
+      }
+
+      const qLower = q.toLowerCase();
+      const scored = [];
+
+      for (let i = 0; i < candidates.length; i++) {
+        const item = candidates[i];
+        let bestScore = -Infinity;
+        let bestTitleMatches = null;
+        let matchedColName = null;
+
+        const titleLower = (item.title || '').toLowerCase();
+        const pathLower = (item.path || '').toLowerCase();
+        const subLower = (item.subtitle || '').toLowerCase();
+
+        // 1. Title match
+        const titleRes = scoreSubsequence(qLower, titleLower);
+        if (titleRes) {
+          bestScore = titleRes.score + 60;
+          bestTitleMatches = titleRes.matches;
+        }
+
+        // 2. Path match
+        if (pathLower) {
+          const pathRes = scoreSubsequence(qLower, pathLower);
+          if (pathRes) {
+            const pathScore = pathRes.score + 30;
+            if (pathScore > bestScore) {
+              bestScore = pathScore;
+            }
+          }
+        }
+
+        // 3. Columns match (for tables)
+        if (Array.isArray(item.columns) && item.columns.length > 0) {
+          for (let c = 0; c < item.columns.length; c++) {
+            const col = String(item.columns[c]);
+            const colRes = scoreSubsequence(qLower, col.toLowerCase());
+            if (colRes) {
+              const colScore = colRes.score + 25;
+              if (colScore > bestScore) {
+                bestScore = colScore;
+                matchedColName = col;
+              }
+            }
+          }
+        }
+
+        // 4. Subtitle match
+        if (subLower) {
+          const subRes = scoreSubsequence(qLower, subLower);
+          if (subRes && subRes.score > bestScore) {
+            bestScore = subRes.score;
+          }
+        }
+
+        if (bestScore > -Infinity) {
+          scored.push({
+            item: {
+              ...item,
+              _titleMatches: bestTitleMatches,
+              _matchedColumn: matchedColName,
+            },
+            score: bestScore,
+          });
+        }
+      }
+
+      // Sort by score descending
+      scored.sort((a, b) => b.score - a.score);
+
+      workspaceSearchResults = scored.slice(0, 60).map(s => s.item);
+      workspaceSearchSelectedIndex = 0;
+      updateWorkspaceSearchCount(workspaceSearchResults.length);
+      renderWorkspaceSearchList(rawQuery);
+    }
+
+    function updateWorkspaceSearchCount(count) {
+      const countEl = document.getElementById('workspace-search-count');
+      if (countEl) {
+        if (workspaceActivePrefixFilter) {
+          countEl.textContent = `[${workspaceActivePrefixFilter}] • ${count} ${count === 1 ? 'item' : 'items'}`;
+        } else {
+          countEl.textContent = `${count} ${count === 1 ? 'item' : 'items'}`;
+        }
+      }
+    }
+
+    function highlightMatchedText(text, matches) {
+      if (!text) return '';
+      if (!matches || !matches.length) return escapeHtmlBase(text);
+      const matchSet = new Set(matches);
+      let html = '';
+      for (let i = 0; i < text.length; i++) {
+        const char = escapeHtmlBase(text[i]);
+        if (matchSet.has(i)) {
+          html += `<span class="text-blue-400 font-semibold underline decoration-blue-500/50">${char}</span>`;
+        } else {
+          html += char;
+        }
+      }
+      return html;
     }
 
     function handleWorkspaceSearchKeydown(e) {
@@ -674,7 +929,6 @@
     async function fetchWorkspaceSearchResults(query) {
       const seq = ++workspaceSearchSeq;
       const container = document.getElementById('workspace-search-results');
-      const countEl = document.getElementById('workspace-search-count');
       if (!container) return;
 
       try {
@@ -691,9 +945,7 @@
 
         workspaceSearchResults = data.results || [];
         workspaceSearchSelectedIndex = 0;
-        if (countEl) {
-          countEl.textContent = `${workspaceSearchResults.length} ${workspaceSearchResults.length === 1 ? 'item' : 'items'}`;
-        }
+        updateWorkspaceSearchCount(workspaceSearchResults.length);
         renderWorkspaceSearchList(query);
       } catch (err) {
         if (seq !== workspaceSearchSeq) return;
@@ -703,8 +955,7 @@
 
     function renderWorkspaceSearchEmpty(message) {
       const container = document.getElementById('workspace-search-results');
-      const countEl = document.getElementById('workspace-search-count');
-      if (countEl) countEl.textContent = '0 items';
+      updateWorkspaceSearchCount(0);
       if (!container) return;
       container.innerHTML = `
         <div class="py-6 text-center text-xs text-gray-500">
@@ -720,7 +971,20 @@
         return;
       }
 
-      container.innerHTML = workspaceSearchResults.map((item, idx) => {
+      let headerHtml = '';
+      if (workspaceActivePrefixFilter) {
+        headerHtml = `
+          <div class="px-2 py-1 mb-1 text-[11px] text-blue-400 bg-blue-950/40 border border-blue-800/40 rounded flex items-center justify-between">
+            <span class="font-medium flex items-center gap-1.5">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/></svg>
+              Filtering by: ${escapeHtmlBase(workspaceActivePrefixFilter)}
+            </span>
+            <span class="text-[10px] text-blue-300/70 font-mono">backspace to clear</span>
+          </div>
+        `;
+      }
+
+      container.innerHTML = headerHtml + workspaceSearchResults.map((item, idx) => {
         const isSelected = idx === workspaceSearchSelectedIndex;
         let badgeColor = 'bg-blue-900/40 text-blue-300 border border-blue-800/40';
         let iconSvg = '';
@@ -751,6 +1015,12 @@
           iconSvg = `<svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`;
         }
 
+        const titleDisplay = highlightMatchedText(item.title, item._titleMatches);
+        let subtitleDisplay = escapeHtmlBase(item.subtitle);
+        if (item._matchedColumn) {
+          subtitleDisplay = `<span class="text-emerald-400 font-medium">Matched col: ${escapeHtmlBase(item._matchedColumn)}</span> • ${subtitleDisplay}`;
+        }
+
         return `
           <div class="search-result-item group flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer transition-colors ${isSelected ? 'bg-blue-600/25 text-white border border-blue-500/30' : 'text-gray-300 hover:bg-white/[0.05] border border-transparent'}"
                data-index="${idx}"
@@ -760,10 +1030,10 @@
               ${iconSvg}
               <div class="min-w-0 flex-1">
                 <div class="text-[13px] font-medium truncate text-gray-100 flex items-center gap-2">
-                  <span>${escapeHtmlBase(item.title)}</span>
+                  <span>${titleDisplay}</span>
                   <span class="text-[9px] px-1.5 py-0.5 rounded font-mono font-normal uppercase ${badgeColor}">${escapeHtmlBase(item.category)}</span>
                 </div>
-                <div class="text-[11px] text-gray-500 truncate font-mono">${escapeHtmlBase(item.subtitle)}</div>
+                <div class="text-[11px] text-gray-500 truncate font-mono">${subtitleDisplay}</div>
               </div>
             </div>
             <svg class="w-3.5 h-3.5 text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-2" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
@@ -789,10 +1059,11 @@
         if (input) {
           input.focus();
           input.select();
+          ensureWorkspaceManifest();
           const query = input.value.trim();
           if (query.length > 0) {
             openWorkspaceSearchDropdown();
-            fetchWorkspaceSearchResults(query);
+            handleWorkspaceSearchInput();
           }
         }
       }

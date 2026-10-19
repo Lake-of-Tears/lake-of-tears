@@ -372,6 +372,13 @@ def test_pipelines_viewer_mutation_forbidden():
                 headers=headers,
             )
             assert r_del.status_code == 403
+
+            # 5. Delete pipeline -> 403
+            r_del2 = client.delete(
+                "/api/v1/pipelines/ws_analytics_daily_etl",
+                headers=headers,
+            )
+            assert r_del2.status_code == 403
     finally:
         backend_main.app.dependency_overrides.clear()
 
@@ -440,6 +447,75 @@ def test_pipelines_editor_and_admin_can_mutate():
             )
             assert r_sched.status_code == 201
             assert r_sched.json()["status"] == "created"
+
+            # 4. Delete pipeline
+            with patch.object(
+                pipeline_service,
+                "delete_scheduled_notebook",
+                new_callable=AsyncMock,
+                return_value={"dag_id": "ws_analytics_daily_etl", "status": "deleted"},
+            ) as mock_delete:
+                r_del = client.delete(
+                    "/api/v1/pipelines/ws_analytics_daily_etl",
+                    headers=headers,
+                )
+                assert r_del.status_code == 200
+                assert r_del.json()["status"] == "deleted"
+                assert mock_delete.called
+    finally:
+        backend_main.app.dependency_overrides.clear()
+
+
+def test_delete_pipeline_protection_and_rules():
+    user, workspace, member, token = _generate_test_user_and_token(role="editor")
+    mock_db = MagicMock()
+
+    backend_main.app.dependency_overrides[database.get_db] = lambda: mock_db
+    backend_main.app.dependency_overrides[auth.get_current_user] = lambda: user
+
+    try:
+        with patch(
+            "pipelines_router.get_pipeline_workspace_and_role",
+            return_value=(workspace, "editor"),
+        ):
+            headers = {"Authorization": f"Bearer {token}"}
+
+            # 1. Reject protected system DAGs
+            res_system = client.delete("/api/v1/pipelines/run_notebook", headers=headers)
+            assert res_system.status_code == 400
+            assert (
+                "Cannot delete protected or non-workspace pipeline" in res_system.json()["detail"]
+            )
+
+            res_ingest = client.delete("/api/v1/pipelines/ingest_weather_dag", headers=headers)
+            assert res_ingest.status_code == 400
+            assert (
+                "Cannot delete protected or non-workspace pipeline" in res_ingest.json()["detail"]
+            )
+
+            # 2. Reject non-workspace pipeline
+            res_non_ws = client.delete("/api/v1/pipelines/other_dag", headers=headers)
+            assert res_non_ws.status_code == 400
+            assert (
+                "Cannot delete protected or non-workspace pipeline" in res_non_ws.json()["detail"]
+            )
+
+            # 3. Reject DAG from another workspace (404)
+            res_foreign = client.delete("/api/v1/pipelines/ws_marketing_etl", headers=headers)
+            assert res_foreign.status_code == 404
+            assert "not found in this workspace" in res_foreign.json()["detail"]
+
+            # 4. Valid workspace DAG deletion succeeds
+            with patch.object(
+                pipeline_service,
+                "delete_scheduled_notebook",
+                new_callable=AsyncMock,
+                return_value={"dag_id": "ws_analytics_my_job", "status": "deleted"},
+            ) as mock_delete:
+                res_ok = client.delete("/api/v1/pipelines/ws_analytics_my_job", headers=headers)
+                assert res_ok.status_code == 200
+                assert res_ok.json() == {"dag_id": "ws_analytics_my_job", "status": "deleted"}
+                assert mock_delete.called
     finally:
         backend_main.app.dependency_overrides.clear()
 

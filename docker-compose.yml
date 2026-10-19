@@ -110,8 +110,10 @@ services:
       SUPERSET_ADMIN_USERNAME: admin
       SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD}
       SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:-please_change_me}
+      WORKSPACES_DIR: /data/workspaces
     volumes:
       - ${DATALAKE_DATA_DIR:-~}/airflow/dags:/opt/airflow/dags
+      - ${DATALAKE_DATA_DIR:-~}/workspaces:/data/workspaces:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -186,6 +188,9 @@ services:
       AIRFLOW_URL: http://airflow:8080/airflow
       AIRFLOW_ADMIN_USER: ${AIRFLOW_ADMIN_USER:-admin}
       AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_PASSWORD:-airflowadminpassword}
+      WORKSPACES_DIR: /data/workspaces
+    volumes:
+      - ${DATALAKE_DATA_DIR:-~}/workspaces:/data/workspaces:ro
     depends_on:
       minio:
         condition: service_healthy

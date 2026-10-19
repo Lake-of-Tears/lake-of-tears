@@ -72,6 +72,20 @@ spec:
                 name: {{ $fullName }}-lakeui
                 port:
                   name: http
+          - path: /api/workspace/manifest
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullName }}-lakeui
+                port:
+                  name: http
+          - path: /workspace/manifest
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullName }}-lakeui
+                port:
+                  name: http
           - path: /api/workspace/search
             pathType: Prefix
             backend:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -9,6 +10,11 @@ import duckdb
 import duckdb_ai
 import main
 import pytest
+
+root = Path(__file__).parents[1]
+for sub in ("pipeline/shared", "pipeline/embed"):
+    if str(root / sub) not in sys.path:
+        sys.path.insert(0, str(root / sub))
 
 DIMS = 768
 
@@ -73,17 +79,9 @@ def _declared_embedding_columns(datasets: list[dict]) -> list[str]:
 )
 def test_declared_embeddings_schema_matches_the_pipeline_output(datasets):
     # Used as table hints by the SQL assistant, so it must list the columns that really exist.
-    assert _declared_embedding_columns(datasets) == [
-        "id",
-        "source",
-        "content",
-        "embedding",
-        "source_date",
-        "provider",
-        "model",
-        "dimension",
-        "ingested_at",
-    ]
+    import embed_sources
+
+    assert _declared_embedding_columns(datasets) == [*embed_sources.OUTPUT_COLUMNS, "ingested_at"]
 
 
 def _embed_response() -> MagicMock:
