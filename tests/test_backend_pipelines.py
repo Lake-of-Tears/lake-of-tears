@@ -125,10 +125,8 @@ def test_is_dag_accessible_by_workspace():
     assert pipeline_service.is_dag_accessible_by_workspace(dag_prefixed, "analytics")
     assert not pipeline_service.is_dag_accessible_by_workspace(dag_prefixed, "finance")
 
-    # Superadmin bypass
-    assert pipeline_service.is_dag_accessible_by_workspace(
-        dag_tagged, "finance", is_superadmin=True
-    )
+    # The caller's role never widens access: scoping is by workspace only
+    assert not pipeline_service.is_dag_accessible_by_workspace(dag_tagged, "finance")
 
     # Global run_notebook is accessible
     assert pipeline_service.is_dag_accessible_by_workspace(
@@ -898,7 +896,7 @@ def test_pipeline_settings_patch_description_and_name():
 def test_pipeline_service_resolves_known_pipeline_notebooks():
     dag = {
         "dag_id": "ingest_tmdb_movies",
-        "tags": [{"name": "ingestion"}, {"name": "notebooks"}],
+        "tags": [{"name": "workspace:default"}, {"name": "ingestion"}, {"name": "notebooks"}],
         "is_paused": False,
     }
     with (
@@ -933,6 +931,66 @@ def test_pipeline_service_resolves_notebook_tag():
         res = asyncio.run(pipeline_service.list_workspace_dags("default", is_superadmin=True))
         assert len(res) == 1
         assert res[0]["notebook_path"] == "custom.ipynb"
+
+
+def _airflow_returns(dags: list[dict], single: dict | None = None):
+    """Patch the Airflow HTTP calls: the DAG list, or one DAG when ``single`` is given."""
+    payload = single if single is not None else {"dags": dags}
+    mock_instance = AsyncMock()
+    mock_instance.get.return_value = MagicMock(status_code=200, json=lambda: payload)
+    return (
+        patch("pipeline_service.get_airflow_server_url", return_value="http://mock:8080"),
+        patch("pipeline_service.get_airflow_auth", return_value=("admin", "pass")),
+        patch("pipeline_service.httpx.AsyncClient"),
+        mock_instance,
+    )
+
+
+def test_superadmin_only_sees_the_pipelines_of_the_workspace_they_are_in():
+    dags = [
+        {"dag_id": "ingest_tmdb", "tags": [{"name": "workspace:default"}], "is_paused": False},
+        {"dag_id": "ws_analytics_report", "tags": [], "is_paused": False},
+        {"dag_id": "purge_deleted_catalogs", "tags": [{"name": "maintenance"}], "is_paused": False},
+    ]
+    url_patch, auth_patch, client_patch, instance = _airflow_returns(dags)
+    with url_patch, auth_patch, client_patch as mock_client:
+        mock_client.return_value.__aenter__.return_value = instance
+        default = asyncio.run(pipeline_service.list_workspace_dags("default", is_superadmin=True))
+        analytics = asyncio.run(
+            pipeline_service.list_workspace_dags("analytics", is_superadmin=True)
+        )
+    assert [p["dag_id"] for p in default] == ["ingest_tmdb"]
+    assert [p["dag_id"] for p in analytics] == ["ws_analytics_report"]
+
+
+def test_superadmin_cannot_open_a_pipeline_through_another_workspace():
+    from fastapi import HTTPException
+
+    dag = {"dag_id": "ingest_tmdb", "tags": [{"name": "workspace:default"}], "is_paused": False}
+    url_patch, auth_patch, client_patch, instance = _airflow_returns([], single=dag)
+    with url_patch, auth_patch, client_patch as mock_client:
+        mock_client.return_value.__aenter__.return_value = instance
+        try:
+            asyncio.run(pipeline_service.get_dag_details("analytics", "ingest_tmdb", True))
+        except HTTPException as exc:
+            assert exc.status_code == 404
+        else:
+            raise AssertionError("expected a 404 for a pipeline of another workspace")
+
+
+def test_superadmin_cannot_delete_a_schedule_of_another_workspace():
+    from fastapi import HTTPException
+
+    try:
+        asyncio.run(
+            pipeline_service.delete_scheduled_notebook(
+                "analytics", "ws_default_nightly_report", is_superadmin=True
+            )
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 404
+    else:
+        raise AssertionError("expected a 404 for a schedule of another workspace")
 
 
 def test_extract_pending_dag_metadata_from_file():

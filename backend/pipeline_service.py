@@ -145,12 +145,12 @@ def resolve_workspace_dag_id(workspace_slug: str, pipeline_title: str) -> str:
     return f"ws_{clean_slug}_{clean_title}"
 
 
-def is_dag_accessible_by_workspace(
-    dag_data: dict[str, Any], workspace_slug: str, is_superadmin: bool = False
-) -> bool:
-    """Check if a DAG belongs to the specified workspace or if caller is superadmin."""
-    if is_superadmin:
-        return True
+def is_dag_accessible_by_workspace(dag_data: dict[str, Any], workspace_slug: str) -> bool:
+    """Check whether a DAG belongs to the workspace: ``ws_<slug>_`` prefix, ``workspace:<slug>``
+    tag, or the shared ``run_notebook`` DAG. The caller's role does not widen this: even a
+    superadmin only sees a workspace's own pipelines through that workspace. (The
+    ``is_superadmin`` arguments of the functions below are kept so callers did not change; they no
+    longer grant extra access.)"""
     dag_id = dag_data.get("dag_id", "")
     prefix = f"ws_{workspace_slug}_"
     if dag_id.startswith(prefix) or dag_id == "run_notebook":
@@ -284,9 +284,7 @@ async def list_workspace_dags(
 
             # Filter DAGs by workspace
             matching_dags = [
-                d
-                for d in raw_dags
-                if is_dag_accessible_by_workspace(d, workspace_slug, is_superadmin)
+                d for d in raw_dags if is_dag_accessible_by_workspace(d, workspace_slug)
             ]
 
             # Merge any local workspace DAG files that haven't been picked up by Airflow yet
@@ -300,7 +298,7 @@ async def list_workspace_dags(
                             py_file, workspace_slug
                         )
                         if pending_dag and is_dag_accessible_by_workspace(
-                            pending_dag, workspace_slug, is_superadmin
+                            pending_dag, workspace_slug
                         ):
                             matching_dags.append(pending_dag)
                             existing_dag_ids.add(py_file.stem)
@@ -409,7 +407,7 @@ async def get_dag_details(
                     raise HTTPException(502, f"Failed to get DAG from Airflow: {resp.text}")
                 raise HTTPException(404, f"Pipeline {dag_id} not found")
 
-            if not is_dag_accessible_by_workspace(dag, workspace_slug, is_superadmin):
+            if not is_dag_accessible_by_workspace(dag, workspace_slug):
                 raise HTTPException(404, f"Pipeline {dag_id} not found")
 
             last_run = (
