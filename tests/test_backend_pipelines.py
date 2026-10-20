@@ -1103,7 +1103,9 @@ with DAG(
 ) as dag:
     pass
 """
-    updated_interval = pipeline_service._replace_schedule_in_code(code_with_schedule_interval, "0 0 * * *")
+    updated_interval = pipeline_service._replace_schedule_in_code(
+        code_with_schedule_interval, "0 0 * * *"
+    )
     assert 'schedule_interval="0 0 * * *"' in updated_interval
     assert ast.parse(updated_interval)
 

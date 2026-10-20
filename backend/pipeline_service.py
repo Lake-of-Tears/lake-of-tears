@@ -1064,10 +1064,10 @@ def _replace_schedule_in_code(content: str, new_schedule: str) -> str:
     if not re.search(pattern, content):
         dag_id_pattern = r'(\bdag_id\s*=\s*["\'][^"\']+["\']\s*,)'
         if re.search(dag_id_pattern, content):
-            return re.sub(dag_id_pattern, rf'\1\n    schedule={val_repr},', content, count=1)
+            return re.sub(dag_id_pattern, rf"\1\n    schedule={val_repr},", content, count=1)
         raise ValueError("Could not locate schedule parameter or dag_id in DAG file")
 
-    return re.sub(pattern, rf'\g<1>{val_repr}', content, count=1)
+    return re.sub(pattern, rf"\g<1>{val_repr}", content, count=1)
 
 
 async def update_pipeline_schedule(

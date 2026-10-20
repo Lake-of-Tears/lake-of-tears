@@ -574,12 +574,16 @@ async def test_ui_patch_pipeline_schedule_proxy():
     mock_resp = httpx.Response(
         200,
         json={"dag_id": "ws_analytics_etl", "schedule_interval": "@daily", "status": "updated"},
-        request=httpx.Request("PATCH", "http://backend:8000/api/v1/pipelines/ws_analytics_etl/schedule"),
+        request=httpx.Request(
+            "PATCH", "http://backend:8000/api/v1/pipelines/ws_analytics_etl/schedule"
+        ),
     )
 
     with (
         patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
-        patch("httpx.AsyncClient.patch", new_callable=AsyncMock, return_value=mock_resp) as mock_patch,
+        patch(
+            "httpx.AsyncClient.patch", new_callable=AsyncMock, return_value=mock_resp
+        ) as mock_patch,
     ):
         cookies = {"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"}
         res = client.patch(
