@@ -258,7 +258,15 @@ async def test_ui_proxy_storage_delete():
 
 def test_storage_page_renders_upload_modal():
     token, mock_workspaces = _create_auth_cookie(role="admin")
-    mock_stats = {"ok": True, "total_objects": 0, "total_size": "0 B", "raw_objects": 0, "raw_size": "0 B", "embeddings_objects": 0, "embeddings_size": "0 B"}
+    mock_stats = {
+        "ok": True,
+        "total_objects": 0,
+        "total_size": "0 B",
+        "raw_objects": 0,
+        "raw_size": "0 B",
+        "embeddings_objects": 0,
+        "embeddings_size": "0 B",
+    }
 
     with (
         patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
@@ -284,7 +292,9 @@ async def test_ui_proxy_storage_upload():
 
     with (
         patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
-        patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp) as mock_post,
+        patch(
+            "httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp
+        ) as mock_post,
     ):
         files = {"file": ("test.csv", b"a,b\n1,2\n", "text/csv")}
         res = client.post(
@@ -303,13 +313,18 @@ async def test_ui_proxy_storage_upload_url():
     token, mock_workspaces = _create_auth_cookie(role="admin")
     mock_resp = httpx.Response(
         status_code=200,
-        json={"upload_url": "http://localhost:9000/datalake/workspaces/analytics/file.csv?put", "key": "workspaces/analytics/file.csv"},
+        json={
+            "upload_url": "http://localhost:9000/datalake/workspaces/analytics/file.csv?put",
+            "key": "workspaces/analytics/file.csv",
+        },
         request=httpx.Request("POST", "http://backend/api/v1/storage/objects/file.csv/upload-url"),
     )
 
     with (
         patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
-        patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp) as mock_post,
+        patch(
+            "httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp
+        ) as mock_post,
     ):
         res = client.post(
             "/api/v1/storage/objects/file.csv/upload-url",

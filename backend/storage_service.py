@@ -309,7 +309,9 @@ def browse_prefix(
         full_pfx = cp.get("Prefix", "")
         trimmed = full_pfx.rstrip("/")
         name = trimmed.split("/")[-1] if "/" in trimmed else trimmed
-        rel_pfx = full_pfx[len(ws_jail) :] if (ws_jail and full_pfx.startswith(ws_jail)) else full_pfx
+        rel_pfx = (
+            full_pfx[len(ws_jail) :] if (ws_jail and full_pfx.startswith(ws_jail)) else full_pfx
+        )
         folders.append(
             {
                 "name": name,

@@ -101,7 +101,9 @@ async def browse_storage(
             workspace_slug=slug,
         )
     except (storage_service.StorageAccessDeniedError, PermissionError) as exc:
-        logger.warning("Access denied browsing storage prefix '%s' in workspace '%s': %s", prefix, slug, exc)
+        logger.warning(
+            "Access denied browsing storage prefix '%s' in workspace '%s': %s", prefix, slug, exc
+        )
         raise HTTPException(status_code=403, detail=str(exc))
     except (storage_service.StoragePathError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -121,7 +123,9 @@ async def get_object_metadata(
     try:
         return storage_service.get_object_metadata(key=key, workspace_slug=slug)
     except (storage_service.StorageAccessDeniedError, PermissionError) as exc:
-        logger.warning("Access denied getting metadata for '%s' in workspace '%s': %s", key, slug, exc)
+        logger.warning(
+            "Access denied getting metadata for '%s' in workspace '%s': %s", key, slug, exc
+        )
         raise HTTPException(status_code=403, detail=str(exc))
     except (storage_service.StoragePathError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -151,7 +155,9 @@ async def get_download_url(
             "expires_in": expires_in,
         }
     except (storage_service.StorageAccessDeniedError, PermissionError) as exc:
-        logger.warning("Access denied generating download URL for '%s' in workspace '%s': %s", key, slug, exc)
+        logger.warning(
+            "Access denied generating download URL for '%s' in workspace '%s': %s", key, slug, exc
+        )
         raise HTTPException(status_code=403, detail=str(exc))
     except (storage_service.StoragePathError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -223,7 +229,9 @@ async def upload_file(
             workspace_slug=slug,
         )
     except (storage_service.StorageAccessDeniedError, PermissionError) as exc:
-        logger.warning("Access denied uploading to '%s' in workspace '%s': %s", target_key, slug, exc)
+        logger.warning(
+            "Access denied uploading to '%s' in workspace '%s': %s", target_key, slug, exc
+        )
         raise HTTPException(status_code=403, detail=str(exc))
     except (storage_service.StoragePathError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -256,7 +264,9 @@ async def get_upload_url(
             "expires_in": expires_in,
         }
     except (storage_service.StorageAccessDeniedError, PermissionError) as exc:
-        logger.warning("Access denied generating upload URL for '%s' in workspace '%s': %s", key, slug, exc)
+        logger.warning(
+            "Access denied generating upload URL for '%s' in workspace '%s': %s", key, slug, exc
+        )
         raise HTTPException(status_code=403, detail=str(exc))
     except (storage_service.StoragePathError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))

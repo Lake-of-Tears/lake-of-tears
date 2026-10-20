@@ -447,8 +447,6 @@ def test_delete_object_rbac_admin_allowed():
         assert resp.status_code == 200
         assert resp.json()["deleted"] is True
 
-
-
         resp = client.delete(
             "/api/v1/storage/objects/raw/stripe/data.parquet",
             headers={"Authorization": f"Bearer {token}"},
@@ -473,8 +471,7 @@ def test_validate_and_jail_path_dual_mode():
         == "workspaces/analytics/raw/"
     )
     assert (
-        storage_service.validate_and_jail_path(slug, "", is_prefix=True)
-        == "workspaces/analytics/"
+        storage_service.validate_and_jail_path(slug, "", is_prefix=True) == "workspaces/analytics/"
     )
 
     # Fully-qualified paths starting with the active workspace prefix are accepted
@@ -501,7 +498,9 @@ def test_validate_and_jail_path_traversal_rejection():
         storage_service.validate_and_jail_path(slug, "raw/../../secrets.parquet")
 
     with pytest.raises(storage_service.StorageAccessDeniedError):
-        storage_service.validate_and_jail_path(slug, "workspaces/analytics/../marketing/data.parquet")
+        storage_service.validate_and_jail_path(
+            slug, "workspaces/analytics/../marketing/data.parquet"
+        )
 
 
 def test_validate_and_jail_path_cross_workspace_rejection():
@@ -520,7 +519,9 @@ def test_validate_and_jail_path_cross_workspace_rejection():
 
 def test_build_breadcrumbs_workspace_jailed():
     slug = "analytics"
-    crumbs = storage_service.build_breadcrumbs("workspaces/analytics/raw/stripe/", workspace_slug=slug)
+    crumbs = storage_service.build_breadcrumbs(
+        "workspaces/analytics/raw/stripe/", workspace_slug=slug
+    )
     assert len(crumbs) == 3
     assert crumbs[0]["name"] == "Workspace: analytics"
     assert crumbs[0]["prefix"] == ""
@@ -741,7 +742,9 @@ def test_get_upload_url_endpoint_jailed():
         patch("storage_router.get_storage_workspace_and_role", return_value=(ws, "admin")),
         patch("storage_service.get_upload_url") as mock_url,
     ):
-        mock_url.return_value = "http://localhost:9000/datalake/workspaces/analytics/file.csv?X-Amz=..."
+        mock_url.return_value = (
+            "http://localhost:9000/datalake/workspaces/analytics/file.csv?X-Amz=..."
+        )
 
         resp = client.post(
             "/api/v1/storage/objects/file.csv/upload-url",
@@ -759,4 +762,3 @@ def test_get_upload_url_endpoint_jailed():
             content_type="application/octet-stream",
             workspace_slug="analytics",
         )
-
