@@ -893,6 +893,85 @@ def list_catalogs(db: Session = Depends(get_db), current_user: User = Depends(ge
     return [_catalog_response(c, current_user, db) for c in catalogs]
 
 
+def _catalog_manifest_projection(catalogs: list[Catalog]) -> list[dict[str, Any]]:
+    result = []
+    for cat in catalogs:
+        schemas = []
+        for s in sorted(cat.schemas, key=_schema_sort_key):
+            tables = []
+            for t in s.tables:
+                cols = [
+                    c.get("name")
+                    for c in (t.column_defs or [])
+                    if isinstance(c, dict) and c.get("name")
+                ]
+                tables.append(
+                    {
+                        "id": str(t.id),
+                        "name": t.name,
+                        "slug": t.slug,
+                        "description": t.description or "",
+                        "s3_path_pattern": t.s3_path_pattern or "",
+                        "columns": cols,
+                    }
+                )
+            schemas.append(
+                {
+                    "id": str(s.id),
+                    "catalog_id": str(s.catalog_id),
+                    "name": s.name,
+                    "slug": s.slug,
+                    "description": s.description or "",
+                    "tier": s.tier or "custom",
+                    "tables": tables,
+                }
+            )
+        result.append(
+            {
+                "id": str(cat.id),
+                "name": cat.name,
+                "slug": cat.slug,
+                "description": cat.description or "",
+                "schemas": schemas,
+            }
+        )
+    return result
+
+
+@app.get("/api/catalogs/catalog-manifest")
+@app.get("/api/catalogs/manifest")
+def catalogs_manifest(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from sqlalchemy import or_
+
+    if current_user.role == "superadmin":
+        catalogs = (
+            db.query(Catalog)
+            .filter(Catalog.deleted_at.is_(None))
+            .order_by(Catalog.created_at)
+            .all()
+        )
+    else:
+        ws_ids = [m.workspace_id for m in current_user.workspace_memberships]
+        shared_ids = db.query(CatalogAccess.catalog_id).filter(
+            CatalogAccess.workspace_id.in_(ws_ids),
+            CatalogAccess.status == "approved",
+            CatalogAccess.suspended.is_(False),
+        )
+        catalogs = (
+            db.query(Catalog)
+            .filter(
+                or_(Catalog.owner_workspace_id.in_(ws_ids), Catalog.id.in_(shared_ids)),
+                Catalog.deleted_at.is_(None),
+            )
+            .order_by(Catalog.created_at)
+            .all()
+        )
+    return _catalog_manifest_projection(catalogs)
+
+
 @app.post("/api/catalogs", response_model=CatalogResponse)
 def create_catalog(
     req: CreateCatalogRequest,
@@ -1635,6 +1714,39 @@ def workspace_catalogs(
         .all()
     )
     return [_catalog_response(c, current_user, db) for c in catalogs]
+
+
+@app.get("/api/workspaces/{workspace_id}/catalog-manifest")
+@app.get("/api/workspaces/{workspace_id}/manifest")
+def workspace_catalog_manifest(
+    workspace_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from sqlalchemy import or_
+
+    if current_user.role != "superadmin":
+        is_member = any(
+            str(m.workspace_id) == str(workspace_id) for m in current_user.workspace_memberships
+        )
+        if not is_member:
+            raise HTTPException(403, "Not a member of this workspace")
+
+    shared_ids = db.query(CatalogAccess.catalog_id).filter(
+        CatalogAccess.workspace_id == workspace_id,
+        CatalogAccess.status == "approved",
+        CatalogAccess.suspended.is_(False),
+    )
+    catalogs = (
+        db.query(Catalog)
+        .filter(
+            or_(Catalog.owner_workspace_id == workspace_id, Catalog.id.in_(shared_ids)),
+            Catalog.deleted_at.is_(None),
+        )
+        .order_by(Catalog.created_at)
+        .all()
+    )
+    return _catalog_manifest_projection(catalogs)
 
 
 @app.get(

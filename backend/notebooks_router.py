@@ -492,7 +492,7 @@ async def websocket_kernel_proxy(
         upstream_url += f"?token={token}"
 
     try:
-        async with websockets.connect(upstream_url) as upstream:
+        async with websockets.connect(upstream_url, proxy=None) as upstream:
 
             async def client_to_upstream():
                 try:

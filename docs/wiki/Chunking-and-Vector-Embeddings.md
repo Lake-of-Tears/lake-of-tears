@@ -1,8 +1,8 @@
 # Chunking and Vector Embeddings
 
-Lake of Tears turns text from your data into **vector embeddings** so you can search it by meaning and ask questions in plain English. This guide explains how embeddings are produced and stored, how to register a new source, how "chunking" works today, how to query the vectors, and what is planned.
+Lake of Tears turns text from your data into **vector embeddings** so you can search it by meaning and ask questions in plain English. This guide explains how embeddings are produced and stored, how to register a new source, how long text is split into chunks, how to query the vectors, and what is still missing.
 
-> **Status of chunking.** Today every row becomes exactly one embedding (one row = one chunk). The pluggable chunking strategies (`recursive`, `document`, `agentic`) are a **planned design** tracked in [#72](https://github.com/Lake-of-Tears/lake-of-tears/issues/72) and are **not implemented yet**; section 4 separates what works now from what is planned.
+> **Chunking.** Long text is split into chunks before embedding, with a strategy you choose per source: `recursive` (the default for unstructured text), `document` (one row is one chunk, used by the shipped structured sources) or `agentic` (an LLM writes standalone statements). Implemented in [#72](https://github.com/Lake-of-Tears/lake-of-tears/issues/72); see section 4.
 
 > **AI providers.** With multi-provider support ([#68](https://github.com/Lake-of-Tears/lake-of-tears/issues/68) to [#71](https://github.com/Lake-of-Tears/lake-of-tears/issues/71)), the model, key and vector dimension described here depend on the provider chosen in the Admin Panel; the pipeline calls the backend AI gateway instead of `gemini_embedder`, and searches cast to the active dimension instead of a fixed 768. See [AI Providers](AI-Providers.md). The examples below show the Gemini defaults.
 
@@ -36,15 +36,19 @@ Vectors live in ordinary Parquet files in MinIO, next to the rest of the data, a
 
 ### The embeddings schema
 
-Each file under `embeddings/` has these columns (confirmed with `DESCRIBE` on pipeline output):
+Each file under `embeddings/` has these columns, one row per chunk (the provider, model and dimension columns are described in [AI Providers](AI-Providers.md)). Files written before chunking existed lack `parent_id`, `chunk_index`, `total_chunks` and `metadata`; searches read old and new files together and those cells are simply empty for old rows.
 
 | Column | Type | Meaning |
 |---|---|---|
-| `id` | `VARCHAR` | The row's `id`/`Id`/`ID` column if the source has one, otherwise an MD5 hash of the text |
+| `id` | `VARCHAR` | One-chunk records: the row's `id`/`Id`/`ID` column if the source has one, otherwise an MD5 hash of the text. Records split into several chunks: `<parent_id>:<chunk_index>` |
 | `source` | `VARCHAR` | Source name, for example `weather` |
 | `content` | `VARCHAR` | The text that was embedded |
 | `embedding` | `DOUBLE[]` | The 768-dimension vector, stored as a list of doubles |
 | `source_date` | `VARCHAR` | The day the data is about (`YYYY-MM-DD`) |
+| `parent_id` | `VARCHAR` | The `id` of the record this chunk came from (equals `id` for a one-chunk record) |
+| `chunk_index` | `BIGINT` | Position of the chunk within its record, starting at 0 |
+| `total_chunks` | `BIGINT` | How many chunks the record produced |
+| `metadata` | `VARCHAR` | The record's other fields as JSON (long values shortened, missing ones left out, the text column and the `year`/`month`/`day` folder columns excluded), the same on every chunk of a record |
 | `ingested_at` | `TIMESTAMP` | When the embedding was created |
 
 The writer replaces one file per source per day, so **re-running a day replaces that partition** instead of duplicating it. We ran the same day twice and the row count stayed the same.
@@ -72,18 +76,20 @@ Things to know:
 
 Embedding only runs for sources you register in `pipeline/embed/embed_sources.py`. Assume your ingestion pipeline already writes `raw/example_orders/` (see the ingestion guide).
 
-### Step 1: write the text function
+### Step 1: choose where the text comes from
 
-A function takes one row (a pandas Series) and returns the text to embed. Put the information a person would search for into one readable sentence:
+For **structured records** (an order, a reading, a log line) write a function that takes one row (a pandas Series) and returns one readable sentence with what a person would search for:
 
 ```python
 def _text_example_orders(row) -> str:
     return f"Order {row.get('order_id', '')}: {row.get('status', 'unknown')}, ${row.get('amount', 0):.2f}"
 ```
 
+For **documents** (articles, pages, transcripts) you do not need a function: the pipeline uses a `text_column` you name, or the first of `content`, `text`, `body`, `description`, `overview`, `summary`, `title` that your data has.
+
 ### Step 2: register it
 
-Add it to both lookups in the same file:
+Add an entry to `SOURCES` in `pipeline/embed/embed_sources.py`, and the function to `TEXT_FN` when you wrote one:
 
 ```python
 TEXT_FN = {
@@ -93,11 +99,20 @@ TEXT_FN = {
 
 SOURCES = {
     # ... existing sources ...
-    "example_orders": "raw/example_orders/**/*.parquet",
+    "example_orders": {
+        "glob": "raw/example_orders/**/*.parquet",
+        "text_fn": _text_example_orders,
+        "chunking": "document",          # one row = one chunk
+    },
+    "company_wiki": {
+        "glob": "raw/company_wiki/**/*.parquet",
+        "text_column": "body",           # optional; detected if you leave it out
+        # "chunking" defaults to "recursive" (512 characters, 64 overlap) for a source with no text_fn
+    },
 }
 ```
 
-`SOURCES` maps the source name to the glob (relative to `s3://datalake/`) that holds its raw data. The text function is looked up by the same name.
+`glob` is relative to `s3://datalake/`. The other options are described in section 4.
 
 ### Step 3: make sure the rows have `source_date`
 
@@ -111,7 +126,7 @@ The `embed_sources` DAG covers every registered source. To run it by hand after 
 docker compose exec airflow airflow dags trigger embed_sources
 ```
 
-The log ends with `[example_orders] Embedded N records for <date>`. See [Airflow Orchestration](Airflow-Orchestration.md) for how to find the log. The Gemini key must be configured in the Admin Panel first.
+The log ends with a line such as `[company_wiki] Embedded 42 chunks from 5 records for <date> (recursive chunking)`. See [Airflow Orchestration](Airflow-Orchestration.md) for how to find the log. The Gemini key must be configured in the Admin Panel first.
 
 ### Testing without calling Gemini
 
@@ -148,34 +163,52 @@ Run it with `MINIO_ENDPOINT=localhost:9000` against the local stack. The vectors
 
 ## 4. Chunking
 
-### What happens today: one row, one chunk
+A **chunk** is the piece of text that gets one embedding. Long text embedded as one piece is truncated by the embedding model or becomes a vector that blurs many topics together, so it is cut into chunks first, and each chunk is searched and returned on its own. The code is in `pipeline/embed/chunking/`.
 
-A **chunk** is the piece of text that gets one embedding. Today the chunk is simply the string your `_text_<source>` function returns for a row. There is no splitting. That works well for structured records (a weather reading, a storage pool status, a log line) and is the same idea as the planned `document` strategy.
+### Strategies
 
-If your rows contain long text, there are two practical options until chunking lands:
+| Strategy | Use for | How it works | Cost |
+|---|---|---|---|
+| `recursive` | Documents, articles, long logs. **Default** for a source with no `text_fn` | Cuts at the coarsest boundary that fits: paragraph, then line, then sentence, then word, then character. Every chunk is at most `chunk_size` characters, and consecutive chunks share up to `chunk_overlap` characters of whole sentences so a fact near a cut is still found | None |
+| `document` | Structured events, metrics, sensor data. **Default** for a source with a `text_fn`, and used by the shipped `jellyfin`, `truenas`, `weather` and `truenas_logs` | One row is one chunk, unchanged | None |
+| `agentic` | Contracts, papers, transcripts | Sends the text to the AI provider in windows and asks for standalone statements (names instead of pronouns, numbers kept exactly). A window the model answers badly is split with `recursive` instead, so a bad reply never fails the run | One model call per `window` characters |
 
-- **Shorten it** in the text function so the important content fits the embedding model's input limit. Longer inputs are truncated or produce a vector that blurs many topics together.
-- **Split it during ingestion.** Have your ingest script write one row per chunk, with its own stable `id` plus your own `parent_id` and `chunk_index` columns. The embedding pipeline treats each row independently, and you can keep those columns for tracing results back to the source document.
+Options per source in `SOURCES`:
 
-### Planned: pluggable chunking strategies (#72)
+| Option | Applies to | Default | Meaning |
+|---|---|---|---|
+| `chunking` | all | `document` with a `text_fn`, else `recursive` | The strategy name |
+| `chunk_size` | `recursive` | 512 | Maximum characters per chunk (about 4 characters per token in English) |
+| `chunk_overlap` | `recursive` | 64 | Characters repeated between neighbouring chunks; must be smaller than `chunk_size` |
+| `window` | `agentic` | 4000 | Characters sent to the model per call |
+| `text_column` | without `text_fn` | detected | The column holding the text |
 
-> **Not implemented.** The following is the design proposed in [#72](https://github.com/Lake-of-Tears/lake-of-tears/issues/72). Names, options and defaults may change before it ships, and none of it can be used yet.
+An unknown strategy name or invalid sizes stop that source's run with a clear error.
 
-| Strategy | Intended use | How it works |
-|---|---|---|
-| `recursive` (planned default for unstructured text) | Documents, articles, long logs | Splits by a hierarchy of separators (paragraph, line, sentence, word), with a target `chunk_size` and a `chunk_overlap`; no LLM cost |
-| `document` | Structured events, metrics, sensor data | Keeps one row as one chunk (today's behavior) |
-| `agentic` | Contracts, papers, transcripts | Uses an LLM to extract standalone statements or topic sections before embedding |
+### What is written
 
-The proposal also adds lineage columns so each chunk can be traced back to the row it came from:
+Each chunk is a row with `parent_id`, `chunk_index`, `total_chunks` and `metadata` (see the schema in section 2), so a search hit can be traced back to its record: for example, find every chunk of one document with `WHERE parent_id = 'doc-backups' ORDER BY chunk_index`. A record that is one chunk keeps its own `id`, so structured sources look exactly as before.
 
-| Planned column | Meaning |
-|---|---|
-| `parent_id` | The original document or row ID |
-| `chunk_index` | Position of the chunk, starting at 0 |
-| `total_chunks` | How many chunks the parent produced |
+We ran this on a local stack with real embeddings: three documents of about 1,000 characters (`chunk_size` 400, `chunk_overlap` 60) became nine chunks of at most 397 characters, each with a 768-dimension vector. The question "How long are nightly database backups kept before they are deleted?" returned the chunk containing the retention rule first (score 0.91; the next chunk scored 0.77), even though the document was about backups in general.
 
-and a declarative way to choose a strategy per source in `SOURCES`. When the framework is built, this section will be updated with working examples.
+### Choosing sizes
+
+- Smaller chunks (200 to 400 characters) answer narrow factual questions precisely but can lose context; larger ones (800 to 1,500) keep context but dilute the vector. The default of 512 with an overlap of 64 is a starting point, not a measured optimum for your data.
+- Keep `chunk_overlap` at roughly 10 to 15 percent of `chunk_size`.
+- Changing the settings changes the chunks and their ids for new days only. Existing days are not re-chunked; re-run the DAG for a past date if you need that (it replaces that day's file).
+
+### Deploying to Airflow
+
+`embed_sources.py` imports the `chunking` folder, so it must sit next to the script. In Docker Compose copy it into the jobs folder with the script (see the ingestion guide for the layout):
+
+```bash
+cp -R pipeline/embed/chunking "$DATALAKE_DATA_DIR/datalake/jobs/pipeline/"
+cp pipeline/embed/embed_sources.py "$DATALAKE_DATA_DIR/datalake/jobs/pipeline/"
+```
+
+### Adding your own strategy
+
+Subclass `BaseChunker` (`chunking/base.py`), set `name`, implement `split(text) -> list[str]`, and register the class in `STRATEGIES` in `chunking/__init__.py`. Blank text and `None` are handled for you by `chunk()`.
 
 ## 5. Query examples
 
@@ -239,7 +272,11 @@ python pipeline/query/rag_query.py "Was it hot yesterday?"
 | `[source] Empty for <date>, skipping` | There were no rows for yesterday. Check that ingestion ran and that `source_date` matches the date. |
 | `GEMINI_API_KEY is not set` | A superadmin must add the key in Settings, Admin Panel. |
 | `Cannot cast list with length N to array with length 768` | The query vector has the wrong dimension. Use the same model and `output_dimensionality` of 768. |
-| The new source never appears in `embeddings/` | It is missing from `SOURCES` or `TEXT_FN`, or both lookups use different names. |
+| The new source never appears in `embeddings/` | It is missing from `SOURCES`, or its `glob` does not match, or (with a `text_fn`) the function is missing from `TEXT_FN` under the same name. |
+| `ModuleNotFoundError: No module named 'chunking'` in the embed log | The `chunking` folder was not copied next to `embed_sources.py` in Airflow (see section 4). |
+| `Unknown chunking strategy` or `Invalid options` | Fix the `chunking` name or the sizes of that source in `SOURCES`. |
+| A source with long text still gives one huge chunk | It has a `text_fn` or `chunking: "document"`. Set `chunking` to `recursive`. |
+| `agentic` log line says it fell back to recursive splitting | The model's reply was not a JSON list of statements, or the AI provider was unreachable. The run continues with recursive chunks. |
 | Daily AI summaries are not searchable | The `summarize` DAG writes plain text summaries to `raw/summaries/<source>/` (columns `source`, `date`, `summary`). They are not embedded. |
 | Searches get slower as data grows | There is no vector index yet (#107); every search scans all embedding files. |
 

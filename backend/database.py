@@ -3,9 +3,24 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://lake_auth:lake_auth@postgres:5432/lake_auth",
+
+def normalize_database_url(url: str) -> str:
+    """Use the psycopg (v3) driver for PostgreSQL URLs.
+
+    Deployments keep configuring a plain ``postgresql://`` URL; the driver is chosen here so it is
+    the same one everywhere (the app and Alembic) and does not depend on a SQLAlchemy default.
+    """
+    for prefix in ("postgresql://", "postgres://", "postgresql+psycopg2://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url[len(prefix) :]
+    return url
+
+
+DATABASE_URL = normalize_database_url(
+    os.getenv(
+        "DATABASE_URL",
+        "postgresql://lake_auth:lake_auth@postgres:5432/lake_auth",
+    )
 )
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)

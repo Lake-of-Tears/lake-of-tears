@@ -58,6 +58,15 @@ KNOWN_PIPELINE_NOTEBOOKS: dict[str, str] = {
     "ingest_tmdb_movies": "tmdb_daily_movies_ingest.ipynb",
 }
 
+PROTECTED_SYSTEM_DAGS: set[str] = {
+    "run_notebook",
+    "refresh_catalog_schemas_dag",
+    "embed_sources_dag",
+    "summarize_dag",
+    "anomaly_detect_dag",
+    "generate_embeddings_dag",
+}
+
 
 def get_default_color_for_dag(dag_id: str) -> str:
     """Return a deterministic color from the master palette based on dag_id."""
@@ -964,6 +973,13 @@ async def delete_scheduled_notebook(
 ) -> dict[str, Any]:
     """Delete a dynamically generated notebook schedule DAG."""
     clean_id = sanitize_dag_id(dag_id)
+    if (
+        clean_id in PROTECTED_SYSTEM_DAGS
+        or clean_id.startswith("ingest_")
+        or not clean_id.startswith("ws_")
+    ):
+        raise HTTPException(400, f"Cannot delete protected or non-workspace pipeline: {dag_id}")
+
     if not clean_id.startswith(f"ws_{workspace_slug}_"):
         raise HTTPException(404, f"Pipeline {dag_id} not found in this workspace")
 

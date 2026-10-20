@@ -71,7 +71,12 @@ def refresh_catalog_schemas():
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
-    db_url = os.getenv("DATABASE_URL", "postgresql://lake_auth:lake_auth@postgres:5432/lake_auth")
+    db_url = os.getenv(
+        "DATABASE_URL",
+        "postgresql://lake_auth:postgresauthpass@lake-of-tears-postgres:5432/lake_auth"
+        if os.getenv("KUBERNETES_SERVICE_HOST")
+        else "postgresql://lake_auth:lake_auth@postgres:5432/lake_auth",
+    )
     engine = create_engine(db_url, pool_pre_ping=True)
     Session = sessionmaker(bind=engine)
     db = Session()
@@ -95,7 +100,7 @@ def refresh_catalog_schemas():
             merged, drift = _merge_columns(existing_cols or [], inferred)
             db.execute(
                 text(
-                    "UPDATE catalog_tables SET column_defs = :cols::jsonb, schema_drift = :drift WHERE id = :id"
+                    "UPDATE catalog_tables SET column_defs = CAST(:cols AS jsonb), schema_drift = :drift WHERE id = :id"
                 ),
                 {"cols": __import__("json").dumps(merged), "drift": drift, "id": str(table_id)},
             )
@@ -113,6 +118,7 @@ with DAG(
     schedule_interval="0 6 * * *",
     start_date=datetime(2024, 1, 1),
     catchup=False,
+    is_paused_upon_creation=False,
     tags=["catalog"],
 ) as dag:
     PythonOperator(

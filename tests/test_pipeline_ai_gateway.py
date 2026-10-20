@@ -167,10 +167,16 @@ def test_embed_source_writes_provider_model_and_dimension(gateway, monkeypatch):
         "provider",
         "model",
         "dimension",
+        "parent_id",
+        "chunk_index",
+        "total_chunks",
+        "metadata",
         "ingested_at",
     ]
     row = out.iloc[0]
     assert (row["provider"], row["model"], row["dimension"]) == ("stub", "stub-embed", 4)
+    # record-level (document) chunking: the row is its own single chunk
+    assert (row["parent_id"], row["chunk_index"], row["total_chunks"]) == (row["id"], 0, 1)
     assert len(row["embedding"]) == 4
 
 

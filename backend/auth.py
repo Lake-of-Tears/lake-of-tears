@@ -8,11 +8,11 @@ import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import bcrypt
 import jwt
 from database import SessionLocal, get_db
 from fastapi import Cookie, Depends, Header, HTTPException
 from models import SystemSetting, User, Workspace, WorkspaceMember
-from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
 SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "dev-secret-please-change-in-production")
@@ -25,7 +25,9 @@ DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
 # Fallback TTL used when the DB is unavailable (e.g. during first startup).
 _FALLBACK_TTL = timedelta(hours=24)
 
-_pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# bcrypt only reads the first 72 bytes of a password and bcrypt >= 5 refuses longer ones. Longer
+# passwords are rejected when they are set (see schemas.check_password_length), never truncated.
+_BCRYPT_ROUNDS = 12
 
 
 def _keystream(enc_key: bytes, nonce: bytes, length: int) -> bytes:
@@ -183,11 +185,17 @@ def set_stored_gemini_model(
 
 
 def hash_password(password: str) -> str:
-    return _pwd.hash(password)
+    # raises ValueError for a password over 72 bytes; the API validates that first
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=_BCRYPT_ROUNDS)).decode(
+        "ascii"
+    )
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return _pwd.verify(plain, hashed)
+    try:
+        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    except ValueError:  # too long to be a real password, or not a bcrypt hash: a failed login
+        return False
 
 
 def get_session_expires_delta(db: Session) -> timedelta:

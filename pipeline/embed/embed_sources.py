@@ -5,9 +5,18 @@ sys.path.insert(0, str(Path(__file__).parents[2]))
 
 import hashlib
 from datetime import date, timedelta
+from typing import Any
 
 import pandas as pd
 from ai_gateway import embed_texts_with_meta
+from chunking import (
+    DEFAULT_CHUNK_OVERLAP,
+    DEFAULT_CHUNK_SIZE,
+    DEFAULT_STRATEGY,
+    BaseChunker,
+    explode_chunks,
+    get_chunker,
+)
 from storage_writer import get_duckdb_con
 
 
@@ -58,22 +67,122 @@ TEXT_FN = {
     "truenas_logs": _text_truenas_logs,
 }
 
-SOURCES = {
-    "jellyfin": "raw/jellyfin/**/*.parquet",
-    "truenas": "raw/truenas/**/*.parquet",
-    "weather": "raw/weather/**/*.parquet",
-    "truenas_logs": "raw/truenas_logs/**/*.parquet",
+# Sources embedded every day. Each entry is a dict:
+#   glob          where the raw Parquet files are (required)
+#   text_fn       builds the text of one row; without it the text comes from ``text_column`` or the
+#                 first of TEXT_COLUMNS the data has
+#   text_column   the column that holds the text (optional)
+#   chunking      "recursive" | "document" | "agentic"; default "document" for a source with a
+#                 text_fn (structured events) and "recursive" otherwise
+#   chunk_size, chunk_overlap   for "recursive", in characters (default 512 and 64)
+#   window        for "agentic", characters sent to the model per call (default 4000)
+SOURCES: dict[str, dict[str, Any]] = {
+    "jellyfin": {
+        "glob": "raw/jellyfin/**/*.parquet",
+        "text_fn": _text_jellyfin,
+        "chunking": "document",
+    },
+    "truenas": {
+        "glob": "raw/truenas/**/*.parquet",
+        "text_fn": _text_truenas,
+        "chunking": "document",
+    },
+    "weather": {
+        "glob": "raw/weather/**/*.parquet",
+        "text_fn": _text_weather,
+        "chunking": "document",
+    },
+    "truenas_logs": {
+        "glob": "raw/truenas_logs/**/*.parquet",
+        "text_fn": _text_truenas_logs,
+        "chunking": "document",
+    },
 }
 
+# Columns of the embeddings Parquet files, in order (``ingested_at`` is added when writing). The SQL
+# assistant's declared schema in backend/ai_service.py and ui/duckdb_ai.py must list the same ones.
+OUTPUT_COLUMNS = [
+    "id",
+    "source",
+    "content",
+    "embedding",
+    "source_date",
+    "provider",
+    "model",
+    "dimension",
+    "parent_id",
+    "chunk_index",
+    "total_chunks",
+    "metadata",
+]
 
-def embed_source(source: str, parquet_glob: str):
+TEXT_COLUMNS = ("content", "text", "body", "description", "overview", "summary", "title")
+
+
+def source_config(source: str, parquet_glob: str | None = None) -> dict[str, Any]:
+    """The settings for ``source`` with defaults applied (a plain glob string is still accepted)."""
+    raw = SOURCES.get(source, {})
+    config: dict[str, Any] = {"glob": raw} if isinstance(raw, str) else dict(raw)
+    if parquet_glob:
+        config["glob"] = parquet_glob
+    config.setdefault("text_fn", TEXT_FN.get(source))
+    config.setdefault("chunking", "document" if config["text_fn"] else DEFAULT_STRATEGY)
+    return config
+
+
+def build_chunker(config: dict[str, Any]) -> BaseChunker:
+    strategy = str(config["chunking"]).lower()
+    options: dict[str, Any] = {}
+    if strategy == "recursive":
+        options = {
+            "chunk_size": config.get("chunk_size", DEFAULT_CHUNK_SIZE),
+            "chunk_overlap": config.get("chunk_overlap", DEFAULT_CHUNK_OVERLAP),
+        }
+    elif strategy == "agentic" and "window" in config:
+        options = {"window": config["window"]}
+    return get_chunker(strategy, **options)
+
+
+def source_text(df: pd.DataFrame, config: dict[str, Any]) -> tuple[pd.Series, str | None]:
+    """The text of each row, and the column it came from (None when built from several)."""
+    text_fn = config.get("text_fn")
+    if text_fn:
+        return df.apply(text_fn, axis=1), None
+    column = config.get("text_column") or next((c for c in TEXT_COLUMNS if c in df.columns), None)
+    if column:
+        return df[column], column
+    text_columns = [
+        c
+        for c in df.columns
+        if pd.api.types.is_string_dtype(df[c]) or pd.api.types.is_object_dtype(df[c])
+    ]
+    return df[text_columns].astype(str).agg(" | ".join, axis=1), None
+
+
+def chunk_source_frame(df: pd.DataFrame, source: str, config: dict[str, Any]) -> pd.DataFrame:
+    """Split each row's text with the source's strategy: one row per chunk, with lineage."""
+    texts, text_column = source_text(df, config)
+    id_col = next((c for c in ("id", "Id", "ID") if c in df.columns), None)
+    if id_col:
+        parent_ids = df[id_col].astype(str).tolist()
+    else:
+        parent_ids = [
+            hashlib.md5(str(t).encode(), usedforsecurity=False).hexdigest() for t in texts
+        ]
+    # year/month/day are added by DuckDB from the year=/month=/day= folder names; source_date has it
+    skip = [c for c in (id_col, text_column, "source_date", "year", "month", "day") if c]
+    return explode_chunks(df, texts.tolist(), parent_ids, build_chunker(config), skip)
+
+
+def embed_source(source: str, parquet_glob: str | None = None):
+    config = source_config(source, parquet_glob)
     con = get_duckdb_con()
     con.execute("INSTALL vss; LOAD vss;")
     yesterday = str(date.today() - timedelta(days=1))
 
     try:
         df = con.execute(f"""
-            SELECT * FROM read_parquet('s3://datalake/{parquet_glob}')
+            SELECT * FROM read_parquet('s3://datalake/{config["glob"]}')
             WHERE source_date = '{yesterday}'
         """).df()
     except Exception as e:
@@ -84,37 +193,21 @@ def embed_source(source: str, parquet_glob: str):
         print(f"[{source}] Empty for {yesterday}, skipping")
         return
 
-    df["content"] = df.apply(TEXT_FN[source], axis=1)
-    df["source"] = source
-    df["source_date"] = yesterday
+    chunks = chunk_source_frame(df, source, config)
+    if chunks.empty:
+        print(f"[{source}] No text to embed for {yesterday}, skipping")
+        return
+    chunks["source"] = source
+    chunks["source_date"] = yesterday
 
-    id_col = next((c for c in ("id", "Id", "ID") if c in df.columns), None)
-    if id_col:
-        df["id"] = df[id_col].astype(str)
-    else:
-        df["id"] = df["content"].apply(
-            lambda t: hashlib.md5(t.encode(), usedforsecurity=False).hexdigest()
-        )
-
-    result = embed_texts_with_meta(df["content"].tolist())
-    df["embedding"] = result["embeddings"]
+    result = embed_texts_with_meta(chunks["content"].tolist())
+    chunks["embedding"] = result["embeddings"]
     # Record which model produced the vectors so searches only compare like with like.
-    df["provider"] = result["provider"]
-    df["model"] = result["embedding_model"]
-    df["dimension"] = result["dimension"]
+    chunks["provider"] = result["provider"]
+    chunks["model"] = result["embedding_model"]
+    chunks["dimension"] = result["dimension"]
 
-    out_df = df[
-        [
-            "id",
-            "source",
-            "content",
-            "embedding",
-            "source_date",
-            "provider",
-            "model",
-            "dimension",
-        ]
-    ].copy()
+    out_df = chunks[OUTPUT_COLUMNS].copy()
     out_df["ingested_at"] = pd.Timestamp.now()
 
     con.register("out_df", out_df)
@@ -123,9 +216,12 @@ def embed_source(source: str, parquet_glob: str):
         COPY out_df TO 's3://datalake/embeddings/{source}/year={y}/month={m}/day={d}/data.parquet'
         (FORMAT PARQUET)
     """)
-    print(f"[{source}] Embedded {len(out_df)} records for {yesterday}")
+    print(
+        f"[{source}] Embedded {len(out_df)} chunks from "
+        f"{out_df['parent_id'].nunique()} records for {yesterday} ({config['chunking']} chunking)"
+    )
 
 
 if __name__ == "__main__":
-    for source, glob in SOURCES.items():
-        embed_source(source, glob)
+    for source in SOURCES:
+        embed_source(source)

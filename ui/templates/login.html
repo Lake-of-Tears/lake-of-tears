@@ -127,6 +127,23 @@
       document.getElementById('banner').classList.add('hidden');
     }
 
+    function formatError(detail, fallback) {
+      if (!detail) return fallback;
+      if (typeof detail === 'string') return detail;
+      if (Array.isArray(detail)) {
+        const msgs = detail.map(item => {
+          if (typeof item === 'string') return item;
+          if (item && item.msg) return item.msg.replace(/^Value error,\s*/i, '');
+          return JSON.stringify(item);
+        });
+        return msgs.join('; ') || fallback;
+      }
+      if (typeof detail === 'object' && detail.msg) {
+        return detail.msg.replace(/^Value error,\s*/i, '');
+      }
+      return String(detail);
+    }
+
     async function submitLogin(e) {
       e.preventDefault();
       const btn = e.target.querySelector('button[type=submit]');
@@ -143,7 +160,7 @@
         });
         const data = await res.json();
         if (res.ok) { window.location.href = NEXT; }
-        else { showBanner(data.detail || 'Sign in failed.', 'error'); }
+        else { showBanner(formatError(data.detail, 'Sign in failed.'), 'error'); }
       } catch { showBanner('Network error — is the backend running?', 'error'); }
       btn.disabled = false; btn.textContent = 'Sign in';
     }
@@ -167,7 +184,7 @@
         });
         const data = await res.json();
         if (res.ok) { window.location.href = NEXT; }
-        else { showBanner(data.detail || 'Registration failed.', 'error'); }
+        else { showBanner(formatError(data.detail, 'Registration failed.'), 'error'); }
       } catch { showBanner('Network error — is the backend running?', 'error'); }
       btn.disabled = false; btn.textContent = 'Create account';
     }
