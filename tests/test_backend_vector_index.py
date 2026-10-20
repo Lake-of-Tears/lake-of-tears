@@ -94,6 +94,8 @@ def test_sync_table_vector_index_reports_an_unconfigured_provider():
     assert res["ok"] is False
     assert "API key is not set" in res["error"]
     assert "Gemini" not in res["error"]
+    assert mock_table.vector_index["status"] == "error"
+    assert "API key is not set" in mock_table.vector_index["last_error"]
 
 
 def test_sync_table_vector_index_success_uses_the_active_provider(tmp_path: Path):
@@ -126,6 +128,28 @@ def test_sync_table_vector_index_success_uses_the_active_provider(tmp_path: Path
     assert mock_table.vector_index["dimension"] == 4
 
 
+def test_sync_table_vector_index_default_dest_s3_overwrites_static_path(tmp_path: Path):
+    mock_table = _movies_table(_movies_parquet(tmp_path))
+    mock_table.slug = "movies_test"
+    mock_db = MagicMock()
+    provider = FakeProvider(dimension=4)
+
+    with patch("vector_index_service.get_active_provider", return_value=provider), patch(
+        "vector_index_service.create_duckdb_connection"
+    ) as mock_con_factory:
+        mock_con = MagicMock()
+        mock_con_factory.return_value = mock_con
+        mock_con.execute.return_value.fetchall.side_effect = [
+            [("overview", "VARCHAR"), ("id", "VARCHAR")],
+            [("Dream thief", "1")],
+        ]
+        res = vector_index_service.sync_table_vector_index(mock_table, mock_db)
+
+    assert res["ok"] is True
+    assert res["s3_vector_path"] == "s3://datalake/embeddings/movies_test/data.parquet"
+    assert mock_table.vector_index["s3_vector_path"] == "s3://datalake/embeddings/movies_test/data.parquet"
+
+
 def test_sync_table_vector_index_is_not_tied_to_768_dimensions(tmp_path: Path):
     import duckdb
 
@@ -146,15 +170,19 @@ def test_sync_table_vector_index_is_not_tied_to_768_dimensions(tmp_path: Path):
 def test_sync_table_vector_index_surfaces_provider_errors(tmp_path: Path):
     from ai_providers import ProviderError
 
+    mock_table = _movies_table(_movies_parquet(tmp_path))
+    mock_db = MagicMock()
     provider = FakeProvider()
     provider.embed_texts = MagicMock(side_effect=ProviderError("Ollama returned HTTP 404"))
     res = vector_index_service.sync_table_vector_index(
-        _movies_table(_movies_parquet(tmp_path)),
-        MagicMock(),
+        mock_table,
+        mock_db,
         dest_s3=str(tmp_path / "o.parquet"),
         provider=provider,
     )
     assert res == {"ok": False, "error": "Ollama returned HTTP 404"}
+    assert mock_table.vector_index["status"] == "error"
+    assert mock_table.vector_index["last_error"] == "Ollama returned HTTP 404"
 
 
 def test_backend_sync_endpoint():

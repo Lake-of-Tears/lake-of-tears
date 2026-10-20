@@ -26,6 +26,21 @@ def _safe_identifier(name: str | None) -> str:
     return slug
 
 
+def _record_sync_error(table: CatalogTable, db: Session, error_msg: str) -> None:
+    try:
+        updated_cfg = dict(table.vector_index or {})
+        updated_cfg["status"] = "error"
+        updated_cfg["last_error"] = error_msg
+        table.vector_index = updated_cfg
+        db.commit()
+        db.refresh(table)
+    except Exception:
+        logger.exception(
+            "Failed to update vector index error status for table %s",
+            getattr(table, "slug", "unknown"),
+        )
+
+
 def sync_table_vector_index(
     table: CatalogTable,
     db: Session,
@@ -38,12 +53,14 @@ def sync_table_vector_index(
     Reads raw data from `table.s3_path_pattern`, composes text chunks using
     the configured source column or template, embeds it with the AI provider selected in the
     Admin Panel (or ``provider``), and writes Parquet files to
-    `s3://datalake/embeddings/<table_slug>/...` with the provider, model and dimension that made
+    `s3://datalake/embeddings/<table_slug>/data.parquet` with the provider, model and dimension that made
     each row. The model and dimension come from the provider, not from the table settings.
     """
     s3_path = (table.s3_path_pattern or "").strip()
     if not s3_path:
-        return {"ok": False, "error": "Table has no S3 storage path configured"}
+        err = "Table has no S3 storage path configured"
+        _record_sync_error(table, db, err)
+        return {"ok": False, "error": err}
 
     vector_cfg = table.vector_index or {}
     source_col = (vector_cfg.get("source_column") or "overview").strip()
@@ -53,7 +70,9 @@ def sync_table_vector_index(
         provider = provider or get_active_provider(db)
         dim = provider.dimension
     except ProviderError as exc:
-        return {"ok": False, "error": str(exc)}
+        err = str(exc)
+        _record_sync_error(table, db, err)
+        return {"ok": False, "error": err}
     model = provider.embedding_model
 
     con = create_duckdb_connection(load_vss=True, register_ai=False)
@@ -69,9 +88,11 @@ def sync_table_vector_index(
             if varchar_cols:
                 source_col = varchar_cols[0]
             else:
+                err = f"Source column '{source_col}' not found in raw table schema"
+                _record_sync_error(table, db, err)
                 return {
                     "ok": False,
-                    "error": f"Source column '{source_col}' not found in raw table schema",
+                    "error": err,
                 }
 
         # Query non-empty records
@@ -80,7 +101,22 @@ def sync_table_vector_index(
             WHERE "{source_col}" IS NOT NULL AND trim("{source_col}") != ''
         """
         raw_rows = con.execute(query).fetchall()
+        now_dt = datetime.now(UTC)
         if not raw_rows:
+            updated_cfg = dict(vector_cfg)
+            updated_cfg["enabled"] = True
+            updated_cfg["source_column"] = source_col
+            updated_cfg["format_template"] = format_template
+            updated_cfg["provider"] = provider.name
+            updated_cfg["model"] = model
+            updated_cfg["dimension"] = dim
+            updated_cfg["status"] = "synced"
+            updated_cfg["total_vectors"] = 0
+            updated_cfg["last_synced_at"] = now_dt.isoformat()
+            updated_cfg.pop("last_error", None)
+            table.vector_index = updated_cfg
+            db.commit()
+            db.refresh(table)
             return {
                 "ok": True,
                 "total_vectors": 0,
@@ -89,10 +125,9 @@ def sync_table_vector_index(
             }
 
         table_slug = _safe_identifier(table.slug)
-        now_dt = datetime.now(UTC)
         y, m, d = now_dt.strftime("%Y"), now_dt.strftime("%m"), now_dt.strftime("%d")
         if not dest_s3:
-            dest_s3 = f"s3://{MINIO_BUCKET}/embeddings/{table_slug}/year={y}/month={m}/day={d}/data.parquet"
+            dest_s3 = f"s3://{MINIO_BUCKET}/embeddings/{table_slug}/data.parquet"
 
         # Create temporary table in DuckDB to hold batch embeddings
         con.execute("""
@@ -180,6 +215,7 @@ def sync_table_vector_index(
         updated_cfg["total_vectors"] = total
         updated_cfg["last_synced_at"] = now_dt.isoformat()
         updated_cfg["s3_vector_path"] = dest_s3
+        updated_cfg.pop("last_error", None)
 
         table.vector_index = updated_cfg
         db.commit()
@@ -194,6 +230,7 @@ def sync_table_vector_index(
         }
     except Exception as exc:
         logger.exception("Vector sync failed for table %s: %s", table.slug, exc)
+        _record_sync_error(table, db, str(exc))
         return {"ok": False, "error": str(exc)}
     finally:
         con.close()
