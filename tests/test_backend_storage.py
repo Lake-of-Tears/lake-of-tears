@@ -447,19 +447,6 @@ def test_delete_object_rbac_admin_allowed():
         assert resp.status_code == 200
         assert resp.json()["deleted"] is True
 
-
-def test_delete_object_rbac_superadmin_allowed():
-    user, ws, member, token = _generate_test_user_and_token(role="viewer", global_role="superadmin")
-    mock_db = MagicMock()
-    mock_db.query.return_value.filter.return_value.first.return_value = ws
-    mock_db.query.return_value.filter.return_value.first.return_value = member
-
-    backend_main.app.dependency_overrides[database.get_db] = lambda: mock_db
-    backend_main.app.dependency_overrides[auth.get_current_user] = lambda: user
-
-    with patch("storage_service.delete_object") as mock_del:
-        mock_del.return_value = {"deleted": True, "key": "raw/stripe/data.parquet"}
-
         resp = client.delete(
             "/api/v1/storage/objects/raw/stripe/data.parquet",
             headers={"Authorization": f"Bearer {token}"},
@@ -467,3 +454,311 @@ def test_delete_object_rbac_superadmin_allowed():
         )
         assert resp.status_code == 200
         assert resp.json()["deleted"] is True
+
+
+# ── Workspace Prefix Jailing Unit & Integration Tests (Issue #250) ───────────
+
+
+def test_validate_and_jail_path_dual_mode():
+    slug = "analytics"
+    # Relative paths resolve within jail
+    assert (
+        storage_service.validate_and_jail_path(slug, "raw/data.parquet")
+        == "workspaces/analytics/raw/data.parquet"
+    )
+    assert (
+        storage_service.validate_and_jail_path(slug, "raw/", is_prefix=True)
+        == "workspaces/analytics/raw/"
+    )
+    assert (
+        storage_service.validate_and_jail_path(slug, "", is_prefix=True) == "workspaces/analytics/"
+    )
+
+    # Fully-qualified paths starting with the active workspace prefix are accepted
+    assert (
+        storage_service.validate_and_jail_path(slug, "workspaces/analytics/raw/data.parquet")
+        == "workspaces/analytics/raw/data.parquet"
+    )
+    assert (
+        storage_service.validate_and_jail_path(slug, "workspaces/analytics/raw/", is_prefix=True)
+        == "workspaces/analytics/raw/"
+    )
+    assert (
+        storage_service.validate_and_jail_path(slug, "workspaces/analytics", is_prefix=True)
+        == "workspaces/analytics/"
+    )
+
+
+def test_validate_and_jail_path_traversal_rejection():
+    slug = "analytics"
+    with pytest.raises(storage_service.StorageAccessDeniedError):
+        storage_service.validate_and_jail_path(slug, "../prod/data.parquet")
+
+    with pytest.raises(storage_service.StorageAccessDeniedError):
+        storage_service.validate_and_jail_path(slug, "raw/../../secrets.parquet")
+
+    with pytest.raises(storage_service.StorageAccessDeniedError):
+        storage_service.validate_and_jail_path(
+            slug, "workspaces/analytics/../marketing/data.parquet"
+        )
+
+
+def test_validate_and_jail_path_cross_workspace_rejection():
+    slug = "analytics"
+    # Attempting to target another workspace
+    with pytest.raises(storage_service.StorageAccessDeniedError):
+        storage_service.validate_and_jail_path(slug, "workspaces/marketing/data.parquet")
+
+    # Attempting to access bucket root or bare workspaces/ prefix
+    with pytest.raises(storage_service.StorageAccessDeniedError):
+        storage_service.validate_and_jail_path(slug, "workspaces/")
+
+    with pytest.raises(storage_service.StorageAccessDeniedError):
+        storage_service.validate_and_jail_path(slug, "workspaces/analytics-other/data.parquet")
+
+
+def test_build_breadcrumbs_workspace_jailed():
+    slug = "analytics"
+    crumbs = storage_service.build_breadcrumbs(
+        "workspaces/analytics/raw/stripe/", workspace_slug=slug
+    )
+    assert len(crumbs) == 3
+    assert crumbs[0]["name"] == "Workspace: analytics"
+    assert crumbs[0]["prefix"] == ""
+    assert crumbs[1]["name"] == "raw"
+    assert crumbs[1]["prefix"] == "raw/"
+    assert crumbs[2]["name"] == "stripe"
+    assert crumbs[2]["prefix"] == "raw/stripe/"
+
+    # At workspace root
+    root_crumbs = storage_service.build_breadcrumbs("workspaces/analytics/", workspace_slug=slug)
+    assert len(root_crumbs) == 1
+    assert root_crumbs[0]["prefix"] == ""
+
+
+def test_get_parent_prefix_workspace_jailed():
+    slug = "analytics"
+    # Root has no parent (Up button disabled)
+    assert storage_service.get_parent_prefix("workspaces/analytics/", workspace_slug=slug) is None
+    assert storage_service.get_parent_prefix("", workspace_slug=slug) is None
+
+    # First subfolder parent is root
+    assert storage_service.get_parent_prefix("workspaces/analytics/raw/", workspace_slug=slug) == ""
+
+    # Nested subfolder parent is immediate ancestor
+    assert (
+        storage_service.get_parent_prefix("workspaces/analytics/raw/stripe/", workspace_slug=slug)
+        == "raw/"
+    )
+
+
+def test_browse_prefix_jailed_workspace():
+    mock_s3 = MagicMock()
+    now = datetime.now(UTC)
+    mock_s3.list_objects_v2.return_value = {
+        "CommonPrefixes": [
+            {"Prefix": "workspaces/analytics/raw/"},
+            {"Prefix": "workspaces/analytics/models/"},
+        ],
+        "Contents": [
+            {
+                "Key": "workspaces/analytics/summary.parquet",
+                "Size": 2048,
+                "LastModified": now,
+                "ETag": '"etag123"',
+            }
+        ],
+        "IsTruncated": False,
+    }
+
+    res = storage_service.browse_prefix(
+        bucket="datalake",
+        prefix="",
+        s3_client=mock_s3,
+        workspace_slug="analytics",
+    )
+
+    assert res["workspace"] == "analytics"
+    assert res["prefix"] == "workspaces/analytics/"
+    assert res["parent_prefix"] is None  # Up disabled at root
+    assert res["total_folders"] == 2
+    assert res["folders"][0]["name"] == "models"
+    assert res["folders"][0]["prefix"] == "models/"  # Workspace-relative
+    assert res["folders"][0]["full_prefix"] == "workspaces/analytics/models/"
+    assert res["files"][0]["name"] == "summary.parquet"
+    assert res["files"][0]["rel_key"] == "summary.parquet"
+    assert res["files"][0]["key"] == "workspaces/analytics/summary.parquet"
+
+
+def test_get_bucket_summary_workspace_jailed():
+    mock_s3 = MagicMock()
+    now = datetime.now(UTC)
+    mock_paginator = MagicMock()
+    mock_s3.get_paginator.return_value = mock_paginator
+    mock_paginator.paginate.return_value = [
+        {
+            "Contents": [
+                {
+                    "Key": "workspaces/analytics/raw/stripe/data.parquet",
+                    "Size": 1048576,
+                    "LastModified": now,
+                },
+                {
+                    "Key": "workspaces/analytics/embeddings/doc.parquet",
+                    "Size": 524288,
+                    "LastModified": now,
+                },
+            ]
+        }
+    ]
+
+    res = storage_service.get_bucket_summary(
+        bucket="datalake",
+        s3_client=mock_s3,
+        workspace_slug="analytics",
+    )
+
+    assert res["ok"] is True
+    assert res["workspace"] == "analytics"
+    assert res["total_objects"] == 2
+    assert res["total_size"] == "1.5 MB"
+    assert "raw" in res["prefix_stats"]
+    assert "embeddings" in res["prefix_stats"]
+    mock_paginator.paginate.assert_called_once_with(
+        Bucket="datalake",
+        Prefix="workspaces/analytics/",
+    )
+
+
+def test_storage_endpoints_cross_workspace_403_forbidden():
+    user, ws, member, token = _generate_test_user_and_token(role="viewer")
+    mock_db = MagicMock()
+
+    backend_main.app.dependency_overrides[database.get_db] = lambda: mock_db
+    backend_main.app.dependency_overrides[auth.get_current_user] = lambda: user
+
+    with patch("storage_router.get_storage_workspace_and_role", return_value=(ws, "viewer")):
+        # Browse cross-workspace
+        resp = client.get(
+            "/api/v1/storage/browse?prefix=workspaces/marketing/",
+            headers={"Authorization": f"Bearer {token}"},
+            cookies={"lake_active_workspace": str(ws.id)},
+        )
+        assert resp.status_code == 403
+        assert "outside the active workspace jail" in resp.json()["detail"].lower()
+
+        # Metadata cross-workspace
+        resp = client.get(
+            "/api/v1/storage/objects/workspaces/marketing/data.parquet/metadata",
+            headers={"Authorization": f"Bearer {token}"},
+            cookies={"lake_active_workspace": str(ws.id)},
+        )
+        assert resp.status_code == 403
+
+        # Download cross-workspace
+        resp = client.get(
+            "/api/v1/storage/objects/workspaces/marketing/data.parquet/download",
+            headers={"Authorization": f"Bearer {token}"},
+            cookies={"lake_active_workspace": str(ws.id)},
+        )
+        assert resp.status_code == 403
+
+
+def test_storage_endpoints_traversal_403_forbidden():
+    user, ws, member, token = _generate_test_user_and_token(role="admin")
+    mock_db = MagicMock()
+
+    backend_main.app.dependency_overrides[database.get_db] = lambda: mock_db
+    backend_main.app.dependency_overrides[auth.get_current_user] = lambda: user
+
+    with patch("storage_router.get_storage_workspace_and_role", return_value=(ws, "admin")):
+        # Browse with directory traversal query
+        resp = client.get(
+            "/api/v1/storage/browse?prefix=../prod/",
+            headers={"Authorization": f"Bearer {token}"},
+            cookies={"lake_active_workspace": str(ws.id)},
+        )
+        assert resp.status_code == 403
+        assert "traversal" in resp.json()["detail"].lower()
+
+        # Delete with path traversal in key
+        resp = client.delete(
+            "/api/v1/storage/objects/workspaces/analytics/../other/secrets.parquet",
+            headers={"Authorization": f"Bearer {token}"},
+            cookies={"lake_active_workspace": str(ws.id)},
+        )
+        assert resp.status_code == 403
+        assert (
+            "traversal" in resp.json()["detail"].lower()
+            or "outside the active workspace jail" in resp.json()["detail"].lower()
+        )
+
+
+def test_upload_file_endpoint_jailed():
+    user, ws, member, token = _generate_test_user_and_token(role="admin")
+    mock_db = MagicMock()
+
+    backend_main.app.dependency_overrides[database.get_db] = lambda: mock_db
+    backend_main.app.dependency_overrides[auth.get_current_user] = lambda: user
+
+    with (
+        patch("storage_router.get_storage_workspace_and_role", return_value=(ws, "admin")),
+        patch("storage_service.upload_object") as mock_upload,
+    ):
+        mock_upload.return_value = {
+            "uploaded": True,
+            "key": "workspaces/analytics/uploads/report.csv",
+            "bucket": "datalake",
+        }
+
+        files = {"file": ("report.csv", b"id,val\n1,10\n", "text/csv")}
+        data = {"prefix": "uploads"}
+        resp = client.post(
+            "/api/v1/storage/upload",
+            headers={"Authorization": f"Bearer {token}"},
+            cookies={"lake_active_workspace": str(ws.id)},
+            files=files,
+            data=data,
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["uploaded"] is True
+        mock_upload.assert_called_once_with(
+            key="uploads/report.csv",
+            data=b"id,val\n1,10\n",
+            content_type="text/csv",
+            workspace_slug="analytics",
+        )
+
+
+def test_get_upload_url_endpoint_jailed():
+    user, ws, member, token = _generate_test_user_and_token(role="admin")
+    mock_db = MagicMock()
+
+    backend_main.app.dependency_overrides[database.get_db] = lambda: mock_db
+    backend_main.app.dependency_overrides[auth.get_current_user] = lambda: user
+
+    with (
+        patch("storage_router.get_storage_workspace_and_role", return_value=(ws, "admin")),
+        patch("storage_service.get_upload_url") as mock_url,
+    ):
+        mock_url.return_value = (
+            "http://localhost:9000/datalake/workspaces/analytics/file.csv?X-Amz=..."
+        )
+
+        resp = client.post(
+            "/api/v1/storage/objects/file.csv/upload-url",
+            headers={"Authorization": f"Bearer {token}"},
+            cookies={"lake_active_workspace": str(ws.id)},
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["key"] == "workspaces/analytics/file.csv"
+        assert "upload_url" in data
+        mock_url.assert_called_once_with(
+            key="file.csv",
+            expires_in=3600,
+            content_type="application/octet-stream",
+            workspace_slug="analytics",
+        )
