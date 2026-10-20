@@ -1030,12 +1030,30 @@ async def switch_workspace(workspace_id: str, request: Request):
     return resp
 
 
-def _backend_get(path: str, token: str) -> dict | list | None:
+def _build_backend_headers(
+    token: str,
+    workspace_id: str | None = None,
+    workspace_slug: str | None = None,
+) -> dict[str, str]:
+    headers = {"Authorization": f"Bearer {token}"}
+    if workspace_id:
+        headers["X-Workspace-Id"] = str(workspace_id)
+    if workspace_slug:
+        headers["X-Workspace-Slug"] = str(workspace_slug)
+    return headers
+
+
+def _backend_get(
+    path: str,
+    token: str,
+    workspace_id: str | None = None,
+    workspace_slug: str | None = None,
+) -> dict | list | None:
     try:
         with httpx.Client(timeout=5) as client:
             resp = client.get(
                 f"{BACKEND_URL}{path}",
-                headers={"Authorization": f"Bearer {token}"},
+                headers=_build_backend_headers(token, workspace_id, workspace_slug),
             )
         if resp.status_code == 200:
             return resp.json()
@@ -1044,12 +1062,17 @@ def _backend_get(path: str, token: str) -> dict | list | None:
     return None
 
 
-async def _backend_get_async(path: str, token: str) -> dict | list | None:
+async def _backend_get_async(
+    path: str,
+    token: str,
+    workspace_id: str | None = None,
+    workspace_slug: str | None = None,
+) -> dict | list | None:
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.get(
                 f"{BACKEND_URL}{path}",
-                headers={"Authorization": f"Bearer {token}"},
+                headers=_build_backend_headers(token, workspace_id, workspace_slug),
             )
         if resp.status_code == 200:
             return resp.json()
@@ -1058,13 +1081,19 @@ async def _backend_get_async(path: str, token: str) -> dict | list | None:
     return None
 
 
-def _backend_post_with_error(path: str, token: str, json: dict) -> tuple[dict | None, str | None]:
+def _backend_post_with_error(
+    path: str,
+    token: str,
+    json: dict,
+    workspace_id: str | None = None,
+    workspace_slug: str | None = None,
+) -> tuple[dict | None, str | None]:
     try:
         with httpx.Client(timeout=5) as client:
             resp = client.post(
                 f"{BACKEND_URL}{path}",
                 json=json,
-                headers={"Authorization": f"Bearer {token}"},
+                headers=_build_backend_headers(token, workspace_id, workspace_slug),
             )
         if resp.status_code in (200, 201):
             return resp.json(), None
@@ -1092,18 +1121,30 @@ def _backend_post_with_error(path: str, token: str, json: dict) -> tuple[dict | 
         return None, "Backend service unreachable"
 
 
-def _backend_post(path: str, token: str, json: dict) -> dict | None:
-    data, _ = _backend_post_with_error(path, token, json)
+def _backend_post(
+    path: str,
+    token: str,
+    json: dict,
+    workspace_id: str | None = None,
+    workspace_slug: str | None = None,
+) -> dict | None:
+    data, _ = _backend_post_with_error(path, token, json, workspace_id, workspace_slug)
     return data
 
 
-def _backend_patch(path: str, token: str, json: dict) -> dict | None:
+def _backend_patch(
+    path: str,
+    token: str,
+    json: dict,
+    workspace_id: str | None = None,
+    workspace_slug: str | None = None,
+) -> dict | None:
     try:
         with httpx.Client(timeout=5) as client:
             resp = client.patch(
                 f"{BACKEND_URL}{path}",
                 json=json,
-                headers={"Authorization": f"Bearer {token}"},
+                headers=_build_backend_headers(token, workspace_id, workspace_slug),
             )
         if resp.status_code == 200:
             return resp.json()
@@ -1112,12 +1153,17 @@ def _backend_patch(path: str, token: str, json: dict) -> dict | None:
     return None
 
 
-def _backend_delete(path: str, token: str) -> bool:
+def _backend_delete(
+    path: str,
+    token: str,
+    workspace_id: str | None = None,
+    workspace_slug: str | None = None,
+) -> bool:
     try:
         with httpx.Client(timeout=5) as client:
             resp = client.delete(
                 f"{BACKEND_URL}{path}",
-                headers={"Authorization": f"Bearer {token}"},
+                headers=_build_backend_headers(token, workspace_id, workspace_slug),
             )
         return resp.status_code == 200
     except Exception:
@@ -1426,12 +1472,18 @@ async def settings_admin_session_settings(
     return RedirectResponse(url="/settings/admin?saved=1", status_code=302)
 
 
-def _backend_put(path: str, token: str, payload: dict[str, Any]) -> tuple[int, Any]:
+def _backend_put(
+    path: str,
+    token: str,
+    payload: dict[str, Any],
+    workspace_id: str | None = None,
+    workspace_slug: str | None = None,
+) -> tuple[int, Any]:
     try:
         with httpx.Client(timeout=15) as client:
             resp = client.put(
                 f"{BACKEND_URL}{path}",
-                headers={"Authorization": f"Bearer {token}"},
+                headers=_build_backend_headers(token, workspace_id, workspace_slug),
                 json=payload,
             )
         try:
@@ -1886,11 +1938,12 @@ async def api_workspace_manifest(request: Request):
             if data is None:
                 data = await _backend_get_async(f"/api/workspaces/{ws_id}/catalogs", token)
         if data is None:
-            data = await _backend_get_async("/api/catalogs/catalog-manifest", token)
+            cat_query = f"?workspace_slug={urllib.parse.quote(ws_slug)}" if ws_slug else ""
+            data = await _backend_get_async(f"/api/catalogs/catalog-manifest{cat_query}", token)
             if data is None:
-                data = await _backend_get_async("/api/catalogs/manifest", token)
+                data = await _backend_get_async(f"/api/catalogs/manifest{cat_query}", token)
             if data is None:
-                data = await _backend_get_async("/api/catalogs", token)
+                data = await _backend_get_async(f"/api/catalogs{cat_query}", token)
         return data or []
 
     async def _fetch_pipelines():
@@ -2291,9 +2344,15 @@ async def api_workspace_search(request: Request, q: str = ""):
     pipelines_list = []
     try:
         if token:
+            ws_id = ws.get("id") if ws else None
             ws_slug = ws.get("slug") if ws else None
             pipe_params = f"?workspace_slug={urllib.parse.quote(ws_slug)}" if ws_slug else ""
-            pipe_data = _backend_get(f"/api/v1/pipelines{pipe_params}", token)
+            pipe_data = _backend_get(
+                f"/api/v1/pipelines{pipe_params}",
+                token,
+                workspace_id=ws_id,
+                workspace_slug=ws_slug,
+            )
             if pipe_data and isinstance(pipe_data, dict):
                 pipelines_list = pipe_data.get("pipelines", [])
             elif isinstance(pipe_data, list):

@@ -7,11 +7,12 @@ import os
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import bcrypt
 import jwt
 from database import SessionLocal, get_db
-from fastapi import Cookie, Depends, Header, HTTPException
+from fastapi import Cookie, Depends, Header, HTTPException, Query
 from models import SystemSetting, User, Workspace, WorkspaceMember
 from sqlalchemy.orm import Session
 
@@ -315,351 +316,217 @@ def require_workspace_admin(
     return member
 
 
+def get_workspace_context(
+    workspace_slug: str | None = Query(None),
+    workspace_id: str | None = Query(None),
+    x_workspace_slug: str | None = Header(None, alias="X-Workspace-Slug"),
+    x_workspace_id: str | None = Header(None, alias="X-Workspace-Id"),
+    lake_workspace_id: str | None = Cookie(None),
+    lake_active_workspace: str | None = Cookie(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    require_write: bool = False,
+    write_error_msg: str = "Workspace viewer role is read-only. Cannot execute write operations.",
+) -> tuple[Workspace, str]:
+    """Resolve active workspace and verify caller permissions.
+
+    Precedence order:
+      1. Query params (workspace_slug, workspace_id)
+      2. Headers (X-Workspace-Slug, X-Workspace-Id)
+      3. Cookies (lake_workspace_id, lake_active_workspace)
+
+    Rejects requests with 400 if no active workspace is specified.
+    Rejects with 404 if the workspace is not found or inactive.
+    Rejects with 403 if user is not superadmin and not a member.
+    Allows superadmins to switch between any active workspace (scope-jailed).
+    """
+
+    def _clean(val: Any) -> str | None:
+        if val is None or not isinstance(val, str | uuid.UUID):
+            return None
+        s = str(val).strip()
+        return s if s else None
+
+    slug = _clean(workspace_slug) or _clean(x_workspace_slug)
+    raw_id = (
+        _clean(workspace_id)
+        or _clean(x_workspace_id)
+        or _clean(lake_workspace_id)
+        or _clean(lake_active_workspace)
+    )
+
+    if not slug and not raw_id:
+        raise HTTPException(
+            400,
+            "Active workspace context (X-Workspace-Id/Slug header or lake_workspace_id cookie) is required",
+        )
+
+    ws: Workspace | None = None
+    if slug:
+        ws = (
+            db.query(Workspace).filter(Workspace.slug == slug, Workspace.status == "active").first()
+        )
+    elif raw_id:
+        try:
+            ws_uuid = uuid.UUID(str(raw_id))
+            ws = (
+                db.query(Workspace)
+                .filter(Workspace.id == ws_uuid, Workspace.status == "active")
+                .first()
+            )
+        except (ValueError, TypeError):
+            ws = None
+
+    if not ws:
+        raise HTTPException(404, "Workspace not found")
+
+    member = (
+        db.query(WorkspaceMember)
+        .filter(
+            WorkspaceMember.workspace_id == ws.id,
+            WorkspaceMember.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not member and current_user.role != "superadmin":
+        raise HTTPException(403, "Not a member of this workspace")
+
+    role = (
+        member.role if member else ("superadmin" if current_user.role == "superadmin" else "viewer")
+    )
+
+    if require_write and current_user.role != "superadmin" and role == "viewer":
+        raise HTTPException(403, write_error_msg)
+
+    return ws, role
+
+
 def get_notebook_workspace_and_role(
     workspace_id: str | None = None,
     workspace_slug: str | None = None,
+    x_workspace_id: str | None = None,
+    x_workspace_slug: str | None = None,
+    lake_workspace_id: str | None = None,
+    lake_active_workspace: str | None = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     require_write: bool = False,
 ) -> tuple[Workspace, str]:
     """Resolve workspace and verify user permissions for notebook operations."""
-    ws = None
-    if workspace_slug:
-        ws = (
-            db.query(Workspace)
-            .filter(Workspace.slug == workspace_slug.strip(), Workspace.status == "active")
-            .first()
-        )
-    elif workspace_id:
-        try:
-            ws_uuid = uuid.UUID(str(workspace_id))
-            ws = (
-                db.query(Workspace)
-                .filter(Workspace.id == ws_uuid, Workspace.status == "active")
-                .first()
-            )
-        except (ValueError, TypeError):
-            ws = None
-
-    if not ws:
-        if current_user.role == "superadmin":
-            ws = (
-                db.query(Workspace)
-                .filter(Workspace.status == "active")
-                .order_by(Workspace.created_at)
-                .first()
-            )
-        else:
-            ws = (
-                db.query(Workspace)
-                .join(WorkspaceMember, WorkspaceMember.workspace_id == Workspace.id)
-                .filter(WorkspaceMember.user_id == current_user.id, Workspace.status == "active")
-                .order_by(Workspace.created_at)
-                .first()
-            )
-
-    if not ws:
-        raise HTTPException(404, "Workspace not found")
-
-    member = (
-        db.query(WorkspaceMember)
-        .filter(
-            WorkspaceMember.workspace_id == ws.id,
-            WorkspaceMember.user_id == current_user.id,
-        )
-        .first()
+    return get_workspace_context(
+        workspace_slug=workspace_slug,
+        workspace_id=workspace_id,
+        x_workspace_slug=x_workspace_slug,
+        x_workspace_id=x_workspace_id,
+        lake_workspace_id=lake_workspace_id,
+        lake_active_workspace=lake_active_workspace,
+        current_user=current_user,
+        db=db,
+        require_write=require_write,
+        write_error_msg="Workspace viewer role is read-only. Cannot modify or execute notebooks.",
     )
-
-    if not member and current_user.role != "superadmin":
-        raise HTTPException(403, "Not a member of this workspace")
-
-    role = (
-        member.role if member else ("superadmin" if current_user.role == "superadmin" else "viewer")
-    )
-
-    if require_write and current_user.role != "superadmin" and role == "viewer":
-        raise HTTPException(
-            403, "Workspace viewer role is read-only. Cannot modify or execute notebooks."
-        )
-
-    return ws, role
 
 
 def get_pipeline_workspace_and_role(
     workspace_id: str | None = None,
     workspace_slug: str | None = None,
+    x_workspace_id: str | None = None,
+    x_workspace_slug: str | None = None,
+    lake_workspace_id: str | None = None,
+    lake_active_workspace: str | None = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     require_write: bool = False,
 ) -> tuple[Workspace, str]:
     """Resolve workspace and verify user permissions for pipeline operations."""
-    ws = None
-    if workspace_slug:
-        ws = (
-            db.query(Workspace)
-            .filter(Workspace.slug == workspace_slug.strip(), Workspace.status == "active")
-            .first()
-        )
-    elif workspace_id:
-        try:
-            ws_uuid = uuid.UUID(str(workspace_id))
-            ws = (
-                db.query(Workspace)
-                .filter(Workspace.id == ws_uuid, Workspace.status == "active")
-                .first()
-            )
-        except (ValueError, TypeError):
-            ws = None
-
-    if not ws:
-        if current_user.role == "superadmin":
-            ws = (
-                db.query(Workspace)
-                .filter(Workspace.status == "active")
-                .order_by(Workspace.created_at)
-                .first()
-            )
-        else:
-            ws = (
-                db.query(Workspace)
-                .join(WorkspaceMember, WorkspaceMember.workspace_id == Workspace.id)
-                .filter(WorkspaceMember.user_id == current_user.id, Workspace.status == "active")
-                .order_by(Workspace.created_at)
-                .first()
-            )
-
-    if not ws:
-        raise HTTPException(404, "Workspace not found")
-
-    member = (
-        db.query(WorkspaceMember)
-        .filter(
-            WorkspaceMember.workspace_id == ws.id,
-            WorkspaceMember.user_id == current_user.id,
-        )
-        .first()
+    return get_workspace_context(
+        workspace_slug=workspace_slug,
+        workspace_id=workspace_id,
+        x_workspace_slug=x_workspace_slug,
+        x_workspace_id=x_workspace_id,
+        lake_workspace_id=lake_workspace_id,
+        lake_active_workspace=lake_active_workspace,
+        current_user=current_user,
+        db=db,
+        require_write=require_write,
+        write_error_msg="Workspace viewer role is read-only. Cannot modify or trigger pipelines.",
     )
-
-    if not member and current_user.role != "superadmin":
-        raise HTTPException(403, "Not a member of this workspace")
-
-    role = (
-        member.role if member else ("superadmin" if current_user.role == "superadmin" else "viewer")
-    )
-
-    if require_write and current_user.role != "superadmin" and role == "viewer":
-        raise HTTPException(
-            403, "Workspace viewer role is read-only. Cannot modify or trigger pipelines."
-        )
-
-    return ws, role
 
 
 def get_storage_workspace_and_role(
     workspace_id: str | None = None,
     workspace_slug: str | None = None,
+    x_workspace_id: str | None = None,
+    x_workspace_slug: str | None = None,
+    lake_workspace_id: str | None = None,
+    lake_active_workspace: str | None = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     require_write: bool = False,
 ) -> tuple[Workspace, str]:
     """Resolve workspace and verify user permissions for storage operations."""
-    ws = None
-    if workspace_slug:
-        ws = (
-            db.query(Workspace)
-            .filter(Workspace.slug == workspace_slug.strip(), Workspace.status == "active")
-            .first()
-        )
-    elif workspace_id:
-        try:
-            ws_uuid = uuid.UUID(str(workspace_id))
-            ws = (
-                db.query(Workspace)
-                .filter(Workspace.id == ws_uuid, Workspace.status == "active")
-                .first()
-            )
-        except (ValueError, TypeError):
-            ws = None
-
-    if not ws:
-        if current_user.role == "superadmin":
-            ws = (
-                db.query(Workspace)
-                .filter(Workspace.status == "active")
-                .order_by(Workspace.created_at)
-                .first()
-            )
-        else:
-            ws = (
-                db.query(Workspace)
-                .join(WorkspaceMember, WorkspaceMember.workspace_id == Workspace.id)
-                .filter(WorkspaceMember.user_id == current_user.id, Workspace.status == "active")
-                .order_by(Workspace.created_at)
-                .first()
-            )
-
-    if not ws:
-        raise HTTPException(404, "Workspace not found")
-
-    member = (
-        db.query(WorkspaceMember)
-        .filter(
-            WorkspaceMember.workspace_id == ws.id,
-            WorkspaceMember.user_id == current_user.id,
-        )
-        .first()
+    return get_workspace_context(
+        workspace_slug=workspace_slug,
+        workspace_id=workspace_id,
+        x_workspace_slug=x_workspace_slug,
+        x_workspace_id=x_workspace_id,
+        lake_workspace_id=lake_workspace_id,
+        lake_active_workspace=lake_active_workspace,
+        current_user=current_user,
+        db=db,
+        require_write=require_write,
+        write_error_msg="Workspace viewer role is read-only. Cannot delete or modify storage objects.",
     )
-
-    if not member and current_user.role != "superadmin":
-        raise HTTPException(403, "Not a member of this workspace")
-
-    role = (
-        member.role if member else ("superadmin" if current_user.role == "superadmin" else "viewer")
-    )
-
-    if require_write and current_user.role != "superadmin" and role == "viewer":
-        raise HTTPException(
-            403, "Workspace viewer role is read-only. Cannot delete or modify storage objects."
-        )
-
-    return ws, role
 
 
 def get_dashboard_workspace_and_role(
     workspace_id: str | None = None,
     workspace_slug: str | None = None,
+    x_workspace_id: str | None = None,
+    x_workspace_slug: str | None = None,
+    lake_workspace_id: str | None = None,
+    lake_active_workspace: str | None = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     require_write: bool = False,
 ) -> tuple[Workspace, str]:
     """Resolve workspace and verify user permissions for dashboard operations."""
-    ws = None
-    if workspace_slug:
-        ws = (
-            db.query(Workspace)
-            .filter(Workspace.slug == workspace_slug.strip(), Workspace.status == "active")
-            .first()
-        )
-    elif workspace_id:
-        try:
-            ws_uuid = uuid.UUID(str(workspace_id))
-            ws = (
-                db.query(Workspace)
-                .filter(Workspace.id == ws_uuid, Workspace.status == "active")
-                .first()
-            )
-        except (ValueError, TypeError):
-            ws = None
-
-    if not ws:
-        if current_user.role == "superadmin":
-            ws = (
-                db.query(Workspace)
-                .filter(Workspace.status == "active")
-                .order_by(Workspace.created_at)
-                .first()
-            )
-        else:
-            ws = (
-                db.query(Workspace)
-                .join(WorkspaceMember, WorkspaceMember.workspace_id == Workspace.id)
-                .filter(WorkspaceMember.user_id == current_user.id, Workspace.status == "active")
-                .order_by(Workspace.created_at)
-                .first()
-            )
-
-    if not ws:
-        raise HTTPException(404, "Workspace not found")
-
-    member = (
-        db.query(WorkspaceMember)
-        .filter(
-            WorkspaceMember.workspace_id == ws.id,
-            WorkspaceMember.user_id == current_user.id,
-        )
-        .first()
+    return get_workspace_context(
+        workspace_slug=workspace_slug,
+        workspace_id=workspace_id,
+        x_workspace_slug=x_workspace_slug,
+        x_workspace_id=x_workspace_id,
+        lake_workspace_id=lake_workspace_id,
+        lake_active_workspace=lake_active_workspace,
+        current_user=current_user,
+        db=db,
+        require_write=require_write,
+        write_error_msg="Workspace viewer role is read-only. Cannot create, edit, or delete dashboards.",
     )
-
-    if not member and current_user.role != "superadmin":
-        raise HTTPException(403, "Not a member of this workspace")
-
-    role = (
-        member.role if member else ("superadmin" if current_user.role == "superadmin" else "viewer")
-    )
-
-    if require_write and current_user.role != "superadmin" and role == "viewer":
-        raise HTTPException(
-            403, "Workspace viewer role is read-only. Cannot create, edit, or delete dashboards."
-        )
-
-    return ws, role
 
 
 def get_ai_workspace_and_role(
     workspace_id: str | None = None,
     workspace_slug: str | None = None,
+    x_workspace_id: str | None = None,
+    x_workspace_slug: str | None = None,
+    lake_workspace_id: str | None = None,
+    lake_active_workspace: str | None = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     require_write: bool = False,
 ) -> tuple[Workspace, str]:
     """Resolve workspace and verify user permissions for AI & SQL operations."""
-    ws = None
-    if workspace_slug:
-        ws = (
-            db.query(Workspace)
-            .filter(Workspace.slug == workspace_slug.strip(), Workspace.status == "active")
-            .first()
-        )
-    elif workspace_id:
-        try:
-            ws_uuid = uuid.UUID(str(workspace_id))
-            ws = (
-                db.query(Workspace)
-                .filter(Workspace.id == ws_uuid, Workspace.status == "active")
-                .first()
-            )
-        except (ValueError, TypeError):
-            ws = None
-
-    if not ws:
-        if current_user.role == "superadmin":
-            ws = (
-                db.query(Workspace)
-                .filter(Workspace.status == "active")
-                .order_by(Workspace.created_at)
-                .first()
-            )
-        else:
-            ws = (
-                db.query(Workspace)
-                .join(WorkspaceMember, WorkspaceMember.workspace_id == Workspace.id)
-                .filter(WorkspaceMember.user_id == current_user.id, Workspace.status == "active")
-                .order_by(Workspace.created_at)
-                .first()
-            )
-
-    if not ws:
-        raise HTTPException(404, "Workspace not found")
-
-    member = (
-        db.query(WorkspaceMember)
-        .filter(
-            WorkspaceMember.workspace_id == ws.id,
-            WorkspaceMember.user_id == current_user.id,
-        )
-        .first()
+    return get_workspace_context(
+        workspace_slug=workspace_slug,
+        workspace_id=workspace_id,
+        x_workspace_slug=x_workspace_slug,
+        x_workspace_id=x_workspace_id,
+        lake_workspace_id=lake_workspace_id,
+        lake_active_workspace=lake_active_workspace,
+        current_user=current_user,
+        db=db,
+        require_write=require_write,
+        write_error_msg="Workspace viewer role is read-only. Cannot execute write operations.",
     )
-
-    if not member and current_user.role != "superadmin":
-        raise HTTPException(403, "Not a member of this workspace")
-
-    role = (
-        member.role if member else ("superadmin" if current_user.role == "superadmin" else "viewer")
-    )
-
-    if require_write and current_user.role != "superadmin" and role == "viewer":
-        raise HTTPException(
-            403, "Workspace viewer role is read-only. Cannot execute write operations."
-        )
-
-    return ws, role

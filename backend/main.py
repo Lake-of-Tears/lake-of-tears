@@ -23,6 +23,7 @@ from auth import (
     get_session_expires_delta,
     get_stored_gemini_api_key,
     get_stored_gemini_model,
+    get_workspace_context,
     hash_password,
     mask_secret,
     require_superadmin,
@@ -34,7 +35,7 @@ from catalog_storage import delete_prefix, prefixes_to_delete
 from dashboards_router import router as dashboards_router
 from database import get_db
 from email_service import send_access_removed, send_access_requested, send_access_reviewed
-from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from models import (
     Catalog,
@@ -864,32 +865,42 @@ def _catalog_response(catalog: Catalog, user: User, db: Session) -> CatalogRespo
 
 
 @app.get("/api/catalogs", response_model=list[CatalogResponse])
-def list_catalogs(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    if current_user.role == "superadmin":
-        catalogs = (
-            db.query(Catalog)
-            .filter(Catalog.deleted_at.is_(None))
-            .order_by(Catalog.created_at)
-            .all()
-        )
-    else:
-        ws_ids = [m.workspace_id for m in current_user.workspace_memberships]
-        shared_ids = db.query(CatalogAccess.catalog_id).filter(
-            CatalogAccess.workspace_id.in_(ws_ids),
-            CatalogAccess.status == "approved",
-            CatalogAccess.suspended.is_(False),
-        )
-        from sqlalchemy import or_
+def list_catalogs(
+    workspace_slug: str | None = Query(None),
+    workspace_id: str | None = Query(None),
+    x_workspace_slug: str | None = Header(None, alias="X-Workspace-Slug"),
+    x_workspace_id: str | None = Header(None, alias="X-Workspace-Id"),
+    lake_workspace_id: str | None = Cookie(None),
+    lake_active_workspace: str | None = Cookie(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    ws, role = get_workspace_context(
+        workspace_slug=workspace_slug,
+        workspace_id=workspace_id,
+        x_workspace_slug=x_workspace_slug,
+        x_workspace_id=x_workspace_id,
+        lake_workspace_id=lake_workspace_id,
+        lake_active_workspace=lake_active_workspace,
+        current_user=current_user,
+        db=db,
+    )
+    from sqlalchemy import or_
 
-        catalogs = (
-            db.query(Catalog)
-            .filter(
-                or_(Catalog.owner_workspace_id.in_(ws_ids), Catalog.id.in_(shared_ids)),
-                Catalog.deleted_at.is_(None),
-            )
-            .order_by(Catalog.created_at)
-            .all()
+    shared_ids = db.query(CatalogAccess.catalog_id).filter(
+        CatalogAccess.workspace_id == ws.id,
+        CatalogAccess.status == "approved",
+        CatalogAccess.suspended.is_(False),
+    )
+    catalogs = (
+        db.query(Catalog)
+        .filter(
+            or_(Catalog.owner_workspace_id == ws.id, Catalog.id.in_(shared_ids)),
+            Catalog.deleted_at.is_(None),
         )
+        .order_by(Catalog.created_at)
+        .all()
+    )
     return [_catalog_response(c, current_user, db) for c in catalogs]
 
 
@@ -941,34 +952,41 @@ def _catalog_manifest_projection(catalogs: list[Catalog]) -> list[dict[str, Any]
 @app.get("/api/catalogs/catalog-manifest")
 @app.get("/api/catalogs/manifest")
 def catalogs_manifest(
+    workspace_slug: str | None = Query(None),
+    workspace_id: str | None = Query(None),
+    x_workspace_slug: str | None = Header(None, alias="X-Workspace-Slug"),
+    x_workspace_id: str | None = Header(None, alias="X-Workspace-Id"),
+    lake_workspace_id: str | None = Cookie(None),
+    lake_active_workspace: str | None = Cookie(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    ws, role = get_workspace_context(
+        workspace_slug=workspace_slug,
+        workspace_id=workspace_id,
+        x_workspace_slug=x_workspace_slug,
+        x_workspace_id=x_workspace_id,
+        lake_workspace_id=lake_workspace_id,
+        lake_active_workspace=lake_active_workspace,
+        current_user=current_user,
+        db=db,
+    )
     from sqlalchemy import or_
 
-    if current_user.role == "superadmin":
-        catalogs = (
-            db.query(Catalog)
-            .filter(Catalog.deleted_at.is_(None))
-            .order_by(Catalog.created_at)
-            .all()
+    shared_ids = db.query(CatalogAccess.catalog_id).filter(
+        CatalogAccess.workspace_id == ws.id,
+        CatalogAccess.status == "approved",
+        CatalogAccess.suspended.is_(False),
+    )
+    catalogs = (
+        db.query(Catalog)
+        .filter(
+            or_(Catalog.owner_workspace_id == ws.id, Catalog.id.in_(shared_ids)),
+            Catalog.deleted_at.is_(None),
         )
-    else:
-        ws_ids = [m.workspace_id for m in current_user.workspace_memberships]
-        shared_ids = db.query(CatalogAccess.catalog_id).filter(
-            CatalogAccess.workspace_id.in_(ws_ids),
-            CatalogAccess.status == "approved",
-            CatalogAccess.suspended.is_(False),
-        )
-        catalogs = (
-            db.query(Catalog)
-            .filter(
-                or_(Catalog.owner_workspace_id.in_(ws_ids), Catalog.id.in_(shared_ids)),
-                Catalog.deleted_at.is_(None),
-            )
-            .order_by(Catalog.created_at)
-            .all()
-        )
+        .order_by(Catalog.created_at)
+        .all()
+    )
     return _catalog_manifest_projection(catalogs)
 
 
