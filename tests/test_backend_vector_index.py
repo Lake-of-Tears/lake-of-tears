@@ -134,9 +134,10 @@ def test_sync_table_vector_index_default_dest_s3_overwrites_static_path(tmp_path
     mock_db = MagicMock()
     provider = FakeProvider(dimension=4)
 
-    with patch("vector_index_service.get_active_provider", return_value=provider), patch(
-        "vector_index_service.create_duckdb_connection"
-    ) as mock_con_factory:
+    with (
+        patch("vector_index_service.get_active_provider", return_value=provider),
+        patch("vector_index_service.create_duckdb_connection") as mock_con_factory,
+    ):
         mock_con = MagicMock()
         mock_con_factory.return_value = mock_con
         mock_con.execute.return_value.fetchall.side_effect = [
@@ -147,7 +148,10 @@ def test_sync_table_vector_index_default_dest_s3_overwrites_static_path(tmp_path
 
     assert res["ok"] is True
     assert res["s3_vector_path"] == "s3://datalake/embeddings/movies_test/data.parquet"
-    assert mock_table.vector_index["s3_vector_path"] == "s3://datalake/embeddings/movies_test/data.parquet"
+    assert (
+        mock_table.vector_index["s3_vector_path"]
+        == "s3://datalake/embeddings/movies_test/data.parquet"
+    )
 
 
 def test_sync_table_vector_index_is_not_tied_to_768_dimensions(tmp_path: Path):
