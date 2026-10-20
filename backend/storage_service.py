@@ -5,6 +5,7 @@ import json
 import logging
 import math
 import os
+import re
 from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -14,6 +15,22 @@ import boto3
 from botocore.config import Config
 
 logger = logging.getLogger("lake.backend.storage.service")
+
+
+# ── Storage Custom Exceptions ─────────────────────────────────────────────────
+
+
+class StoragePathError(ValueError):
+    """Raised when a storage path contains invalid characters or formatting."""
+
+    pass
+
+
+class StorageAccessDeniedError(PermissionError):
+    """Raised when an operation attempts to access storage outside the assigned workspace jail."""
+
+    pass
+
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -136,8 +153,84 @@ class S3RangeReader(io.RawIOBase):
 # ── Core Storage Service Operations ──────────────────────────────────────────
 
 
-def build_breadcrumbs(prefix: str) -> list[dict[str, str]]:
-    """Build breadcrumb path list from S3 prefix."""
+def validate_and_jail_path(
+    workspace_slug: str,
+    path: str,
+    is_prefix: bool = False,
+) -> str:
+    """Validate, sanitize, and strictly jail a storage path or prefix to workspaces/<slug>/.
+
+    Dual-mode: Accepts both relative paths ('raw/charges.parquet') and explicit
+    workspace paths ('workspaces/<slug>/raw/charges.parquet').
+    Rejects traversal ('..'), invalid characters, or attempts to access root or other workspaces.
+    """
+    clean_slug = (workspace_slug or "default").replace("\\", "/").strip("/ ")
+    if not clean_slug or ".." in clean_slug:
+        raise StorageAccessDeniedError("Invalid workspace slug.")
+    ws_jail = f"workspaces/{clean_slug}/"
+
+    # Normalize backslashes and strip whitespace
+    raw = (path or "").replace("\\", "/").strip()
+
+    # Empty path handling
+    if not raw or raw == "/":
+        return ws_jail if is_prefix else ws_jail.rstrip("/")
+
+    # Strip leading slash for traversal inspection
+    stripped = raw.lstrip("/")
+    segments = stripped.split("/")
+    for seg in segments:
+        if seg in ("..", "."):
+            raise StorageAccessDeniedError("Directory traversal ('..') is strictly forbidden.")
+        if re.search(r'[\x00-\x1f<>:"|?*]', seg):
+            raise StoragePathError(f"Invalid character in path segment: {seg}")
+
+    # Canonicalize multiple slashes
+    while "//" in stripped:
+        stripped = stripped.replace("//", "/")
+
+    # Check if path explicitly begins with workspaces/
+    if stripped == f"workspaces/{clean_slug}" or stripped == f"workspaces/{clean_slug}/":
+        return ws_jail if is_prefix else ws_jail.rstrip("/")
+
+    if stripped.startswith("workspaces/"):
+        if not stripped.startswith(ws_jail):
+            raise StorageAccessDeniedError(
+                f"Access denied: Path '{path}' is outside the active workspace jail ('{ws_jail}')."
+            )
+        resolved = stripped
+    else:
+        # Relative path within workspace jail
+        resolved = f"{ws_jail}{stripped}"
+
+    if is_prefix and not resolved.endswith("/"):
+        resolved += "/"
+
+    return resolved
+
+
+def build_breadcrumbs(
+    prefix: str,
+    workspace_slug: str | None = None,
+) -> list[dict[str, str]]:
+    """Build breadcrumb path list from S3 prefix, anchored to workspace root if slug is provided."""
+    clean_slug = (workspace_slug or "").strip("/")
+    if clean_slug:
+        ws_root = f"workspaces/{clean_slug}/"
+        crumbs = [{"name": f"Workspace: {clean_slug}", "prefix": ""}]
+        rel = prefix
+        if rel.startswith(ws_root):
+            rel = rel[len(ws_root) :]
+        elif rel.startswith(f"workspaces/{clean_slug}"):
+            rel = rel[len(f"workspaces/{clean_slug}") :].lstrip("/")
+
+        parts = [p for p in rel.strip("/").split("/") if p]
+        accum = ""
+        for part in parts:
+            accum += f"{part}/"
+            crumbs.append({"name": part, "prefix": accum})
+        return crumbs
+
     crumbs = [{"name": "datalake", "prefix": ""}]
     if not prefix:
         return crumbs
@@ -150,10 +243,27 @@ def build_breadcrumbs(prefix: str) -> list[dict[str, str]]:
     return crumbs
 
 
-def get_parent_prefix(prefix: str) -> str | None:
-    """Get the immediate parent prefix or None if at root."""
+def get_parent_prefix(
+    prefix: str,
+    workspace_slug: str | None = None,
+) -> str | None:
+    """Get the immediate parent prefix, returning None if at root or workspace jail root."""
     if not prefix or prefix == "/":
         return None
+
+    clean_slug = (workspace_slug or "").strip("/")
+    if clean_slug:
+        ws_root = f"workspaces/{clean_slug}/"
+        rel = prefix
+        if rel.startswith(ws_root):
+            rel = rel[len(ws_root) :]
+        rel = rel.strip("/")
+        if not rel:
+            return None
+        if "/" not in rel:
+            return ""
+        return rel.rsplit("/", 1)[0] + "/"
+
     trimmed = prefix.strip("/")
     if "/" not in trimmed:
         return ""
@@ -167,12 +277,20 @@ def browse_prefix(
     limit: int = 100,
     continuation_token: str | None = None,
     s3_client: Any | None = None,
+    workspace_slug: str | None = None,
 ) -> dict[str, Any]:
-    """Browse hierarchical folders and objects in a bucket prefix."""
+    """Browse hierarchical folders and objects in a bucket prefix, jailed to workspace if provided."""
     s3 = s3_client or get_s3_client()
-    clean_prefix = prefix.lstrip("/")
-    if clean_prefix and not clean_prefix.endswith("/") and delimiter == "/":
-        clean_prefix += "/"
+
+    clean_slug = (workspace_slug or "").strip("/")
+    ws_jail = f"workspaces/{clean_slug}/" if clean_slug else ""
+
+    if clean_slug:
+        clean_prefix = validate_and_jail_path(clean_slug, prefix, is_prefix=True)
+    else:
+        clean_prefix = prefix.lstrip("/")
+        if clean_prefix and not clean_prefix.endswith("/") and delimiter == "/":
+            clean_prefix += "/"
 
     max_keys = max(1, min(limit, 1000))
     kwargs: dict[str, Any] = {
@@ -191,10 +309,12 @@ def browse_prefix(
         full_pfx = cp.get("Prefix", "")
         trimmed = full_pfx.rstrip("/")
         name = trimmed.split("/")[-1] if "/" in trimmed else trimmed
+        rel_pfx = full_pfx[len(ws_jail) :] if (ws_jail and full_pfx.startswith(ws_jail)) else full_pfx
         folders.append(
             {
                 "name": name,
-                "prefix": full_pfx,
+                "prefix": rel_pfx if clean_slug else full_pfx,
+                "full_prefix": full_pfx,
             }
         )
 
@@ -210,10 +330,12 @@ def browse_prefix(
         etag = item.get("ETag", "").strip('"')
         is_parquet = filename.lower().endswith(".parquet")
         is_notebook = filename.lower().endswith(".ipynb")
+        rel_key = key[len(ws_jail) :] if (ws_jail and key.startswith(ws_jail)) else key
 
         files.append(
             {
                 "key": key,
+                "rel_key": rel_key,
                 "name": filename,
                 "size": size,
                 "size_human": _human_size(size),
@@ -230,11 +352,19 @@ def browse_prefix(
     folders.sort(key=lambda x: x["name"].lower())
     files.sort(key=lambda x: x["name"].lower())
 
+    rel_prefix = (
+        clean_prefix[len(ws_jail) :]
+        if (ws_jail and clean_prefix.startswith(ws_jail))
+        else clean_prefix
+    )
+
     return {
         "bucket": bucket,
+        "workspace": clean_slug or None,
         "prefix": clean_prefix,
-        "parent_prefix": get_parent_prefix(clean_prefix),
-        "breadcrumbs": build_breadcrumbs(clean_prefix),
+        "rel_prefix": rel_prefix,
+        "parent_prefix": get_parent_prefix(clean_prefix, workspace_slug=clean_slug or None),
+        "breadcrumbs": build_breadcrumbs(clean_prefix, workspace_slug=clean_slug or None),
         "folders": folders,
         "files": files,
         "total_folders": len(folders),
@@ -248,10 +378,15 @@ def get_object_metadata(
     bucket: str = MINIO_BUCKET,
     key: str = "",
     s3_client: Any | None = None,
+    workspace_slug: str | None = None,
 ) -> dict[str, Any]:
     """Retrieve S3 metadata and extract detailed Parquet schema/metrics via PyArrow."""
+    if workspace_slug:
+        clean_key = validate_and_jail_path(workspace_slug, key, is_prefix=False)
+    else:
+        clean_key = key.lstrip("/")
+
     s3 = s3_client or get_s3_client()
-    clean_key = key.lstrip("/")
 
     head = s3.head_object(Bucket=bucket, Key=clean_key)
     size = head.get("ContentLength", 0)
@@ -345,9 +480,16 @@ def get_object_metadata(
             logger.warning("Could not parse notebook metadata for %s: %s", clean_key, exc)
             notebook_info = {"error": str(exc)}
 
+    clean_slug = (workspace_slug or "").strip("/")
+    ws_jail = f"workspaces/{clean_slug}/" if clean_slug else ""
+    rel_key = (
+        clean_key[len(ws_jail) :] if (ws_jail and clean_key.startswith(ws_jail)) else clean_key
+    )
+
     return {
         "bucket": bucket,
         "key": clean_key,
+        "rel_key": rel_key,
         "filename": filename,
         "size": size,
         "size_human": _human_size(size),
@@ -367,13 +509,18 @@ def get_download_url(
     key: str = "",
     expires_in: int = 3600,
     s3_client: Any | None = None,
+    workspace_slug: str | None = None,
 ) -> str:
     """Generate a presigned S3 GET URL for browser download.
 
     Replaces internal Docker endpoint host with MINIO_PUBLIC_ENDPOINT if necessary.
     """
+    if workspace_slug:
+        clean_key = validate_and_jail_path(workspace_slug, key, is_prefix=False)
+    else:
+        clean_key = key.lstrip("/")
+
     s3 = s3_client or get_s3_client()
-    clean_key = key.lstrip("/")
 
     url = s3.generate_presigned_url(
         "get_object",
@@ -405,10 +552,15 @@ def stream_object(
     bucket: str = MINIO_BUCKET,
     key: str = "",
     s3_client: Any | None = None,
+    workspace_slug: str | None = None,
 ) -> tuple[Generator[bytes, None, None], dict[str, str]]:
     """Stream object content as fallback if presigned URL is unreachable."""
+    if workspace_slug:
+        clean_key = validate_and_jail_path(workspace_slug, key, is_prefix=False)
+    else:
+        clean_key = key.lstrip("/")
+
     s3 = s3_client or get_s3_client()
-    clean_key = key.lstrip("/")
     obj = s3.get_object(Bucket=bucket, Key=clean_key)
     body = obj["Body"]
     filename = clean_key.split("/")[-1]
@@ -435,19 +587,98 @@ def delete_object(
     bucket: str = MINIO_BUCKET,
     key: str = "",
     s3_client: Any | None = None,
+    workspace_slug: str | None = None,
 ) -> dict[str, Any]:
-    """Delete an S3 object."""
+    """Delete an S3 object, strictly jailed to workspace if provided."""
+    if workspace_slug:
+        clean_key = validate_and_jail_path(workspace_slug, key, is_prefix=False)
+    else:
+        clean_key = key.lstrip("/")
+
     s3 = s3_client or get_s3_client()
-    clean_key = key.lstrip("/")
     s3.delete_object(Bucket=bucket, Key=clean_key)
     return {"deleted": True, "bucket": bucket, "key": clean_key}
+
+
+def upload_object(
+    bucket: str = MINIO_BUCKET,
+    key: str = "",
+    data: bytes | io.BytesIO | Any = b"",
+    content_type: str = "application/octet-stream",
+    s3_client: Any | None = None,
+    workspace_slug: str | None = None,
+) -> dict[str, Any]:
+    """Upload an object into S3, jailed to workspace if provided."""
+    if workspace_slug:
+        clean_key = validate_and_jail_path(workspace_slug, key, is_prefix=False)
+    else:
+        clean_key = key.lstrip("/")
+
+    s3 = s3_client or get_s3_client()
+    s3.put_object(
+        Bucket=bucket,
+        Key=clean_key,
+        Body=data,
+        ContentType=content_type,
+    )
+    clean_slug = (workspace_slug or "").strip("/")
+    ws_jail = f"workspaces/{clean_slug}/" if clean_slug else ""
+    rel_key = (
+        clean_key[len(ws_jail) :] if (ws_jail and clean_key.startswith(ws_jail)) else clean_key
+    )
+    return {
+        "uploaded": True,
+        "bucket": bucket,
+        "key": clean_key,
+        "rel_key": rel_key,
+    }
+
+
+def get_upload_url(
+    bucket: str = MINIO_BUCKET,
+    key: str = "",
+    expires_in: int = 3600,
+    content_type: str = "application/octet-stream",
+    s3_client: Any | None = None,
+    workspace_slug: str | None = None,
+) -> str:
+    """Generate a presigned S3 PUT URL for browser/client upload."""
+    if workspace_slug:
+        clean_key = validate_and_jail_path(workspace_slug, key, is_prefix=False)
+    else:
+        clean_key = key.lstrip("/")
+
+    s3 = s3_client or get_s3_client()
+    url = s3.generate_presigned_url(
+        "put_object",
+        Params={"Bucket": bucket, "Key": clean_key, "ContentType": content_type},
+        ExpiresIn=expires_in,
+        HttpMethod="PUT",
+    )
+
+    if MINIO_PUBLIC_ENDPOINT:
+        pub = urlparse(MINIO_PUBLIC_ENDPOINT)
+        gen = urlparse(url)
+        if gen.netloc != pub.netloc:
+            url = urlunparse(
+                (
+                    pub.scheme or gen.scheme,
+                    pub.netloc,
+                    gen.path,
+                    gen.params,
+                    gen.query,
+                    gen.fragment,
+                )
+            )
+    return url
 
 
 def get_bucket_summary(
     bucket: str = MINIO_BUCKET,
     s3_client: Any | None = None,
+    workspace_slug: str | None = None,
 ) -> dict[str, Any]:
-    """Compute overall bucket stats and top-level prefix breakdown."""
+    """Compute bucket stats and top-level prefix breakdown, strictly scoped to workspace if provided."""
     try:
         s3 = s3_client or get_s3_client()
         paginator = s3.get_paginator("list_objects_v2")
@@ -455,16 +686,27 @@ def get_bucket_summary(
         prefix_stats: dict[str, dict] = {}
         source_last_modified: dict[str, datetime | None] = {s: None for s in SOURCES}
 
-        for page in paginator.paginate(Bucket=bucket):
+        clean_slug = (workspace_slug or "").strip("/")
+        ws_root = f"workspaces/{clean_slug}/" if clean_slug else ""
+
+        paginate_kwargs: dict[str, Any] = {"Bucket": bucket}
+        if ws_root:
+            paginate_kwargs["Prefix"] = ws_root
+
+        for page in paginator.paginate(**paginate_kwargs):
             for obj in page.get("Contents", []):
                 key: str = obj["Key"]
+                if key == ws_root or key.endswith("/"):
+                    continue
                 size: int = obj["Size"]
                 last_mod: datetime = obj["LastModified"]
 
                 total_objects += 1
                 total_size += size
 
-                top = key.split("/")[0] if "/" in key else key
+                # Determine relative key to find top subfolder
+                rel_key = key[len(ws_root) :] if (ws_root and key.startswith(ws_root)) else key
+                top = rel_key.split("/")[0] if "/" in rel_key else "root"
                 if top not in prefix_stats:
                     prefix_stats[top] = {"objects": 0, "size": 0, "last_modified": None}
                 prefix_stats[top]["objects"] += 1
@@ -476,7 +718,7 @@ def get_bucket_summary(
                     prefix_stats[top]["last_modified"] = last_mod
 
                 for src in SOURCES:
-                    if f"/{src}/" in key or key.startswith(f"{src}/"):
+                    if f"/{src}/" in rel_key or rel_key.startswith(f"{src}/"):
                         if (
                             source_last_modified[src] is None
                             or last_mod > source_last_modified[src]
@@ -502,6 +744,7 @@ def get_bucket_summary(
         return {
             "ok": True,
             "bucket": bucket,
+            "workspace": clean_slug or None,
             "total_objects": total_objects,
             "total_size": _human_size(total_size),
             "raw_objects": raw["objects"],

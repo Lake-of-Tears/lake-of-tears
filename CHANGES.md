@@ -13,6 +13,7 @@ Every change made to this repo gets one row, newest first.
 
 | Date | Action | Ticket | Files | Summary |
 |---|---|---|---|---|
+| 20261020 | ADD | #250 | `backend/storage_service.py`, `backend/storage_router.py`, `backend/catalog_storage.py`, `ui/main.py`, `ui/templates/storage.html`, `tests/` | Workspace isolation for S3/MinIO storage prefix jailing (`workspaces/<slug>/`): dual-mode path resolution, strict traversal/cross-workspace 403 rejection, prefix-scoped metrics, direct & presigned file uploads, and UI upload modal |
 | 20261019 | IMPROVEMENT | #211 | `backend/alembic/env.py`, `backend/database.py`, `backend/requirements.txt`, `tests/test_database_url.py` | Migrated to SQLAlchemy 2.1.5 and psycopg v3 (`psycopg[binary] 3.3.6`); added `normalize_database_url()` to keep plain `postgresql://` URLs in Compose, Helm and Airflow (PR #224). Note: local dev environments need `pip install -r backend/requirements.txt` |
 | 20261017 | BUG FIX | #189 | `ui/duckdb_ai.py`, `ui/main.py`, `ui/templates/sql.html`, `tests/test_ui_sql_table_names.py` | SQL Editor sidebar, Query button and AI schema prompt now use the DuckDB view name (`media.tmdb_trending`) instead of the hyphenated catalog slug, which was invalid SQL (PR #190) |
 | 20261017 | ADD | #191 | `docs/wiki/Airflow-Orchestration.md` | Documented which workspace sees which pipeline (prefix, tag, `run_notebook`) and that superadmins see all by design (PR #192) |

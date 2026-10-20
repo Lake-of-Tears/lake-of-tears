@@ -17,7 +17,17 @@ import httpx
 import jwt
 import websockets
 from dotenv import load_dotenv
-from fastapi import FastAPI, Form, Query, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    FastAPI,
+    File,
+    Form,
+    Query,
+    Request,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from fastapi.responses import (
     HTMLResponse,
     JSONResponse,
@@ -268,7 +278,7 @@ def _source_status(last_modified: datetime | None) -> str:
     return "red"
 
 
-def _get_bucket_stats() -> dict[str, Any]:
+def _get_bucket_stats(workspace_slug: str | None = None) -> dict[str, Any]:
     try:
         s3 = _s3_client()
         paginator = s3.get_paginator("list_objects_v2")
@@ -276,16 +286,26 @@ def _get_bucket_stats() -> dict[str, Any]:
         prefix_stats: dict[str, dict] = {}
         source_last_modified: dict[str, datetime | None] = {s: None for s in SOURCES}
 
-        for page in paginator.paginate(Bucket=MINIO_BUCKET):
+        clean_slug = (workspace_slug or "").strip("/")
+        ws_root = f"workspaces/{clean_slug}/" if clean_slug else ""
+
+        paginate_kwargs: dict[str, Any] = {"Bucket": MINIO_BUCKET}
+        if ws_root:
+            paginate_kwargs["Prefix"] = ws_root
+
+        for page in paginator.paginate(**paginate_kwargs):
             for obj in page.get("Contents", []):
                 key: str = obj["Key"]
+                if key == ws_root or key.endswith("/"):
+                    continue
                 size: int = obj["Size"]
                 last_mod: datetime = obj["LastModified"]
 
                 total_objects += 1
                 total_size += size
 
-                top = key.split("/")[0] if "/" in key else key
+                rel_key = key[len(ws_root) :] if (ws_root and key.startswith(ws_root)) else key
+                top = rel_key.split("/")[0] if "/" in rel_key else "root"
                 if top not in prefix_stats:
                     prefix_stats[top] = {"objects": 0, "size": 0, "last_modified": None}
                 prefix_stats[top]["objects"] += 1
@@ -297,7 +317,7 @@ def _get_bucket_stats() -> dict[str, Any]:
                     prefix_stats[top]["last_modified"] = last_mod
 
                 for src in SOURCES:
-                    if f"/{src}/" in key or key.startswith(f"{src}/"):
+                    if f"/{src}/" in rel_key or rel_key.startswith(f"{src}/"):
                         if (
                             source_last_modified[src] is None
                             or last_mod > source_last_modified[src]
@@ -322,6 +342,7 @@ def _get_bucket_stats() -> dict[str, Any]:
 
         return {
             "ok": True,
+            "workspace": clean_slug or None,
             "total_objects": total_objects,
             "total_size": _human_size(total_size),
             "raw_objects": raw["objects"],
@@ -809,9 +830,10 @@ async def catalog_refresh_schema(request: Request, table_id: str):
 
 @app.get("/storage", response_class=HTMLResponse)
 async def storage(request: Request):
-    stats = _get_bucket_stats()
     user = getattr(request.state, "user", None) or {}
     ws = getattr(request.state, "workspace", None) or {}
+    slug = ws.get("slug")
+    stats = _get_bucket_stats(workspace_slug=slug)
     is_superadmin = user.get("role") == "superadmin"
     user_role = (
         user.get("role") if is_superadmin else (ws.get("my_role") or ws.get("role") or "read")
@@ -3253,6 +3275,66 @@ async def ui_delete_object(request: Request, key: str):
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.delete(
                 f"{BACKEND_URL}/api/v1/storage/objects/{key}",
+                headers=headers,
+                params=params,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@app.post("/api/storage/upload")
+@app.post("/api/v1/storage/upload")
+async def ui_upload_object(
+    request: Request,
+    file: UploadFile = File(...),
+    prefix: str = Form(""),
+):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params = {}
+    if ws and ws.get("slug"):
+        params["workspace_slug"] = ws["slug"]
+
+    try:
+        content = await file.read()
+        files = {"file": (file.filename, content, file.content_type or "application/octet-stream")}
+        data = {"prefix": prefix}
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                f"{BACKEND_URL}/api/v1/storage/upload",
+                headers=headers,
+                params=params,
+                files=files,
+                data=data,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@app.post("/api/storage/objects/{key:path}/upload-url")
+@app.post("/api/v1/storage/objects/{key:path}/upload-url")
+async def ui_get_upload_url(
+    request: Request,
+    key: str,
+    content_type: str = Query("application/octet-stream"),
+    expires_in: int = 3600,
+):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params = {"content_type": content_type, "expires_in": expires_in}
+    if ws and ws.get("slug"):
+        params["workspace_slug"] = ws["slug"]
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{BACKEND_URL}/api/v1/storage/objects/{key}/upload-url",
                 headers=headers,
                 params=params,
                 cookies=request.cookies,

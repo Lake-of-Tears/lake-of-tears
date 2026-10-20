@@ -19,6 +19,15 @@
     </div>
 
     <div class="flex items-center gap-2">
+      {% if can_delete %}
+      <button id="btn-upload" onclick="openUploadModal()" class="btn-primary text-xs gap-1.5" title="Upload file to current folder">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+        </svg>
+        Upload File
+      </button>
+      {% endif %}
+
       <button id="btn-refresh" onclick="refreshCurrentPrefix()" class="btn-ghost text-xs gap-1.5" title="Refresh file listing">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -349,6 +358,44 @@
   </div>
 </div>
 
+<!-- ── Upload File Modal ────────────────────────────────────────────────── -->
+<div id="upload-modal" class="fixed inset-0 z-50 hidden bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+  <div class="card w-full max-w-md p-6 shadow-2xl border border-gray-700/60 space-y-4">
+    <div class="flex items-center justify-between pb-3 border-b border-gray-800">
+      <div class="flex items-center gap-2.5">
+        <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+        </svg>
+        <h3 class="text-base font-semibold text-gray-100">Upload File</h3>
+      </div>
+      <button onclick="closeUploadModal()" class="text-gray-400 hover:text-gray-200">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
+
+    <div>
+      <label class="block text-xs text-gray-400 mb-1">Target Directory</label>
+      <input type="text" id="upload-prefix-input" class="input-dark text-xs w-full font-mono py-1.5 px-3" readonly />
+    </div>
+
+    <div>
+      <label class="block text-xs text-gray-400 mb-1">Select File</label>
+      <input type="file" id="upload-file-input" class="block w-full text-xs text-gray-400 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500 cursor-pointer" />
+    </div>
+
+    <div id="upload-status" class="hidden text-xs py-2 px-3 rounded"></div>
+
+    <div class="flex items-center justify-end gap-3 pt-3 border-t border-gray-800">
+      <button onclick="closeUploadModal()" class="btn-ghost text-xs">Cancel</button>
+      <button id="btn-submit-upload" onclick="executeUpload()" class="btn-primary text-xs px-4 py-2">
+        Upload
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Client-Side Storage Explorer Script ────────────────────────────────── -->
 <script>
   const BUCKET_NAME = "{{ minio_bucket|default('datalake') }}";
@@ -356,6 +403,8 @@
   const IS_SUPERADMIN = {{ 'true' if is_superadmin else 'false' }};
 
   let currentPrefix = "";
+  let currentFullPrefix = "";
+  let currentParentPrefix = null;
   let currentContinuationToken = null;
   let tokenHistory = []; // Stack for Previous pagination: [{prefix, token}]
   let currentItems = { folders: [], files: [] };
@@ -397,7 +446,9 @@
       }
 
       const data = await res.json();
-      currentPrefix = data.prefix || "";
+      currentPrefix = data.rel_prefix !== undefined ? data.rel_prefix : (data.prefix || "");
+      currentFullPrefix = data.prefix || "";
+      currentParentPrefix = data.parent_prefix !== undefined ? data.parent_prefix : null;
       currentContinuationToken = data.next_continuation_token || null;
       currentItems = { folders: data.folders || [], files: data.files || [] };
 
@@ -438,7 +489,7 @@
     const parentBtn = document.getElementById('btn-parent-dir');
 
     if (!crumbs || crumbs.length === 0) {
-      crumbs = [{ name: 'datalake', prefix: '' }];
+      crumbs = [{ name: 'Workspace', prefix: '' }];
     }
 
     let html = '';
@@ -467,9 +518,9 @@
 
     container.innerHTML = html;
 
-    // Enable/disable parent button
+    // Enable/disable parent button strictly based on currentParentPrefix or crumb depth
     if (parentBtn) {
-      parentBtn.disabled = crumbs.length <= 1;
+      parentBtn.disabled = (currentParentPrefix === null || currentParentPrefix === undefined);
     }
   }
 
@@ -644,10 +695,8 @@
   }
 
   function navigateParent() {
-    if (!currentPrefix) return;
-    const trimmed = currentPrefix.replace(/\/$/, "");
-    const parent = trimmed.includes('/') ? trimmed.substring(0, trimmed.lastIndexOf('/') + 1) : "";
-    navigateToPrefix(parent);
+    if (currentParentPrefix === null || currentParentPrefix === undefined) return;
+    navigateToPrefix(currentParentPrefix);
   }
 
   function refreshCurrentPrefix() {
@@ -887,13 +936,88 @@
   }
 
   function copyCurrentS3URI() {
-    const uri = currentPrefix ? `s3://${BUCKET_NAME}/${currentPrefix}` : `s3://${BUCKET_NAME}/`;
+    const p = currentFullPrefix || currentPrefix;
+    const uri = p ? `s3://${BUCKET_NAME}/${p.replace(/^\/+/, '')}` : `s3://${BUCKET_NAME}/`;
     navigator.clipboard.writeText(uri);
     const textSpan = document.getElementById('copy-text');
     if (textSpan) {
       const orig = textSpan.textContent;
       textSpan.textContent = 'Copied!';
       setTimeout(() => { textSpan.textContent = orig; }, 1500);
+    }
+  }
+
+  function openUploadModal() {
+    const prefixInput = document.getElementById('upload-prefix-input');
+    const fileInput = document.getElementById('upload-file-input');
+    const statusDiv = document.getElementById('upload-status');
+    if (prefixInput) {
+      prefixInput.value = currentPrefix || "(Workspace Root)";
+    }
+    if (fileInput) fileInput.value = "";
+    if (statusDiv) {
+      statusDiv.className = "hidden text-xs py-2 px-3 rounded";
+      statusDiv.textContent = "";
+    }
+    document.getElementById('upload-modal').classList.remove('hidden');
+  }
+
+  function closeUploadModal() {
+    document.getElementById('upload-modal').classList.add('hidden');
+  }
+
+  async function executeUpload() {
+    const fileInput = document.getElementById('upload-file-input');
+    const statusDiv = document.getElementById('upload-status');
+    const submitBtn = document.getElementById('btn-submit-upload');
+
+    if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+      if (statusDiv) {
+        statusDiv.className = "text-xs py-2 px-3 rounded bg-red-900/40 text-red-400 border border-red-800/50 block";
+        statusDiv.textContent = "Please select a file to upload.";
+      }
+      return;
+    }
+
+    const file = fileInput.files[0];
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('prefix', currentPrefix || "");
+
+    try {
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Uploading...";
+      if (statusDiv) {
+        statusDiv.className = "text-xs py-2 px-3 rounded bg-blue-900/40 text-blue-300 border border-blue-800/50 block";
+        statusDiv.textContent = `Uploading ${file.name}...`;
+      }
+
+      const res = await fetch('/api/v1/storage/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || errData.error || `HTTP ${res.status}`);
+      }
+
+      if (statusDiv) {
+        statusDiv.className = "text-xs py-2 px-3 rounded bg-emerald-900/40 text-emerald-300 border border-emerald-800/50 block";
+        statusDiv.textContent = `Successfully uploaded ${file.name}!`;
+      }
+      setTimeout(() => {
+        closeUploadModal();
+        refreshCurrentPrefix();
+      }, 700);
+    } catch (err) {
+      if (statusDiv) {
+        statusDiv.className = "text-xs py-2 px-3 rounded bg-red-900/40 text-red-400 border border-red-800/50 block";
+        statusDiv.textContent = `Upload failed: ${err.message}`;
+      }
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Upload";
     }
   }
 
@@ -947,6 +1071,7 @@
     if (e.key === 'Escape') {
       closeParquetModal();
       closeDeleteModal();
+      closeUploadModal();
     }
   });
 </script>
