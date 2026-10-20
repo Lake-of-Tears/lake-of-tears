@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from database import Base
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, case
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -122,7 +122,17 @@ class Catalog(Base):
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     schemas: Mapped[list["CatalogSchema"]] = relationship(
-        back_populates="catalog", cascade="all, delete-orphan", order_by="CatalogSchema.name"
+        back_populates="catalog",
+        cascade="all, delete-orphan",
+        order_by=lambda: [
+            case(
+                ((CatalogSchema.tier == "bronze") | (CatalogSchema.slug == "bronze"), 1),
+                ((CatalogSchema.tier == "silver") | (CatalogSchema.slug == "silver"), 2),
+                ((CatalogSchema.tier == "gold") | (CatalogSchema.slug == "gold"), 3),
+                else_=4,
+            ),
+            CatalogSchema.name,
+        ],
     )
     access_grants: Mapped[list["CatalogAccess"]] = relationship(
         back_populates="catalog", cascade="all, delete-orphan"

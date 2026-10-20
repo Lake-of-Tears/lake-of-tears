@@ -92,7 +92,7 @@
       <!-- Schemas -->
       <div id="schemas-{{ catalog.id }}" class="hidden border-t border-white/[0.05]">
         {% if catalog.schemas %}
-          {% for schema in catalog.schemas %}
+          {% for schema in catalog.schemas | sort_schemas %}
           <div class="border-b border-white/[0.04] last:border-0">
 
             <!-- Schema row -->
@@ -331,6 +331,26 @@ function toggleSchema(id) {
   const open = el.classList.toggle('hidden');
   ch.classList.toggle('-rotate-90', open);
   sessionStorage.setItem(_key('s' + id), open ? '' : '1');
+}
+
+function expandCatalog(id) {
+  const el = document.getElementById('schemas-' + id);
+  const ch = document.getElementById('chev-cat-' + id);
+  if (el && el.classList.contains('hidden')) {
+    el.classList.remove('hidden');
+    if (ch) ch.classList.remove('-rotate-90');
+    sessionStorage.setItem(_key('c' + id), '1');
+  }
+}
+
+function expandSchema(id) {
+  const el = document.getElementById('tables-' + id);
+  const ch = document.getElementById('chev-schema-' + id);
+  if (el && el.classList.contains('hidden')) {
+    el.classList.remove('hidden');
+    if (ch) ch.classList.remove('-rotate-90');
+    sessionStorage.setItem(_key('s' + id), '1');
+  }
 }
 
 // Restore expanded state
@@ -793,5 +813,100 @@ function saveVectorConfig() {
   const btn = document.getElementById('btn-vector-sync');
   if (btn) triggerVectorSync(btn);
 }
+
+window.navigateCatalogTo = function(item) {
+  if (!item) return;
+  const catId = item.catalog_id || item.cat_id || item.cat;
+  const schId = item.schema_id || item.sch_id || item.sch;
+  const tblId = item.table_id || item.tbl_id || item.table;
+
+  // 1. If table is targeted:
+  if (tblId) {
+    let tableEl = document.querySelector(`[data-table-id="${tblId}"]`);
+    if (!tableEl && item.table_ident) {
+      tableEl = document.querySelector(`[data-table-ident="${item.table_ident}"]`);
+    }
+
+    if (tableEl) {
+      const schContainer = tableEl.closest('[id^="tables-"]');
+      if (schContainer) {
+        const sId = schContainer.id.slice(7);
+        expandSchema(sId);
+        const catContainer = schContainer.closest('[id^="schemas-"]');
+        if (catContainer) {
+          const cId = catContainer.id.slice(8);
+          expandCatalog(cId);
+        }
+      } else {
+        if (schId) expandSchema(schId);
+        if (catId) expandCatalog(catId);
+      }
+
+      tableEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      tableEl.classList.add('ring-2', 'ring-blue-500', 'bg-blue-900/30');
+      setTimeout(() => {
+        tableEl.classList.remove('ring-2', 'ring-blue-500', 'bg-blue-900/30');
+      }, 3000);
+      openTablePanel(tableEl);
+      return;
+    }
+  }
+
+  // 2. If schema is targeted:
+  if (schId) {
+    expandSchema(schId);
+    const schContainer = document.getElementById('tables-' + schId);
+    if (schContainer) {
+      const catContainer = schContainer.closest('[id^="schemas-"]');
+      if (catContainer) {
+        const cId = catContainer.id.slice(8);
+        expandCatalog(cId);
+      }
+    } else if (catId) {
+      expandCatalog(catId);
+    }
+
+    const schemaBtn = document.querySelector(`button[onclick*="toggleSchema('${schId}')"]`);
+    if (schemaBtn) {
+      schemaBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      schemaBtn.classList.add('ring-2', 'ring-amber-500/70', 'bg-amber-900/30');
+      setTimeout(() => {
+        schemaBtn.classList.remove('ring-2', 'ring-amber-500/70', 'bg-amber-900/30');
+      }, 3000);
+      return;
+    }
+  }
+
+  // 3. If catalog is targeted:
+  if (catId) {
+    expandCatalog(catId);
+    const catBtn = document.querySelector(`button[onclick*="toggleCatalog('${catId}')"]`);
+    if (catBtn) {
+      catBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      catBtn.classList.add('ring-2', 'ring-emerald-500/70', 'bg-emerald-900/30');
+      setTimeout(() => {
+        catBtn.classList.remove('ring-2', 'ring-emerald-500/70', 'bg-emerald-900/30');
+      }, 3000);
+    }
+  }
+};
+
+// Deep link auto-navigation on page load
+(function initCatalogDeepLink() {
+  const params = new URLSearchParams(window.location.search);
+  const catId = params.get('catalog_id') || params.get('cat_id') || params.get('cat');
+  const schId = params.get('schema_id') || params.get('sch_id') || params.get('sch');
+  const tblId = params.get('table_id') || params.get('tbl_id') || params.get('table');
+
+  if (catId || schId || tblId) {
+    setTimeout(() => {
+      window.navigateCatalogTo({
+        catalog_id: catId,
+        schema_id: schId,
+        table_id: tblId
+      });
+    }, 150);
+  }
+})();
 </script>
 {% endblock %}

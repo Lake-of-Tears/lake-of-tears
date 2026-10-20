@@ -124,6 +124,21 @@ For **OpenAI** enter an API key (defaults: `gpt-4o-mini`, `text-embedding-3-smal
 
 For **Amazon Bedrock** choose a region and model ids (defaults: Claude 3.5 Haiku and Titan Text Embeddings v2, 1024 dimensions; Cohere Embed also works). Leave the access keys blank to use the workload's IAM role, or enter an access key id and secret. The identity needs `bedrock:InvokeModel` and model access enabled in that region. The Helm chart does not create a service account yet, so an EKS role (IRSA) needs one added to the backend deployment.
 
+### Chunking long text for embeddings
+
+Long text is cut into chunks before it is embedded, with a strategy chosen per source in `SOURCES` in `pipeline/embed/embed_sources.py`:
+
+```python
+SOURCES = {
+    "weather":      {"glob": "raw/weather/**/*.parquet", "text_fn": _text_weather, "chunking": "document"},
+    "company_wiki": {"glob": "raw/company_wiki/**/*.parquet", "text_column": "body"},       # recursive by default
+    "contracts":    {"glob": "raw/contracts/**/*.parquet", "chunking": "agentic", "window": 4000},
+    "articles":     {"glob": "raw/articles/**/*.parquet", "chunking": "recursive", "chunk_size": 800, "chunk_overlap": 100},
+}
+```
+
+`recursive` (default for text sources: 512 characters, 64 overlap) splits at paragraph, sentence and word boundaries; `document` keeps one row as one chunk (default for sources with a `text_fn`); `agentic` has the AI provider rewrite the text as standalone statements. Every chunk keeps `parent_id`, `chunk_index` and `total_chunks` so a search hit can be traced to its record. Copy the `pipeline/embed/chunking/` folder next to `embed_sources.py` when deploying to Airflow. Details, options and sizing advice are in the [Chunking and Vector Embeddings guide](docs/wiki/Chunking-and-Vector-Embeddings.md).
+
 ---
 
 ## Deploying with Helm (Kubernetes)

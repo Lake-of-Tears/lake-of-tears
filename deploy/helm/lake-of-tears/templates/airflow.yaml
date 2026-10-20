@@ -74,6 +74,7 @@ spec:
               (
                 sleep 5
                 airflow users reset-password -u admin -p "$_AIRFLOW_WWW_USER_PASSWORD" 2>/dev/null || true
+                airflow dags unpause refresh_catalog_schemas 2>/dev/null || true
               ) &
               exec /entrypoint standalone
           env:
@@ -88,6 +89,12 @@ spec:
                   key: AIRFLOW_DB_CONN
             - name: AIRFLOW__CORE__LOAD_EXAMPLES
               value: "False"
+            - name: AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION
+              value: "False"
+            - name: AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL
+              value: "5"
+            - name: AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL
+              value: "5"
             - name: AIRFLOW__CORE__DAGS_FOLDER
               value: /opt/airflow/dags
             - name: AIRFLOW__API__AUTH_BACKENDS
@@ -145,6 +152,13 @@ spec:
               value: datalake
             - name: BACKEND_URL
               value: "http://{{ include "lake-of-tears.fullname" . }}-backend:8000"
+            - name: POSTGRES_AUTH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "lake-of-tears.fullname" . }}-credentials
+                  key: postgresAuthPassword
+            - name: DATABASE_URL
+              value: "postgresql://{{ .Values.postgres.auth.username }}:$(POSTGRES_AUTH_PASSWORD)@{{ include "lake-of-tears.fullname" . }}-postgres:5432/{{ .Values.postgres.auth.database }}"
             - name: AUTH_SECRET_KEY
               valueFrom:
                 secretKeyRef:

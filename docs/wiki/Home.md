@@ -19,7 +19,7 @@
 | [Deployment and Operations](Deployment-and-Operations.md) | Local setup with Docker Compose, production deployment with Helm, health checks, backups and restores, storage maintenance, secret rotation and a troubleshooting table |
 | [Data Ingestion and Pipelines](Data-Ingestion-and-Pipelines.md) | How data flows from a source into MinIO as Parquet, a tested step-by-step tutorial for writing a new ingest script and Airflow DAG, and best practices for idempotency, backfills, schema changes and error handling |
 | [Airflow Orchestration](Airflow-Orchestration.md) | How Airflow is set up in Compose and Helm, the DAGs that ship, the DAG standard with a copy-and-paste template, and operations: triggering, testing, backfilling, logs, credentials and a troubleshooting checklist |
-| [Chunking and Vector Embeddings](Chunking-and-Vector-Embeddings.md) | How text becomes vectors stored in Parquet, how to register a source for embedding, how chunking works today and what is planned, and query examples |
+| [Chunking and Vector Embeddings](Chunking-and-Vector-Embeddings.md) | How text becomes vectors stored in Parquet, how to register a source for embedding, how long text is split into chunks (`recursive`, `document`, `agentic`), and query examples |
 | [DuckDB Querying and Analytics](DuckDB-Querying-and-Analytics.md) | Where you can run SQL, connecting DuckDB to MinIO, partition-aware query patterns, vector search syntax, and using the lake from notebooks and Superset |
 | [Workspaces and Catalog Management](Workspaces-and-Catalog-Management.md) | Workspace isolation, the workspace cookie, deletion and purge lifecycles, catalog sharing and administration |
 

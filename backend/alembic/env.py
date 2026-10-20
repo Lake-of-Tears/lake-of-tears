@@ -12,7 +12,7 @@ from sqlalchemy import engine_from_config, pool
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import models  # noqa: E402, F401 — registers all ORM classes with Base.metadata
-from database import Base  # noqa: E402
+from database import Base, normalize_database_url  # noqa: E402
 
 config = context.config
 
@@ -23,9 +23,11 @@ target_metadata = Base.metadata
 
 
 def _db_url() -> str:
-    return os.getenv(
-        "DATABASE_URL",
-        "postgresql://lake_auth:lake_auth@postgres:5432/lake_auth",
+    return normalize_database_url(
+        os.getenv(
+            "DATABASE_URL",
+            "postgresql://lake_auth:lake_auth@postgres:5432/lake_auth",
+        )
     )
 
 

@@ -138,11 +138,15 @@ async def schedule_notebook_pipeline(
         parameters=req.parameters,
         compute_resources=req.compute_resources,
         is_superadmin=is_superadmin,
+        workspace_id=ws.id,
+        user_id=current_user.id,
+        db=db,
     )
 
 
 @router.delete("/schedule-notebook/{dag_id}")
-async def delete_scheduled_notebook_pipeline(
+@router.delete("/{dag_id}")
+async def delete_pipeline(
     dag_id: str,
     workspace_slug: str | None = Query(None),
     x_workspace_slug: str | None = Header(None, alias="X-Workspace-Slug"),
@@ -151,7 +155,7 @@ async def delete_scheduled_notebook_pipeline(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Delete a dynamically generated notebook schedule DAG."""
+    """Delete a workspace pipeline DAG."""
     ws, role = _resolve_workspace_context(
         workspace_slug=workspace_slug,
         x_workspace_slug=x_workspace_slug,
@@ -166,7 +170,12 @@ async def delete_scheduled_notebook_pipeline(
         workspace_slug=ws.slug,
         dag_id=dag_id,
         is_superadmin=is_superadmin,
+        workspace_id=ws.id,
+        db=db,
     )
+
+
+delete_scheduled_notebook_pipeline = delete_pipeline
 
 
 @router.get("/timeline")

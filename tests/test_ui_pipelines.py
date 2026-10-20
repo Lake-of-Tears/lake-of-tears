@@ -53,8 +53,21 @@ def test_get_pipelines_page_renders_native_template():
         assert 'id="filter-running"' in response.text
         assert 'id="filter-failed"' in response.text
         assert 'id="inspector-drawer"' in response.text
+        assert 'id="btn-delete-pipeline-drawer"' in response.text
+        assert 'id="pipeline-delete-modal"' in response.text
         assert 'id="trigger-modal"' in response.text
         assert "Schedule Notebook" in response.text
+
+        # Verify pipelines pagination elements (#239)
+        assert 'id="pipelines-pagination-toolbar"' in response.text
+        assert 'id="pipelines-pagination-info"' in response.text
+        assert 'id="pipelines-page-size"' in response.text
+        assert 'id="btn-pipelines-prev"' in response.text
+        assert 'id="btn-pipelines-next"' in response.text
+        assert 'id="pipelines-page-numbers"' in response.text
+        assert '<option value="10">10</option>' in response.text
+        assert '<option value="25">25</option>' in response.text
+        assert '<option value="50">50</option>' in response.text
 
 
 def test_get_pipelines_page_viewer_mode_restrictions():
@@ -67,8 +80,9 @@ def test_get_pipelines_page_viewer_mode_restrictions():
         )
         assert response.status_code == 200
         assert "Read-Only Viewer" in response.text
-        # Viewer should not have "+ Schedule Notebook" header button
+        # Viewer should not have "+ Schedule Notebook" header button or delete button
         assert "Schedule Notebook" not in response.text
+        assert 'id="btn-delete-pipeline-drawer"' not in response.text
 
 
 def test_notebooks_page_contains_enhanced_schedule_modal():
@@ -209,6 +223,33 @@ async def test_ui_pipeline_proxy_delete_schedule():
 
 
 @pytest.mark.anyio
+async def test_ui_pipeline_proxy_delete_pipeline():
+    token, mock_workspaces = _create_auth_cookie(role="editor")
+
+    mock_resp = httpx.Response(
+        200,
+        json={"dag_id": "ws_analytics_forecast", "status": "deleted"},
+        request=httpx.Request(
+            "DELETE", "http://backend:8000/api/v1/pipelines/ws_analytics_forecast"
+        ),
+    )
+
+    with (
+        patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
+        patch(
+            "httpx.AsyncClient.delete", new_callable=AsyncMock, return_value=mock_resp
+        ) as mock_del,
+    ):
+        res = client.delete(
+            "/api/pipelines/ws_analytics_forecast",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
+        )
+        assert res.status_code == 200
+        assert res.json()["status"] == "deleted"
+        assert mock_del.called
+
+
+@pytest.mark.anyio
 async def test_ui_pipeline_proxy_runs_tasks_logs():
     token, mock_workspaces = _create_auth_cookie(role="member")
 
@@ -300,6 +341,13 @@ def test_get_pipelines_page_renders_timeline_container_and_controls():
         assert 'id="calendar-month-year-label"' in response.text
         assert 'id="calendar-days-grid"' in response.text
         assert 'html[data-theme="light"]' in response.text
+
+        # Verify mouse wheel zoom and cursor anchoring script definitions
+        assert "const ZOOM_LEVELS = ['24h', '12h', '6h', '1h'];" in response.text
+        assert "function setTimelineZoom(level, anchorClientX = null)" in response.text
+        assert "function stepTimelineZoom(zoomIn, anchorClientX = null)" in response.text
+        assert "WHEEL_ZOOM_THRESHOLD = 50" in response.text
+        assert "overscroll-behavior: contain" in response.text
 
 
 @pytest.mark.anyio
@@ -460,5 +508,32 @@ def test_pipelines_page_renders_editable_fields_and_notebook_link():
         assert 'id="drawer-notebook-link-wrap"' in response.text
         assert 'id="drawer-active-run-alert"' in response.text
         assert 'id="drawer-metadata-section"' in response.text
-        assert 'id="btn-save-drawer-meta"' in response.text
         assert 'id="drawer-color-swatch"' in response.text
+
+
+def test_pipelines_page_includes_highlight_and_row_ids():
+    token, mock_workspaces = _create_auth_cookie(role="member")
+
+    with patch.object(main, "_fetch_workspaces", return_value=mock_workspaces):
+        response = client.get(
+            "/pipelines",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
+        )
+        assert response.status_code == 200
+        assert "highlightPipelineRow" in response.text
+        assert "pipeline-row-" in response.text
+        assert "openDagId" in response.text
+
+
+def test_notebooks_page_includes_pipeline_redirect_and_prepopulation():
+    token, mock_workspaces = _create_auth_cookie(role="member")
+
+    with patch.object(main, "_fetch_workspaces", return_value=mock_workspaces):
+        response = client.get(
+            "/notebooks",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
+        )
+        assert response.status_code == 200
+        assert "loadExistingPipelineForNotebook" in response.text
+        assert "/pipelines?open=" in response.text
+        assert "airflow-sched-cadence" in response.text

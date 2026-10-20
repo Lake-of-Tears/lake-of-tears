@@ -188,7 +188,7 @@ DEFAULT_LAKEHOUSE_DATASETS: list[dict[str, Any]] = [
         "name": "embeddings",
         "schema": "gold",
         "s3_path": f"s3://{MINIO_BUCKET}/embeddings/**/*.parquet",
-        "description": "Embeddings of each source's record text (content), written daily by the embed_sources pipeline; provider, model and dimension record which model made them.",
+        "description": "Embeddings of each source's record text (content), written daily by the embed_sources pipeline, one row per chunk (parent_id, chunk_index and total_chunks say which record a chunk came from); provider, model and dimension record which model made them.",
         "columns": [
             {"name": "id", "type": "VARCHAR"},
             {"name": "source", "type": "VARCHAR"},
@@ -198,6 +198,10 @@ DEFAULT_LAKEHOUSE_DATASETS: list[dict[str, Any]] = [
             {"name": "provider", "type": "VARCHAR"},
             {"name": "model", "type": "VARCHAR"},
             {"name": "dimension", "type": "BIGINT"},
+            {"name": "parent_id", "type": "VARCHAR"},
+            {"name": "chunk_index", "type": "BIGINT"},
+            {"name": "total_chunks", "type": "BIGINT"},
+            {"name": "metadata", "type": "VARCHAR"},
             {"name": "ingested_at", "type": "TIMESTAMP"},
         ],
     },
@@ -801,7 +805,15 @@ def get_workspace_catalogs_from_db(db: Session, workspace_id: Any) -> list[dict[
     result: list[dict[str, Any]] = []
     for c in catalogs:
         schemas_list: list[dict[str, Any]] = []
-        for s in c.schemas:
+        _tier_order = {"bronze": 1, "silver": 2, "gold": 3}
+        sorted_schemas = sorted(
+            c.schemas,
+            key=lambda s: (
+                _tier_order.get((s.tier or s.slug or "").lower(), 99),
+                (s.name or s.slug or "").lower(),
+            ),
+        )
+        for s in sorted_schemas:
             tables_list: list[dict[str, Any]] = []
             for t in s.tables:
                 tables_list.append(

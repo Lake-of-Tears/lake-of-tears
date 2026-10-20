@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import math
 import os
@@ -17,7 +18,13 @@ import jwt
 import websockets
 from dotenv import load_dotenv
 from fastapi import FastAPI, Form, Query, Request, WebSocket, WebSocketDisconnect, status
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
@@ -59,8 +66,36 @@ SOURCE_LABELS = {
 
 app = FastAPI(title="Lake of Tears")
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+_SCHEMA_TIER_ORDER = {"bronze": 1, "silver": 2, "gold": 3}
+
+
+def _sort_schemas(schemas: Any) -> list[dict[str, Any]]:
+    if not isinstance(schemas, list):
+        return []
+
+    def _key(s: Any) -> tuple[int, str]:
+        tier = (
+            getattr(s, "tier", None)
+            or (s.get("tier") if isinstance(s, dict) else None)
+            or getattr(s, "slug", None)
+            or (s.get("slug") if isinstance(s, dict) else None)
+            or ""
+        ).lower()
+        name = (
+            getattr(s, "name", None)
+            or (s.get("name") if isinstance(s, dict) else None)
+            or getattr(s, "slug", None)
+            or (s.get("slug") if isinstance(s, dict) else None)
+            or ""
+        ).lower()
+        return (_SCHEMA_TIER_ORDER.get(tier, 99), name)
+
+    return sorted(schemas, key=_key)
+
+
 # Catalog slugs use hyphens but the DuckDB views use underscores; templates show the SQL name.
 templates.env.filters["sql_ident"] = duckdb_ai._safe_identifier
+templates.env.filters["sort_schemas"] = _sort_schemas
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 _PUBLIC_PREFIXES = (
@@ -403,7 +438,7 @@ def _run_query(
     ai_state = {"rows_processed": 0, "ai_calls": 0}
     start_ts = time.perf_counter()
     try:
-        with duckdb_pool_instance.acquire() as con:
+        with duckdb_pool_instance.acquire(sql=sql) as con:
             if cancel is not None:
                 cancel.attach(con)
                 cancel.check()
@@ -602,6 +637,10 @@ async def catalog(request: Request):
         catalogs = _backend_get(f"/api/workspaces/{ws['id']}/catalogs", token) or []
     elif token:
         catalogs = _backend_get("/api/catalogs", token) or []
+    if isinstance(catalogs, list):
+        for cat in catalogs:
+            if isinstance(cat, dict) and "schemas" in cat and isinstance(cat["schemas"], list):
+                cat["schemas"] = _sort_schemas(cat["schemas"])
     error = request.query_params.get("error")
     return templates.TemplateResponse(
         request=request,
@@ -787,15 +826,19 @@ async def storage(request: Request):
 def _resolve_ui_catalogs(request: Request) -> list[dict[str, Any]]:
     token = request.cookies.get("lake_token")
     ws = getattr(request.state, "workspace", None)
+    catalogs: list[dict[str, Any]] = []
     if token and ws and isinstance(ws, dict) and ws.get("id"):
         res = _backend_get(f"/api/workspaces/{ws['id']}/catalogs", token)
         if isinstance(res, list):
-            return res
-    if token:
+            catalogs = res
+    elif token:
         res = _backend_get("/api/catalogs", token)
         if isinstance(res, list):
-            return res
-    return []
+            catalogs = res
+    for cat in catalogs:
+        if isinstance(cat, dict) and "schemas" in cat and isinstance(cat["schemas"], list):
+            cat["schemas"] = _sort_schemas(cat["schemas"])
+    return catalogs
 
 
 @app.get("/sql", response_class=HTMLResponse)
@@ -991,6 +1034,20 @@ def _backend_get(path: str, token: str) -> dict | list | None:
     try:
         with httpx.Client(timeout=5) as client:
             resp = client.get(
+                f"{BACKEND_URL}{path}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
+
+
+async def _backend_get_async(path: str, token: str) -> dict | list | None:
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(
                 f"{BACKEND_URL}{path}",
                 headers={"Authorization": f"Bearer {token}"},
             )
@@ -1808,6 +1865,270 @@ async def api_search_notebooks(request: Request, q: str = "", subpath: str = "")
     )
 
 
+@app.get("/workspace/manifest")
+@app.get("/api/workspace/manifest")
+async def api_workspace_manifest(request: Request):
+    auth_res = _get_notebook_auth_and_workspace(request, require_write=False)
+    if isinstance(auth_res, JSONResponse):
+        return auth_res
+    user, ws = auth_res
+    token = request.cookies.get("lake_token") or ""
+    ws_slug = ws.get("slug") or "default"
+    ws_id = ws.get("id") or "default"
+
+    # Parallel data fetch using asyncio.gather
+    async def _fetch_catalogs():
+        if not token:
+            return []
+        data = None
+        if ws_id != "default":
+            data = await _backend_get_async(f"/api/workspaces/{ws_id}/catalog-manifest", token)
+            if data is None:
+                data = await _backend_get_async(f"/api/workspaces/{ws_id}/catalogs", token)
+        if data is None:
+            data = await _backend_get_async("/api/catalogs/catalog-manifest", token)
+            if data is None:
+                data = await _backend_get_async("/api/catalogs/manifest", token)
+            if data is None:
+                data = await _backend_get_async("/api/catalogs", token)
+        return data or []
+
+    async def _fetch_pipelines():
+        if not token:
+            return []
+        pipe_params = f"?workspace_slug={urllib.parse.quote(ws_slug)}" if ws_slug else ""
+        pipe_data = await _backend_get_async(f"/api/v1/pipelines{pipe_params}", token)
+        if pipe_data and isinstance(pipe_data, dict):
+            return pipe_data.get("pipelines", [])
+        if isinstance(pipe_data, list):
+            return pipe_data
+        return []
+
+    async def _fetch_notebooks():
+        fs_items = notebook_proxy.scan_workspace_filesystem(ws_slug)
+        if fs_items is not None:
+            return fs_items
+        return await notebook_proxy.search_workspace_items(ws_slug, query="", subpath="")
+
+    catalogs_raw, pipelines_raw, nb_items = await asyncio.gather(
+        _fetch_catalogs(),
+        _fetch_pipelines(),
+        _fetch_notebooks(),
+        return_exceptions=True,
+    )
+
+    if isinstance(catalogs_raw, Exception):
+        logger.warning("Error fetching catalogs for manifest: %s", catalogs_raw)
+        catalogs_raw = []
+    if isinstance(pipelines_raw, Exception):
+        logger.warning("Error fetching pipelines for manifest: %s", pipelines_raw)
+        pipelines_raw = []
+    if isinstance(nb_items, Exception):
+        logger.warning("Error fetching notebooks for manifest: %s", nb_items)
+        nb_items = []
+
+    items: list[dict[str, Any]] = []
+
+    # 1. Process Notebooks and Folders
+    for item in nb_items:
+        is_dir = item.get("type") == "directory"
+        parent = item.get("parent_dir", "")
+        location_desc = f"/{parent}" if parent else "Workspace Root"
+        if is_dir:
+            items.append(
+                {
+                    "category": "Folders",
+                    "title": item["name"],
+                    "subtitle": f"Folder in {location_desc}",
+                    "url": f"/notebooks?folder={urllib.parse.quote(item['path'])}",
+                    "type": "folder",
+                    "path": item["path"],
+                }
+            )
+        else:
+            items.append(
+                {
+                    "category": "Notebooks",
+                    "title": item["name"],
+                    "subtitle": f"Notebook in {location_desc}",
+                    "url": f"/notebooks?path={urllib.parse.quote(item['path'])}",
+                    "type": "notebook",
+                    "path": item["path"],
+                }
+            )
+
+    # 2. Process Catalogs, Schemas, Tables
+    for cat in catalogs_raw:
+        cat_id = cat.get("id", "")
+        cat_name = cat.get("name", "")
+        cat_slug = cat.get("slug", "")
+        cat_desc = cat.get("description") or "Data Catalog"
+        items.append(
+            {
+                "category": "Catalog",
+                "title": cat_name,
+                "subtitle": cat_desc,
+                "url": f"/catalog?catalog_id={cat_id}",
+                "type": "catalog",
+                "catalog_id": str(cat_id),
+                "path": cat_slug or cat_name,
+            }
+        )
+
+        for schema in cat.get("schemas") or []:
+            sch_id = schema.get("id", "")
+            sch_name = schema.get("name", "")
+            sch_slug = schema.get("slug", "")
+            tables = schema.get("tables") or []
+            tier_label = f"{schema.get('tier').capitalize()} tier • " if schema.get("tier") else ""
+            table_count_label = f"{len(tables)} table{'s' if len(tables) != 1 else ''}"
+
+            items.append(
+                {
+                    "category": "Schemas",
+                    "title": sch_name or sch_slug,
+                    "subtitle": f"Schema in {cat_name} • {tier_label}{table_count_label}",
+                    "url": f"/catalog?catalog_id={cat_id}&schema_id={sch_id}",
+                    "type": "schema",
+                    "catalog_id": str(cat_id),
+                    "schema_id": str(sch_id),
+                    "path": f"{cat_slug}.{sch_slug}",
+                }
+            )
+
+            for table in tables:
+                tbl_id = table.get("id", "")
+                tbl_name = table.get("name", "")
+                tbl_slug = table.get("slug", "")
+                tbl_desc = table.get("description") or ""
+                sql_sch = duckdb_ai._safe_identifier(sch_slug)
+                sql_tbl = duckdb_ai._safe_identifier(tbl_slug)
+                cols = table.get("columns") or []
+                if not cols and "column_defs" in table:
+                    cols = [
+                        c.get("name")
+                        for c in (table.get("column_defs") or [])
+                        if isinstance(c, dict) and c.get("name")
+                    ]
+
+                sub = f"Table in {cat_name}.{sql_sch} • {len(cols)} cols"
+                if tbl_desc:
+                    sub += f" • {tbl_desc}"
+
+                items.append(
+                    {
+                        "category": "Tables",
+                        "title": tbl_name or sql_tbl,
+                        "subtitle": sub,
+                        "url": f"/catalog?catalog_id={cat_id}&schema_id={sch_id}&table_id={tbl_id}",
+                        "type": "table",
+                        "catalog_id": str(cat_id),
+                        "schema_id": str(sch_id),
+                        "table_id": str(tbl_id),
+                        "table_ident": sql_tbl,
+                        "path": f"{sql_sch}.{sql_tbl}",
+                        "columns": cols,
+                    }
+                )
+
+    # 3. Pipelines
+    if not pipelines_raw:
+        pipelines_raw = [
+            {
+                "dag_id": "run_notebook",
+                "name": "run_notebook",
+                "desc": "On-demand execution of notebooks via Airflow",
+            },
+            {
+                "dag_id": "daily_ingest",
+                "name": "daily_ingest",
+                "desc": "Scheduled ingestion & normalization",
+            },
+            {"dag_id": "ecommerce_sync", "name": "ecommerce_sync", "desc": "Shopify & Stripe sync"},
+        ]
+
+    for pipe in pipelines_raw:
+        dag_id = pipe.get("dag_id") or pipe.get("name", "")
+        pipe_name = (
+            pipe.get("display_label") or pipe.get("pipeline_name") or pipe.get("name") or dag_id
+        )
+        pipe_desc = pipe.get("description") or pipe.get("desc") or f"Pipeline {dag_id}"
+        items.append(
+            {
+                "category": "Pipelines",
+                "title": pipe_name,
+                "subtitle": pipe_desc,
+                "url": f"/pipelines?open={urllib.parse.quote(dag_id)}",
+                "type": "pipeline",
+                "dag_id": dag_id,
+                "path": dag_id,
+            }
+        )
+
+    # 4. Storage Sources
+    for src in SOURCES:
+        src_label = SOURCE_LABELS.get(src, src.title())
+        src_desc = f"MinIO S3 prefix: raw/{src}/"
+        items.append(
+            {
+                "category": "Storage",
+                "title": f"{src_label} Storage",
+                "subtitle": src_desc,
+                "url": "/storage",
+                "type": "storage",
+                "path": f"raw/{src}",
+            }
+        )
+
+    # 5. Application Navigation Pages
+    nav_pages = [
+        {"title": "Dashboard", "subtitle": "System overview & metrics", "url": "/"},
+        {"title": "Catalog", "subtitle": "Datasets & schemas", "url": "/catalog"},
+        {"title": "Storage", "subtitle": "MinIO S3 data lake buckets", "url": "/storage"},
+        {"title": "SQL Editor", "subtitle": "DuckDB SQL queries", "url": "/sql"},
+        {"title": "Visualizations", "subtitle": "Apache Superset dashboards", "url": "/dashboards"},
+        {"title": "Pipelines", "subtitle": "Apache Airflow DAGs", "url": "/pipelines"},
+        {"title": "Data Ingestion", "subtitle": "Connectors & ingestion status", "url": "/ingest"},
+        {"title": "AI Query", "subtitle": "Gemini natural language SQL", "url": "/ai"},
+        {
+            "title": "Anomaly Detection",
+            "subtitle": "Data drift & anomaly detection",
+            "url": "/anomalies",
+        },
+        {"title": "Notebooks", "subtitle": "Interactive Jupyter notebooks", "url": "/notebooks"},
+        {
+            "title": "Workspace Settings",
+            "subtitle": "Manage workspace members & catalogs",
+            "url": "/settings/workspace",
+        },
+        {
+            "title": "Account Settings",
+            "subtitle": "Profile & credentials",
+            "url": "/settings/account",
+        },
+    ]
+    for page in nav_pages:
+        items.append(
+            {
+                "category": "Navigation",
+                "title": page["title"],
+                "subtitle": page["subtitle"],
+                "url": page["url"],
+                "type": "page",
+                "path": page["url"],
+            }
+        )
+
+    return JSONResponse(
+        {
+            "workspace": ws_slug,
+            "version": 1,
+            "count": len(items),
+            "items": items,
+        }
+    )
+
+
 @app.get("/workspace/search")
 @app.get("/api/workspace/search")
 async def api_workspace_search(request: Request, q: str = ""):
@@ -1852,7 +2173,7 @@ async def api_workspace_search(request: Request, q: str = ""):
     except Exception as exc:
         logger.warning("Error searching notebooks in workspace search: %s", exc)
 
-    # 2. Catalog Tables & Datasets
+    # 2. Catalogs, Schemas & Tables
     try:
         catalogs = []
         if token and ws.get("id") != "default":
@@ -1860,19 +2181,109 @@ async def api_workspace_search(request: Request, q: str = ""):
         elif token:
             catalogs = _backend_get("/api/catalogs", token) or []
         for cat in catalogs:
+            cat_id = cat.get("id", "")
             cat_name = cat.get("name", "")
+            cat_slug = cat.get("slug", "")
             cat_desc = cat.get("description") or "Data Catalog"
-            if not query or query in cat_name.lower() or query in cat_desc.lower():
+            if (
+                not query
+                or query in cat_name.lower()
+                or query in cat_slug.lower()
+                or query in cat_desc.lower()
+            ):
                 results.append(
                     {
                         "category": "Catalog",
                         "title": cat_name,
                         "subtitle": cat_desc,
-                        "url": "/catalog",
+                        "url": f"/catalog?catalog_id={cat_id}",
                         "type": "catalog",
+                        "catalog_id": str(cat_id),
                         "path": cat_name,
                     }
                 )
+
+            for schema in cat.get("schemas") or []:
+                sch_id = schema.get("id", "")
+                sch_name = schema.get("name", "")
+                sch_slug = schema.get("slug", "")
+                sch_desc = schema.get("description") or ""
+                sch_tier = (schema.get("tier") or "").lower()
+                tables = schema.get("tables") or []
+
+                schema_matches = (
+                    not query
+                    or query in sch_name.lower()
+                    or query in sch_slug.lower()
+                    or query in sch_desc.lower()
+                    or query in sch_tier
+                )
+
+                if schema_matches:
+                    tier_label = (
+                        f"{schema.get('tier').capitalize()} tier • " if schema.get("tier") else ""
+                    )
+                    table_count_label = f"{len(tables)} table{'s' if len(tables) != 1 else ''}"
+                    results.append(
+                        {
+                            "category": "Schemas",
+                            "title": sch_name or sch_slug,
+                            "subtitle": f"Schema in {cat_name} • {tier_label}{table_count_label}",
+                            "url": f"/catalog?catalog_id={cat_id}&schema_id={sch_id}",
+                            "type": "schema",
+                            "catalog_id": str(cat_id),
+                            "schema_id": str(sch_id),
+                            "path": f"{cat_slug}.{sch_slug}",
+                        }
+                    )
+
+                for table in tables:
+                    tbl_id = table.get("id", "")
+                    tbl_name = table.get("name", "")
+                    tbl_slug = table.get("slug", "")
+                    tbl_desc = table.get("description") or ""
+                    tbl_s3 = table.get("s3_path_pattern") or ""
+                    cols = table.get("column_defs") or []
+
+                    direct_match = (
+                        not query
+                        or query in tbl_name.lower()
+                        or query in tbl_slug.lower()
+                        or query in tbl_desc.lower()
+                        or query in tbl_s3.lower()
+                    )
+
+                    col_match = None
+                    if not direct_match and query:
+                        for col in cols:
+                            if isinstance(col, dict) and query in str(col.get("name", "")).lower():
+                                col_match = col.get("name")
+                                break
+
+                    if direct_match or col_match:
+                        sql_sch = duckdb_ai._safe_identifier(sch_slug)
+                        sql_tbl = duckdb_ai._safe_identifier(tbl_slug)
+                        if col_match:
+                            sub = f"Table in {cat_name}.{sql_sch} • Matched column: {col_match} • {len(cols)} cols"
+                        elif tbl_desc:
+                            sub = f"Table in {cat_name}.{sql_sch} • {len(cols)} cols • {tbl_desc}"
+                        else:
+                            sub = f"Table in {cat_name}.{sql_sch} • {len(cols)} cols"
+
+                        results.append(
+                            {
+                                "category": "Tables",
+                                "title": tbl_name or sql_tbl,
+                                "subtitle": sub,
+                                "url": f"/catalog?catalog_id={cat_id}&schema_id={sch_id}&table_id={tbl_id}",
+                                "type": "table",
+                                "catalog_id": str(cat_id),
+                                "schema_id": str(sch_id),
+                                "table_id": str(tbl_id),
+                                "table_ident": sql_tbl,
+                                "path": f"{sql_sch}.{sql_tbl}",
+                            }
+                        )
     except Exception as exc:
         logger.warning("Error searching catalog in workspace search: %s", exc)
 
@@ -1997,7 +2408,7 @@ async def api_workspace_search(request: Request, q: str = ""):
 
 @app.get("/api/notebooks/{path:path}")
 @app.get("/notebooks/api/{path:path}")
-async def api_get_notebook(request: Request, path: str):
+async def api_get_notebook(request: Request, path: str, download: bool = False):
     auth_res = _get_notebook_auth_and_workspace(request, require_write=False)
     if isinstance(auth_res, JSONResponse):
         return auth_res
@@ -2008,6 +2419,20 @@ async def api_get_notebook(request: Request, path: str):
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
     status_code, data = await notebook_proxy.get_notebook(ws["slug"], clean_path, auth_token=token)
+    if status_code != 200:
+        return JSONResponse(data, status_code=status_code)
+
+    if download:
+        filename = clean_path.split("/")[-1]
+        if not filename.endswith(".ipynb"):
+            filename = f"{filename}.ipynb"
+        content = data.get("content", data)
+        return Response(
+            content=json.dumps(content, indent=2),
+            media_type="application/x-ipynb+json",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
     return JSONResponse(data, status_code=status_code)
 
 
@@ -2136,7 +2561,7 @@ async def websocket_kernel_proxy(websocket: WebSocket, kernel_id: str):
         upstream_url += f"?token={notebook_proxy.JUPYTER_TOKEN}"
 
     try:
-        async with websockets.connect(upstream_url) as upstream:
+        async with websockets.connect(upstream_url, proxy=None) as upstream:
 
             async def client_to_upstream():
                 try:
@@ -2262,7 +2687,9 @@ async def ui_schedule_notebook(request: Request):
 
 @app.delete("/api/pipelines/schedule-notebook/{dag_id}")
 @app.delete("/api/v1/pipelines/schedule-notebook/{dag_id}")
-async def ui_delete_schedule_notebook(request: Request, dag_id: str):
+@app.delete("/api/pipelines/{dag_id}")
+@app.delete("/api/v1/pipelines/{dag_id}")
+async def ui_delete_pipeline(request: Request, dag_id: str):
     token = _get_request_token(request)
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     ws = getattr(request.state, "workspace", None)
@@ -2273,7 +2700,7 @@ async def ui_delete_schedule_notebook(request: Request, dag_id: str):
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.delete(
-                f"{BACKEND_URL}/api/v1/pipelines/schedule-notebook/{dag_id}",
+                f"{BACKEND_URL}/api/v1/pipelines/{dag_id}",
                 headers=headers,
                 params=params,
                 cookies=request.cookies,
@@ -2281,6 +2708,9 @@ async def ui_delete_schedule_notebook(request: Request, dag_id: str):
             return JSONResponse(resp.json(), status_code=resp.status_code)
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+ui_delete_schedule_notebook = ui_delete_pipeline
 
 
 @app.get("/api/pipelines/timeline")

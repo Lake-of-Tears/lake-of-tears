@@ -58,6 +58,15 @@ KNOWN_PIPELINE_NOTEBOOKS: dict[str, str] = {
     "ingest_tmdb_movies": "tmdb_daily_movies_ingest.ipynb",
 }
 
+PROTECTED_SYSTEM_DAGS: set[str] = {
+    "run_notebook",
+    "refresh_catalog_schemas_dag",
+    "embed_sources_dag",
+    "summarize_dag",
+    "anomaly_detect_dag",
+    "generate_embeddings_dag",
+}
+
 
 def get_default_color_for_dag(dag_id: str) -> str:
     """Return a deterministic color from the master palette based on dag_id."""
@@ -208,6 +217,51 @@ async def _fetch_latest_dag_run(
     return None
 
 
+def _extract_pending_dag_metadata_from_file(
+    py_file: Path, workspace_slug: str
+) -> dict[str, Any] | None:
+    """Parse dynamic DAG python code on disk to synthesize DAG metadata if not yet synced to Airflow."""
+    try:
+        content = py_file.read_text(encoding="utf-8")
+        dag_id_match = re.search(r'dag_id=["\']([^"\']+)["\']', content)
+        dag_id = dag_id_match.group(1) if dag_id_match else py_file.stem
+
+        sched_match = re.search(r'schedule(?:_interval)?=["\']([^"\']+)["\']', content)
+        schedule = sched_match.group(1) if sched_match else "None (Manual)"
+
+        doc_match = re.search(r'doc_md=["\']([^"\']+)["\']', content)
+        doc_md = doc_match.group(1) if doc_match else dag_id.replace("_", " ").title()
+
+        tags_match = re.search(r"tags=\[([^\]]+)\]", content)
+        tags = []
+        if tags_match:
+            raw_tags = tags_match.group(1)
+            tags = [t.strip().strip("\"'") for t in raw_tags.split(",") if t.strip()]
+        else:
+            tags = [f"workspace:{workspace_slug}", "notebook", "scheduled"]
+
+        sched_obj = (
+            {"__type": "CronExpression", "value": schedule}
+            if (schedule.startswith("@") or " " in schedule)
+            else schedule
+        )
+
+        return {
+            "dag_id": dag_id,
+            "description": doc_md,
+            "schedule_interval": sched_obj,
+            "timetable_description": schedule,
+            "is_paused": False,
+            "is_active": True,
+            "tags": [{"name": t} for t in tags],
+            "fileloc": str(py_file),
+            "next_dagrun": None,
+        }
+    except Exception as exc:
+        logger.warning("Failed to parse pending DAG metadata from %s: %s", py_file, exc)
+        return None
+
+
 async def list_workspace_dags(
     workspace_slug: str,
     is_superadmin: bool = False,
@@ -234,6 +288,22 @@ async def list_workspace_dags(
                 for d in raw_dags
                 if is_dag_accessible_by_workspace(d, workspace_slug, is_superadmin)
             ]
+
+            # Merge any local workspace DAG files that haven't been picked up by Airflow yet
+            existing_dag_ids = {d.get("dag_id") for d in matching_dags}
+            dags_dir = get_airflow_dags_dir()
+            ws_dir = dags_dir / "workspaces" / workspace_slug
+            if ws_dir.is_dir():
+                for py_file in sorted(ws_dir.glob("*.py")):
+                    if py_file.stem not in existing_dag_ids:
+                        pending_dag = _extract_pending_dag_metadata_from_file(
+                            py_file, workspace_slug
+                        )
+                        if pending_dag and is_dag_accessible_by_workspace(
+                            pending_dag, workspace_slug, is_superadmin
+                        ):
+                            matching_dags.append(pending_dag)
+                            existing_dag_ids.add(py_file.stem)
 
             meta_map = get_pipeline_metadata_map(workspace_id, db) if workspace_id and db else {}
 
@@ -322,16 +392,31 @@ async def get_dag_details(
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(url, auth=auth)
-            if resp.status_code == 404:
+            dag = None
+            if resp.status_code == 200:
+                dag = resp.json()
+            elif resp.status_code == 404:
+                # Check if the DAG file exists on disk in workspace folder
+                dags_dir = get_airflow_dags_dir()
+                dag_file = (
+                    dags_dir / "workspaces" / workspace_slug / f"{sanitize_dag_id(dag_id)}.py"
+                )
+                if dag_file.is_file():
+                    dag = _extract_pending_dag_metadata_from_file(dag_file, workspace_slug)
+
+            if not dag:
+                if resp.status_code != 200 and resp.status_code != 404:
+                    raise HTTPException(502, f"Failed to get DAG from Airflow: {resp.text}")
                 raise HTTPException(404, f"Pipeline {dag_id} not found")
-            if resp.status_code != 200:
-                raise HTTPException(502, f"Failed to get DAG from Airflow: {resp.text}")
-            dag = resp.json()
 
             if not is_dag_accessible_by_workspace(dag, workspace_slug, is_superadmin):
                 raise HTTPException(404, f"Pipeline {dag_id} not found")
 
-            last_run = await _fetch_latest_dag_run(client, api_base, auth, dag_id)
+            last_run = (
+                await _fetch_latest_dag_run(client, api_base, auth, dag_id)
+                if resp.status_code == 200
+                else None
+            )
             tags_raw = dag.get("tags", [])
             tags = [t.get("name", t) if isinstance(t, dict) else str(t) for t in tags_raw]
             sched_obj = dag.get("schedule_interval")
@@ -819,6 +904,9 @@ async def schedule_notebook(
     parameters: dict[str, Any] | None = None,
     compute_resources: dict[str, str] | None = None,
     is_superadmin: bool = False,
+    workspace_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
+    db: Session | None = None,
 ) -> dict[str, Any]:
     """Create or update a recurring notebook schedule DAG."""
     clean_title = sanitize_pipeline_name(
@@ -847,6 +935,29 @@ async def schedule_notebook(
         logger.error("Failed to write dynamic DAG file to %s: %s", ws_dir, exc)
         raise HTTPException(500, f"Failed to persist pipeline DAG file: {exc}") from exc
 
+    # Persist or update PipelineMetadata in DB if workspace_id and db are provided
+    if workspace_id and db:
+        try:
+            upsert_pipeline_metadata(
+                workspace_id=workspace_id,
+                dag_id=dag_id,
+                display_label=clean_title,
+                description=f"Scheduled notebook: {notebook_path.strip('/ ')}",
+                user_id=user_id,
+                db=db,
+            )
+        except Exception as exc:
+            logger.warning("Failed to upsert pipeline metadata for %s: %s", dag_id, exc)
+
+    # Attempt to unpause immediately in Airflow if already registered
+    api_base = get_airflow_api_base()
+    auth = get_airflow_auth()
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            await client.patch(f"{api_base}/dags/{dag_id}", json={"is_paused": False}, auth=auth)
+    except Exception:
+        pass
+
     return {
         "dag_id": dag_id,
         "file_path": str(dag_file),
@@ -856,11 +967,22 @@ async def schedule_notebook(
 
 
 async def delete_scheduled_notebook(
-    workspace_slug: str, dag_id: str, is_superadmin: bool = False
+    workspace_slug: str,
+    dag_id: str,
+    is_superadmin: bool = False,
+    workspace_id: uuid.UUID | None = None,
+    db: Session | None = None,
 ) -> dict[str, Any]:
     """Delete a dynamically generated notebook schedule DAG."""
     clean_id = sanitize_dag_id(dag_id)
-    if not is_superadmin and not clean_id.startswith(f"ws_{workspace_slug}_"):
+    if (
+        clean_id in PROTECTED_SYSTEM_DAGS
+        or clean_id.startswith("ingest_")
+        or not clean_id.startswith("ws_")
+    ):
+        raise HTTPException(400, f"Cannot delete protected or non-workspace pipeline: {dag_id}")
+
+    if not clean_id.startswith(f"ws_{workspace_slug}_"):
         raise HTTPException(404, f"Pipeline {dag_id} not found in this workspace")
 
     dags_dir = get_airflow_dags_dir()
@@ -871,6 +993,25 @@ async def delete_scheduled_notebook(
             logger.info("Deleted dynamic DAG file: %s", dag_file)
         except Exception as exc:
             logger.warning("Failed to unlink DAG file %s: %s", dag_file, exc)
+
+    # Remove PipelineMetadata from DB if available
+    if workspace_id and db:
+        try:
+            from models import PipelineMetadata
+
+            row = (
+                db.query(PipelineMetadata)
+                .filter(
+                    PipelineMetadata.workspace_id == workspace_id,
+                    PipelineMetadata.dag_id == clean_id,
+                )
+                .first()
+            )
+            if row:
+                db.delete(row)
+                db.commit()
+        except Exception as exc:
+            logger.warning("Failed to delete pipeline metadata for %s: %s", clean_id, exc)
 
     # Attempt to purge from Airflow REST API
     api_base = get_airflow_api_base()
