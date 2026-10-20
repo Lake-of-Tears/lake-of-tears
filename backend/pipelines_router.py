@@ -61,12 +61,13 @@ def _resolve_workspace_context(
     x_workspace_slug: str | None = Header(None, alias="X-Workspace-Slug"),
     x_workspace_id: str | None = Header(None, alias="X-Workspace-Id"),
     lake_active_workspace: str | None = Cookie(None),
+    lake_workspace_id: str | None = Cookie(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     require_write: bool = False,
 ) -> tuple[Any, str]:
     slug = workspace_slug or x_workspace_slug
-    ws_id = x_workspace_id or lake_active_workspace
+    ws_id = x_workspace_id or lake_active_workspace or lake_workspace_id
     return get_pipeline_workspace_and_role(
         workspace_id=ws_id,
         workspace_slug=slug,

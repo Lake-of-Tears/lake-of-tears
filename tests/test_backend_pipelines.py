@@ -125,8 +125,8 @@ def test_is_dag_accessible_by_workspace():
     assert pipeline_service.is_dag_accessible_by_workspace(dag_prefixed, "analytics")
     assert not pipeline_service.is_dag_accessible_by_workspace(dag_prefixed, "finance")
 
-    # Superadmin bypass
-    assert pipeline_service.is_dag_accessible_by_workspace(
+    # Superadmin scope jailing (#249): superadmin cannot bypass active workspace scope
+    assert not pipeline_service.is_dag_accessible_by_workspace(
         dag_tagged, "finance", is_superadmin=True
     )
 

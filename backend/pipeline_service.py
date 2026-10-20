@@ -148,9 +148,7 @@ def resolve_workspace_dag_id(workspace_slug: str, pipeline_title: str) -> str:
 def is_dag_accessible_by_workspace(
     dag_data: dict[str, Any], workspace_slug: str, is_superadmin: bool = False
 ) -> bool:
-    """Check if a DAG belongs to the specified workspace or if caller is superadmin."""
-    if is_superadmin:
-        return True
+    """Check if a DAG belongs to the specified workspace."""
     dag_id = dag_data.get("dag_id", "")
     prefix = f"ws_{workspace_slug}_"
     if dag_id.startswith(prefix) or dag_id == "run_notebook":
@@ -160,6 +158,13 @@ def is_dag_accessible_by_workspace(
     for tag in tags:
         tag_name = tag.get("name") if isinstance(tag, dict) else str(tag)
         if tag_name == expected_tag:
+            return True
+    if workspace_slug == "default" and not dag_id.startswith("ws_"):
+        has_other_ws_tag = any(
+            (t.get("name") if isinstance(t, dict) else str(t)).startswith("workspace:")
+            for t in tags
+        )
+        if not has_other_ws_tag:
             return True
     return False
 
