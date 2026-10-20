@@ -537,3 +537,56 @@ def test_notebooks_page_includes_pipeline_redirect_and_prepopulation():
         assert "loadExistingPipelineForNotebook" in response.text
         assert "/pipelines?open=" in response.text
         assert "airflow-sched-cadence" in response.text
+
+
+def test_inspector_drawer_schedule_and_split_run_controls():
+    token, mock_workspaces = _create_auth_cookie(role="member")
+
+    with patch.object(main, "_fetch_workspaces", return_value=mock_workspaces):
+        response = client.get(
+            "/pipelines",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
+        )
+        assert response.status_code == 200
+
+        # Verify Split Run button controls (#188)
+        assert 'id="drawer-run-split-btn"' in response.text
+        assert 'id="btn-drawer-run-now"' in response.text
+        assert 'id="btn-drawer-run-menu"' in response.text
+        assert 'id="drawer-run-dropdown"' in response.text
+        assert "Run with Parameters..." in response.text
+        assert "triggerPipelineFromDrawer" in response.text
+
+        # Verify Schedule section and controls (#188)
+        assert 'id="drawer-schedule-card"' in response.text
+        assert 'id="drawer-schedule-preset"' in response.text
+        assert 'id="drawer-custom-cron-wrap"' in response.text
+        assert 'id="drawer-custom-cron-input"' in response.text
+        assert 'id="drawer-schedule-permission-hint"' in response.text
+        assert "canEditSchedule" in response.text
+        assert "onDrawerSchedulePresetChange" in response.text
+        assert "getDrawerSelectedSchedule" in response.text
+
+
+@pytest.mark.anyio
+async def test_ui_patch_pipeline_schedule_proxy():
+    token, mock_workspaces = _create_auth_cookie(role="admin")
+    mock_resp = httpx.Response(
+        200,
+        json={"dag_id": "ws_analytics_etl", "schedule_interval": "@daily", "status": "updated"},
+        request=httpx.Request("PATCH", "http://backend:8000/api/v1/pipelines/ws_analytics_etl/schedule"),
+    )
+
+    with (
+        patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
+        patch("httpx.AsyncClient.patch", new_callable=AsyncMock, return_value=mock_resp) as mock_patch,
+    ):
+        cookies = {"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"}
+        res = client.patch(
+            "/api/pipelines/ws_analytics_etl/schedule",
+            json={"schedule_interval": "@daily"},
+            cookies=cookies,
+        )
+        assert res.status_code == 200
+        assert res.json()["schedule_interval"] == "@daily"
+        assert mock_patch.called

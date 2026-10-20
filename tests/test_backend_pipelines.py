@@ -1042,3 +1042,232 @@ with DAG(
             assert details["schedule_interval"] == "@daily"
             assert details["notebook_path"] == "pending.ipynb"
             assert details["last_run"] is None
+
+
+# ── Schedule Update & Validation Tests (#188) ─────────────────────────────────
+
+
+def test_validate_schedule_expression():
+    from fastapi import HTTPException
+
+    # Valid presets
+    assert pipeline_service.validate_schedule_expression("@hourly") == "@hourly"
+    assert pipeline_service.validate_schedule_expression("@daily") == "@daily"
+    assert pipeline_service.validate_schedule_expression("@weekly") == "@weekly"
+    assert pipeline_service.validate_schedule_expression("@monthly") == "@monthly"
+
+    # None / Manual normalization
+    assert pipeline_service.validate_schedule_expression(None) == "None"
+    assert pipeline_service.validate_schedule_expression("none") == "None"
+    assert pipeline_service.validate_schedule_expression("null") == "None"
+    assert pipeline_service.validate_schedule_expression("") == "None"
+
+    # Valid cron expressions
+    assert pipeline_service.validate_schedule_expression("0 8 * * *") == "0 8 * * *"
+    assert pipeline_service.validate_schedule_expression("*/15 * * * *") == "*/15 * * * *"
+
+    # Invalid expressions raise 400
+    with pytest.raises(HTTPException) as exc_info:
+        pipeline_service.validate_schedule_expression("invalid_cron_expr")
+    assert exc_info.value.status_code == 400
+
+    with pytest.raises(HTTPException) as exc_info:
+        pipeline_service.validate_schedule_expression("99 99 * * *")
+    assert exc_info.value.status_code == 400
+
+
+def test_replace_schedule_in_code():
+    code_with_schedule = """
+from airflow import DAG
+with DAG(
+    dag_id="test_dag",
+    schedule="0 8 * * *",
+    start_date=datetime(2026, 1, 1),
+) as dag:
+    pass
+"""
+    updated = pipeline_service._replace_schedule_in_code(code_with_schedule, "@hourly")
+    assert 'schedule="@hourly"' in updated
+    assert ast.parse(updated)
+
+    none_updated = pipeline_service._replace_schedule_in_code(code_with_schedule, "None")
+    assert "schedule=None" in none_updated
+    assert ast.parse(none_updated)
+
+    code_with_schedule_interval = """
+from airflow import DAG
+with DAG(
+    dag_id="test_dag",
+    schedule_interval="0 2 * * *",
+    start_date=datetime(2026, 1, 1),
+) as dag:
+    pass
+"""
+    updated_interval = pipeline_service._replace_schedule_in_code(code_with_schedule_interval, "0 0 * * *")
+    assert 'schedule_interval="0 0 * * *"' in updated_interval
+    assert ast.parse(updated_interval)
+
+
+@pytest.mark.anyio
+async def test_update_pipeline_schedule_workspace_dag():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        dags_dir = Path(tmpdir)
+        ws_dir = dags_dir / "workspaces" / "analytics"
+        ws_dir.mkdir(parents=True)
+        py_file = ws_dir / "ws_analytics_etl.py"
+        py_file.write_text(
+            """
+from airflow import DAG
+with DAG(
+    dag_id="ws_analytics_etl",
+    schedule=None,
+) as dag:
+    pass
+""",
+            encoding="utf-8",
+        )
+
+        with patch("pipeline_service.get_airflow_dags_dir", return_value=dags_dir):
+            res = await pipeline_service.update_pipeline_schedule(
+                workspace_slug="analytics",
+                dag_id="ws_analytics_etl",
+                schedule_interval="@daily",
+                is_superadmin=False,
+                role="member",
+            )
+            assert res["dag_id"] == "ws_analytics_etl"
+            assert res["schedule_interval"] == "@daily"
+            assert res["status"] == "updated"
+
+            # Verify file content on disk
+            content = py_file.read_text(encoding="utf-8")
+            assert 'schedule="@daily"' in content
+            assert ast.parse(content)
+
+
+@pytest.mark.anyio
+async def test_update_pipeline_schedule_builtin_dag_rbac():
+    from fastapi import HTTPException
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        dags_dir = Path(tmpdir)
+        py_file = dags_dir / "ingest_tmdb_movies_dag.py"
+        py_file.write_text(
+            """
+from airflow import DAG
+with DAG(
+    dag_id="ingest_tmdb_movies",
+    schedule="0 2 * * *",
+) as dag:
+    pass
+""",
+            encoding="utf-8",
+        )
+
+        with patch("pipeline_service.get_airflow_dags_dir", return_value=dags_dir):
+            # Member role should be rejected with 403
+            with pytest.raises(HTTPException) as exc_info:
+                await pipeline_service.update_pipeline_schedule(
+                    workspace_slug="analytics",
+                    dag_id="ingest_tmdb_movies",
+                    schedule_interval="0 4 * * *",
+                    is_superadmin=False,
+                    role="member",
+                )
+            assert exc_info.value.status_code == 403
+            assert "Only workspace admins or superadmins" in exc_info.value.detail
+
+            # Admin role should succeed
+            res = await pipeline_service.update_pipeline_schedule(
+                workspace_slug="analytics",
+                dag_id="ingest_tmdb_movies",
+                schedule_interval="0 4 * * *",
+                is_superadmin=False,
+                role="admin",
+            )
+            assert res["dag_id"] == "ingest_tmdb_movies"
+            assert res["schedule_interval"] == "0 4 * * *"
+
+            content = py_file.read_text(encoding="utf-8")
+            assert 'schedule="0 4 * * *"' in content
+
+
+@pytest.mark.anyio
+async def test_update_pipeline_schedule_run_notebook_blocked():
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as exc_info:
+        await pipeline_service.update_pipeline_schedule(
+            workspace_slug="analytics",
+            dag_id="run_notebook",
+            schedule_interval="@hourly",
+            is_superadmin=True,
+            role="superadmin",
+        )
+    assert exc_info.value.status_code == 400
+    assert "run_notebook cannot be modified" in exc_info.value.detail
+
+
+def test_pipeline_schedule_patch_endpoint():
+    user_admin, workspace, member, token_admin = _generate_test_user_and_token(role="admin")
+    mock_db = MagicMock()
+
+    backend_main.app.dependency_overrides[database.get_db] = lambda: mock_db
+    backend_main.app.dependency_overrides[auth.get_current_user] = lambda: user_admin
+
+    try:
+        with (
+            patch(
+                "pipelines_router.get_pipeline_workspace_and_role",
+                return_value=(workspace, "admin"),
+            ),
+            patch.object(
+                pipeline_service,
+                "update_pipeline_schedule",
+                new_callable=AsyncMock,
+                return_value={
+                    "dag_id": "ws_analytics_etl",
+                    "schedule_interval": "@weekly",
+                    "file_path": "/dags/ws_analytics_etl.py",
+                    "status": "updated",
+                },
+            ) as mock_update,
+        ):
+            headers = {"Authorization": f"Bearer {token_admin}"}
+            resp = client.patch(
+                "/api/v1/pipelines/ws_analytics_etl/schedule",
+                json={"schedule_interval": "@weekly"},
+                headers=headers,
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["dag_id"] == "ws_analytics_etl"
+            assert data["schedule_interval"] == "@weekly"
+            assert mock_update.called
+    finally:
+        backend_main.app.dependency_overrides.clear()
+
+
+def test_pipeline_schedule_patch_viewer_forbidden():
+    user_viewer, workspace, member, token_viewer = _generate_test_user_and_token(role="viewer")
+    mock_db = MagicMock()
+
+    backend_main.app.dependency_overrides[database.get_db] = lambda: mock_db
+    backend_main.app.dependency_overrides[auth.get_current_user] = lambda: user_viewer
+
+    try:
+        from fastapi import HTTPException
+
+        with patch(
+            "pipelines_router.get_pipeline_workspace_and_role",
+            side_effect=HTTPException(403, "Workspace viewer role is read-only"),
+        ):
+            headers = {"Authorization": f"Bearer {token_viewer}"}
+            resp = client.patch(
+                "/api/v1/pipelines/ws_analytics_etl/schedule",
+                json={"schedule_interval": "@weekly"},
+                headers=headers,
+            )
+            assert resp.status_code == 403
+    finally:
+        backend_main.app.dependency_overrides.clear()

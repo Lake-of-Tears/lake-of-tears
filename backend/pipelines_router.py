@@ -30,6 +30,10 @@ class PauseUpdateRequest(BaseModel):
     is_paused: bool
 
 
+class PipelineScheduleRequest(BaseModel):
+    schedule_interval: str
+
+
 class TriggerPipelineRequest(BaseModel):
     conf: dict[str, Any] | None = Field(default_factory=dict)
 
@@ -274,6 +278,37 @@ async def update_pipeline_settings(
         is_visible_on_timeline=req.is_visible_on_timeline,
         user_id=current_user.id,
         db=db,
+    )
+
+
+@router.patch("/{dag_id}/schedule")
+async def update_pipeline_schedule(
+    dag_id: str,
+    req: PipelineScheduleRequest,
+    workspace_slug: str | None = Query(None),
+    x_workspace_slug: str | None = Header(None, alias="X-Workspace-Slug"),
+    x_workspace_id: str | None = Header(None, alias="X-Workspace-Id"),
+    lake_active_workspace: str | None = Cookie(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update execution schedule for a pipeline."""
+    ws, role = _resolve_workspace_context(
+        workspace_slug=workspace_slug,
+        x_workspace_slug=x_workspace_slug,
+        x_workspace_id=x_workspace_id,
+        lake_active_workspace=lake_active_workspace,
+        current_user=current_user,
+        db=db,
+        require_write=True,
+    )
+    is_superadmin = current_user.role == "superadmin"
+    return await pipeline_service.update_pipeline_schedule(
+        workspace_slug=ws.slug,
+        dag_id=dag_id,
+        schedule_interval=req.schedule_interval,
+        is_superadmin=is_superadmin,
+        role=role,
     )
 
 

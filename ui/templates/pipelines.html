@@ -214,10 +214,22 @@
       border-color: #e5e7eb !important;
     }
     html[data-theme="light"] #inspector-drawer-panel input,
-    html[data-theme="light"] #inspector-drawer-panel textarea {
+    html[data-theme="light"] #inspector-drawer-panel textarea,
+    html[data-theme="light"] #inspector-drawer-panel select {
       background-color: #ffffff !important;
       border-color: #d1d5db !important;
       color: #111827 !important;
+    }
+    html[data-theme="light"] #drawer-run-dropdown {
+      background-color: #ffffff !important;
+      border-color: #e5e7eb !important;
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05) !important;
+    }
+    html[data-theme="light"] #drawer-run-dropdown button {
+      color: #374151 !important;
+    }
+    html[data-theme="light"] #drawer-run-dropdown button:hover {
+      background-color: #f3f4f6 !important;
     }
     html[data-theme="light"] #btn-delete-pipeline-drawer {
       color: #e11d48 !important;
@@ -545,6 +557,34 @@
           </div>
         </div>
         <div class="flex items-center gap-2 shrink-0">
+          <!-- Split Run Button -->
+          <div id="drawer-run-split-btn" class="relative inline-flex items-center rounded-lg shadow-sm">
+            <button id="btn-drawer-run-now" onclick="triggerPipelineFromDrawer(false)"
+                    class="px-2.5 py-1.5 text-xs font-medium rounded-l-lg text-emerald-100 bg-emerald-600 hover:bg-emerald-500 border border-emerald-500/40 focus:outline-none transition-all flex items-center gap-1.5 shadow-sm"
+                    title="Trigger execution immediately">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span id="btn-drawer-run-text">Run</span>
+            </button>
+            <button id="btn-drawer-run-menu" onclick="toggleRunDropdown(event)"
+                    class="px-1.5 py-1.5 text-xs font-medium rounded-r-lg text-emerald-100 bg-emerald-700 hover:bg-emerald-600 border border-l-0 border-emerald-500/40 focus:outline-none transition-all flex items-center justify-center shadow-sm"
+                    title="Run options">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            <div id="drawer-run-dropdown" class="hidden absolute right-0 top-full mt-1.5 w-48 rounded-lg bg-[#202020] border border-white/10 shadow-xl py-1 z-30 text-xs">
+              <button type="button" onclick="triggerPipelineFromDrawer(true)" class="w-full text-left px-3 py-2 text-gray-200 hover:bg-white/[0.08] flex items-center gap-2 transition-colors">
+                <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                <span>Run with Parameters...</span>
+              </button>
+            </div>
+          </div>
           {% if my_role != 'viewer' %}
           <button id="btn-delete-pipeline-drawer" onclick="openDeletePipelineModal(currentDrawerDagId)"
                   class="hidden px-2.5 py-1.5 text-xs font-medium rounded-lg text-rose-300 hover:text-white bg-rose-500/10 hover:bg-rose-600 border border-rose-500/30 transition-all flex items-center gap-1.5 shadow-sm"
@@ -574,6 +614,38 @@
           <label class="block text-[10px] font-medium text-gray-400 uppercase tracking-wider mb-1">Description</label>
           <textarea id="drawer-desc-input" rows="2" placeholder="Add a description for this pipeline..."
                     class="input-dark text-xs w-full resize-none"></textarea>
+        </div>
+
+        <!-- Editable Schedule Card -->
+        <div id="drawer-schedule-card" class="p-3 rounded-lg bg-black/20 border border-white/[0.06] space-y-2">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <label class="text-[10px] font-medium text-gray-400 uppercase tracking-wider">Schedule</label>
+              <span id="drawer-schedule-type-badge" class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20">Manual</span>
+            </div>
+            <div id="drawer-schedule-human" class="text-[11px] text-gray-400 font-mono truncate max-w-[280px]">Manual trigger only</div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div>
+              <select id="drawer-schedule-preset" onchange="onDrawerSchedulePresetChange()"
+                      class="input-dark text-xs w-full py-1.5 px-2 rounded-lg bg-[#202020] border border-white/10 text-gray-100 focus:outline-none focus:border-blue-500 transition-colors">
+                <option value="None">None (Manual)</option>
+                <option value="@hourly">Hourly (@hourly)</option>
+                <option value="@daily">Daily at Midnight (@daily)</option>
+                <option value="@weekly">Weekly on Sunday (@weekly)</option>
+                <option value="@monthly">Monthly on 1st (@monthly)</option>
+                <option value="custom">Custom Cron...</option>
+              </select>
+            </div>
+            <div id="drawer-custom-cron-wrap" class="hidden">
+              <input id="drawer-custom-cron-input" type="text"
+                     placeholder="e.g. 0 8 * * * or @hourly"
+                     oninput="onDrawerCustomCronInput()"
+                     class="input-dark text-xs font-mono w-full py-1.5 px-2 rounded-lg bg-[#202020] border border-white/10 text-gray-100 focus:outline-none focus:border-blue-500 transition-colors" />
+            </div>
+          </div>
+          <div id="drawer-schedule-permission-hint" class="hidden text-[10px] text-amber-400/90 italic"></div>
         </div>
 
         <!-- Notebook Job Link (Dynamic) -->
@@ -2095,9 +2167,153 @@
   function closeInspector() {
     document.getElementById('inspector-drawer').classList.add('hidden');
     stopLogPolling();
+    const runDropdown = document.getElementById('drawer-run-dropdown');
+    if (runDropdown) runDropdown.classList.add('hidden');
     const deleteBtn = document.getElementById('btn-delete-pipeline-drawer');
     if (deleteBtn) deleteBtn.classList.add('hidden');
     currentDrawerDagId = null;
+  }
+
+  let originalDrawerSchedule = 'None';
+
+  function canEditSchedule(dagId) {
+    if (!dagId || dagId === 'run_notebook') return false;
+    if (userRole === 'viewer') return false;
+    if (userRole === 'superadmin') return true;
+    const isWs = dagId.startsWith('ws_');
+    if (isWs) return true;
+    return userRole === 'admin';
+  }
+
+  function describeSchedule(sched) {
+    if (!sched || ['None', 'none', 'null', '', 'None (Manual)'].includes(sched)) {
+      return { type: 'Manual', desc: 'Manual trigger only' };
+    }
+    const clean = sched.trim();
+    if (clean === '@hourly' || clean === '0 * * * *') {
+      return { type: 'Preset', desc: 'Every hour at minute 0' };
+    }
+    if (clean === '@daily' || clean === '@midnight' || clean === '0 0 * * *') {
+      return { type: 'Preset', desc: 'Every day at 00:00 UTC' };
+    }
+    if (clean === '@weekly' || clean === '0 0 * * 0') {
+      return { type: 'Preset', desc: 'Every week on Sunday at 00:00 UTC' };
+    }
+    if (clean === '@monthly' || clean === '0 0 1 * *') {
+      return { type: 'Preset', desc: 'Every month on 1st at 00:00 UTC' };
+    }
+    return { type: 'Cron', desc: clean };
+  }
+
+  function onDrawerSchedulePresetChange() {
+    const preset = document.getElementById('drawer-schedule-preset').value;
+    const customWrap = document.getElementById('drawer-custom-cron-wrap');
+    const customInput = document.getElementById('drawer-custom-cron-input');
+    const humanEl = document.getElementById('drawer-schedule-human');
+    const typeBadge = document.getElementById('drawer-schedule-type-badge');
+
+    if (preset === 'custom') {
+      customWrap.classList.remove('hidden');
+      if (customInput && !customInput.value.trim() && originalDrawerSchedule !== 'None' && !['@hourly', '@daily', '@weekly', '@monthly'].includes(originalDrawerSchedule)) {
+        customInput.value = originalDrawerSchedule;
+      }
+      if (customInput) customInput.focus();
+      onDrawerCustomCronInput();
+    } else {
+      customWrap.classList.add('hidden');
+      const info = describeSchedule(preset);
+      if (humanEl) humanEl.textContent = info.desc;
+      if (typeBadge) {
+        typeBadge.textContent = info.type;
+        typeBadge.className = info.type === 'Manual'
+          ? 'px-1.5 py-0.5 rounded text-[10px] font-mono bg-gray-500/10 text-gray-400 border border-gray-500/20'
+          : 'px-1.5 py-0.5 rounded text-[10px] font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20';
+      }
+    }
+  }
+
+  function onDrawerCustomCronInput() {
+    const customInput = document.getElementById('drawer-custom-cron-input');
+    const humanEl = document.getElementById('drawer-schedule-human');
+    const typeBadge = document.getElementById('drawer-schedule-type-badge');
+    const val = customInput ? customInput.value.trim() : '';
+
+    if (typeBadge) {
+      typeBadge.textContent = 'Cron';
+      typeBadge.className = 'px-1.5 py-0.5 rounded text-[10px] font-mono bg-purple-500/10 text-purple-400 border border-purple-500/20';
+    }
+    if (humanEl) {
+      humanEl.textContent = val ? val : 'Enter 5-field cron or Airflow macro';
+    }
+  }
+
+  function getDrawerSelectedSchedule() {
+    const preset = document.getElementById('drawer-schedule-preset');
+    if (!preset) return 'None';
+    if (preset.value === 'custom') {
+      const customInput = document.getElementById('drawer-custom-cron-input');
+      return customInput && customInput.value.trim() ? customInput.value.trim() : 'None';
+    }
+    return preset.value;
+  }
+
+  function toggleRunDropdown(event) {
+    if (event) event.stopPropagation();
+    const dropdown = document.getElementById('drawer-run-dropdown');
+    if (dropdown) dropdown.classList.toggle('hidden');
+  }
+
+  document.addEventListener('click', (e) => {
+    const splitBtn = document.getElementById('drawer-run-split-btn');
+    const dropdown = document.getElementById('drawer-run-dropdown');
+    if (dropdown && !dropdown.classList.contains('hidden')) {
+      if (!splitBtn || !splitBtn.contains(e.target)) {
+        dropdown.classList.add('hidden');
+      }
+    }
+  });
+
+  async function triggerPipelineFromDrawer(withParams = false) {
+    const dropdown = document.getElementById('drawer-run-dropdown');
+    if (dropdown) dropdown.classList.add('hidden');
+
+    if (userRole === 'viewer' || !currentDrawerDagId) return;
+
+    if (withParams) {
+      openTriggerModal(currentDrawerDagId);
+      return;
+    }
+
+    const runBtn = document.getElementById('btn-drawer-run-now');
+    const runText = document.getElementById('btn-drawer-run-text');
+    if (runBtn) runBtn.disabled = true;
+    if (runText) runText.textContent = 'Queueing...';
+
+    try {
+      const res = await fetch(`/api/pipelines/${currentDrawerDagId}/trigger`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conf: {} }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || 'Failed to trigger run');
+      }
+      showToast(`Run queued! ID: ${data.dag_run_id}`, 'success');
+
+      // Switch to Runs tab if not on it
+      setDrawerTab('runs');
+
+      // Immediately refresh runs list in drawer and refresh pipeline table/timeline
+      await loadDrawerRuns(currentDrawerDagId, data.dag_run_id);
+      fetchPipelines();
+      fetchTimeline();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      if (runBtn) runBtn.disabled = false;
+      if (runText) runText.textContent = 'Run';
+    }
   }
 
   function setDrawerTab(tab) {
@@ -2133,6 +2349,111 @@
 
     const descInput = document.getElementById('drawer-desc-input');
     if (descInput) descInput.value = p ? (p.description || '') : '';
+
+    // Split Run button state
+    const runNowBtn = document.getElementById('btn-drawer-run-now');
+    const runMenuBtn = document.getElementById('btn-drawer-run-menu');
+    if (runNowBtn && runMenuBtn) {
+      if (userRole === 'viewer') {
+        runNowBtn.disabled = true;
+        runNowBtn.className = 'px-2.5 py-1.5 text-xs font-medium rounded-l-lg text-emerald-100/50 bg-emerald-800/40 border border-emerald-500/20 cursor-not-allowed flex items-center gap-1.5 shadow-sm';
+        runNowBtn.title = 'Viewers cannot trigger pipelines';
+        runMenuBtn.disabled = true;
+        runMenuBtn.className = 'px-1.5 py-1.5 text-xs font-medium rounded-r-lg text-emerald-100/50 bg-emerald-800/40 border border-l-0 border-emerald-500/20 cursor-not-allowed flex items-center justify-center shadow-sm';
+        runMenuBtn.title = 'Viewers cannot trigger pipelines';
+      } else {
+        runNowBtn.disabled = false;
+        runNowBtn.className = 'px-2.5 py-1.5 text-xs font-medium rounded-l-lg text-emerald-100 bg-emerald-600 hover:bg-emerald-500 border border-emerald-500/40 focus:outline-none transition-all flex items-center gap-1.5 shadow-sm cursor-pointer';
+        runNowBtn.title = 'Trigger execution immediately';
+        runMenuBtn.disabled = false;
+        runMenuBtn.className = 'px-1.5 py-1.5 text-xs font-medium rounded-r-lg text-emerald-100 bg-emerald-700 hover:bg-emerald-600 border border-l-0 border-emerald-500/40 focus:outline-none transition-all flex items-center justify-center shadow-sm cursor-pointer';
+        runMenuBtn.title = 'Run options';
+      }
+    }
+
+    // Editable schedule control setup
+    const editable = canEditSchedule(dagId);
+    const currentSchedule = p ? (p.schedule_interval || 'None') : 'None';
+    originalDrawerSchedule = currentSchedule;
+
+    const cleanSched = (currentSchedule || '').trim();
+    const presetSelect = document.getElementById('drawer-schedule-preset');
+    const customWrap = document.getElementById('drawer-custom-cron-wrap');
+    const customInput = document.getElementById('drawer-custom-cron-input');
+    const hintEl = document.getElementById('drawer-schedule-permission-hint');
+    const humanEl = document.getElementById('drawer-schedule-human');
+    const typeBadge = document.getElementById('drawer-schedule-type-badge');
+
+    if (presetSelect) {
+      if (['None', 'none', 'null', '', 'None (Manual)'].includes(cleanSched)) {
+        presetSelect.value = 'None';
+        if (customWrap) customWrap.classList.add('hidden');
+        if (customInput) customInput.value = '';
+      } else if (['@hourly', '0 * * * *'].includes(cleanSched)) {
+        presetSelect.value = '@hourly';
+        if (customWrap) customWrap.classList.add('hidden');
+        if (customInput) customInput.value = '';
+      } else if (['@daily', '@midnight', '0 0 * * *'].includes(cleanSched)) {
+        presetSelect.value = '@daily';
+        if (customWrap) customWrap.classList.add('hidden');
+        if (customInput) customInput.value = '';
+      } else if (['@weekly', '0 0 * * 0'].includes(cleanSched)) {
+        presetSelect.value = '@weekly';
+        if (customWrap) customWrap.classList.add('hidden');
+        if (customInput) customInput.value = '';
+      } else if (['@monthly', '0 0 1 * *'].includes(cleanSched)) {
+        presetSelect.value = '@monthly';
+        if (customWrap) customWrap.classList.add('hidden');
+        if (customInput) customInput.value = '';
+      } else {
+        presetSelect.value = 'custom';
+        if (customWrap) customWrap.classList.remove('hidden');
+        if (customInput) customInput.value = cleanSched;
+      }
+
+      const info = describeSchedule(cleanSched);
+      if (humanEl) humanEl.textContent = info.desc;
+      if (typeBadge) {
+        typeBadge.textContent = info.type;
+        if (info.type === 'Manual') {
+          typeBadge.className = 'px-1.5 py-0.5 rounded text-[10px] font-mono bg-gray-500/10 text-gray-400 border border-gray-500/20';
+        } else if (info.type === 'Preset') {
+          typeBadge.className = 'px-1.5 py-0.5 rounded text-[10px] font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20';
+        } else {
+          typeBadge.className = 'px-1.5 py-0.5 rounded text-[10px] font-mono bg-purple-500/10 text-purple-400 border border-purple-500/20';
+        }
+      }
+
+      if (!editable) {
+        presetSelect.disabled = true;
+        presetSelect.classList.add('opacity-60', 'cursor-not-allowed');
+        if (customInput) {
+          customInput.disabled = true;
+          customInput.classList.add('opacity-60', 'cursor-not-allowed');
+        }
+        if (hintEl) {
+          hintEl.classList.remove('hidden');
+          if (dagId === 'run_notebook') {
+            hintEl.textContent = 'The run_notebook pipeline is strictly on-demand and cannot be scheduled.';
+          } else if (userRole === 'viewer') {
+            hintEl.textContent = 'Viewers cannot edit pipeline schedules.';
+          } else {
+            hintEl.textContent = 'Schedule editing for built-in pipelines requires Workspace Admin or Superadmin role.';
+          }
+        }
+      } else {
+        presetSelect.disabled = false;
+        presetSelect.classList.remove('opacity-60', 'cursor-not-allowed');
+        if (customInput) {
+          customInput.disabled = false;
+          customInput.classList.remove('opacity-60', 'cursor-not-allowed');
+        }
+        if (hintEl) {
+          hintEl.classList.add('hidden');
+          hintEl.textContent = '';
+        }
+      }
+    }
 
     const isPaused = p ? p.is_paused : false;
     const statusBadge = document.getElementById('drawer-status-badge');
@@ -2256,6 +2577,9 @@
     const display_label = nameInput ? nameInput.value.trim() : null;
     const description = descInput ? descInput.value.trim() : null;
 
+    const selectedSchedule = getDrawerSelectedSchedule();
+    const scheduleChanged = canEditSchedule(dagId) && selectedSchedule !== originalDrawerSchedule;
+
     const btn = document.getElementById('btn-save-drawer-meta');
     if (btn) {
       btn.disabled = true;
@@ -2263,6 +2587,19 @@
     }
 
     try {
+      if (scheduleChanged) {
+        const schedRes = await fetch(`/api/pipelines/${dagId}/schedule`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ schedule_interval: selectedSchedule }),
+        });
+        const schedData = await schedRes.json();
+        if (!schedRes.ok) {
+          throw new Error(schedData.detail || 'Failed to update pipeline schedule');
+        }
+        originalDrawerSchedule = schedData.schedule_interval;
+      }
+
       const res = await fetch(`/api/pipelines/${dagId}/settings`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -2272,7 +2609,7 @@
       if (!res.ok) {
         throw new Error(data.detail || 'Failed to update pipeline settings');
       }
-      showToast('Pipeline name and description updated', 'success');
+      showToast(scheduleChanged ? 'Pipeline settings and schedule updated' : 'Pipeline name and description updated', 'success');
 
       // Update locally in allPipelines and timelineData
       const p = allPipelines.find(item => item.dag_id === dagId);
@@ -2282,14 +2619,23 @@
           p.pipeline_name = display_label;
         }
         if (description !== null) p.description = description;
+        if (scheduleChanged) {
+          p.schedule_interval = originalDrawerSchedule;
+        }
       }
       if (timelineData && timelineData.pipelines) {
         const tp = timelineData.pipelines.find(item => item.dag_id === dagId);
-        if (tp && display_label) tp.display_label = display_label;
+        if (tp) {
+          if (display_label) tp.display_label = display_label;
+          if (scheduleChanged) tp.schedule_interval = originalDrawerSchedule;
+        }
       }
+
+      if (p) renderDrawerDetails(dagId, p);
 
       applyFilters(false);
       renderTimelineSwimlanes();
+      fetchTimeline();
     } catch (err) {
       showToast(err.message, 'error');
     } finally {

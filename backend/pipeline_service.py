@@ -1027,6 +1027,135 @@ async def delete_scheduled_notebook(
     return {"dag_id": clean_id, "status": "deleted"}
 
 
+def validate_schedule_expression(schedule_interval: str | None) -> str:
+    """Validate and normalize a schedule interval expression.
+
+    Accepts:
+    - None / 'none' / 'null' / '' -> returns 'None'
+    - Airflow presets (@hourly, @daily, @midnight, @weekly, @monthly, @yearly, @annually)
+    - Valid 5-part cron expressions (e.g. '0 8 * * *', '*/15 * * * *')
+
+    Raises HTTPException(400) if invalid.
+    """
+    if not schedule_interval or schedule_interval.strip().lower() in ("none", "null", "@once", ""):
+        return "None"
+
+    clean = schedule_interval.strip()
+    if clean in PRESET_MAP:
+        return clean
+
+    try:
+        if not croniter.is_valid(clean):
+            raise ValueError("Invalid cron expression")
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid schedule expression '{schedule_interval}'. Expected a standard Airflow preset (@hourly, @daily, @weekly, @monthly) or valid 5-part cron expression.",
+        ) from exc
+
+    return clean
+
+
+def _replace_schedule_in_code(content: str, new_schedule: str) -> str:
+    """Safely replace schedule or schedule_interval in Python DAG code."""
+    val_repr = "None" if new_schedule == "None" else f'"{new_schedule}"'
+    pattern = r'(\b(?:schedule|schedule_interval)\s*=\s*)(?:None|"[^"]*"|\'[^\']*\')'
+
+    if not re.search(pattern, content):
+        dag_id_pattern = r'(\bdag_id\s*=\s*["\'][^"\']+["\']\s*,)'
+        if re.search(dag_id_pattern, content):
+            return re.sub(dag_id_pattern, rf'\1\n    schedule={val_repr},', content, count=1)
+        raise ValueError("Could not locate schedule parameter or dag_id in DAG file")
+
+    return re.sub(pattern, rf'\g<1>{val_repr}', content, count=1)
+
+
+async def update_pipeline_schedule(
+    workspace_slug: str,
+    dag_id: str,
+    schedule_interval: str,
+    is_superadmin: bool = False,
+    role: str = "member",
+) -> dict[str, Any]:
+    """Update execution schedule for dynamic workspace or built-in DAGs."""
+    clean_id = sanitize_dag_id(dag_id)
+    if clean_id == "run_notebook":
+        raise HTTPException(
+            400, "Schedule for run_notebook cannot be modified (on-demand headless runner)"
+        )
+
+    is_workspace_dag = clean_id.startswith(f"ws_{workspace_slug}_") or clean_id.startswith("ws_")
+
+    if not is_workspace_dag and not is_superadmin and role != "admin":
+        raise HTTPException(
+            403, "Only workspace admins or superadmins can modify built-in pipeline schedules"
+        )
+
+    clean_sched = validate_schedule_expression(schedule_interval)
+
+    dags_dir = get_airflow_dags_dir()
+    dag_file: Path | None = None
+
+    if is_workspace_dag:
+        ws_file = dags_dir / "workspaces" / workspace_slug / f"{clean_id}.py"
+        if ws_file.is_file():
+            dag_file = ws_file
+
+    if not dag_file:
+        for candidate in (
+            dags_dir / f"{clean_id}.py",
+            dags_dir / f"{clean_id}_dag.py",
+        ):
+            if candidate.is_file():
+                dag_file = candidate
+                break
+
+    if not dag_file and dags_dir.is_dir():
+        for f in sorted(dags_dir.glob("*.py")):
+            if f.name.startswith("__"):
+                continue
+            try:
+                txt = f.read_text(encoding="utf-8")
+                if re.search(rf'\bdag_id\s*=\s*["\']{re.escape(clean_id)}["\']', txt):
+                    dag_file = f
+                    break
+            except Exception:
+                continue
+
+    if not dag_file or not dag_file.is_file():
+        raise HTTPException(404, f"Pipeline DAG definition file for '{dag_id}' not found.")
+
+    try:
+        current_code = dag_file.read_text(encoding="utf-8")
+        updated_code = _replace_schedule_in_code(current_code, clean_sched)
+    except Exception as exc:
+        logger.error("Failed to replace schedule in DAG file %s: %s", dag_file, exc)
+        raise HTTPException(500, f"Failed to modify DAG schedule in file: {exc}") from exc
+
+    try:
+        ast.parse(updated_code)
+    except SyntaxError as exc:
+        logger.error("AST validation failed for modified DAG %s: %s", dag_id, exc)
+        raise HTTPException(
+            500, f"Failed to update DAG schedule: AST validation error: {exc}"
+        ) from exc
+
+    try:
+        dag_file.write_text(updated_code, encoding="utf-8")
+        dag_file.touch()
+        logger.info("Updated schedule for DAG %s to '%s' in %s", dag_id, clean_sched, dag_file)
+    except Exception as exc:
+        logger.error("Failed to write updated DAG file %s: %s", dag_file, exc)
+        raise HTTPException(500, f"Failed to save updated DAG file: {exc}") from exc
+
+    return {
+        "dag_id": dag_id,
+        "schedule_interval": clean_sched,
+        "file_path": str(dag_file),
+        "status": "updated",
+    }
+
+
 def compute_projected_runs_for_day(
     schedule_interval: str | None,
     day_start: datetime,
