@@ -218,7 +218,15 @@ class AuthMiddleware(BaseHTTPMiddleware):
             active = workspaces[0]
         request.state.workspace = active
 
-        return await call_next(request)
+        response = await call_next(request)
+        if active and (not active_id or active_id != str(active["id"])):
+            response.set_cookie(
+                _WORKSPACE_COOKIE,
+                str(active["id"]),
+                max_age=30 * 24 * 3600,
+                samesite="lax",
+            )
+        return response
 
 
 app.add_middleware(AuthMiddleware)

@@ -235,6 +235,22 @@ def _set_auth_cookie(
     )
     max_age = int(expires_delta.total_seconds())
     response.set_cookie(COOKIE_NAME, token, max_age=max_age, httponly=True, samesite="lax")
+    ws = (
+        db.query(Workspace)
+        .join(WorkspaceMember, WorkspaceMember.workspace_id == Workspace.id)
+        .filter(WorkspaceMember.user_id == user.id, Workspace.status == "active")
+        .order_by(Workspace.created_at)
+        .first()
+    )
+    if not ws and user.role == "superadmin":
+        ws = (
+            db.query(Workspace)
+            .filter(Workspace.status == "active")
+            .order_by(Workspace.created_at)
+            .first()
+        )
+    if ws:
+        response.set_cookie("lake_workspace_id", str(ws.id), max_age=max_age, samesite="lax")
     return token
 
 

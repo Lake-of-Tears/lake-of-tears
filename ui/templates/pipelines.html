@@ -879,6 +879,8 @@
 
 
 <script>
+  const currentWorkspaceSlug = "{{ workspace.slug if workspace else '' }}";
+  const currentWorkspaceId = "{{ workspace.id if workspace else '' }}";
   let allPipelines = [];
   let currentFilter = 'all';
   let currentDrawerDagId = null;
@@ -1350,7 +1352,8 @@
     document.getElementById('timeline-tz-badge').textContent = userTimezone;
 
     try {
-      const res = await fetch(`/api/pipelines/timeline?date=${encodeURIComponent(currentTimelineDate)}&tz=${encodeURIComponent(userTimezone)}`);
+      const wsParam = currentWorkspaceSlug ? `&workspace_slug=${encodeURIComponent(currentWorkspaceSlug)}` : '';
+      const res = await fetch(`/api/pipelines/timeline?date=${encodeURIComponent(currentTimelineDate)}&tz=${encodeURIComponent(userTimezone)}${wsParam}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       timelineData = await res.json();
 
@@ -1769,7 +1772,8 @@
     icon.classList.add('animate-spin');
 
     try {
-      const res = await fetch('/api/pipelines');
+      const wsQuery = currentWorkspaceSlug ? `?workspace_slug=${encodeURIComponent(currentWorkspaceSlug)}` : '';
+      const res = await fetch(`/api/pipelines${wsQuery}`);
       if (!res.ok) {
         throw new Error(`Failed to load pipelines: ${res.statusText}`);
       }

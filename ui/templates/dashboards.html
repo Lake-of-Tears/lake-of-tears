@@ -221,6 +221,7 @@
 </div>
 
 <script>
+  const currentWorkspaceSlug = '{{ workspace.slug if workspace else "" }}';
   let allDashboards = [];
   let currentFilter = 'all';
   let pendingDeleteId = null;
@@ -249,8 +250,9 @@
     if (refreshIcon) refreshIcon.classList.add('animate-spin');
 
     try {
+      const wsQuery = currentWorkspaceSlug ? `?workspace_slug=${encodeURIComponent(currentWorkspaceSlug)}` : '';
       // 1. Fetch stats
-      const statsResp = await fetch('/api/dashboards/stats');
+      const statsResp = await fetch(`/api/dashboards/stats${wsQuery}`);
       if (statsResp.ok) {
         const stats = await statsResp.json();
         document.getElementById('stat-total').textContent = stats.total_dashboards;
@@ -263,7 +265,7 @@
       }
 
       // 2. Fetch list
-      const resp = await fetch('/api/dashboards');
+      const resp = await fetch(`/api/dashboards${wsQuery}`);
       if (resp.ok) {
         allDashboards = await resp.json();
         renderDashboards();
