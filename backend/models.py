@@ -86,8 +86,8 @@ class WorkspaceMember(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    # Workspace-scoped roles: 'admin' | 'user'
-    role: Mapped[str] = mapped_column(String(20), nullable=False, default="user")
+    # Workspace-scoped roles: 'admin' | 'write' | 'read'
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="read")
     joined_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )

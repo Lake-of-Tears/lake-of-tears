@@ -393,10 +393,12 @@
           <div class="text-sm text-gray-200 truncate">{{ m.display_name or m.email }}</div>
           <div class="text-[11px] text-gray-500 truncate">{{ m.email }}</div>
         </div>
-        {% if request.state.user and (request.state.user.role == 'superadmin' or workspace.my_role == 'admin') and m.user_id != (request.state.user.sub | default('')) %}
+        {% set member_is_superadmin = (m.is_superadmin or m.global_role == 'superadmin') %}
+        {% if request.state.user and (request.state.user.role == 'superadmin' or workspace.my_role == 'admin') and m.user_id != (request.state.user.sub | default('')) and not member_is_superadmin %}
         <form action="/settings/workspace/members/{{ m.user_id }}/role" method="post" class="shrink-0">
           <select name="role" onchange="this.form.submit()" class="bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded px-2 py-1 focus:outline-none focus:border-blue-500">
-            <option value="user" {% if m.role == 'user' %}selected{% endif %}>User</option>
+            <option value="read" {% if m.role == 'read' or m.role == 'user' %}selected{% endif %}>Read</option>
+            <option value="write" {% if m.role == 'write' %}selected{% endif %}>Write</option>
             <option value="admin" {% if m.role == 'admin' %}selected{% endif %}>Admin</option>
           </select>
         </form>
@@ -406,7 +408,9 @@
           </button>
         </form>
         {% else %}
-        <span class="text-[11px] text-gray-500 capitalize shrink-0">{{ m.role }}</span>
+        <span class="text-[11px] {% if member_is_superadmin %}text-amber-400 font-medium{% else %}text-gray-500 capitalize{% endif %} shrink-0">
+          {% if member_is_superadmin %}Admin (Superadmin){% else %}{{ m.role | capitalize }}{% endif %}
+        </span>
         {% endif %}
       </div>
       {% endfor %}
@@ -421,7 +425,8 @@
       <input type="email" name="email" required placeholder="user@example.com"
         class="flex-1 input-dark text-sm" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
       <select name="role" class="bg-gray-800 border border-gray-700 text-gray-300 text-sm rounded-md px-2 py-2 focus:outline-none focus:border-blue-500">
-        <option value="user">User</option>
+        <option value="read">Read</option>
+        <option value="write">Write</option>
         <option value="admin">Admin</option>
       </select>
       <button type="submit" class="btn-primary shrink-0">Add</button>

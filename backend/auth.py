@@ -326,7 +326,7 @@ def get_workspace_context(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     require_write: bool = False,
-    write_error_msg: str = "Workspace viewer role is read-only. Cannot execute write operations.",
+    write_error_msg: str = "Workspace read role is read-only. Cannot execute write operations.",
 ) -> tuple[Workspace, str]:
     """Resolve active workspace and verify caller permissions.
 
@@ -393,10 +393,14 @@ def get_workspace_context(
         raise HTTPException(403, "Not a member of this workspace")
 
     role = (
-        member.role if member else ("superadmin" if current_user.role == "superadmin" else "viewer")
+        member.role if member else ("superadmin" if current_user.role == "superadmin" else "read")
     )
 
-    if require_write and current_user.role != "superadmin" and role == "viewer":
+    if (
+        require_write
+        and current_user.role != "superadmin"
+        and (role in ("read", "viewer") or role not in ("write", "admin", "superadmin"))
+    ):
         raise HTTPException(403, write_error_msg)
 
     return ws, role

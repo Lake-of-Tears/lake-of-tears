@@ -323,7 +323,7 @@ def register(req: RegisterRequest, response: Response, db: Session = Depends(get
         # Add to Default workspace automatically
         default_ws = db.query(Workspace).filter(Workspace.slug == "default").first()
         if default_ws:
-            db.add(WorkspaceMember(workspace_id=default_ws.id, user_id=user.id, role="user"))
+            db.add(WorkspaceMember(workspace_id=default_ws.id, user_id=user.id, role="read"))
 
     db.commit()
     db.refresh(user)
@@ -599,7 +599,9 @@ def list_members(
             user_id=m.user_id,
             email=m.user.email,
             display_name=m.user.display_name,
-            role=m.role,
+            role="admin" if m.user.role == "superadmin" else m.role,
+            global_role=m.user.role,
+            is_superadmin=(m.user.role == "superadmin"),
             joined_at=m.joined_at,
         )
         for m in ws.members
@@ -629,13 +631,14 @@ def add_member(
     if not target:
         raise HTTPException(404, "User not found — they must register first")
 
+    role_to_set = "admin" if target.role == "superadmin" else req.role
     existing = (
         db.query(WorkspaceMember).filter_by(workspace_id=workspace_id, user_id=target.id).first()
     )
     if existing:
-        existing.role = req.role
+        existing.role = role_to_set
     else:
-        db.add(WorkspaceMember(workspace_id=ws.id, user_id=target.id, role=req.role))
+        db.add(WorkspaceMember(workspace_id=ws.id, user_id=target.id, role=role_to_set))
     db.commit()
     return {"ok": True}
 
@@ -663,6 +666,8 @@ def update_member(
         raise HTTPException(404, "Member not found")
     if str(member.user_id) == str(current_user.id):
         raise HTTPException(400, "Cannot change your own workspace role")
+    if member.user.role == "superadmin":
+        raise HTTPException(400, "Cannot change the workspace role of a superadmin")
     member.role = req.role
     db.commit()
     return {"ok": True}
@@ -690,6 +695,8 @@ def remove_member(
         raise HTTPException(404, "Member not found")
     if str(member.user_id) == str(current_user.id):
         raise HTTPException(400, "Cannot remove yourself from a workspace")
+    if member.user.role == "superadmin":
+        raise HTTPException(400, "Cannot remove a superadmin from a workspace")
     db.delete(member)
     db.commit()
     return {"ok": True}

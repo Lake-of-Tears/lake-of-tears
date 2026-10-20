@@ -203,7 +203,7 @@ def handle_oauth_callback(provider: str, request: Request, response: Response, d
         else:
             default_ws = db.query(Workspace).filter(Workspace.slug == "default").first()
             if default_ws:
-                db.add(WorkspaceMember(workspace_id=default_ws.id, user_id=user.id, role="user"))
+                db.add(WorkspaceMember(workspace_id=default_ws.id, user_id=user.id, role="read"))
 
     # Link OAuth account
     if (

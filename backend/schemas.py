@@ -104,6 +104,8 @@ class WorkspaceMemberResponse(BaseModel):
     email: str
     display_name: str | None
     role: str
+    global_role: str = "user"
+    is_superadmin: bool = False
     joined_at: datetime
 
     model_config = {"from_attributes": True}
@@ -153,13 +155,13 @@ class DeleteWorkspaceRequest(BaseModel):
 
 class AddMemberRequest(BaseModel):
     email: EmailStr
-    role: str = "user"
+    role: str = "read"
 
     @field_validator("role")
     @classmethod
     def valid_role(cls, v: str) -> str:
-        if v not in ("admin", "user"):
-            raise ValueError("role must be 'admin' or 'user'")
+        if v not in ("admin", "write", "read"):
+            raise ValueError("role must be 'admin', 'write', or 'read'")
         return v
 
 
@@ -169,8 +171,8 @@ class UpdateMemberRequest(BaseModel):
     @field_validator("role")
     @classmethod
     def valid_role(cls, v: str) -> str:
-        if v not in ("admin", "user"):
-            raise ValueError("role must be 'admin' or 'user'")
+        if v not in ("admin", "write", "read"):
+            raise ValueError("role must be 'admin', 'write', or 'read'")
         return v
 
 

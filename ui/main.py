@@ -813,8 +813,10 @@ async def storage(request: Request):
     user = getattr(request.state, "user", None) or {}
     ws = getattr(request.state, "workspace", None) or {}
     is_superadmin = user.get("role") == "superadmin"
-    user_role = user.get("role") if is_superadmin else (ws.get("role") or "viewer")
-    can_delete = is_superadmin or user_role in ("admin", "editor")
+    user_role = (
+        user.get("role") if is_superadmin else (ws.get("my_role") or ws.get("role") or "read")
+    )
+    can_delete = is_superadmin or user_role in ("admin", "write", "editor")
     return templates.TemplateResponse(
         request=request,
         name="storage.html",
@@ -1761,10 +1763,11 @@ def _get_notebook_auth_and_workspace(
     ws_role = active.get("my_role") or user_role
 
     if require_write:
-        if user_role != "superadmin" and ws_role == "viewer":
+        if user_role != "superadmin" and ws_role in ("read", "viewer"):
+            role_label = "viewer" if ws_role == "viewer" else "read"
             return JSONResponse(
                 {
-                    "detail": "Workspace viewer role is read-only. Cannot modify or execute notebooks."
+                    "detail": f"Workspace {role_label} role is read-only. Cannot modify or execute notebooks."
                 },
                 status_code=403,
             )
@@ -2607,13 +2610,14 @@ async def websocket_kernel_proxy(websocket: WebSocket, kernel_id: str):
 
         user_role = user.get("role")
         ws_role = (active.get("my_role") if active else None) or user_role
-        if user_role != "superadmin" and ws_role == "viewer":
+        if user_role != "superadmin" and ws_role in ("read", "viewer"):
+            role_label = "Viewer" if ws_role == "viewer" else "Read"
             await websocket.send_json(
                 {
                     "msg_type": "error",
                     "content": {
                         "ename": "PermissionError",
-                        "evalue": "Viewer role cannot execute cells",
+                        "evalue": f"{role_label} role cannot execute cells",
                     },
                 }
             )
