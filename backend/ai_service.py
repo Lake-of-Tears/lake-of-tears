@@ -17,6 +17,7 @@ from ai_providers import AIProvider, ProviderNotConfigured, get_active_provider
 from ai_providers.compat import ProviderClient
 from ai_providers.gemini import GeminiProvider
 from auth import DEFAULT_GEMINI_MODEL
+from sql_guardrails import validate_sql_s3_paths
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -951,6 +952,8 @@ def execute_sql_query(
     read_only: bool = False,
     max_ai_rows: int = AI_MAX_ROWS_PER_QUERY,
     api_key: str | None = None,
+    workspace_slug: str | None = None,
+    is_superadmin: bool = False,
 ) -> dict[str, Any]:
     """Execute a DuckDB SQL query with registered workspace Catalog views and SQL AI UDFs."""
     if read_only:
@@ -965,6 +968,27 @@ def execute_sql_query(
                 "ai_calls_made": 0,
                 "registered_views": [],
                 "error": reason,
+            }
+
+    if not is_superadmin:
+        allowed, reason = validate_sql_s3_paths(
+            sql=sql,
+            workspace_slug=workspace_slug or "default",
+            catalogs=catalogs,
+            is_superadmin=is_superadmin,
+            bucket=MINIO_BUCKET,
+        )
+        if not allowed:
+            return {
+                "ok": False,
+                "columns": [],
+                "rows": [],
+                "row_count": 0,
+                "execution_ms": 0.0,
+                "ai_calls_made": 0,
+                "registered_views": [],
+                "error": reason,
+                "error_code": 403,
             }
 
     ai_state = {"rows_processed": 0, "ai_calls": 0}

@@ -41,12 +41,13 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 
 try:
-    from ui import ai_gateway_client, duckdb_ai, duckdb_pool, notebook_proxy
+    from ui import ai_gateway_client, duckdb_ai, duckdb_pool, notebook_proxy, sql_guardrails
 except ImportError:
     import ai_gateway_client
     import duckdb_ai
     import duckdb_pool
     import notebook_proxy
+    import sql_guardrails
 
 logger = logging.getLogger("lake.ui")
 
@@ -459,6 +460,8 @@ def _run_query(
     read_only: bool = False,
     max_ai_rows: int = 50,
     cancel: Any = None,
+    workspace_slug: str | None = None,
+    is_superadmin: bool = False,
 ) -> dict[str, Any]:
     if read_only:
         allowed, reason = duckdb_ai.is_read_only_sql(sql)
@@ -470,6 +473,25 @@ def _run_query(
                 bucket=MINIO_BUCKET,
             )
             return {"ok": False, "error": reason, "error_info": classified}
+
+    if not is_superadmin:
+        allowed, reason = sql_guardrails.validate_sql_s3_paths(
+            sql=sql,
+            workspace_slug=workspace_slug or "default",
+            catalogs=catalogs,
+            is_superadmin=is_superadmin,
+            bucket=MINIO_BUCKET,
+        )
+        if not allowed:
+            return {
+                "ok": False,
+                "error": reason,
+                "error_code": 403,
+                "columns": [],
+                "rows": [],
+                "row_count": 0,
+                "execution_ms": 0.0,
+            }
 
     ai_state = {"rows_processed": 0, "ai_calls": 0}
     start_ts = time.perf_counter()
@@ -718,8 +740,22 @@ async def api_catalog_preview(
         return JSONResponse({"ok": False, "error": "Invalid view identifier"}, status_code=400)
 
     catalogs = _resolve_ui_catalogs(request)
+    ws = getattr(request.state, "workspace", None)
+    ws_slug = (ws.get("slug") if isinstance(ws, dict) else getattr(ws, "slug", None)) or "default"
+    user = getattr(request.state, "user", None)
+    is_superadmin = (
+        user.get("role") == "superadmin"
+        if isinstance(user, dict)
+        else getattr(user, "role", None) == "superadmin"
+    )
     sql = f"SELECT * FROM {clean_view} LIMIT {limit}"
-    result = _run_query(sql, catalogs=catalogs, read_only=True)
+    result = _run_query(
+        sql,
+        catalogs=catalogs,
+        read_only=True,
+        workspace_slug=ws_slug,
+        is_superadmin=is_superadmin,
+    )
     if result.get("ok"):
         safe_rows = [[_json_safe(c) for c in r] for r in result.get("rows", [])]
         return JSONResponse(
@@ -920,7 +956,20 @@ async def sql_get(request: Request):
 @app.post("/sql", response_class=HTMLResponse)
 async def sql_post(request: Request, sql: str = Form(...)):
     catalogs = _resolve_ui_catalogs(request)
-    result = _run_query(sql, catalogs=catalogs)
+    ws = getattr(request.state, "workspace", None)
+    ws_slug = (ws.get("slug") if isinstance(ws, dict) else getattr(ws, "slug", None)) or "default"
+    user = getattr(request.state, "user", None)
+    is_superadmin = (
+        user.get("role") == "superadmin"
+        if isinstance(user, dict)
+        else getattr(user, "role", None) == "superadmin"
+    )
+    result = _run_query(
+        sql,
+        catalogs=catalogs,
+        workspace_slug=ws_slug,
+        is_superadmin=is_superadmin,
+    )
     return templates.TemplateResponse(
         request=request,
         name="sql.html",
@@ -3695,6 +3744,8 @@ def _ui_genie_chat(
     catalogs: list[dict[str, Any]] | None = None,
     model: str | None = None,
     cancel: Any = None,
+    workspace_slug: str | None = None,
+    is_superadmin: bool = False,
 ) -> dict[str, Any]:
     """Execute Genie conversational data analyst loop in Lake UI."""
 
@@ -3779,7 +3830,14 @@ def _ui_genie_chat(
         return {"ok": False, "mode": mode, "error": f"Failed to synthesize SQL: {exc}"}
 
     _check_cancelled()
-    exec_res = _run_query(generated_sql, catalogs=catalogs, read_only=True, cancel=cancel)
+    exec_res = _run_query(
+        generated_sql,
+        catalogs=catalogs,
+        read_only=True,
+        cancel=cancel,
+        workspace_slug=workspace_slug,
+        is_superadmin=is_superadmin,
+    )
     self_corrected = False
     initial_error: str | None = None
 
@@ -3798,7 +3856,14 @@ def _ui_genie_chat(
         if fix_res.get("ok") and fix_res.get("fixed_sql"):
             candidate_sql = fix_res["fixed_sql"]
             _check_cancelled()
-            retry_res = _run_query(candidate_sql, catalogs=catalogs, read_only=True, cancel=cancel)
+            retry_res = _run_query(
+                candidate_sql,
+                catalogs=catalogs,
+                read_only=True,
+                cancel=cancel,
+                workspace_slug=workspace_slug,
+                is_superadmin=is_superadmin,
+            )
             if retry_res["ok"]:
                 generated_sql = candidate_sql
                 exec_res = retry_res
@@ -3920,9 +3985,26 @@ async def ui_ai_sql_execute(request: Request):
     read_only = bool(body.get("read_only", False))
     max_ai_rows = int(body.get("max_ai_rows", 50))
     catalogs = _resolve_ui_catalogs(request)
-    res = _run_query(sql, catalogs=catalogs, read_only=read_only, max_ai_rows=max_ai_rows)
+    ws = getattr(request.state, "workspace", None)
+    ws_slug = (ws.get("slug") if isinstance(ws, dict) else getattr(ws, "slug", None)) or "default"
+    user = getattr(request.state, "user", None)
+    is_superadmin = (
+        user.get("role") == "superadmin"
+        if isinstance(user, dict)
+        else getattr(user, "role", None) == "superadmin"
+    )
+    res = _run_query(
+        sql,
+        catalogs=catalogs,
+        read_only=read_only,
+        max_ai_rows=max_ai_rows,
+        workspace_slug=ws_slug,
+        is_superadmin=is_superadmin,
+    )
     if res.get("ok"):
         res["rows"] = [[duckdb_ai.serialize_cell(c) for c in r] for r in res.get("rows", [])]
+    if not res.get("ok") and res.get("error_code") == 403:
+        return JSONResponse(res, status_code=403)
     return JSONResponse(res)
 
 
@@ -4009,6 +4091,14 @@ async def ui_ai_chat(request: Request):
     model = str(body["model"]) if body.get("model") else None
     request_id = str(body.get("request_id") or "")
     catalogs = _resolve_ui_catalogs(request)
+    ws = getattr(request.state, "workspace", None)
+    ws_slug = (ws.get("slug") if isinstance(ws, dict) else getattr(ws, "slug", None)) or "default"
+    user = getattr(request.state, "user", None)
+    is_superadmin = (
+        user.get("role") == "superadmin"
+        if isinstance(user, dict)
+        else getattr(user, "role", None) == "superadmin"
+    )
 
     cancel = duckdb_ai.CancelToken()
     if request_id:
@@ -4023,6 +4113,8 @@ async def ui_ai_chat(request: Request):
             catalogs=catalogs,
             model=model,
             cancel=cancel,
+            workspace_slug=ws_slug,
+            is_superadmin=is_superadmin,
         )
     )
 

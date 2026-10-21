@@ -6,7 +6,7 @@ from typing import Any
 import ai_service
 from auth import get_ai_workspace_and_role, get_current_user
 from database import get_db
-from fastapi import APIRouter, Cookie, Depends, Header, Query
+from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query, status
 from models import User, Workspace
 from schemas import (
     GenieChatRequest,
@@ -75,14 +75,22 @@ async def execute_sql(
     db: Session = Depends(get_db),
 ) -> SqlExecuteResponse:
     """Execute a DuckDB SQL query with workspace Catalog views and SQL AI UDFs registered."""
-    ws, _, _ = ctx
+    ws, _, user = ctx
+    is_superadmin = getattr(user, "role", None) == "superadmin"
     catalogs = ai_service.get_workspace_catalogs_from_db(db, ws.id)
     result = ai_service.execute_sql_query(
         sql=req.sql,
         catalogs=catalogs,
         read_only=req.read_only,
         max_ai_rows=req.max_ai_rows,
+        workspace_slug=ws.slug,
+        is_superadmin=is_superadmin,
     )
+    if not result.get("ok") and result.get("error_code") == 403:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=result.get("error") or "Access Denied: S3 path violates workspace boundaries.",
+        )
     return SqlExecuteResponse(**result)
 
 
