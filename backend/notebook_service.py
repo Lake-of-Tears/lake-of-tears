@@ -20,6 +20,40 @@ MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "datalake")
 
+IGNORED_WORKSPACE_DIRS: set[str] = {
+    "__pycache__",
+    ".ipynb_checkpoints",
+    "node_modules",
+    ".git",
+    "data",
+    "raw",
+    "scratch",
+    "tmp",
+    ".tmp",
+    ".cache",
+    ".duckdb",
+}
+
+IGNORED_WORKSPACE_FILE_EXTENSIONS: set[str] = {
+    ".parquet",
+    ".arrow",
+    ".feather",
+    ".csv",
+    ".tsv",
+    ".db",
+    ".duckdb",
+    ".sqlite",
+    ".sqlite3",
+    ".bin",
+    ".tar",
+    ".gz",
+    ".zip",
+    ".pkl",
+    ".pickle",
+    ".h5",
+    ".hdf5",
+}
+
 
 def get_jupyter_server_url() -> str:
     """Return the base Jupyter Server URL, checking environment dynamically."""
@@ -182,14 +216,22 @@ async def list_workspace_notebooks(workspace_slug: str, subpath: str = "") -> di
     items = []
     if isinstance(data, dict) and "content" in data and isinstance(data["content"], list):
         for entry in data["content"]:
+            name = entry.get("name", "")
+            if name.startswith(".") or name in IGNORED_WORKSPACE_DIRS:
+                continue
+            entry_type = entry.get("type")
+            if entry_type == "file" and any(
+                name.lower().endswith(ext) for ext in IGNORED_WORKSPACE_FILE_EXTENSIONS
+            ):
+                continue
             raw_path = entry.get("path", "")
             prefix = get_workspace_dir(workspace_slug) + "/"
             rel_path = raw_path[len(prefix) :] if raw_path.startswith(prefix) else raw_path
             items.append(
                 {
-                    "name": entry.get("name"),
+                    "name": name,
                     "path": rel_path,
-                    "type": entry.get("type"),
+                    "type": entry_type,
                     "last_modified": entry.get("last_modified"),
                     "created": entry.get("created"),
                     "size": entry.get("size"),

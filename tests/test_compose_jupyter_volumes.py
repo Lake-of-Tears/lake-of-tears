@@ -18,3 +18,12 @@ def test_lake_ui_notebooks_folder_is_a_host_mount():
 def test_existing_mounts_are_kept():
     targets = {v.split(":")[-1] for v in _jupyter_volumes()}
     assert {"/home/jovyan/work", "/home/jovyan/datalake"} <= targets
+
+
+def test_jupyter_mounts_workspace_isolation_startup_script():
+    volumes = _jupyter_volumes()
+    found = any(
+        "/home/jovyan/.ipython/profile_default/startup/00-workspace-isolation.py" in v
+        for v in volumes
+    )
+    assert found, "Expected 00-workspace-isolation.py to be mounted in jupyter volumes"

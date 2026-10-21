@@ -31,6 +31,40 @@ WORKSPACES_DIR = os.getenv("WORKSPACES_DIR", "/data/workspaces")
 _FS_SCAN_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 _FS_SCAN_TTL_SECONDS = 30.0
 
+IGNORED_WORKSPACE_DIRS: set[str] = {
+    "__pycache__",
+    ".ipynb_checkpoints",
+    "node_modules",
+    ".git",
+    "data",
+    "raw",
+    "scratch",
+    "tmp",
+    ".tmp",
+    ".cache",
+    ".duckdb",
+}
+
+IGNORED_WORKSPACE_FILE_EXTENSIONS: set[str] = {
+    ".parquet",
+    ".arrow",
+    ".feather",
+    ".csv",
+    ".tsv",
+    ".db",
+    ".duckdb",
+    ".sqlite",
+    ".sqlite3",
+    ".bin",
+    ".tar",
+    ".gz",
+    ".zip",
+    ".pkl",
+    ".pickle",
+    ".h5",
+    ".hdf5",
+}
+
 
 def clear_fs_scan_cache(workspace_slug: str | None = None) -> None:
     """Clear in-memory filesystem scan cache."""
@@ -83,12 +117,7 @@ def scan_workspace_filesystem(
                     if len(items) >= limit:
                         break
                     name = entry.name
-                    if name.startswith(".") or name in (
-                        "__pycache__",
-                        ".ipynb_checkpoints",
-                        "node_modules",
-                        ".git",
-                    ):
+                    if name.startswith(".") or name in IGNORED_WORKSPACE_DIRS:
                         continue
                     rel_path = f"{rel_prefix}/{name}" if rel_prefix else name
                     parent_dir = rel_prefix
@@ -104,6 +133,10 @@ def scan_workspace_filesystem(
                         )
                         _walk(entry.path, rel_path, depth + 1)
                     elif entry.is_file(follow_symlinks=False):
+                        if any(
+                            name.lower().endswith(ext) for ext in IGNORED_WORKSPACE_FILE_EXTENSIONS
+                        ):
+                            continue
                         entry_type = "notebook" if name.endswith(".ipynb") else "file"
                         items.append(
                             {
@@ -316,15 +349,23 @@ async def list_workspace_notebooks(
     items = []
     if isinstance(data, dict) and "content" in data and isinstance(data["content"], list):
         for entry in data["content"]:
+            name = entry.get("name", "")
+            if name.startswith(".") or name in IGNORED_WORKSPACE_DIRS:
+                continue
+            entry_type = entry.get("type")
+            if entry_type == "file" and any(
+                name.lower().endswith(ext) for ext in IGNORED_WORKSPACE_FILE_EXTENSIONS
+            ):
+                continue
             # Extract relative path to workspace root
             raw_path = entry.get("path", "")
             prefix = get_workspace_dir(workspace_slug) + "/"
             rel_path = raw_path[len(prefix) :] if raw_path.startswith(prefix) else raw_path
             items.append(
                 {
-                    "name": entry.get("name"),
+                    "name": name,
                     "path": rel_path,
-                    "type": entry.get("type"),
+                    "type": entry_type,
                     "last_modified": entry.get("last_modified"),
                     "created": entry.get("created"),
                     "size": entry.get("size"),
