@@ -218,7 +218,7 @@ services:
       # Notebooks created in the Lake UI are stored under workspaces/ in Jupyter's root folder.
       - ${DATALAKE_DATA_DIR:-~}/workspaces:/home/jovyan/workspaces
       - ${DATALAKE_DATA_DIR:-~}/datalake:/home/jovyan/datalake
-      - ./deploy/jupyter/00-workspace-isolation.py:/home/jovyan/.ipython/profile_default/startup/00-workspace-isolation.py:ro
+      - ./deploy/jupyter/00-workspace-isolation.py:/etc/ipython/startup/00-workspace-isolation.py:ro
     # base_url=/jupyter/: the Lake UI notebook proxy builds Jupyter API URLs from this prefix
     # (JUPYTER_BASE_URL); Jupyter is not exposed through nginx.
     command: >

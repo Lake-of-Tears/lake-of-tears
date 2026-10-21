@@ -78,7 +78,7 @@ spec:
               mountPath: /home/jovyan/work
               subPath: work
             - name: jupyter-config
-              mountPath: /home/jovyan/.ipython/profile_default/startup/00-workspace-isolation.py
+              mountPath: /etc/ipython/startup/00-workspace-isolation.py
               subPath: 00-workspace-isolation.py
           resources:
             {{- toYaml .Values.jupyter.resources | nindent 12 }}

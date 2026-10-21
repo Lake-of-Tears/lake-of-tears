@@ -63,7 +63,7 @@ def test_jupyter_mounts_the_folders_the_lake_ui_writes_to():
     assert mounts == {
         "/home/jovyan/workspaces": "workspaces",
         "/home/jovyan/work": "work",
-        "/home/jovyan/.ipython/profile_default/startup/00-workspace-isolation.py": "00-workspace-isolation.py",
+        "/etc/ipython/startup/00-workspace-isolation.py": "00-workspace-isolation.py",
     }
     volume = next(v for v in pod["volumes"] if v["name"] == "jupyter-home")
     assert volume["persistentVolumeClaim"]["claimName"].endswith("-jupyter-home")

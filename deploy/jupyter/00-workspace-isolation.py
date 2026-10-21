@@ -1,4 +1,5 @@
 import builtins
+import io
 import os
 import pathlib
 
@@ -88,6 +89,17 @@ def _guarded_makedirs(name, *args, **kwargs):
 
 
 builtins.open = _guarded_open
+io.open = _guarded_open
 os.mkdir = _guarded_mkdir
 os.makedirs = _guarded_makedirs
 pathlib.Path.mkdir = lambda self, *args, **kwargs: _guarded_mkdir(self, *args, **kwargs)
+
+try:
+    from IPython import get_ipython
+
+    _ip = get_ipython()
+    if _ip:
+        _ip.user_ns["open"] = _guarded_open
+        _ip.user_global_ns["open"] = _guarded_open
+except Exception:
+    pass

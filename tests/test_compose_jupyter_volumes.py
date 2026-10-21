@@ -22,8 +22,5 @@ def test_existing_mounts_are_kept():
 
 def test_jupyter_mounts_workspace_isolation_startup_script():
     volumes = _jupyter_volumes()
-    found = any(
-        "/home/jovyan/.ipython/profile_default/startup/00-workspace-isolation.py" in v
-        for v in volumes
-    )
+    found = any("/etc/ipython/startup/00-workspace-isolation.py" in v for v in volumes)
     assert found, "Expected 00-workspace-isolation.py to be mounted in jupyter volumes"
