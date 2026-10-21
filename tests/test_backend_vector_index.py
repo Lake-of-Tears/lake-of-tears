@@ -19,7 +19,14 @@ if ui_dir not in sys.path:
 
 import auth  # noqa: E402
 import vector_index_service  # noqa: E402
-from models import Catalog, CatalogAccess, CatalogTable, User  # noqa: E402
+from models import (  # noqa: E402
+    Catalog,
+    CatalogAccess,
+    CatalogTable,
+    User,
+    Workspace,
+    WorkspaceMember,
+)
 
 spec = importlib.util.spec_from_file_location(
     "backend_main_vector", Path(__file__).parents[1] / "backend" / "main.py"
@@ -196,7 +203,11 @@ def test_backend_sync_endpoint():
     tbl_id = uuid.uuid4()
     ws_id = uuid.uuid4()
 
+    workspace = Workspace(id=ws_id, name="default", slug="default", status="active")
     user = User(id=user_id, email="admin@lake.local", role="admin", is_active=True)
+    user.workspace_memberships = [
+        WorkspaceMember(workspace_id=ws_id, user_id=user_id, role="admin")
+    ]
     token = jwt.encode(
         {"sub": str(user_id), "email": user.email, "role": user.role},
         auth.SECRET_KEY,
@@ -221,6 +232,10 @@ def test_backend_sync_endpoint():
 
     backend_main.app.dependency_overrides[backend_main.get_db] = lambda: mock_db
     backend_main.app.dependency_overrides[backend_main.get_current_user] = lambda: user
+    backend_main.app.dependency_overrides[auth.get_catalog_workspace_and_role] = lambda: (
+        workspace,
+        "admin",
+    )
 
     try:
         with patch(
@@ -229,7 +244,10 @@ def test_backend_sync_endpoint():
         ):
             resp = client.post(
                 f"/api/catalogs/{cat_id}/schemas/{sch_id}/tables/{tbl_id}/vector-index/sync",
-                headers={"Authorization": f"Bearer {token}"},
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "X-Workspace-Id": str(ws_id),
+                },
             )
             assert resp.status_code == 200
             data = resp.json()

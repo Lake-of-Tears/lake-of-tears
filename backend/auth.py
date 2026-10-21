@@ -534,3 +534,53 @@ def get_ai_workspace_and_role(
         require_write=require_write,
         write_error_msg="Workspace viewer role is read-only. Cannot execute write operations.",
     )
+
+
+def get_catalog_workspace_and_role(
+    workspace_slug: str | None = Query(None),
+    workspace_id: str | None = Query(None),
+    x_workspace_slug: str | None = Header(None, alias="X-Workspace-Slug"),
+    x_workspace_id: str | None = Header(None, alias="X-Workspace-Id"),
+    lake_workspace_id: str | None = Cookie(None),
+    lake_active_workspace: str | None = Cookie(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    require_write: bool = False,
+) -> tuple[Workspace, str]:
+    """Resolve active workspace and verify permissions for catalog operations."""
+    return get_workspace_context(
+        workspace_slug=workspace_slug,
+        workspace_id=workspace_id,
+        x_workspace_slug=x_workspace_slug,
+        x_workspace_id=x_workspace_id,
+        lake_workspace_id=lake_workspace_id,
+        lake_active_workspace=lake_active_workspace,
+        current_user=current_user,
+        db=db,
+        require_write=require_write,
+        write_error_msg="Workspace viewer role is read-only. Cannot modify catalogs.",
+    )
+
+
+def get_catalog_write_workspace_and_role(
+    workspace_slug: str | None = Query(None),
+    workspace_id: str | None = Query(None),
+    x_workspace_slug: str | None = Header(None, alias="X-Workspace-Slug"),
+    x_workspace_id: str | None = Header(None, alias="X-Workspace-Id"),
+    lake_workspace_id: str | None = Cookie(None),
+    lake_active_workspace: str | None = Cookie(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> tuple[Workspace, str]:
+    """Resolve active workspace and require write permissions for catalog operations."""
+    return get_catalog_workspace_and_role(
+        workspace_slug=workspace_slug,
+        workspace_id=workspace_id,
+        x_workspace_slug=x_workspace_slug,
+        x_workspace_id=x_workspace_id,
+        lake_workspace_id=lake_workspace_id,
+        lake_active_workspace=lake_active_workspace,
+        current_user=current_user,
+        db=db,
+        require_write=True,
+    )

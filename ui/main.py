@@ -662,10 +662,15 @@ async def catalog(request: Request):
     token = request.cookies.get("lake_token")
     ws = request.state.workspace
     catalogs = []
-    if token and ws:
-        catalogs = _backend_get(f"/api/workspaces/{ws['id']}/catalogs", token) or []
-    elif token:
-        catalogs = _backend_get("/api/catalogs", token) or []
+    if token and ws and isinstance(ws, dict) and ws.get("id"):
+        catalogs = (
+            _backend_get(
+                f"/api/workspaces/{ws['id']}/catalogs",
+                token,
+                workspace_id=str(ws["id"]),
+            )
+            or []
+        )
     if isinstance(catalogs, list):
         for cat in catalogs:
             if isinstance(cat, dict) and "schemas" in cat and isinstance(cat["schemas"], list):
@@ -813,6 +818,7 @@ async def catalog_create(
             "description": description.strip() if description else None,
             "workspace_id": effective_workspace_id,
         },
+        workspace_id=effective_workspace_id,
     )
     if error:
         return RedirectResponse(
@@ -860,11 +866,11 @@ def _resolve_ui_catalogs(request: Request) -> list[dict[str, Any]]:
     ws = getattr(request.state, "workspace", None)
     catalogs: list[dict[str, Any]] = []
     if token and ws and isinstance(ws, dict) and ws.get("id"):
-        res = _backend_get(f"/api/workspaces/{ws['id']}/catalogs", token)
-        if isinstance(res, list):
-            catalogs = res
-    elif token:
-        res = _backend_get("/api/catalogs", token)
+        res = _backend_get(
+            f"/api/workspaces/{ws['id']}/catalogs",
+            token,
+            workspace_id=str(ws["id"]),
+        )
         if isinstance(res, list):
             catalogs = res
     for cat in catalogs:
@@ -1641,15 +1647,18 @@ async def settings_catalog_soft_delete(request: Request, catalog_id: str):
     ws = request.state.workspace
     token = request.cookies.get("lake_token")
     if ws and token:
-        _backend_delete(f"/api/catalogs/{catalog_id}", token)
+        _backend_delete(f"/api/catalogs/{catalog_id}", token, workspace_id=str(ws["id"]))
     return RedirectResponse(url="/settings/workspace?tab=catalogs", status_code=302)
 
 
 @app.post("/settings/workspace/catalogs/{catalog_id}/reactivate")
 async def settings_catalog_reactivate(request: Request, catalog_id: str):
+    ws = request.state.workspace
     token = request.cookies.get("lake_token")
-    if token:
-        _backend_post(f"/api/catalogs/{catalog_id}/reactivate", token, {})
+    if token and ws:
+        _backend_post(
+            f"/api/catalogs/{catalog_id}/reactivate", token, {}, workspace_id=str(ws["id"])
+        )
     return RedirectResponse(url="/settings/workspace?tab=catalogs", status_code=302)
 
 
@@ -1659,11 +1668,15 @@ async def settings_catalog_purge(
     catalog_id: str,
     confirm_name: str = Form(...),
 ):
+    ws = request.state.workspace
     token = request.cookies.get("lake_token")
     error = None
-    if token:
+    if token and ws:
         result = _backend_post(
-            f"/api/catalogs/{catalog_id}/purge", token, {"confirm_name": confirm_name}
+            f"/api/catalogs/{catalog_id}/purge",
+            token,
+            {"confirm_name": confirm_name},
+            workspace_id=str(ws["id"]),
         )
         if result is None:
             error = "purge_failed"
@@ -1679,26 +1692,38 @@ async def settings_catalog_remove_shared(request: Request, catalog_id: str):
     ws = request.state.workspace
     token = request.cookies.get("lake_token")
     if ws and token:
-        _backend_delete(f"/api/workspaces/{ws['id']}/catalogs/{catalog_id}/shared", token)
+        _backend_delete(
+            f"/api/workspaces/{ws['id']}/catalogs/{catalog_id}/shared",
+            token,
+            workspace_id=str(ws["id"]),
+        )
     return RedirectResponse(url="/settings/workspace?tab=catalogs", status_code=302)
 
 
 @app.post("/settings/workspace/catalogs/{catalog_id}/access/{access_id}/approve")
 async def settings_catalog_approve_access(request: Request, catalog_id: str, access_id: str):
+    ws = request.state.workspace
     token = request.cookies.get("lake_token")
-    if token:
+    if token and ws:
         _backend_patch(
-            f"/api/catalogs/{catalog_id}/access/{access_id}", token, {"status": "approved"}
+            f"/api/catalogs/{catalog_id}/access/{access_id}",
+            token,
+            {"status": "approved"},
+            workspace_id=str(ws["id"]),
         )
     return RedirectResponse(url="/settings/workspace", status_code=302)
 
 
 @app.post("/settings/workspace/catalogs/{catalog_id}/access/{access_id}/reject")
 async def settings_catalog_reject_access(request: Request, catalog_id: str, access_id: str):
+    ws = request.state.workspace
     token = request.cookies.get("lake_token")
-    if token:
+    if token and ws:
         _backend_patch(
-            f"/api/catalogs/{catalog_id}/access/{access_id}", token, {"status": "rejected"}
+            f"/api/catalogs/{catalog_id}/access/{access_id}",
+            token,
+            {"status": "rejected"},
+            workspace_id=str(ws["id"]),
         )
     return RedirectResponse(url="/settings/workspace", status_code=302)
 
@@ -1966,17 +1991,33 @@ async def api_workspace_manifest(request: Request):
         if not token:
             return []
         data = None
-        if ws_id != "default":
-            data = await _backend_get_async(f"/api/workspaces/{ws_id}/catalog-manifest", token)
+        effective_ws_id = str(ws_id) if ws_id and ws_id != "default" else None
+        if effective_ws_id:
+            data = await _backend_get_async(
+                f"/api/workspaces/{effective_ws_id}/catalog-manifest",
+                token,
+            )
             if data is None:
-                data = await _backend_get_async(f"/api/workspaces/{ws_id}/catalogs", token)
-        if data is None:
-            cat_query = f"?workspace_slug={urllib.parse.quote(ws_slug)}" if ws_slug else ""
-            data = await _backend_get_async(f"/api/catalogs/catalog-manifest{cat_query}", token)
+                data = await _backend_get_async(
+                    f"/api/workspaces/{effective_ws_id}/catalogs",
+                    token,
+                )
+        if data is None and ws_slug:
+            cat_query = f"?workspace_slug={urllib.parse.quote(ws_slug)}"
+            data = await _backend_get_async(
+                f"/api/catalogs/catalog-manifest{cat_query}",
+                token,
+            )
             if data is None:
-                data = await _backend_get_async(f"/api/catalogs/manifest{cat_query}", token)
+                data = await _backend_get_async(
+                    f"/api/catalogs/manifest{cat_query}",
+                    token,
+                )
             if data is None:
-                data = await _backend_get_async(f"/api/catalogs{cat_query}", token)
+                data = await _backend_get_async(
+                    f"/api/catalogs{cat_query}",
+                    token,
+                )
         return data or []
 
     async def _fetch_pipelines():
@@ -2262,10 +2303,25 @@ async def api_workspace_search(request: Request, q: str = ""):
     # 2. Catalogs, Schemas & Tables
     try:
         catalogs = []
-        if token and ws.get("id") != "default":
-            catalogs = _backend_get(f"/api/workspaces/{ws['id']}/catalogs", token) or []
-        elif token:
-            catalogs = _backend_get("/api/catalogs", token) or []
+        if token and ws and isinstance(ws, dict) and ws.get("id") and ws.get("id") != "default":
+            catalogs = (
+                _backend_get(
+                    f"/api/workspaces/{ws['id']}/catalogs",
+                    token,
+                    workspace_id=str(ws["id"]),
+                )
+                or []
+            )
+        elif token and ws and isinstance(ws, dict) and ws.get("slug"):
+            catalogs = (
+                _backend_get(
+                    "/api/catalogs",
+                    token,
+                    workspace_id=str(ws.get("id")) if ws.get("id") else None,
+                    workspace_slug=ws.get("slug"),
+                )
+                or []
+            )
         for cat in catalogs:
             cat_id = cat.get("id", "")
             cat_name = cat.get("name", "")
