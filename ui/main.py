@@ -192,19 +192,24 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         path = request.url.path
-        if any(path == p or path.startswith(p) for p in _PUBLIC_PREFIXES):
-            return await call_next(request)
+        is_public = any(path == p or path.startswith(p) for p in _PUBLIC_PREFIXES)
 
         token = request.cookies.get("lake_token")
         if not token:
+            if is_public:
+                return await call_next(request)
             return RedirectResponse(url=f"/login?next={request.url}", status_code=302)
 
         try:
             payload = jwt.decode(token, AUTH_SECRET_KEY, algorithms=["HS256"])
             request.state.user = payload
         except jwt.ExpiredSignatureError:
+            if is_public:
+                return await call_next(request)
             return RedirectResponse(url="/login?error=expired", status_code=302)
         except jwt.InvalidTokenError:
+            if is_public:
+                return await call_next(request)
             return RedirectResponse(url="/login?error=invalid", status_code=302)
 
         # Inject session config for the idle-timeout JS in base.html
@@ -214,6 +219,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
         session_cfg = await loop.run_in_executor(None, _get_session_config)
         workspaces = await loop.run_in_executor(None, _fetch_workspaces, token)
         if workspaces is None:
+            if is_public:
+                return await call_next(request)
             resp = RedirectResponse(url="/login?reason=session_expired", status_code=302)
             resp.delete_cookie("lake_token")
             resp.delete_cookie(_WORKSPACE_COOKIE)
@@ -864,12 +871,22 @@ async def storage(request: Request):
 def _resolve_ui_catalogs(request: Request) -> list[dict[str, Any]]:
     token = request.cookies.get("lake_token")
     ws = getattr(request.state, "workspace", None)
+    ws_id = None
+    if ws and isinstance(ws, dict) and ws.get("id"):
+        ws_id = str(ws["id"])
+    elif token:
+        ws_cookie = request.cookies.get(_WORKSPACE_COOKIE)
+        ws_header = request.headers.get("X-Workspace-Id") or request.query_params.get(
+            "workspace_id"
+        )
+        ws_id = ws_cookie or ws_header
+
     catalogs: list[dict[str, Any]] = []
-    if token and ws and isinstance(ws, dict) and ws.get("id"):
+    if token and ws_id:
         res = _backend_get(
-            f"/api/workspaces/{ws['id']}/catalogs",
+            f"/api/workspaces/{ws_id}/catalogs",
             token,
-            workspace_id=str(ws["id"]),
+            workspace_id=str(ws_id),
         )
         if isinstance(res, list):
             catalogs = res
