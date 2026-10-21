@@ -111,6 +111,14 @@ class WorkspaceMemberResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class CandidateMemberResponse(BaseModel):
+    id: uuid.UUID
+    email: str
+    display_name: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
 class WorkspaceResponse(BaseModel):
     id: uuid.UUID
     name: str

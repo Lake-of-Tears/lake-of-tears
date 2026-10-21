@@ -35,7 +35,7 @@ from catalog_storage import delete_prefix, prefixes_to_delete
 from dashboards_router import router as dashboards_router
 from database import get_db
 from email_service import send_access_removed, send_access_requested, send_access_reviewed
-from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from models import (
     Catalog,
@@ -52,6 +52,7 @@ from oauth import enabled_providers, get_oauth_redirect, handle_oauth_callback
 from pipelines_router import router as pipelines_router
 from schemas import (
     AddMemberRequest,
+    CandidateMemberResponse,
     CatalogAccessResponse,
     CatalogDirectoryItem,
     CatalogResponse,
@@ -606,6 +607,43 @@ def list_members(
         )
         for m in ws.members
     ]
+
+
+@app.get(
+    "/api/workspaces/{workspace_id}/candidate-members",
+    response_model=list[CandidateMemberResponse],
+)
+def list_candidate_members(
+    workspace_id: str,
+    q: str | None = Query(default=None, max_length=100),
+    limit: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from sqlalchemy import or_
+
+    ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+    if not ws:
+        raise HTTPException(404, "Workspace not found")
+    if current_user.role != "superadmin":
+        member_check = next(
+            (m for m in ws.members if m.user_id == current_user.id and m.role == "admin"), None
+        )
+        if not member_check:
+            raise HTTPException(403, "Workspace admin access required")
+
+    existing_member_ids = [m.user_id for m in ws.members]
+
+    query = db.query(User).filter(User.is_active.is_(True))
+    if existing_member_ids:
+        query = query.filter(~User.id.in_(existing_member_ids))
+
+    if q and q.strip():
+        search = f"%{q.strip()}%"
+        query = query.filter(or_(User.email.ilike(search), User.display_name.ilike(search)))
+
+    users = query.order_by(User.email.asc()).limit(limit).all()
+    return [CandidateMemberResponse.model_validate(u) for u in users]
 
 
 @app.post("/api/workspaces/{workspace_id}/members")

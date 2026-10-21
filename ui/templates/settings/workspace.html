@@ -421,17 +421,229 @@
 
     {% if request.state.user and (request.state.user.role == 'superadmin' or workspace.my_role == 'admin') %}
     <h3 class="text-xs font-semibold text-gray-400 mb-3">Add member</h3>
-    <form action="/settings/workspace/members/add" method="post" class="flex gap-2">
-      <input type="email" name="email" required placeholder="user@example.com"
-        class="flex-1 input-dark text-sm" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+    <form id="add-member-form" action="/settings/workspace/members/add" method="post" class="flex gap-2 relative">
+      <div class="relative flex-1" id="member-combobox-wrap">
+        <input
+          type="text"
+          id="member-search-input"
+          autocomplete="off"
+          placeholder="Search registered user by name or email…"
+          class="w-full input-dark text-sm"
+          style="background-color: var(--c-input-bg); border-color: var(--c-input-border);"
+          aria-autocomplete="list"
+          aria-expanded="false"
+        />
+        <input type="hidden" name="email" id="member-selected-email" required />
+
+        <!-- Suggestions dropdown -->
+        <div
+          id="member-suggestions"
+          class="hidden absolute left-0 right-0 top-full mt-1 max-h-60 overflow-y-auto rounded-lg border border-white/10 bg-[#1c1c1f] shadow-2xl z-50 py-1"
+        ></div>
+      </div>
+
       <select name="role" class="bg-gray-800 border border-gray-700 text-gray-300 text-sm rounded-md px-2 py-2 focus:outline-none focus:border-blue-500">
         <option value="read">Read</option>
         <option value="write">Write</option>
         <option value="admin">Admin</option>
       </select>
-      <button type="submit" class="btn-primary shrink-0">Add</button>
+      <button
+        type="submit"
+        id="add-member-submit"
+        disabled
+        class="btn-primary shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        Add
+      </button>
     </form>
-    <p class="text-[11px] text-gray-600 mt-2">The user must have an existing account.</p>
+    <p class="text-[11px] text-gray-500 mt-2 flex items-center gap-1.5" id="member-hint">
+      <svg class="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      <span>Search and select an active registered user to add them to this workspace.</span>
+    </p>
+
+    <script>
+    (function() {
+      const input = document.getElementById('member-search-input');
+      const hiddenEmail = document.getElementById('member-selected-email');
+      const dropdown = document.getElementById('member-suggestions');
+      const submitBtn = document.getElementById('add-member-submit');
+      const form = document.getElementById('add-member-form');
+      const wsId = "{{ workspace.id }}";
+
+      let _candidates = [];
+      let _selectedIndex = -1;
+      let _selectedUser = null;
+      let _debounceTimer = null;
+
+      function esc(str) {
+        const d = document.createElement('div');
+        d.textContent = str || '';
+        return d.innerHTML;
+      }
+
+      function clearSelection() {
+        _selectedUser = null;
+        hiddenEmail.value = '';
+        submitBtn.disabled = true;
+      }
+
+      function selectUser(user) {
+        _selectedUser = user;
+        hiddenEmail.value = user.email;
+        input.value = user.display_name ? `${user.display_name} (${user.email})` : user.email;
+        submitBtn.disabled = false;
+        closeDropdown();
+      }
+
+      function openDropdown() {
+        dropdown.classList.remove('hidden');
+        input.setAttribute('aria-expanded', 'true');
+      }
+
+      function closeDropdown() {
+        dropdown.classList.add('hidden');
+        input.setAttribute('aria-expanded', 'false');
+        _selectedIndex = -1;
+      }
+
+      function renderSuggestions(users, query) {
+        _candidates = users || [];
+        _selectedIndex = -1;
+        if (!_candidates.length) {
+          dropdown.innerHTML = `<div class="px-3 py-2.5 text-xs text-gray-500 text-center">${query ? 'No matching users found' : 'No available candidate users'}</div>`;
+          openDropdown();
+          return;
+        }
+
+        dropdown.innerHTML = _candidates.map((u, idx) => {
+          const initial = esc((u.display_name || u.email || '?')[0].toUpperCase());
+          const nameHtml = u.display_name ? `<span class="text-gray-200 font-medium">${esc(u.display_name)}</span> <span class="text-gray-500 text-[10px]">·</span> ` : '';
+          return `
+            <div
+              class="candidate-item flex items-center gap-2.5 px-3 py-2 text-xs hover:bg-white/[0.08] cursor-pointer transition-colors"
+              data-index="${idx}"
+            >
+              <div class="w-6 h-6 rounded-full bg-blue-600/70 flex items-center justify-center text-[11px] font-bold text-white shrink-0">
+                ${initial}
+              </div>
+              <div class="flex-1 min-w-0 truncate">
+                ${nameHtml}<span class="text-gray-400 font-mono text-[11px]">${esc(u.email)}</span>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        dropdown.querySelectorAll('.candidate-item').forEach(el => {
+          el.addEventListener('mousedown', (e) => {
+            e.preventDefault(); // prevent blur before click
+            const idx = parseInt(el.getAttribute('data-index'), 10);
+            if (_candidates[idx]) {
+              selectUser(_candidates[idx]);
+            }
+          });
+        });
+
+        openDropdown();
+      }
+
+      function updateHighlight() {
+        const items = dropdown.querySelectorAll('.candidate-item');
+        items.forEach((item, idx) => {
+          if (idx === _selectedIndex) {
+            item.classList.add('bg-white/[0.12]');
+            item.scrollIntoView({ block: 'nearest' });
+          } else {
+            item.classList.remove('bg-white/[0.12]');
+          }
+        });
+      }
+
+      async function fetchCandidates(q) {
+        try {
+          const res = await fetch(`/api/workspaces/${wsId}/candidate-members?q=${encodeURIComponent(q || '')}`);
+          if (!res.ok) return [];
+          return await res.json();
+        } catch (e) {
+          return [];
+        }
+      }
+
+      function handleSearch() {
+        const query = input.value.trim();
+        // If the text no longer matches the selected user, clear selection
+        if (_selectedUser) {
+          const expected = _selectedUser.display_name
+            ? `${_selectedUser.display_name} (${_selectedUser.email})`
+            : _selectedUser.email;
+          if (input.value !== expected && input.value !== _selectedUser.email) {
+            clearSelection();
+          }
+        } else {
+          clearSelection();
+        }
+
+        clearTimeout(_debounceTimer);
+        _debounceTimer = setTimeout(async () => {
+          const users = await fetchCandidates(query);
+          renderSuggestions(users, query);
+        }, 180);
+      }
+
+      input.addEventListener('focus', () => {
+        handleSearch();
+      });
+
+      input.addEventListener('input', () => {
+        handleSearch();
+      });
+
+      input.addEventListener('keydown', (e) => {
+        if (dropdown.classList.contains('hidden')) {
+          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            handleSearch();
+          }
+          return;
+        }
+
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          if (_candidates.length > 0) {
+            _selectedIndex = (_selectedIndex + 1) % _candidates.length;
+            updateHighlight();
+          }
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          if (_candidates.length > 0) {
+            _selectedIndex = (_selectedIndex - 1 + _candidates.length) % _candidates.length;
+            updateHighlight();
+          }
+        } else if (e.key === 'Enter') {
+          if (_selectedIndex >= 0 && _candidates[_selectedIndex]) {
+            e.preventDefault();
+            selectUser(_candidates[_selectedIndex]);
+          } else if (!_selectedUser) {
+            e.preventDefault();
+          }
+        } else if (e.key === 'Escape') {
+          closeDropdown();
+        }
+      });
+
+      document.addEventListener('click', (e) => {
+        const wrap = document.getElementById('member-combobox-wrap');
+        if (wrap && !wrap.contains(e.target)) {
+          closeDropdown();
+        }
+      });
+
+      form.addEventListener('submit', (e) => {
+        if (!_selectedUser || !hiddenEmail.value) {
+          e.preventDefault();
+          input.focus();
+        }
+      });
+    })();
+    </script>
     {% endif %}
   </div>
 </div>

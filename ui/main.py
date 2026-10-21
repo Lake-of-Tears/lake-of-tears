@@ -1402,6 +1402,29 @@ async def settings_workspace_rename(
     return RedirectResponse(url="/settings/workspace?saved=1", status_code=302)
 
 
+@app.get("/api/workspaces/{workspace_id}/candidate-members")
+async def api_workspace_candidate_members(
+    request: Request,
+    workspace_id: str,
+    q: str = "",
+    limit: int = 20,
+):
+    token = request.cookies.get("lake_token")
+    if not token:
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+    from urllib.parse import quote
+
+    query_str = f"?limit={limit}"
+    if q:
+        query_str += f"&q={quote(q)}"
+    result = await _backend_get_async(
+        f"/api/workspaces/{workspace_id}/candidate-members{query_str}", token
+    )
+    if result is None:
+        return JSONResponse([], status_code=200)
+    return JSONResponse(result)
+
+
 @app.post("/settings/workspace/members/add")
 async def settings_workspace_add_member(
     request: Request,
