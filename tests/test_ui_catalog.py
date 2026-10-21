@@ -497,3 +497,80 @@ def test_catalog_page_includes_deep_link_and_navigation_handlers():
         assert res.status_code == 200
         assert "window.navigateCatalogTo" in res.text
         assert "initCatalogDeepLink" in res.text
+
+
+# ── /catalog/preview Sample Data Endpoint Tests ───────────────────────────────
+
+
+def test_catalog_preview_resolves_workspace_and_queries_duckdb():
+    token = _make_token()
+    mock_workspaces = [{"id": "ws-1", "name": "Dev", "slug": "dev"}]
+    mock_catalogs = [
+        {
+            "id": "cat-1",
+            "name": "default",
+            "schemas": [
+                {
+                    "id": "sch-bronze",
+                    "slug": "bronze",
+                    "tier": "bronze",
+                    "tables": [
+                        {
+                            "id": "tbl-trials",
+                            "slug": "clinical_trials",
+                            "s3_path_pattern": "s3://datalake/workspaces/dev/bronze/clinical_trials/**/*.parquet",
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+
+    mock_query_result = {
+        "ok": True,
+        "columns": ["nct_id", "brief_title"],
+        "rows": [["NCT00001", "Study Title 1"], ["NCT00002", "Study Title 2"]],
+    }
+
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
+        patch.object(main, "_backend_get", return_value=mock_catalogs),
+        patch.object(main, "_run_query", return_value=mock_query_result) as mock_run,
+    ):
+        res = client.get(
+            "/catalog/preview?view=bronze.clinical_trials&limit=15",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["ok"] is True
+        assert data["columns"] == ["nct_id", "brief_title"]
+        assert len(data["rows"]) == 2
+
+        # Verify _run_query received the populated catalog context
+        mock_run.assert_called_once()
+        call_kwargs = mock_run.call_args[1]
+        assert "bronze.clinical_trials" in mock_run.call_args[0][0]
+        assert call_kwargs.get("catalogs") == mock_catalogs
+        assert call_kwargs.get("read_only") is True
+
+
+def test_catalog_preview_unauthenticated_returns_401():
+    with patch.object(main, "AUTH_ENABLED", True):
+        res = client.get("/catalog/preview?view=bronze.clinical_trials")
+        assert res.status_code == 401
+        assert res.json()["ok"] is False
+        assert "Not authenticated" in res.json()["error"]
+
+
+def test_catalog_preview_invalid_view_returns_400():
+    token = _make_token()
+    with patch.object(main, "AUTH_ENABLED", True):
+        res = client.get(
+            "/catalog/preview?view=bronze.bad;drop table",
+            cookies={"lake_token": token},
+        )
+        assert res.status_code == 400
+        assert res.json()["ok"] is False
+        assert "Invalid view identifier" in res.json()["error"]
