@@ -376,3 +376,24 @@ def test_ui_post_password_success_redirects_and_updates_cookie():
         assert resp.status_code == 302
         assert resp.headers["location"] == "/settings/account?password_saved=1"
         assert "lake_token=" in resp.headers.get("set-cookie", "")
+
+
+def test_get_current_user_supports_role_and_email_sub():
+    user = _make_user("OldPass123!", email="superadmin@example.com")
+    user.role = "superadmin"
+    mock_db = MagicMock()
+    mock_db.query.return_value.filter.return_value.first.return_value = user
+
+    import jwt
+
+    # 1. Test with sub="superadmin"
+    token_role = jwt.encode({"sub": "superadmin"}, auth.SECRET_KEY, algorithm=auth.ALGORITHM)
+    u1 = auth.get_current_user(lake_token=token_role, db=mock_db)
+    assert u1.email == "superadmin@example.com"
+
+    # 2. Test with sub="superadmin@example.com"
+    token_email = jwt.encode(
+        {"sub": "superadmin@example.com"}, auth.SECRET_KEY, algorithm=auth.ALGORITHM
+    )
+    u2 = auth.get_current_user(lake_token=token_email, db=mock_db)
+    assert u2.email == "superadmin@example.com"

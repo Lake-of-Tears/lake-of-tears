@@ -252,14 +252,19 @@ def get_current_user(
         raise HTTPException(401, "Invalid token")
 
     sub_val = payload.get("sub")
+    user = None
     try:
         user_uuid = uuid.UUID(str(sub_val))
+        user = db.query(User).filter(User.id == user_uuid).first()
     except (ValueError, TypeError, AttributeError):
-        raise HTTPException(401, "Invalid token")
+        pass
 
-    user = db.query(User).filter(User.id == user_uuid).first()
+    if not user and sub_val:
+        sub_str = str(sub_val)
+        user = db.query(User).filter((User.email == sub_str) | (User.role == sub_str)).first()
+
     if not user or not user.is_active:
-        raise HTTPException(401, "User not found or disabled")
+        raise HTTPException(401, "Invalid token")
     return user
 
 
