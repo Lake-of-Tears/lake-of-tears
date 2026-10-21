@@ -19,11 +19,11 @@ from auth import (
     SECRET_KEY,
     create_token,
     decode_token,
+    get_catalog_workspace_and_role,
     get_current_user,
     get_session_expires_delta,
     get_stored_gemini_api_key,
     get_stored_gemini_model,
-    get_workspace_context,
     hash_password,
     mask_secret,
     require_superadmin,
@@ -35,7 +35,7 @@ from catalog_storage import delete_prefix, prefixes_to_delete
 from dashboards_router import router as dashboards_router
 from database import get_db
 from email_service import send_access_removed, send_access_requested, send_access_reviewed
-from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request, Response
+from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from models import (
     Catalog,
@@ -759,7 +759,56 @@ def _seed_medallion_schemas(db: Session, catalog: Catalog) -> None:
         )
 
 
-def _caller_access(db: Session, catalog: Catalog, user: User) -> str | None:
+def _caller_access(
+    db: Session,
+    catalog: Catalog,
+    user: User,
+    ws: Workspace | None = None,
+) -> str | None:
+    """Determine caller's access level ('owner', 'write', 'read', or None) to a catalog.
+
+    When `ws` is provided (active workspace context), access is strictly jailed to that workspace:
+    - If active workspace owns the catalog:
+      - superadmin -> 'owner'
+      - workspace admin/owner -> 'owner'
+      - workspace member/write/user -> 'write'
+      - workspace viewer/read -> 'read'
+    - If active workspace does NOT own the catalog:
+      - Checks approved, non-suspended CatalogAccess grant specifically for `ws.id`
+      - If no approved grant exists -> returns None (catalog is invisible in this workspace)
+      - If grant exists -> grant.mode (e.g. 'read')
+    """
+    if ws is not None:
+        if str(catalog.owner_workspace_id) == str(ws.id):
+            if user.role == "superadmin":
+                return "owner"
+            member = next(
+                (m for m in user.workspace_memberships if str(m.workspace_id) == str(ws.id)),
+                None,
+            )
+            if not member:
+                return None
+            role = member.role.lower() if member.role else "read"
+            if role in ("admin", "owner"):
+                return "owner"
+            if role in ("write", "user", "member"):
+                return "write"
+            return "read"
+
+        # Cross-workspace: strictly verify approved sharing grant for active workspace
+        grant = (
+            db.query(CatalogAccess)
+            .filter(
+                CatalogAccess.catalog_id == catalog.id,
+                CatalogAccess.workspace_id == ws.id,
+                CatalogAccess.status == "approved",
+                CatalogAccess.suspended.is_(False),
+            )
+            .first()
+        )
+        return grant.mode if grant else None
+
+    # Fallback when ws is not provided
     if user.role == "superadmin":
         return "owner"
     ws_ids = [str(m.workspace_id) for m in user.workspace_memberships]
@@ -771,16 +820,24 @@ def _caller_access(db: Session, catalog: Catalog, user: User) -> str | None:
             CatalogAccess.catalog_id == catalog.id,
             CatalogAccess.workspace_id.in_(ws_ids),
             CatalogAccess.status == "approved",
+            CatalogAccess.suspended.is_(False),
         )
         .first()
     )
     return grant.mode if grant else None
 
 
-def _assert_catalog_access(db: Session, catalog: Catalog, user: User, require: str = "read") -> str:
-    access = _caller_access(db, catalog, user)
+def _assert_catalog_access(
+    db: Session,
+    catalog: Catalog,
+    user: User,
+    require: str = "read",
+    ws: Workspace | None = None,
+) -> str:
+    access = _caller_access(db, catalog, user, ws=ws)
     if access is None:
-        raise HTTPException(403, "No access to this catalog")
+        # Strict invisibility outside active workspace / approved shares
+        raise HTTPException(404, "Catalog not found")
     if require == "write" and access not in ("owner", "write"):
         raise HTTPException(403, "Write access required")
     if require == "owner" and access != "owner":
@@ -853,8 +910,13 @@ def _ensure_system_settings(db: Session) -> None:
     db.commit()
 
 
-def _catalog_response(catalog: Catalog, user: User, db: Session) -> CatalogResponse:
-    access = _caller_access(db, catalog, user)
+def _catalog_response(
+    catalog: Catalog,
+    user: User,
+    db: Session,
+    ws: Workspace | None = None,
+) -> CatalogResponse:
+    access = _caller_access(db, catalog, user, ws=ws)
     owner_ws_name = catalog.owner_workspace.name if catalog.owner_workspace else None
     return CatalogResponse(
         id=catalog.id,
@@ -884,30 +946,35 @@ def _catalog_response(catalog: Catalog, user: User, db: Session) -> CatalogRespo
     )
 
 
+def _as_uuid(val: Any) -> uuid.UUID | None:
+    if isinstance(val, uuid.UUID):
+        return val
+    if not val:
+        return None
+    try:
+        return uuid.UUID(str(val))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def _extract_ws(ws_ctx: Any) -> Workspace | None:
+    if isinstance(ws_ctx, tuple) and len(ws_ctx) == 2 and ws_ctx[0] is not None:
+        return ws_ctx[0]
+    return None
+
+
 # ── Catalog CRUD ──────────────────────────────────────────────────────────────
 
 
 @app.get("/api/catalogs", response_model=list[CatalogResponse])
 def list_catalogs(
-    workspace_slug: str | None = Query(None),
-    workspace_id: str | None = Query(None),
-    x_workspace_slug: str | None = Header(None, alias="X-Workspace-Slug"),
-    x_workspace_id: str | None = Header(None, alias="X-Workspace-Id"),
-    lake_workspace_id: str | None = Cookie(None),
-    lake_active_workspace: str | None = Cookie(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    ws_ctx: tuple[Workspace, str] | None = Depends(get_catalog_workspace_and_role),
 ):
-    ws, role = get_workspace_context(
-        workspace_slug=workspace_slug,
-        workspace_id=workspace_id,
-        x_workspace_slug=x_workspace_slug,
-        x_workspace_id=x_workspace_id,
-        lake_workspace_id=lake_workspace_id,
-        lake_active_workspace=lake_active_workspace,
-        current_user=current_user,
-        db=db,
-    )
+    ws = _extract_ws(ws_ctx)
+    if ws is None:
+        return []
     from sqlalchemy import or_
 
     shared_ids = db.query(CatalogAccess.catalog_id).filter(
@@ -924,7 +991,7 @@ def list_catalogs(
         .order_by(Catalog.created_at)
         .all()
     )
-    return [_catalog_response(c, current_user, db) for c in catalogs]
+    return [_catalog_response(c, current_user, db, ws=ws) for c in catalogs]
 
 
 def _catalog_manifest_projection(catalogs: list[Catalog]) -> list[dict[str, Any]]:
@@ -975,25 +1042,13 @@ def _catalog_manifest_projection(catalogs: list[Catalog]) -> list[dict[str, Any]
 @app.get("/api/catalogs/catalog-manifest")
 @app.get("/api/catalogs/manifest")
 def catalogs_manifest(
-    workspace_slug: str | None = Query(None),
-    workspace_id: str | None = Query(None),
-    x_workspace_slug: str | None = Header(None, alias="X-Workspace-Slug"),
-    x_workspace_id: str | None = Header(None, alias="X-Workspace-Id"),
-    lake_workspace_id: str | None = Cookie(None),
-    lake_active_workspace: str | None = Cookie(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    ws_ctx: tuple[Workspace, str] | None = Depends(get_catalog_workspace_and_role),
 ):
-    ws, role = get_workspace_context(
-        workspace_slug=workspace_slug,
-        workspace_id=workspace_id,
-        x_workspace_slug=x_workspace_slug,
-        x_workspace_id=x_workspace_id,
-        lake_workspace_id=lake_workspace_id,
-        lake_active_workspace=lake_active_workspace,
-        current_user=current_user,
-        db=db,
-    )
+    ws = _extract_ws(ws_ctx)
+    if ws is None:
+        return []
     from sqlalchemy import or_
 
     shared_ids = db.query(CatalogAccess.catalog_id).filter(
@@ -1042,13 +1097,14 @@ def create_catalog(
     _seed_medallion_schemas(db, catalog)
     db.commit()
     db.refresh(catalog)
-    return _catalog_response(catalog, current_user, db)
+    return _catalog_response(catalog, current_user, db, ws=ws)
 
 
 def _resolve_workspace(workspace_id: str | None, user: User, db: Session) -> Workspace:
     if not workspace_id:
         raise HTTPException(422, "workspace_id is required")
-    ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+    ws_uuid = _as_uuid(workspace_id)
+    ws = db.query(Workspace).filter(Workspace.id == ws_uuid).first() if ws_uuid else None
     if not ws:
         raise HTTPException(404, "Workspace not found")
     if user.role != "superadmin":
@@ -1056,7 +1112,7 @@ def _resolve_workspace(workspace_id: str | None, user: User, db: Session) -> Wor
             (
                 m
                 for m in user.workspace_memberships
-                if str(m.workspace_id) == workspace_id and m.role == "admin"
+                if str(m.workspace_id) == str(workspace_id) and m.role == "admin"
             ),
             None,
         )
@@ -1071,8 +1127,9 @@ def catalog_directory(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    ws_uuid = _as_uuid(workspace_id)
     membership = next(
-        (m for m in current_user.workspace_memberships if str(m.workspace_id) == workspace_id),
+        (m for m in current_user.workspace_memberships if str(m.workspace_id) == str(workspace_id)),
         None,
     )
     if not membership and current_user.role != "superadmin":
@@ -1084,13 +1141,19 @@ def catalog_directory(
         db.query(Catalog)
         .filter(
             Catalog.deleted_at.is_(None),
-            Catalog.owner_workspace_id != workspace_id,
+            Catalog.owner_workspace_id != ws_uuid,
         )
         .order_by(Catalog.name)
         .all()
+        if ws_uuid
+        else []
     )
 
-    grants = db.query(CatalogAccess).filter(CatalogAccess.workspace_id == workspace_id).all()
+    grants = (
+        db.query(CatalogAccess).filter(CatalogAccess.workspace_id == ws_uuid).all()
+        if ws_uuid
+        else []
+    )
     grant_by_catalog = {str(g.catalog_id): g for g in grants}
 
     result = []
@@ -1124,12 +1187,15 @@ def get_catalog(
     catalog_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    ws_ctx: tuple[Workspace, str] | None = Depends(get_catalog_workspace_and_role),
 ):
-    catalog = db.query(Catalog).filter(Catalog.id == catalog_id).first()
+    ws = _extract_ws(ws_ctx)
+    cat_uuid = _as_uuid(catalog_id)
+    catalog = db.query(Catalog).filter(Catalog.id == cat_uuid).first() if cat_uuid else None
     if not catalog:
         raise HTTPException(404, "Catalog not found")
-    _assert_catalog_access(db, catalog, current_user, "read")
-    return _catalog_response(catalog, current_user, db)
+    _assert_catalog_access(db, catalog, current_user, "read", ws=ws)
+    return _catalog_response(catalog, current_user, db, ws=ws)
 
 
 @app.patch("/api/catalogs/{catalog_id}", response_model=CatalogResponse)
@@ -1138,18 +1204,21 @@ def update_catalog(
     req: UpdateCatalogRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    ws_ctx: tuple[Workspace, str] | None = Depends(get_catalog_workspace_and_role),
 ):
-    catalog = db.query(Catalog).filter(Catalog.id == catalog_id).first()
+    ws = _extract_ws(ws_ctx)
+    cat_uuid = _as_uuid(catalog_id)
+    catalog = db.query(Catalog).filter(Catalog.id == cat_uuid).first() if cat_uuid else None
     if not catalog:
         raise HTTPException(404, "Catalog not found")
-    _assert_catalog_access(db, catalog, current_user, "owner")
+    _assert_catalog_access(db, catalog, current_user, "owner", ws=ws)
     if req.name is not None:
         catalog.name = req.name.strip()
     if req.description is not None:
         catalog.description = req.description
     db.commit()
     db.refresh(catalog)
-    return _catalog_response(catalog, current_user, db)
+    return _catalog_response(catalog, current_user, db, ws=ws)
 
 
 @app.delete("/api/catalogs/{catalog_id}", response_model=CatalogResponse)
@@ -1157,11 +1226,14 @@ def delete_catalog(
     catalog_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    ws_ctx: tuple[Workspace, str] | None = Depends(get_catalog_workspace_and_role),
 ):
-    catalog = db.query(Catalog).filter(Catalog.id == catalog_id).first()
+    ws = _extract_ws(ws_ctx)
+    cat_uuid = _as_uuid(catalog_id)
+    catalog = db.query(Catalog).filter(Catalog.id == cat_uuid).first() if cat_uuid else None
     if not catalog:
         raise HTTPException(404, "Catalog not found")
-    _assert_catalog_access(db, catalog, current_user, "owner")
+    _assert_catalog_access(db, catalog, current_user, "owner", ws=ws)
     if catalog.is_default:
         raise HTTPException(409, "The default catalog cannot be deleted")
     if catalog.deleted_at is not None:
@@ -1185,7 +1257,7 @@ def delete_catalog(
 
     db.commit()
     db.refresh(catalog)
-    return _catalog_response(catalog, current_user, db)
+    return _catalog_response(catalog, current_user, db, ws=ws)
 
 
 @app.post("/api/catalogs/{catalog_id}/reactivate", response_model=CatalogResponse)
@@ -1193,11 +1265,14 @@ def reactivate_catalog(
     catalog_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    ws_ctx: tuple[Workspace, str] | None = Depends(get_catalog_workspace_and_role),
 ):
-    catalog = db.query(Catalog).filter(Catalog.id == catalog_id).first()
+    ws = _extract_ws(ws_ctx)
+    cat_uuid = _as_uuid(catalog_id)
+    catalog = db.query(Catalog).filter(Catalog.id == cat_uuid).first() if cat_uuid else None
     if not catalog:
         raise HTTPException(404, "Catalog not found")
-    _assert_catalog_access(db, catalog, current_user, "owner")
+    _assert_catalog_access(db, catalog, current_user, "owner", ws=ws)
     if catalog.deleted_at is None:
         raise HTTPException(409, "Catalog is not pending deletion")
 
@@ -1212,7 +1287,7 @@ def reactivate_catalog(
 
     db.commit()
     db.refresh(catalog)
-    return _catalog_response(catalog, current_user, db)
+    return _catalog_response(catalog, current_user, db, ws=ws)
 
 
 def _purge_objects_for_catalogs(db: Session, catalog_ids: set) -> None:
@@ -1246,11 +1321,14 @@ def purge_catalog(
     req: PurgeCatalogRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    ws_ctx: tuple[Workspace, str] | None = Depends(get_catalog_workspace_and_role),
 ):
-    catalog = db.query(Catalog).filter(Catalog.id == catalog_id).first()
+    ws = _extract_ws(ws_ctx)
+    cat_uuid = _as_uuid(catalog_id)
+    catalog = db.query(Catalog).filter(Catalog.id == cat_uuid).first() if cat_uuid else None
     if not catalog:
         raise HTTPException(404, "Catalog not found")
-    _assert_catalog_access(db, catalog, current_user, "owner")
+    _assert_catalog_access(db, catalog, current_user, "owner", ws=ws)
     if catalog.is_default:
         raise HTTPException(409, "The default catalog cannot be deleted")
 
@@ -1282,11 +1360,14 @@ def list_schemas(
     catalog_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    ws_ctx: tuple[Workspace, str] | None = Depends(get_catalog_workspace_and_role),
 ):
-    catalog = db.query(Catalog).filter(Catalog.id == catalog_id).first()
+    ws = _extract_ws(ws_ctx)
+    cat_uuid = _as_uuid(catalog_id)
+    catalog = db.query(Catalog).filter(Catalog.id == cat_uuid).first() if cat_uuid else None
     if not catalog:
         raise HTTPException(404, "Catalog not found")
-    _assert_catalog_access(db, catalog, current_user, "read")
+    _assert_catalog_access(db, catalog, current_user, "read", ws=ws)
     return [
         CatalogSchemaResponse(
             id=s.id,
@@ -1308,13 +1389,16 @@ def create_schema(
     req: CreateSchemaRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    ws_ctx: tuple[Workspace, str] | None = Depends(get_catalog_workspace_and_role),
 ):
-    catalog = db.query(Catalog).filter(Catalog.id == catalog_id).first()
+    ws = _extract_ws(ws_ctx)
+    cat_uuid = _as_uuid(catalog_id)
+    catalog = db.query(Catalog).filter(Catalog.id == cat_uuid).first() if cat_uuid else None
     if not catalog:
         raise HTTPException(404, "Catalog not found")
-    _assert_catalog_access(db, catalog, current_user, "write")
+    _assert_catalog_access(db, catalog, current_user, "write", ws=ws)
     slug = _slugify(req.name)
-    if db.query(CatalogSchema).filter_by(catalog_id=catalog_id, slug=slug).first():
+    if db.query(CatalogSchema).filter_by(catalog_id=cat_uuid, slug=slug).first():
         raise HTTPException(400, f"Schema slug '{slug}' already exists in this catalog")
     schema = CatalogSchema(
         catalog_id=catalog.id, name=req.name.strip(), slug=slug, description=req.description
@@ -1341,12 +1425,20 @@ def update_schema(
     req: UpdateSchemaRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    ws_ctx: tuple[Workspace, str] | None = Depends(get_catalog_workspace_and_role),
 ):
-    catalog = db.query(Catalog).filter(Catalog.id == catalog_id).first()
+    ws = _extract_ws(ws_ctx)
+    cat_uuid = _as_uuid(catalog_id)
+    sch_uuid = _as_uuid(schema_id)
+    catalog = db.query(Catalog).filter(Catalog.id == cat_uuid).first() if cat_uuid else None
     if not catalog:
         raise HTTPException(404, "Catalog not found")
-    _assert_catalog_access(db, catalog, current_user, "write")
-    schema = db.query(CatalogSchema).filter_by(id=schema_id, catalog_id=catalog_id).first()
+    _assert_catalog_access(db, catalog, current_user, "write", ws=ws)
+    schema = (
+        db.query(CatalogSchema).filter_by(id=sch_uuid, catalog_id=cat_uuid).first()
+        if sch_uuid and cat_uuid
+        else None
+    )
     if not schema:
         raise HTTPException(404, "Schema not found")
     if schema.tier in _MEDALLION_TIERS:
@@ -1373,12 +1465,20 @@ def delete_schema(
     schema_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    ws_ctx: tuple[Workspace, str] | None = Depends(get_catalog_workspace_and_role),
 ):
-    catalog = db.query(Catalog).filter(Catalog.id == catalog_id).first()
+    ws = _extract_ws(ws_ctx)
+    cat_uuid = _as_uuid(catalog_id)
+    sch_uuid = _as_uuid(schema_id)
+    catalog = db.query(Catalog).filter(Catalog.id == cat_uuid).first() if cat_uuid else None
     if not catalog:
         raise HTTPException(404, "Catalog not found")
-    _assert_catalog_access(db, catalog, current_user, "owner")
-    schema = db.query(CatalogSchema).filter_by(id=schema_id, catalog_id=catalog_id).first()
+    _assert_catalog_access(db, catalog, current_user, "owner", ws=ws)
+    schema = (
+        db.query(CatalogSchema).filter_by(id=sch_uuid, catalog_id=cat_uuid).first()
+        if sch_uuid and cat_uuid
+        else None
+    )
     if not schema:
         raise HTTPException(404, "Schema not found")
     if schema.tier in _MEDALLION_TIERS:
@@ -1400,12 +1500,20 @@ def list_tables(
     schema_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    ws_ctx: tuple[Workspace, str] | None = Depends(get_catalog_workspace_and_role),
 ):
-    catalog = db.query(Catalog).filter(Catalog.id == catalog_id).first()
+    ws = _extract_ws(ws_ctx)
+    cat_uuid = _as_uuid(catalog_id)
+    sch_uuid = _as_uuid(schema_id)
+    catalog = db.query(Catalog).filter(Catalog.id == cat_uuid).first() if cat_uuid else None
     if not catalog:
         raise HTTPException(404, "Catalog not found")
-    _assert_catalog_access(db, catalog, current_user, "read")
-    schema = db.query(CatalogSchema).filter_by(id=schema_id, catalog_id=catalog_id).first()
+    _assert_catalog_access(db, catalog, current_user, "read", ws=ws)
+    schema = (
+        db.query(CatalogSchema).filter_by(id=sch_uuid, catalog_id=cat_uuid).first()
+        if (sch_uuid and cat_uuid)
+        else None
+    )
     if not schema:
         raise HTTPException(404, "Schema not found")
     return [CatalogTableResponse.model_validate(t) for t in schema.tables]
@@ -1420,16 +1528,24 @@ def create_table(
     req: CreateTableRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    ws_ctx: tuple[Workspace, str] | None = Depends(get_catalog_workspace_and_role),
 ):
-    catalog = db.query(Catalog).filter(Catalog.id == catalog_id).first()
+    ws = _extract_ws(ws_ctx)
+    cat_uuid = _as_uuid(catalog_id)
+    sch_uuid = _as_uuid(schema_id)
+    catalog = db.query(Catalog).filter(Catalog.id == cat_uuid).first() if cat_uuid else None
     if not catalog:
         raise HTTPException(404, "Catalog not found")
-    _assert_catalog_access(db, catalog, current_user, "write")
-    schema = db.query(CatalogSchema).filter_by(id=schema_id, catalog_id=catalog_id).first()
+    _assert_catalog_access(db, catalog, current_user, "write", ws=ws)
+    schema = (
+        db.query(CatalogSchema).filter_by(id=sch_uuid, catalog_id=cat_uuid).first()
+        if (sch_uuid and cat_uuid)
+        else None
+    )
     if not schema:
         raise HTTPException(404, "Schema not found")
     slug = _slugify(req.name)
-    if db.query(CatalogTable).filter_by(schema_id=schema_id, slug=slug).first():
+    if db.query(CatalogTable).filter_by(schema_id=sch_uuid, slug=slug).first():
         raise HTTPException(400, f"Table slug '{slug}' already exists in this schema")
     table = CatalogTable(
         schema_id=schema.id,
@@ -1456,12 +1572,21 @@ def update_table(
     req: UpdateTableRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    ws_ctx: tuple[Workspace, str] | None = Depends(get_catalog_workspace_and_role),
 ):
-    catalog = db.query(Catalog).filter(Catalog.id == catalog_id).first()
+    ws = _extract_ws(ws_ctx)
+    cat_uuid = _as_uuid(catalog_id)
+    sch_uuid = _as_uuid(schema_id)
+    tbl_uuid = _as_uuid(table_id)
+    catalog = db.query(Catalog).filter(Catalog.id == cat_uuid).first() if cat_uuid else None
     if not catalog:
         raise HTTPException(404, "Catalog not found")
-    _assert_catalog_access(db, catalog, current_user, "write")
-    table = db.query(CatalogTable).filter_by(id=table_id, schema_id=schema_id).first()
+    _assert_catalog_access(db, catalog, current_user, "write", ws=ws)
+    table = (
+        db.query(CatalogTable).filter_by(id=tbl_uuid, schema_id=sch_uuid).first()
+        if (tbl_uuid and sch_uuid)
+        else None
+    )
     if not table:
         raise HTTPException(404, "Table not found")
     if req.description is not None:
@@ -1487,12 +1612,21 @@ def sync_table_vector_index_endpoint(
     table_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    ws_ctx: tuple[Workspace, str] | None = Depends(get_catalog_workspace_and_role),
 ):
-    catalog = db.query(Catalog).filter(Catalog.id == catalog_id).first()
+    ws = _extract_ws(ws_ctx)
+    cat_uuid = _as_uuid(catalog_id)
+    sch_uuid = _as_uuid(schema_id)
+    tbl_uuid = _as_uuid(table_id)
+    catalog = db.query(Catalog).filter(Catalog.id == cat_uuid).first() if cat_uuid else None
     if not catalog:
         raise HTTPException(404, "Catalog not found")
-    _assert_catalog_access(db, catalog, current_user, "write")
-    table = db.query(CatalogTable).filter_by(id=table_id, schema_id=schema_id).first()
+    _assert_catalog_access(db, catalog, current_user, "write", ws=ws)
+    table = (
+        db.query(CatalogTable).filter_by(id=tbl_uuid, schema_id=sch_uuid).first()
+        if (tbl_uuid and sch_uuid)
+        else None
+    )
     if not table:
         raise HTTPException(404, "Table not found")
 
@@ -1511,12 +1645,21 @@ def delete_table(
     table_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    ws_ctx: tuple[Workspace, str] | None = Depends(get_catalog_workspace_and_role),
 ):
-    catalog = db.query(Catalog).filter(Catalog.id == catalog_id).first()
+    ws = _extract_ws(ws_ctx)
+    cat_uuid = _as_uuid(catalog_id)
+    sch_uuid = _as_uuid(schema_id)
+    tbl_uuid = _as_uuid(table_id)
+    catalog = db.query(Catalog).filter(Catalog.id == cat_uuid).first() if cat_uuid else None
     if not catalog:
         raise HTTPException(404, "Catalog not found")
-    _assert_catalog_access(db, catalog, current_user, "write")
-    table = db.query(CatalogTable).filter_by(id=table_id, schema_id=schema_id).first()
+    _assert_catalog_access(db, catalog, current_user, "write", ws=ws)
+    table = (
+        db.query(CatalogTable).filter_by(id=tbl_uuid, schema_id=sch_uuid).first()
+        if (tbl_uuid and sch_uuid)
+        else None
+    )
     if not table:
         raise HTTPException(404, "Table not found")
     db.delete(table)
@@ -1532,15 +1675,22 @@ def list_access(
     catalog_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    ws_ctx: tuple[Workspace, str] | None = Depends(get_catalog_workspace_and_role),
 ):
-    catalog = db.query(Catalog).filter(Catalog.id == catalog_id).first()
+    ws = _extract_ws(ws_ctx)
+    cat_uuid = _as_uuid(catalog_id)
+    catalog = db.query(Catalog).filter(Catalog.id == cat_uuid).first() if cat_uuid else None
     if not catalog:
         raise HTTPException(404, "Catalog not found")
-    _assert_catalog_access(db, catalog, current_user, "owner")
-    grants = db.query(CatalogAccess).filter(CatalogAccess.catalog_id == catalog_id).all()
+    _assert_catalog_access(db, catalog, current_user, "owner", ws=ws)
+    grants = (
+        db.query(CatalogAccess).filter(CatalogAccess.catalog_id == cat_uuid).all()
+        if cat_uuid
+        else []
+    )
     result = []
     for g in grants:
-        ws = db.query(Workspace).filter(Workspace.id == g.workspace_id).first()
+        g_ws = db.query(Workspace).filter(Workspace.id == g.workspace_id).first()
         requester = (
             db.query(User).filter(User.id == g.requested_by).first() if g.requested_by else None
         )
@@ -1549,7 +1699,7 @@ def list_access(
                 id=g.id,
                 catalog_id=g.catalog_id,
                 workspace_id=g.workspace_id,
-                workspace_name=ws.name if ws else None,
+                workspace_name=g_ws.name if g_ws else None,
                 mode=g.mode,
                 status=g.status,
                 requested_by_email=requester.email if requester else None,
@@ -1567,7 +1717,8 @@ def request_access(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    catalog = db.query(Catalog).filter(Catalog.id == catalog_id).first()
+    cat_uuid = _as_uuid(catalog_id)
+    catalog = db.query(Catalog).filter(Catalog.id == cat_uuid).first() if cat_uuid else None
     if not catalog:
         raise HTTPException(404, "Catalog not found")
 
@@ -1594,7 +1745,12 @@ def request_access(
     if str(ws_id) == str(catalog.owner_workspace_id):
         raise HTTPException(400, "Owner workspace already has full access")
 
-    existing = db.query(CatalogAccess).filter_by(catalog_id=catalog_id, workspace_id=ws_id).first()
+    ws_uuid = _as_uuid(ws_id)
+    existing = (
+        db.query(CatalogAccess).filter_by(catalog_id=cat_uuid, workspace_id=ws_uuid).first()
+        if (cat_uuid and ws_uuid)
+        else None
+    )
     if existing:
         if existing.status == "approved":
             raise HTTPException(400, "Access already approved")
@@ -1608,7 +1764,7 @@ def request_access(
         db.add(
             CatalogAccess(
                 catalog_id=catalog.id,
-                workspace_id=ws_id,
+                workspace_id=ws_uuid,
                 mode=req.mode,
                 status="pending",
                 requested_by=current_user.id,
@@ -1617,7 +1773,7 @@ def request_access(
     db.commit()
 
     owner_emails = _owner_emails(db, catalog)
-    ws = db.query(Workspace).filter(Workspace.id == ws_id).first()
+    ws = db.query(Workspace).filter(Workspace.id == ws_uuid).first() if ws_uuid else None
     threading.Thread(
         target=send_access_requested,
         args=(owner_emails, ws.name if ws else "Unknown", catalog.name, req.mode),
@@ -1634,13 +1790,21 @@ def review_access(
     req: ReviewAccessRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    ws_ctx: tuple[Workspace, str] | None = Depends(get_catalog_workspace_and_role),
 ):
-    catalog = db.query(Catalog).filter(Catalog.id == catalog_id).first()
+    ws = _extract_ws(ws_ctx)
+    cat_uuid = _as_uuid(catalog_id)
+    acc_uuid = _as_uuid(access_id)
+    catalog = db.query(Catalog).filter(Catalog.id == cat_uuid).first() if cat_uuid else None
     if not catalog:
         raise HTTPException(404, "Catalog not found")
-    _assert_catalog_access(db, catalog, current_user, "owner")
+    _assert_catalog_access(db, catalog, current_user, "owner", ws=ws)
 
-    grant = db.query(CatalogAccess).filter_by(id=access_id, catalog_id=catalog_id).first()
+    grant = (
+        db.query(CatalogAccess).filter_by(id=acc_uuid, catalog_id=cat_uuid).first()
+        if (acc_uuid and cat_uuid)
+        else None
+    )
     if not grant:
         raise HTTPException(404, "Access grant not found")
 
@@ -1670,12 +1834,20 @@ def revoke_access(
     access_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    ws_ctx: tuple[Workspace, str] | None = Depends(get_catalog_workspace_and_role),
 ):
-    catalog = db.query(Catalog).filter(Catalog.id == catalog_id).first()
+    ws = _extract_ws(ws_ctx)
+    cat_uuid = _as_uuid(catalog_id)
+    acc_uuid = _as_uuid(access_id)
+    catalog = db.query(Catalog).filter(Catalog.id == cat_uuid).first() if cat_uuid else None
     if not catalog:
         raise HTTPException(404, "Catalog not found")
-    _assert_catalog_access(db, catalog, current_user, "owner")
-    grant = db.query(CatalogAccess).filter_by(id=access_id, catalog_id=catalog_id).first()
+    _assert_catalog_access(db, catalog, current_user, "owner", ws=ws)
+    grant = (
+        db.query(CatalogAccess).filter_by(id=acc_uuid, catalog_id=cat_uuid).first()
+        if (acc_uuid and cat_uuid)
+        else None
+    )
     if not grant:
         raise HTTPException(404, "Access grant not found")
     db.delete(grant)
@@ -1692,8 +1864,9 @@ def inbound_access_requests(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    ws_uuid = _as_uuid(workspace_id)
     membership = next(
-        (m for m in current_user.workspace_memberships if str(m.workspace_id) == workspace_id),
+        (m for m in current_user.workspace_memberships if str(m.workspace_id) == str(workspace_id)),
         None,
     )
     if not membership and current_user.role != "superadmin":
@@ -1701,9 +1874,13 @@ def inbound_access_requests(
     if membership and membership.role != "admin" and current_user.role != "superadmin":
         raise HTTPException(403, "Workspace admin access required")
 
-    owned_catalog_ids = db.query(Catalog.id).filter(
-        Catalog.owner_workspace_id == workspace_id,
-        Catalog.deleted_at.is_(None),
+    owned_catalog_ids = (
+        db.query(Catalog.id).filter(
+            Catalog.owner_workspace_id == ws_uuid,
+            Catalog.deleted_at.is_(None),
+        )
+        if ws_uuid
+        else []
     )
     grants = (
         db.query(CatalogAccess)
@@ -1712,6 +1889,8 @@ def inbound_access_requests(
             CatalogAccess.status == "pending",
         )
         .all()
+        if ws_uuid
+        else []
     )
 
     result = []
@@ -1738,23 +1917,39 @@ def workspace_catalogs(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    ws_uuid = _as_uuid(workspace_id)
+    ws = (
+        db.query(Workspace).filter(Workspace.id == ws_uuid, Workspace.status == "active").first()
+        if ws_uuid
+        else None
+    )
+    if not ws:
+        raise HTTPException(404, "Workspace not found")
+
+    if current_user.role != "superadmin":
+        is_member = any(
+            str(m.workspace_id) == str(workspace_id) for m in current_user.workspace_memberships
+        )
+        if not is_member:
+            raise HTTPException(403, "Not a member of this workspace")
+
     from sqlalchemy import or_
 
     shared_ids = db.query(CatalogAccess.catalog_id).filter(
-        CatalogAccess.workspace_id == workspace_id,
+        CatalogAccess.workspace_id == ws_uuid,
         CatalogAccess.status == "approved",
         CatalogAccess.suspended.is_(False),
     )
     catalogs = (
         db.query(Catalog)
         .filter(
-            or_(Catalog.owner_workspace_id == workspace_id, Catalog.id.in_(shared_ids)),
+            or_(Catalog.owner_workspace_id == ws_uuid, Catalog.id.in_(shared_ids)),
             Catalog.deleted_at.is_(None),
         )
         .order_by(Catalog.created_at)
         .all()
     )
-    return [_catalog_response(c, current_user, db) for c in catalogs]
+    return [_catalog_response(c, current_user, db, ws=ws) for c in catalogs]
 
 
 @app.get("/api/workspaces/{workspace_id}/catalog-manifest")
@@ -1764,7 +1959,14 @@ def workspace_catalog_manifest(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    from sqlalchemy import or_
+    ws_uuid = _as_uuid(workspace_id)
+    ws = (
+        db.query(Workspace).filter(Workspace.id == ws_uuid, Workspace.status == "active").first()
+        if ws_uuid
+        else None
+    )
+    if not ws:
+        raise HTTPException(404, "Workspace not found")
 
     if current_user.role != "superadmin":
         is_member = any(
@@ -1773,15 +1975,17 @@ def workspace_catalog_manifest(
         if not is_member:
             raise HTTPException(403, "Not a member of this workspace")
 
+    from sqlalchemy import or_
+
     shared_ids = db.query(CatalogAccess.catalog_id).filter(
-        CatalogAccess.workspace_id == workspace_id,
+        CatalogAccess.workspace_id == ws_uuid,
         CatalogAccess.status == "approved",
         CatalogAccess.suspended.is_(False),
     )
     catalogs = (
         db.query(Catalog)
         .filter(
-            or_(Catalog.owner_workspace_id == workspace_id, Catalog.id.in_(shared_ids)),
+            or_(Catalog.owner_workspace_id == ws_uuid, Catalog.id.in_(shared_ids)),
             Catalog.deleted_at.is_(None),
         )
         .order_by(Catalog.created_at)
@@ -1799,12 +2003,17 @@ def workspace_catalog_settings(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+    ws_uuid = _as_uuid(workspace_id)
+    ws = db.query(Workspace).filter(Workspace.id == ws_uuid).first() if ws_uuid else None
     if not ws:
         raise HTTPException(404, "Workspace not found")
     if current_user.role != "superadmin":
         member = next(
-            (m for m in current_user.workspace_memberships if str(m.workspace_id) == workspace_id),
+            (
+                m
+                for m in current_user.workspace_memberships
+                if str(m.workspace_id) == str(workspace_id)
+            ),
             None,
         )
         if not member:
@@ -1812,7 +2021,7 @@ def workspace_catalog_settings(
 
     owned = (
         db.query(Catalog)
-        .filter(Catalog.owner_workspace_id == workspace_id)
+        .filter(Catalog.owner_workspace_id == ws_uuid)
         .order_by(Catalog.deleted_at.is_(None).desc(), Catalog.name)
         .all()
     )
@@ -1820,7 +2029,7 @@ def workspace_catalog_settings(
     access_grants = (
         db.query(CatalogAccess)
         .filter(
-            CatalogAccess.workspace_id == workspace_id,
+            CatalogAccess.workspace_id == ws_uuid,
             CatalogAccess.status.in_(["pending", "approved"]),
         )
         .all()
@@ -1854,7 +2063,9 @@ def remove_shared_catalog(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+    ws_uuid = _as_uuid(workspace_id)
+    cat_uuid = _as_uuid(catalog_id)
+    ws = db.query(Workspace).filter(Workspace.id == ws_uuid).first() if ws_uuid else None
     if not ws:
         raise HTTPException(404, "Workspace not found")
     if current_user.role != "superadmin":
@@ -1862,7 +2073,7 @@ def remove_shared_catalog(
             (
                 m
                 for m in current_user.workspace_memberships
-                if str(m.workspace_id) == workspace_id and m.role == "admin"
+                if str(m.workspace_id) == str(workspace_id) and m.role == "admin"
             ),
             None,
         )
@@ -1872,10 +2083,12 @@ def remove_shared_catalog(
     grant = (
         db.query(CatalogAccess)
         .filter(
-            CatalogAccess.workspace_id == workspace_id,
-            CatalogAccess.catalog_id == catalog_id,
+            CatalogAccess.workspace_id == ws_uuid,
+            CatalogAccess.catalog_id == cat_uuid,
         )
         .first()
+        if (ws_uuid and cat_uuid)
+        else None
     )
     if not grant:
         raise HTTPException(404, "Shared catalog not found")
