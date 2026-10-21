@@ -11,4 +11,4 @@ aiofiles==25.1.0
 websockets==16.1.1
 numpy>=2.5.4
 pyarrow>=15.0.0
-sqlglot>=25.0.0
+sqlglot>=30.23.0
