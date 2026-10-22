@@ -93,20 +93,37 @@
     <div class="space-y-1 mb-2">
       {% for cat in owned_catalogs %}
       {% set is_pending = cat.deleted_at is not none and cat.deleted_at %}
-      <div class="flex items-center gap-3 py-2 border-b border-white/[0.04] last:border-0">
+      <div class="flex items-center gap-3 py-2.5 border-b border-white/[0.04] last:border-0">
         <div class="flex-1 min-w-0">
-          <div class="flex items-center gap-2">
-            <span class="text-sm {% if is_pending %}text-gray-500 line-through{% else %}text-gray-200{% endif %} truncate">{{ cat.name }}</span>
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="inline-flex items-center gap-1.5 text-xs">
+              <span class="text-[9px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-gray-800 text-gray-400 border border-gray-700/60 font-mono">Workspace</span>
+              <span class="font-medium text-gray-200">{{ workspace.name }}</span>
+            </span>
+            <span class="text-gray-600 text-xs">/</span>
+            <span class="inline-flex items-center gap-1.5 text-xs">
+              <span class="text-[9px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-blue-950/60 text-blue-400 border border-blue-800/60 font-mono">Catalog</span>
+              <span class="font-mono font-medium {% if is_pending %}text-gray-500 line-through{% else %}text-blue-200{% endif %}">{{ cat.name }}</span>
+            </span>
             {% if is_pending %}
             <span class="text-[10px] px-1.5 py-0.5 rounded bg-yellow-900/30 text-yellow-500 border border-yellow-800/40 shrink-0">pending deletion</span>
             {% endif %}
           </div>
           {% if is_pending and cat.scheduled_purge_at %}
-          <div class="text-[11px] text-gray-600 mt-0.5">
+          <div class="text-[11px] text-gray-600 mt-1">
             Deletes {{ cat.scheduled_purge_at[:10] }} at {{ cat.scheduled_purge_at[11:16] }} UTC
           </div>
           {% else %}
-          <div class="text-[11px] text-gray-500">{{ cat.schemas | length }} schema{{ 's' if cat.schemas | length != 1 }}</div>
+          <div class="flex items-center gap-2 mt-1.5 text-[11px] text-gray-500 flex-wrap">
+            <span class="text-[10px] uppercase tracking-wider text-gray-500 font-semibold font-mono">Schemas ({{ cat.schemas | length }}):</span>
+            {% if cat.schemas %}
+              {% for sch in cat.schemas %}
+                <span class="px-1.5 py-0.5 rounded bg-white/[0.04] text-gray-300 font-mono text-[10px] border border-white/[0.06]">{{ sch.slug or sch.name }}</span>
+              {% endfor %}
+            {% else %}
+              <span class="italic text-gray-600">No schemas</span>
+            {% endif %}
+          </div>
           {% endif %}
         </div>
         {% if cat.is_default %}
@@ -145,12 +162,33 @@
     <div class="space-y-1">
       {% for sc in shared_catalogs %}
       {% set sc_pending = sc.status == 'pending' %}
-      <div class="flex items-center gap-3 py-2 border-b border-white/[0.04] last:border-0">
+      <div class="flex items-center gap-3 py-2.5 border-b border-white/[0.04] last:border-0">
         <div class="flex-1 min-w-0">
-          <div class="text-sm {% if sc_pending %}text-gray-500{% else %}text-gray-200{% endif %} truncate">
-            {% if sc.owner_workspace_name %}<span class="text-gray-500">{{ sc.owner_workspace_name }}.</span>{% endif %}{{ sc.catalog_name }}
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="inline-flex items-center gap-1.5 text-xs">
+              <span class="text-[9px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-gray-800 text-gray-400 border border-gray-700/60 font-mono">Workspace</span>
+              <span class="font-medium text-gray-200">{{ sc.owner_workspace_name or 'External' }}</span>
+            </span>
+            <span class="text-gray-600 text-xs">/</span>
+            <span class="inline-flex items-center gap-1.5 text-xs">
+              <span class="text-[9px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-cyan-950/60 text-cyan-400 border border-cyan-800/60 font-mono">Catalog</span>
+              <span class="font-mono font-medium {% if sc_pending %}text-gray-500{% else %}text-cyan-200{% endif %}">{{ sc.catalog_name }}</span>
+            </span>
+            {% if sc_pending %}
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-yellow-900/30 text-yellow-500 border border-yellow-800/40 shrink-0">pending approval</span>
+            {% endif %}
           </div>
-          {% if sc.suspended %}<div class="text-[11px] text-yellow-600">suspended</div>{% endif %}
+          <div class="flex items-center gap-2 mt-1.5 text-[11px] text-gray-500 flex-wrap">
+            <span class="text-[10px] uppercase tracking-wider text-gray-500 font-semibold font-mono">Schemas{% if sc.schemas %} ({{ sc.schemas | length }}){% endif %}:</span>
+            {% if sc.schemas %}
+              {% for sch in sc.schemas %}
+                <span class="px-1.5 py-0.5 rounded bg-white/[0.04] text-cyan-300/80 font-mono text-[10px] border border-cyan-800/30">{{ sch.slug or sch.name }}</span>
+              {% endfor %}
+            {% else %}
+              <span class="italic text-gray-500">All schemas included</span>
+            {% endif %}
+            {% if sc.suspended %}<span class="text-[10px] text-yellow-500 font-mono ml-1">suspended</span>{% endif %}
+          </div>
         </div>
         {% if sc_pending %}
         <span class="text-[10px] px-1.5 py-0.5 rounded bg-yellow-900/30 text-yellow-500 border border-yellow-800/40 shrink-0">pending approval</span>
@@ -160,7 +198,7 @@
           {{ sc.mode or 'read' }}
         </span>
         <form action="/settings/workspace/catalogs/{{ sc.catalog_id }}/remove-shared" method="post"
-              onsubmit="return confirm('Remove shared access to \'{{ sc.catalog_name }}\'?')">
+              onsubmit="return confirm('Remove shared access to this catalog?')">
           <button type="submit" class="text-xs px-2.5 py-1 rounded border border-gray-700 text-gray-500 hover:text-red-400 hover:border-red-600/50 transition-colors shrink-0">Remove</button>
         </form>
         {% endif %}
@@ -303,8 +341,16 @@
       const desc = item.description ? ' · ' + escHtml(item.description) : '';
       row.innerHTML = `
         <div class="flex-1 min-w-0">
-          <div class="text-sm text-gray-200 truncate">
-            ${escHtml(item.name)}<span class="text-gray-500 text-[11px] ml-1">· ${escHtml(item.owner_workspace_name)}</span>
+          <div class="flex items-center gap-2 flex-wrap mb-1">
+            <span class="inline-flex items-center gap-1 text-xs">
+              <span class="text-[9px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded bg-gray-800 text-gray-400 border border-gray-700/60 font-mono">Workspace</span>
+              <span class="font-medium text-gray-300">${escHtml(item.owner_workspace_name || 'External')}</span>
+            </span>
+            <span class="text-gray-600 text-xs">/</span>
+            <span class="inline-flex items-center gap-1 text-xs">
+              <span class="text-[9px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded bg-blue-950/60 text-blue-400 border border-blue-800/60 font-mono">Catalog</span>
+              <span class="font-mono font-medium text-blue-200">${escHtml(item.name)}</span>
+            </span>
           </div>
           <div class="text-[11px] text-gray-500">${schemaLabel}${desc}</div>
         </div>

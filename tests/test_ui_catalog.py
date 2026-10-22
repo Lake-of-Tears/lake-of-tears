@@ -682,3 +682,112 @@ def test_catalog_vector_sync_backend_error():
         assert res.status_code == 500
         assert res.json()["ok"] is False
         assert res.json()["error"] == "Backend sync failed"
+
+
+def test_workspace_settings_catalogs_labels_owned_workspace_and_schemas():
+    token = _make_token()
+    mock_workspaces = [
+        {
+            "id": "ws-100",
+            "slug": "dev",
+            "name": "Dev Workspace",
+            "role": "admin",
+            "my_role": "admin",
+        }
+    ]
+    mock_catalog_settings = {
+        "owned": [
+            {
+                "id": "cat-1",
+                "name": "default",
+                "slug": "default",
+                "is_default": True,
+                "schemas": [
+                    {"name": "Bronze", "slug": "bronze"},
+                    {"name": "Silver", "slug": "silver"},
+                ],
+            }
+        ],
+        "shared": [],
+    }
+
+    def mock_backend_get(path, *args, **kwargs):
+        if "settings/catalogs" in path:
+            return mock_catalog_settings
+        return []
+
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
+        patch.object(main, "_backend_get", side_effect=mock_backend_get),
+    ):
+        res = client.get(
+            "/settings/workspace?tab=catalogs",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-100"},
+        )
+        assert res.status_code == 200
+        html = res.text
+        assert "Workspace" in html
+        assert "Dev Workspace" in html
+        assert "Catalog" in html
+        assert "default" in html
+        assert "Schemas (2):" in html
+        assert "bronze" in html
+        assert "silver" in html
+
+
+def test_workspace_settings_catalogs_labels_shared_workspace_and_catalog():
+    token = _make_token()
+    mock_workspaces = [
+        {
+            "id": "ws-100",
+            "slug": "dev",
+            "name": "Dev Workspace",
+            "role": "admin",
+            "my_role": "admin",
+        }
+    ]
+    mock_catalog_settings = {
+        "owned": [],
+        "shared": [
+            {
+                "access_id": "acc-1",
+                "catalog_id": "cat-2",
+                "catalog_name": "default",
+                "owner_workspace_id": "ws-root",
+                "owner_workspace_name": "Default",
+                "status": "approved",
+                "suspended": False,
+                "mode": "read",
+                "schemas": [
+                    {"name": "Bronze", "slug": "bronze"},
+                    {"name": "Gold", "slug": "gold"},
+                ],
+            }
+        ],
+    }
+
+    def mock_backend_get(path, *args, **kwargs):
+        if "settings/catalogs" in path:
+            return mock_catalog_settings
+        return []
+
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
+        patch.object(main, "_backend_get", side_effect=mock_backend_get),
+    ):
+        res = client.get(
+            "/settings/workspace?tab=shared",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-100"},
+        )
+        assert res.status_code == 200
+        html = res.text
+        assert "Workspace" in html
+        assert "Default" in html
+        assert "Catalog" in html
+        assert "default" in html
+        assert "Schemas (2):" in html
+        assert "bronze" in html
+        assert "gold" in html
+        assert "read" in html

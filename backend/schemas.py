@@ -377,6 +377,8 @@ class SharedCatalogSettingsItem(BaseModel):
     owner_workspace_name: str | None = None
     status: str
     suspended: bool = False
+    mode: str = "read"
+    schemas: list[CatalogSchemaResponse] = []
 
 
 class WorkspaceCatalogSettingsResponse(BaseModel):
