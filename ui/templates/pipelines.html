@@ -528,6 +528,58 @@
     {% endif %}
   </div>
 
+  <!-- Shared with You Pipelines Section -->
+  {% if shared_workspaces %}
+  <div class="shared-with-you-section mt-8 pt-4 border-t border-white/[0.07]" id="pipelines-shared-section">
+    <div class="flex items-center justify-between mb-4">
+      <div class="flex items-center gap-2">
+        <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+        </svg>
+        <h2 class="text-sm font-semibold text-gray-200">Shared with You</h2>
+        <span class="text-[10px] px-2 py-0.5 rounded-full bg-cyan-950/40 text-cyan-300 border border-cyan-800/40 font-medium">
+          {{ shared_workspaces | length }} workspace{{ 's' if shared_workspaces | length > 1 else '' }}
+        </span>
+      </div>
+    </div>
+
+    <div class="space-y-4">
+      {% for sws in shared_workspaces %}
+      <div class="card p-4 space-y-3" data-shared-workspace-id="{{ sws.id }}">
+        <!-- Shared Workspace Header Card -->
+        <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-6 h-6 rounded bg-cyan-600/30 border border-cyan-500/30 flex items-center justify-center text-xs font-bold text-cyan-300">
+              {{ sws.name[0] | upper }}
+            </span>
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="font-semibold text-sm text-gray-100">{{ sws.name }}</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-cyan-950/40 text-cyan-400 border border-cyan-800/40 font-mono">
+                  🔗 Shared · Read-Only
+                </span>
+              </div>
+            </div>
+          </div>
+          <button type="button"
+                  onclick="openDisconnectShareModal('{{ sws.id }}', '{{ sws.name }}')"
+                  class="btn-ghost text-xs px-2.5 py-1 text-red-400 hover:text-red-300 hover:bg-red-950/30 border border-red-900/30 rounded flex items-center gap-1.5 transition-colors">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+            Disconnect Share
+          </button>
+        </div>
+
+        <div id="shared-pipelines-{{ sws.slug }}" class="space-y-2">
+          <button onclick="fetchSharedWorkspacePipelines('{{ sws.slug }}', '{{ sws.name }}')" class="text-xs text-cyan-400 hover:text-cyan-200 underline">
+            Load shared pipelines
+          </button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
 </div>
 
 <!-- ── Slide-Over Inspector Drawer ─────────────────────────────────────────── -->
@@ -1785,6 +1837,37 @@
       showToast(err.message, 'error');
     } finally {
       icon.classList.remove('animate-spin');
+    }
+  }
+
+  async function fetchSharedWorkspacePipelines(slug, name) {
+    const container = document.getElementById(`shared-pipelines-${slug}`);
+    if (!container) return;
+    container.innerHTML = `<div class="text-xs text-gray-500 py-1">Loading shared pipelines...</div>`;
+    try {
+      const res = await fetch(`/api/pipelines?workspace_slug=${encodeURIComponent(slug)}`);
+      if (!res.ok) throw new Error('Failed to load shared pipelines');
+      const data = await res.json();
+      const pipes = data.pipelines || [];
+      if (pipes.length === 0) {
+        container.innerHTML = `<div class="text-xs text-gray-500 py-1">No pipelines found in this shared workspace.</div>`;
+        return;
+      }
+      container.innerHTML = pipes.map(p => `
+        <div class="flex items-center justify-between p-2.5 rounded bg-white/[0.02] border border-white/[0.04] text-xs">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="w-2 h-2 rounded-full ${p.is_paused ? 'bg-gray-500' : 'bg-emerald-400'}"></span>
+            <span class="font-mono text-cyan-300 font-medium truncate">${escapeHtml(p.dag_id)}</span>
+            <span class="text-[9px] px-1.5 py-0.5 rounded font-mono uppercase bg-cyan-950/40 text-cyan-300 border border-cyan-800/40">🔗 Shared · ${escapeHtml(name)}</span>
+          </div>
+          <div class="flex items-center gap-3 shrink-0 text-gray-400 font-mono text-[11px]">
+            <span>${escapeHtml(p.schedule_interval || 'None')}</span>
+            <span class="text-[10px] text-gray-500">Read-Only</span>
+          </div>
+        </div>
+      `).join('');
+    } catch (err) {
+      container.innerHTML = `<div class="text-xs text-red-400 py-1">${escapeHtml(err.message)}</div>`;
     }
   }
 

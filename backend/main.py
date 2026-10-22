@@ -1149,6 +1149,17 @@ def _caller_access(
                 None,
             )
             if not member:
+                share = (
+                    db.query(WorkspaceShare)
+                    .filter(
+                        WorkspaceShare.workspace_id == ws.id,
+                        WorkspaceShare.user_id == user.id,
+                        WorkspaceShare.status == "approved",
+                    )
+                    .first()
+                )
+                if share:
+                    return "read"
                 return None
             role = member.role.lower() if member.role else "read"
             if role in ("admin", "owner"):
@@ -2293,7 +2304,17 @@ def workspace_catalogs(
             str(m.workspace_id) == str(workspace_id) for m in current_user.workspace_memberships
         )
         if not is_member:
-            raise HTTPException(403, "Not a member of this workspace")
+            has_share = (
+                db.query(WorkspaceShare)
+                .filter(
+                    WorkspaceShare.workspace_id == ws.id,
+                    WorkspaceShare.user_id == current_user.id,
+                    WorkspaceShare.status == "approved",
+                )
+                .first()
+            )
+            if not has_share:
+                raise HTTPException(403, "Not a member of this workspace")
 
     from sqlalchemy import or_
 
@@ -2335,7 +2356,17 @@ def workspace_catalog_manifest(
             str(m.workspace_id) == str(workspace_id) for m in current_user.workspace_memberships
         )
         if not is_member:
-            raise HTTPException(403, "Not a member of this workspace")
+            has_share = (
+                db.query(WorkspaceShare)
+                .filter(
+                    WorkspaceShare.workspace_id == ws.id,
+                    WorkspaceShare.user_id == current_user.id,
+                    WorkspaceShare.status == "approved",
+                )
+                .first()
+            )
+            if not has_share:
+                raise HTTPException(403, "Not a member of this workspace")
 
     from sqlalchemy import or_
 

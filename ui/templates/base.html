@@ -81,6 +81,11 @@
       border-bottom-color: var(--c-topbar-border) !important;
     }
     main { background-color: var(--c-content-bg) !important; }
+    body.hide-shared-objects .shared-with-you-section,
+    body.hide-shared-objects .shared-object-item,
+    body.hide-shared-objects .shared-object-badge {
+      display: none !important;
+    }
   </style>
   <style type="text/tailwindcss">
     @layer base {
@@ -285,6 +290,19 @@
         </div>
       </div>
       <div class="flex items-center gap-3 shrink-0">
+
+        <!-- Shared Objects Toggle -->
+        <button id="global-shared-objects-toggle"
+                onclick="toggleGlobalSharedObjects()"
+                title="Toggle Shared Workspace Objects Visibility"
+                type="button"
+                class="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border transition-colors bg-cyan-950/30 text-cyan-300 border-cyan-800/40 hover:bg-cyan-900/40">
+          <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+          </svg>
+          <span class="hidden md:inline" id="global-shared-toggle-label">Shared: Visible</span>
+          <span class="w-2 h-2 rounded-full bg-cyan-400" id="global-shared-toggle-dot"></span>
+        </button>
 
         <!-- Theme toggle -->
         <div class="flex items-center gap-0.5 bg-black/20 rounded-md p-0.5" title="Theme">
@@ -1068,6 +1086,139 @@
         }
       }
     });
+    // ── Global Shared Workspace Objects Visibility & Disconnect ───────────────
+    function getSharedObjectsVisible() {
+      const stored = localStorage.getItem('lake_show_shared_objects');
+      return stored === null ? true : stored === 'true';
+    }
+
+    function applySharedObjectsVisibility(visible) {
+      const dot = document.getElementById('global-shared-toggle-dot');
+      const label = document.getElementById('global-shared-toggle-label');
+      const btn = document.getElementById('global-shared-objects-toggle');
+
+      if (visible) {
+        document.body.classList.remove('hide-shared-objects');
+        if (dot) dot.className = 'w-2 h-2 rounded-full bg-cyan-400';
+        if (label) label.textContent = 'Shared: Visible';
+        if (btn) btn.className = 'flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border transition-colors bg-cyan-950/30 text-cyan-300 border-cyan-800/40 hover:bg-cyan-900/40';
+      } else {
+        document.body.classList.add('hide-shared-objects');
+        if (dot) dot.className = 'w-2 h-2 rounded-full bg-gray-500';
+        if (label) label.textContent = 'Shared: Hidden';
+        if (btn) btn.className = 'flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border transition-colors bg-white/[0.04] text-gray-400 border-white/[0.08] hover:bg-white/[0.08]';
+      }
+      document.querySelectorAll('.view-shared-toggle-checkbox').forEach(cb => {
+        cb.checked = visible;
+      });
+      window.dispatchEvent(new CustomEvent('lake:shared-objects-toggle', { detail: { visible } }));
+    }
+
+    function toggleGlobalSharedObjects() {
+      const cur = getSharedObjectsVisible();
+      const next = !cur;
+      localStorage.setItem('lake_show_shared_objects', String(next));
+      applySharedObjectsVisibility(next);
+    }
+
+    let pendingDisconnectWsId = null;
+    let pendingDisconnectWsName = null;
+
+    function openDisconnectShareModal(wsId, wsName) {
+      pendingDisconnectWsId = wsId;
+      pendingDisconnectWsName = wsName;
+      const nameEl = document.getElementById('disconnect-ws-name');
+      if (nameEl) nameEl.textContent = wsName;
+      const modal = document.getElementById('disconnect-share-modal');
+      if (modal) modal.classList.remove('hidden');
+    }
+
+    function closeDisconnectModal() {
+      pendingDisconnectWsId = null;
+      pendingDisconnectWsName = null;
+      const modal = document.getElementById('disconnect-share-modal');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    async function executeDisconnectShare() {
+      if (!pendingDisconnectWsId) return;
+      const wsId = pendingDisconnectWsId;
+      const btn = document.getElementById('btn-confirm-disconnect');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Disconnecting...';
+      }
+
+      try {
+        const res = await fetch(`/api/workspaces/${encodeURIComponent(wsId)}/shares`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        if (!res.ok && res.status !== 404 && res.status !== 204) {
+          const err = await res.json().catch(() => ({}));
+          alert(err.detail || 'Failed to disconnect workspace share');
+          if (btn) { btn.disabled = false; btn.textContent = 'Disconnect Share'; }
+          return;
+        }
+
+        closeDisconnectModal();
+
+        // Optimistically remove all elements related to this shared workspace
+        document.querySelectorAll(`[data-shared-workspace-id="${wsId}"]`).forEach(el => {
+          el.remove();
+        });
+
+        // Check if currently inside this workspace
+        const currentWsId = '{{ request.state.workspace.id if request.state.workspace else "" }}';
+        if (currentWsId && currentWsId === wsId) {
+          window.location.href = '/';
+          return;
+        }
+
+        if (typeof refreshSharedCounts === 'function') {
+          refreshSharedCounts();
+        }
+      } catch (err) {
+        alert('Error disconnecting workspace share: ' + err.message);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Disconnect Share';
+        }
+      }
+    }
+
+    // Initialize visibility on DOM load
+    document.addEventListener('DOMContentLoaded', () => {
+      applySharedObjectsVisibility(getSharedObjectsVisible());
+    });
   </script>
+
+  <!-- Disconnect Share Confirmation Modal -->
+  <div id="disconnect-share-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+    <div class="bg-[#1a1a1a] border border-white/[0.08] rounded-xl shadow-2xl w-full max-w-md p-6">
+      <div class="flex items-center gap-3 mb-4 text-amber-400">
+        <div class="w-10 h-10 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
+          <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+          </svg>
+        </div>
+        <div>
+          <h3 class="text-base font-semibold text-gray-100">Disconnect Shared Workspace</h3>
+          <p class="text-xs text-gray-400">Remove shared read-only access</p>
+        </div>
+      </div>
+      <p class="text-sm text-gray-300 mb-6">
+        Are you sure you want to disconnect from workspace <strong id="disconnect-ws-name" class="text-white"></strong>?
+        You will immediately lose read access to all its catalogs, notebooks, pipelines, and storage.
+      </p>
+      <div class="flex justify-end gap-3">
+        <button onclick="closeDisconnectModal()" type="button" class="btn-ghost text-xs px-3 py-1.5">Cancel</button>
+        <button id="btn-confirm-disconnect" onclick="executeDisconnectShare()" type="button" class="btn-danger text-xs px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white font-medium rounded-md">
+          Disconnect Share
+        </button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>
