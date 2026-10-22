@@ -459,3 +459,69 @@ def test_ui_resolve_catalogs_removes_global_fallback():
         )
     finally:
         ui_main._backend_get = original_get
+
+
+def test_catalog_access_request_requires_reason_and_exposes_requester_details():
+    fix = _setup_fixture()
+    session = fix["session"]
+
+    backend_main.app.dependency_overrides[database.get_db] = lambda: session
+    try:
+        # 1. Request without reason -> 400
+        resp_empty = client.post(
+            f"/api/catalogs/{fix['cat_a_private'].id}/access/request",
+            json={"mode": "read", "workspace_id": str(fix["ws_b"].id), "message": "   "},
+            headers={"Authorization": f"Bearer {fix['bob_token']}"},
+        )
+        assert resp_empty.status_code == 400
+        assert "reason for the request is required" in resp_empty.json()["detail"]
+
+        # 2. Request with reason > 500 chars -> 400
+        resp_long = client.post(
+            f"/api/catalogs/{fix['cat_a_private'].id}/access/request",
+            json={"mode": "read", "workspace_id": str(fix["ws_b"].id), "message": "x" * 501},
+            headers={"Authorization": f"Bearer {fix['bob_token']}"},
+        )
+        assert resp_long.status_code == 400
+        assert "500 characters" in resp_long.json()["detail"]
+
+        # 3. Request with valid reason -> 200
+        resp_ok = client.post(
+            f"/api/catalogs/{fix['cat_a_private'].id}/access/request",
+            json={
+                "mode": "read",
+                "workspace_id": str(fix["ws_b"].id),
+                "message": "  Need payroll benchmarks for Q4 audit  ",
+            },
+            headers={"Authorization": f"Bearer {fix['bob_token']}"},
+        )
+        assert resp_ok.status_code == 200
+
+        # 4. Alice (admin of ws_a) inspects inbound access requests and settings/catalogs
+        resp_inbound = client.get(
+            f"/api/workspaces/{fix['ws_a'].id}/access/requests/inbound",
+            headers={"Authorization": f"Bearer {fix['alice_token']}"},
+        )
+        assert resp_inbound.status_code == 200
+        inbound_items = resp_inbound.json()
+        assert len(inbound_items) == 1
+        assert inbound_items[0]["requester_name"] == "Bob Beta"
+        assert inbound_items[0]["requester_email"] == "bob@lake.local"
+        assert inbound_items[0]["message"] == "Need payroll benchmarks for Q4 audit"
+
+        resp_settings = client.get(
+            f"/api/workspaces/{fix['ws_a'].id}/settings/catalogs",
+            headers={"Authorization": f"Bearer {fix['alice_token']}"},
+        )
+        assert resp_settings.status_code == 200
+        pending_out = [
+            o
+            for o in resp_settings.json()["shared_with_others"]
+            if o["catalog_id"] == str(fix["cat_a_private"].id)
+        ]
+        assert len(pending_out) == 1
+        assert pending_out[0]["requester_name"] == "Bob Beta"
+        assert pending_out[0]["requester_email"] == "bob@lake.local"
+        assert pending_out[0]["message"] == "Need payroll benchmarks for Q4 audit"
+    finally:
+        backend_main.app.dependency_overrides.clear()

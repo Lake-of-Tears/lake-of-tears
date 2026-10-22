@@ -2096,6 +2096,12 @@ def request_access(
     if not catalog:
         raise HTTPException(404, "Catalog not found")
 
+    reason = (req.message or "").strip()
+    if not reason:
+        raise HTTPException(400, "A reason for the request is required")
+    if len(reason) > 500:
+        raise HTTPException(400, "Reason must be 500 characters or fewer")
+
     # caller must be a workspace admin in the given workspace (or superadmin)
     if req.workspace_id:
         membership = next(
@@ -2130,6 +2136,7 @@ def request_access(
             raise HTTPException(400, "Access already approved")
         existing.mode = req.mode
         existing.status = "pending"
+        existing.request_message = reason
         existing.requested_by = current_user.id
         existing.requested_at = __import__("datetime").datetime.now(
             __import__("datetime").timezone.utc
@@ -2141,6 +2148,7 @@ def request_access(
                 workspace_id=ws_uuid,
                 mode=req.mode,
                 status="pending",
+                request_message=reason,
                 requested_by=current_user.id,
             )
         )
@@ -2278,6 +2286,9 @@ def inbound_access_requests(
                 catalog_name=cat.name if cat else "—",
                 requesting_workspace_id=g.workspace_id,
                 requesting_workspace_name=req_ws.name if req_ws else None,
+                requester_name=g.requester.display_name if g.requester else None,
+                requester_email=g.requester.email if g.requester else None,
+                message=g.request_message,
                 mode=g.mode,
                 requested_at=g.requested_at,
             )
@@ -2487,7 +2498,9 @@ def workspace_catalog_settings(
                 target_workspace_id=grant.workspace_id,
                 target_workspace_name=target_ws.name if target_ws else "Unknown",
                 target_workspace_slug=target_ws.slug if target_ws else "unknown",
+                requester_name=grant.requester.display_name if grant.requester else None,
                 requester_email=grant.requester.email if grant.requester else None,
+                message=grant.request_message,
                 status=grant.status,
                 suspended=grant.suspended,
                 mode=grant.mode or "read",
