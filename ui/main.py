@@ -798,6 +798,19 @@ async def catalog_vector_sync(request: Request):
             status_code=400,
         )
 
+    ws = getattr(request.state, "workspace", None)
+    effective_workspace_id = (
+        (str(ws["id"]) if ws and isinstance(ws, dict) and "id" in ws else None)
+        or request.cookies.get("lake_workspace_id")
+        or request.cookies.get("lake_active_workspace")
+        or data.get("workspace_id")
+    )
+    effective_workspace_slug = (
+        (ws.get("slug") if ws and isinstance(ws, dict) else None)
+        or request.cookies.get("lake_workspace_slug")
+        or data.get("workspace_slug")
+    )
+
     if source_col is not None:
         patch_payload = {
             "vector_index": {
@@ -811,12 +824,17 @@ async def catalog_vector_sync(request: Request):
             f"/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}",
             token or "",
             patch_payload,
+            workspace_id=effective_workspace_id,
+            workspace_slug=effective_workspace_slug,
         )
 
     sync_res, err = _backend_post_with_error(
         f"/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}/vector-index/sync",
         token or "",
         {},
+        workspace_id=effective_workspace_id,
+        workspace_slug=effective_workspace_slug,
+        timeout=180.0,
     )
     if err:
         return JSONResponse({"ok": False, "error": err}, status_code=500)
@@ -1191,9 +1209,10 @@ def _backend_post_with_error(
     json: dict,
     workspace_id: str | None = None,
     workspace_slug: str | None = None,
+    timeout: float = 5.0,
 ) -> tuple[dict | None, str | None]:
     try:
-        with httpx.Client(timeout=5) as client:
+        with httpx.Client(timeout=timeout) as client:
             resp = client.post(
                 f"{BACKEND_URL}{path}",
                 json=json,

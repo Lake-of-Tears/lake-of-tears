@@ -574,3 +574,110 @@ def test_catalog_preview_invalid_view_returns_400():
         assert res.status_code == 400
         assert res.json()["ok"] is False
         assert "Invalid view identifier" in res.json()["error"]
+
+
+# ── Catalog Vector Sync Tests ───────────────────────────────────────────────────
+
+
+def test_catalog_vector_sync_success_passes_workspace_context():
+    token = _make_token()
+    mock_workspaces = [
+        {"id": "ws-100", "slug": "test-ws", "name": "Test Workspace", "role": "admin"}
+    ]
+    mock_table = {
+        "id": "tbl-1",
+        "name": "clinical_trials",
+        "vector_index": {"status": "synced", "count": 10},
+    }
+
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
+        patch.object(main, "_backend_patch") as mock_patch,
+        patch.object(main, "_backend_post_with_error", return_value=(mock_table, None)) as mock_post,
+    ):
+        res = client.post(
+            "/catalog/vector-sync",
+            json={
+                "catalog_id": "cat-1",
+                "schema_id": "sch-1",
+                "table_id": "tbl-1",
+                "source_column": "overview",
+                "format_template": "Study: {title} | {overview}",
+            },
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-100"},
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["ok"] is True
+        assert data["table"] == mock_table
+
+        # Verify _backend_patch was called with workspace_id="ws-100"
+        mock_patch.assert_called_once()
+        patch_kwargs = mock_patch.call_args[1]
+        assert patch_kwargs.get("workspace_id") == "ws-100"
+        assert patch_kwargs.get("workspace_slug") == "test-ws"
+
+        # Verify _backend_post_with_error was called with workspace_id="ws-100" and generous timeout
+        mock_post.assert_called_once()
+        post_kwargs = mock_post.call_args[1]
+        assert post_kwargs.get("workspace_id") == "ws-100"
+        assert post_kwargs.get("workspace_slug") == "test-ws"
+        assert post_kwargs.get("timeout") == 180.0
+
+
+def test_catalog_vector_sync_unauthenticated():
+    client.cookies.clear()
+    with patch.object(main, "AUTH_ENABLED", True):
+        res = client.post(
+            "/catalog/vector-sync",
+            json={"catalog_id": "cat-1", "schema_id": "sch-1", "table_id": "tbl-1"},
+            follow_redirects=False,
+        )
+        assert res.status_code == 302
+        assert "/login" in res.headers["location"]
+
+
+def test_catalog_vector_sync_missing_ids():
+    token = _make_token()
+    with patch.object(main, "AUTH_ENABLED", True):
+        res = client.post(
+            "/catalog/vector-sync",
+            json={"catalog_id": "cat-1"},
+            cookies={"lake_token": token},
+        )
+        assert res.status_code == 400
+        assert res.json()["ok"] is False
+        assert "Missing catalog_id, schema_id, or table_id" in res.json()["error"]
+
+
+def test_catalog_vector_sync_backend_error():
+    token = _make_token()
+    mock_workspaces = [
+        {"id": "ws-100", "slug": "test-ws", "name": "Test Workspace", "role": "admin"}
+    ]
+
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
+        patch.object(main, "_backend_patch"),
+        patch.object(
+            main,
+            "_backend_post_with_error",
+            return_value=(None, "Backend sync failed"),
+        ),
+    ):
+        res = client.post(
+            "/catalog/vector-sync",
+            json={
+                "catalog_id": "cat-1",
+                "schema_id": "sch-1",
+                "table_id": "tbl-1",
+                "source_column": "overview",
+            },
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-100"},
+        )
+        assert res.status_code == 500
+        assert res.json()["ok"] is False
+        assert res.json()["error"] == "Backend sync failed"
+
