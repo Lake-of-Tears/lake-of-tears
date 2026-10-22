@@ -266,27 +266,83 @@
             <div id="schemas-{{ catalog.id }}" class="hidden border-t border-white/[0.05]">
               {% if catalog.schemas %}
                 {% for schema in catalog.schemas | sort_schemas %}
-                <div class="border-b border-white/[0.04] last:border-0 pl-6 pr-3 py-2">
-                  <div class="flex items-center gap-2">
-                    <span class="text-xs font-mono text-gray-300 font-medium">{{ schema.name }}</span>
-                    <span class="text-[9px] px-1.5 py-0.2 rounded font-mono uppercase bg-white/[0.04] text-gray-400">{{ schema.tier }}</span>
+                <div class="border-b border-white/[0.04] last:border-0">
+                  <button
+                    onclick="toggleSchema('{{ schema.id }}')"
+                    class="w-full flex items-center gap-3 pl-8 pr-4 py-2.5 text-left hover:bg-white/[0.03] transition-colors
+                      {% if schema.tier == 'bronze' %}border-l-2 border-[#cd7f32]
+                      {% elif schema.tier == 'silver' %}border-l-2 border-[#a8a9ad]
+                      {% elif schema.tier == 'gold' %}border-l-2 border-[#ffd700]
+                      {% else %}border-l-2 border-transparent{% endif %}">
+                    <svg id="chev-schema-{{ schema.id }}" class="w-3.5 h-3.5 text-gray-600 shrink-0 transition-transform duration-150 -rotate-90"
+                         fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
+                    </svg>
+
+                    {% if schema.tier == 'bronze' %}
+                    <img src="/static/img/medallion/bronze-ore.png" alt="bronze" class="w-5 h-5 object-contain shrink-0"/>
+                    {% elif schema.tier == 'silver' %}
+                    <img src="/static/img/medallion/silver-ore.png" alt="silver" class="w-5 h-5 object-contain shrink-0"/>
+                    {% elif schema.tier == 'gold' %}
+                    <img src="/static/img/medallion/gold-ore.png" alt="gold" class="w-5 h-5 object-contain shrink-0"/>
+                    {% else %}
+                    <svg class="w-4 h-4 text-gray-500 shrink-0" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/>
+                    </svg>
+                    {% endif %}
+
+                    <span class="text-sm font-mono font-medium shrink-0
+                      {% if schema.tier == 'bronze' %}text-[#cd7f32]
+                      {% elif schema.tier == 'silver' %}text-[#a8a9ad]
+                      {% elif schema.tier == 'gold' %}text-[#b8860b]
+                      {% else %}text-gray-300{% endif %}">
+                      {{ schema.slug|sql_ident }}
+                    </span>
+                    {% if schema.name and schema.name|lower != (schema.slug|sql_ident)|lower %}
+                    <span class="text-xs text-gray-500 font-sans shrink-0">({{ schema.name }})</span>
+                    {% endif %}
+
+                    <span class="ml-auto text-[11px] text-gray-600">
+                      {{ schema.tables | length }} table{{ 's' if schema.tables | length != 1 }}
+                    </span>
+                  </button>
+
+                  <!-- Tables inside shared schema -->
+                  <div id="tables-{{ schema.id }}" class="hidden bg-black/10">
+                    {% if schema.tables %}
+                      {% for table in schema.tables %}
+                      <div class="flex items-center gap-3 pl-14 pr-4 py-2 hover:bg-white/[0.04] cursor-pointer group border-b border-white/[0.03] last:border-0"
+                           data-cat="{{ catalog.slug|sql_ident }}"
+                           data-sch="{{ schema.slug|sql_ident }}"
+                           data-table-ident="{{ table.slug|sql_ident }}"
+                           data-cat-id="{{ catalog.id }}"
+                           data-sch-id="{{ schema.id }}"
+                           data-table-id="{{ table.id }}"
+                           data-table="{{ table | tojson | forceescape }}"
+                           onclick="openTablePanel(this)">
+                        <svg class="w-3.5 h-3.5 text-cyan-500/70 shrink-0" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                        </svg>
+                        <div class="flex items-baseline gap-2 flex-1 min-w-0">
+                          <span class="text-sm font-mono text-cyan-400 font-medium group-hover:text-cyan-300 transition-colors">{{ table.slug|sql_ident }}</span>
+                          {% if table.name and table.name|lower != (table.slug|sql_ident)|lower %}
+                          <span class="text-xs text-gray-500 truncate group-hover:text-gray-400 transition-colors">{{ table.name }}</span>
+                          {% endif %}
+                        </div>
+                        <span class="text-[9px] px-1.5 py-0.5 rounded font-mono uppercase bg-cyan-950/40 text-cyan-400 border border-cyan-800/40 shrink-0">shared</span>
+                        {% if table.column_defs and table.column_defs | length > 0 %}
+                        <span class="text-[11px] text-gray-600 shrink-0">{{ table.column_defs | length }} cols</span>
+                        {% endif %}
+                      </div>
+                      {% endfor %}
+                    {% else %}
+                    <div class="pl-14 pr-4 py-3 text-sm text-gray-600 italic">No tables in this schema yet.</div>
+                    {% endif %}
                   </div>
-                  {% if schema.tables %}
-                  <div class="mt-2 space-y-1 pl-4">
-                    {% for table in schema.tables %}
-                    <div class="flex items-center justify-between text-xs py-1 text-gray-400">
-                      <span class="font-mono text-cyan-300">{{ table.name }}</span>
-                      <span class="text-[10px] text-gray-500 font-mono">{{ table.format }}</span>
-                    </div>
-                    {% endfor %}
-                  </div>
-                  {% else %}
-                  <div class="text-[11px] text-gray-600 pl-4 py-1">No tables in this schema</div>
-                  {% endif %}
                 </div>
                 {% endfor %}
               {% else %}
-                <div class="px-4 py-3 text-xs text-gray-600">No schemas found in this catalog</div>
+                <div class="px-4 py-3 text-xs text-gray-600 italic">No schemas found in this catalog</div>
               {% endif %}
             </div>
           </div>

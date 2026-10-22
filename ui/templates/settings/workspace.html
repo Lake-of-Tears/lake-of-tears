@@ -155,7 +155,10 @@
         {% if sc_pending %}
         <span class="text-[10px] px-1.5 py-0.5 rounded bg-yellow-900/30 text-yellow-500 border border-yellow-800/40 shrink-0">pending approval</span>
         {% else %}
-        <span class="text-[10px] px-1.5 py-0.5 rounded border border-gray-700 text-gray-500 shrink-0">{{ sc.mode or 'read' }}</span>
+        <span class="inline-flex items-center gap-1.5 text-[11px] font-medium text-cyan-300 bg-cyan-950/40 border border-cyan-800/40 px-2.5 py-0.5 rounded-full shrink-0 font-mono">
+          <span class="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+          {{ sc.mode or 'read' }}
+        </span>
         <form action="/settings/workspace/catalogs/{{ sc.catalog_id }}/remove-shared" method="post"
               onsubmit="return confirm('Remove shared access to \'{{ sc.catalog_name }}\'?')">
           <button type="submit" class="text-xs px-2.5 py-1 rounded border border-gray-700 text-gray-500 hover:text-red-400 hover:border-red-600/50 transition-colors shrink-0">Remove</button>
