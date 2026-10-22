@@ -2431,6 +2431,23 @@ def workspace_catalog_settings(
     for grant in access_grants:
         cat = grant.catalog
         owner_ws = cat.owner_workspace if cat else None
+        cat_schemas = (
+            [
+                CatalogSchemaResponse(
+                    id=s.id,
+                    catalog_id=s.catalog_id,
+                    name=s.name,
+                    slug=s.slug,
+                    description=s.description,
+                    tier=s.tier,
+                    created_at=s.created_at,
+                    tables=[],
+                )
+                for s in (cat.schemas if cat and cat.schemas else [])
+            ]
+            if cat
+            else []
+        )
         shared.append(
             SharedCatalogSettingsItem(
                 access_id=grant.id,
@@ -2440,6 +2457,8 @@ def workspace_catalog_settings(
                 owner_workspace_name=owner_ws.name if owner_ws else None,
                 status=grant.status,
                 suspended=grant.suspended,
+                mode=grant.mode if hasattr(grant, "mode") and grant.mode else "read",
+                schemas=cat_schemas,
             )
         )
 
