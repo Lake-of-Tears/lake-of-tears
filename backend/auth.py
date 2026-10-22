@@ -13,7 +13,7 @@ import bcrypt
 import jwt
 from database import SessionLocal, get_db
 from fastapi import Cookie, Depends, Header, HTTPException, Query
-from models import SystemSetting, User, Workspace, WorkspaceMember
+from models import SystemSetting, User, Workspace, WorkspaceMember, WorkspaceShare
 from sqlalchemy.orm import Session
 
 SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "dev-secret-please-change-in-production")
@@ -394,8 +394,19 @@ def get_workspace_context(
         .first()
     )
 
+    share = None
     if not member and current_user.role != "superadmin":
-        raise HTTPException(403, "Not a member of this workspace")
+        share = (
+            db.query(WorkspaceShare)
+            .filter(
+                WorkspaceShare.workspace_id == ws.id,
+                WorkspaceShare.user_id == current_user.id,
+                WorkspaceShare.status == "approved",
+            )
+            .first()
+        )
+        if not share:
+            raise HTTPException(403, "Not a member of this workspace")
 
     role = (
         member.role if member else ("superadmin" if current_user.role == "superadmin" else "read")

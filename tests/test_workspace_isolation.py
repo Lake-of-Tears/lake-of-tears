@@ -125,8 +125,8 @@ def test_cross_workspace_non_member_returns_403():
     ws = _create_workspace("Secret Project", "secret-project")
 
     mock_db = MagicMock()
-    # First query for Workspace returns ws, second query for WorkspaceMember returns None
-    mock_db.query.return_value.filter.return_value.first.side_effect = [ws, None]
+    # Workspace returns ws, WorkspaceMember returns None, WorkspaceShare returns None
+    mock_db.query.return_value.filter.return_value.first.side_effect = [ws, None, None]
 
     backend_main.app.dependency_overrides[database.get_db] = lambda: mock_db
     backend_main.app.dependency_overrides[auth.get_current_user] = lambda: user

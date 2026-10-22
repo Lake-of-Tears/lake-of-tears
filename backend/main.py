@@ -35,7 +35,17 @@ from catalog_storage import delete_prefix, prefixes_to_delete
 from dashboards_router import router as dashboards_router
 from database import get_db
 from email_service import send_access_removed, send_access_requested, send_access_reviewed
-from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request, Response
+from fastapi import (
+    Cookie,
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from models import (
     Catalog,
@@ -46,6 +56,7 @@ from models import (
     User,
     Workspace,
     WorkspaceMember,
+    WorkspaceShare,
 )
 from notebooks_router import router as notebooks_router
 from oauth import enabled_providers, get_oauth_redirect, handle_oauth_callback
@@ -87,6 +98,9 @@ from schemas import (
     WorkspaceCatalogSettingsResponse,
     WorkspaceMemberResponse,
     WorkspaceResponse,
+    WorkspaceShareRequest,
+    WorkspaceShareResponse,
+    WorkspaceShareReviewRequest,
 )
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
@@ -157,6 +171,17 @@ def _unique_slug(db: Session, base: str) -> str:
         i += 1
         slug = f"{base}-{i}"
     return slug
+
+
+def _as_uuid(val: Any) -> uuid.UUID | None:
+    if isinstance(val, uuid.UUID):
+        return val
+    if not val:
+        return None
+    try:
+        return uuid.UUID(str(val))
+    except (ValueError, TypeError, AttributeError):
+        return None
 
 
 def _create_default_catalog(db: Session, ws: Workspace, user: User) -> Catalog:
@@ -255,8 +280,13 @@ def _set_auth_cookie(
     return token
 
 
-def _workspace_response(ws: Workspace, user: User) -> WorkspaceResponse:
+def _workspace_response(ws: Workspace, user: User, is_shared: bool = False) -> WorkspaceResponse:
     member = next((m for m in ws.members if m.user_id == user.id), None)
+    role = (
+        member.role
+        if member
+        else ("superadmin" if user.role == "superadmin" else ("read" if is_shared else None))
+    )
     return WorkspaceResponse(
         id=ws.id,
         name=ws.name,
@@ -265,7 +295,28 @@ def _workspace_response(ws: Workspace, user: User) -> WorkspaceResponse:
         created_at=ws.created_at,
         is_system=ws.is_system,
         status=ws.status,
-        my_role=member.role if member else ("superadmin" if user.role == "superadmin" else None),
+        my_role=role,
+        is_shared=is_shared,
+    )
+
+
+def _workspace_share_response(
+    share: WorkspaceShare, ws: Workspace | None = None, user: User | None = None
+) -> WorkspaceShareResponse:
+    target_ws = ws or share.workspace
+    target_user = user or share.user
+    return WorkspaceShareResponse(
+        id=share.id,
+        workspace_id=share.workspace_id,
+        workspace_name=target_ws.name if target_ws else "",
+        workspace_slug=target_ws.slug if target_ws else "",
+        user_id=share.user_id,
+        user_email=target_user.email if target_user else "",
+        user_display_name=target_user.display_name if target_user else None,
+        status=share.status,
+        requested_at=share.requested_at,
+        approved_at=share.approved_at,
+        approved_by=share.approved_by,
     )
 
 
@@ -499,15 +550,35 @@ def list_workspaces(db: Session = Depends(get_db), current_user: User = Depends(
             .order_by(Workspace.created_at)
             .all()
         )
+        return [_workspace_response(ws, current_user, is_shared=False) for ws in workspaces]
     else:
-        workspaces = (
+        member_workspaces = (
             db.query(Workspace)
             .join(WorkspaceMember, WorkspaceMember.workspace_id == Workspace.id)
             .filter(WorkspaceMember.user_id == current_user.id, Workspace.status == "active")
             .order_by(Workspace.created_at)
             .all()
         )
-    return [_workspace_response(ws, current_user) for ws in workspaces]
+        member_ws_ids = {ws.id for ws in member_workspaces}
+
+        shared_workspaces = (
+            db.query(Workspace)
+            .join(WorkspaceShare, WorkspaceShare.workspace_id == Workspace.id)
+            .filter(
+                WorkspaceShare.user_id == current_user.id,
+                WorkspaceShare.status == "approved",
+                Workspace.status == "active",
+            )
+            .order_by(Workspace.created_at)
+            .all()
+        )
+        shared_workspaces = [ws for ws in shared_workspaces if ws.id not in member_ws_ids]
+
+        res = [_workspace_response(ws, current_user, is_shared=False) for ws in member_workspaces]
+        res.extend(
+            [_workspace_response(ws, current_user, is_shared=True) for ws in shared_workspaces]
+        )
+        return res
 
 
 @app.post("/api/workspaces", response_model=WorkspaceResponse)
@@ -544,15 +615,30 @@ def get_workspace(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+    ws_uuid = _as_uuid(workspace_id)
+    if not ws_uuid:
+        raise HTTPException(404, "Workspace not found")
+    ws = db.query(Workspace).filter(Workspace.id == ws_uuid).first()
     if not ws:
         raise HTTPException(404, "Workspace not found")
-    # check membership unless superadmin
+    # check membership or approved share unless superadmin
+    is_shared = False
     if current_user.role != "superadmin":
         member = next((m for m in ws.members if m.user_id == current_user.id), None)
         if not member:
-            raise HTTPException(403, "Not a member of this workspace")
-    return _workspace_response(ws, current_user)
+            share = (
+                db.query(WorkspaceShare)
+                .filter(
+                    WorkspaceShare.workspace_id == ws.id,
+                    WorkspaceShare.user_id == current_user.id,
+                    WorkspaceShare.status == "approved",
+                )
+                .first()
+            )
+            if not share:
+                raise HTTPException(403, "Not a member of this workspace")
+            is_shared = True
+    return _workspace_response(ws, current_user, is_shared=is_shared)
 
 
 @app.patch("/api/workspaces/{workspace_id}", response_model=WorkspaceResponse)
@@ -562,7 +648,10 @@ def update_workspace(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+    ws_uuid = _as_uuid(workspace_id)
+    if not ws_uuid:
+        raise HTTPException(404, "Workspace not found")
+    ws = db.query(Workspace).filter(Workspace.id == ws_uuid).first()
     if not ws:
         raise HTTPException(404, "Workspace not found")
     # Must be workspace admin or superadmin
@@ -589,7 +678,10 @@ def list_members(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+    ws_uuid = _as_uuid(workspace_id)
+    if not ws_uuid:
+        raise HTTPException(404, "Workspace not found")
+    ws = db.query(Workspace).filter(Workspace.id == ws_uuid).first()
     if not ws:
         raise HTTPException(404, "Workspace not found")
     if current_user.role != "superadmin":
@@ -622,7 +714,10 @@ def list_candidate_members(
 ):
     from sqlalchemy import or_
 
-    ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+    ws_uuid = _as_uuid(workspace_id)
+    if not ws_uuid:
+        raise HTTPException(404, "Workspace not found")
+    ws = db.query(Workspace).filter(Workspace.id == ws_uuid).first()
     if not ws:
         raise HTTPException(404, "Workspace not found")
     if current_user.role != "superadmin":
@@ -653,7 +748,10 @@ def add_member(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+    ws_uuid = _as_uuid(workspace_id)
+    if not ws_uuid:
+        raise HTTPException(404, "Workspace not found")
+    ws = db.query(Workspace).filter(Workspace.id == ws_uuid).first()
     if not ws:
         raise HTTPException(404, "Workspace not found")
     if ws.status == "inactive":
@@ -670,13 +768,13 @@ def add_member(
         raise HTTPException(404, "User not found — they must register first")
 
     role_to_set = "admin" if target.role == "superadmin" else req.role
-    existing = (
-        db.query(WorkspaceMember).filter_by(workspace_id=workspace_id, user_id=target.id).first()
-    )
+    existing = db.query(WorkspaceMember).filter_by(workspace_id=ws.id, user_id=target.id).first()
     if existing:
         existing.role = role_to_set
     else:
         db.add(WorkspaceMember(workspace_id=ws.id, user_id=target.id, role=role_to_set))
+    # Automatically delete/supersede any existing WorkspaceShare for this user on this workspace
+    db.query(WorkspaceShare).filter_by(workspace_id=ws.id, user_id=target.id).delete()
     db.commit()
     return {"ok": True}
 
@@ -689,7 +787,10 @@ def update_member(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+    ws_uuid = _as_uuid(workspace_id)
+    if not ws_uuid:
+        raise HTTPException(404, "Workspace not found")
+    ws = db.query(Workspace).filter(Workspace.id == ws_uuid).first()
     if not ws:
         raise HTTPException(404, "Workspace not found")
     if current_user.role != "superadmin":
@@ -718,7 +819,10 @@ def remove_member(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+    ws_uuid = _as_uuid(workspace_id)
+    if not ws_uuid:
+        raise HTTPException(404, "Workspace not found")
+    ws = db.query(Workspace).filter(Workspace.id == ws_uuid).first()
     if not ws:
         raise HTTPException(404, "Workspace not found")
     if current_user.role != "superadmin":
@@ -738,6 +842,226 @@ def remove_member(
     db.delete(member)
     db.commit()
     return {"ok": True}
+
+
+# ── Workspace Shares ──────────────────────────────────────────────────────────
+
+
+@app.get("/api/workspaces/shares/mine", response_model=list[WorkspaceShareResponse])
+def list_my_workspace_shares(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    shares = (
+        db.query(WorkspaceShare)
+        .filter(WorkspaceShare.user_id == current_user.id)
+        .order_by(WorkspaceShare.requested_at.desc())
+        .all()
+    )
+    return [_workspace_share_response(s) for s in shares]
+
+
+@app.post("/api/workspaces/{workspace_id}/shares", response_model=WorkspaceShareResponse)
+def request_workspace_share(
+    workspace_id: str,
+    req: WorkspaceShareRequest | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    ws_uuid = _as_uuid(workspace_id)
+    if not ws_uuid:
+        raise HTTPException(404, "Workspace not found")
+    ws = db.query(Workspace).filter(Workspace.id == ws_uuid, Workspace.status == "active").first()
+    if not ws:
+        raise HTTPException(404, "Workspace not found")
+
+    # Member check
+    member = (
+        db.query(WorkspaceMember).filter_by(workspace_id=ws.id, user_id=current_user.id).first()
+    )
+    if member:
+        raise HTTPException(400, "You are already a direct member of this workspace")
+
+    existing_share = (
+        db.query(WorkspaceShare).filter_by(workspace_id=ws.id, user_id=current_user.id).first()
+    )
+    if existing_share:
+        if existing_share.status == "pending":
+            raise HTTPException(409, "A share request is already pending for this workspace")
+        if existing_share.status == "approved":
+            raise HTTPException(409, "Workspace share is already approved")
+        if existing_share.status == "rejected":
+            existing_share.status = "pending"
+            existing_share.requested_at = datetime.now(UTC)
+            existing_share.approved_at = None
+            existing_share.approved_by = None
+            db.commit()
+            db.refresh(existing_share)
+            return _workspace_share_response(existing_share, ws, current_user)
+
+    share = WorkspaceShare(
+        workspace_id=ws.id,
+        user_id=current_user.id,
+        status="pending",
+        requested_at=datetime.now(UTC),
+    )
+    db.add(share)
+    db.commit()
+    db.refresh(share)
+    return _workspace_share_response(share, ws, current_user)
+
+
+@app.get(
+    "/api/workspaces/{workspace_id}/shares",
+    response_model=list[WorkspaceShareResponse],
+)
+def list_workspace_shares(
+    workspace_id: str,
+    status: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    ws_uuid = _as_uuid(workspace_id)
+    if not ws_uuid:
+        raise HTTPException(404, "Workspace not found")
+    ws = db.query(Workspace).filter(Workspace.id == ws_uuid).first()
+    if not ws:
+        raise HTTPException(404, "Workspace not found")
+
+    if current_user.role != "superadmin":
+        admin_check = next(
+            (m for m in ws.members if m.user_id == current_user.id and m.role == "admin"),
+            None,
+        )
+        if not admin_check:
+            raise HTTPException(403, "Workspace admin access required")
+
+    query = db.query(WorkspaceShare).filter(WorkspaceShare.workspace_id == ws.id)
+    if status:
+        query = query.filter(WorkspaceShare.status == status)
+
+    shares = query.order_by(WorkspaceShare.requested_at.desc()).all()
+    return [_workspace_share_response(s, ws) for s in shares]
+
+
+@app.patch(
+    "/api/workspaces/{workspace_id}/shares/{share_id}",
+    response_model=WorkspaceShareResponse,
+)
+def review_workspace_share(
+    workspace_id: str,
+    share_id: str,
+    req: WorkspaceShareReviewRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    ws_uuid = _as_uuid(workspace_id)
+    if not ws_uuid:
+        raise HTTPException(404, "Workspace not found")
+    ws = db.query(Workspace).filter(Workspace.id == ws_uuid).first()
+    if not ws:
+        raise HTTPException(404, "Workspace not found")
+
+    if current_user.role != "superadmin":
+        admin_check = next(
+            (m for m in ws.members if m.user_id == current_user.id and m.role == "admin"),
+            None,
+        )
+        if not admin_check:
+            raise HTTPException(403, "Workspace admin access required")
+
+    share_uuid = _as_uuid(share_id)
+    if not share_uuid:
+        raise HTTPException(404, "Workspace share request not found")
+
+    share = (
+        db.query(WorkspaceShare)
+        .filter(WorkspaceShare.id == share_uuid, WorkspaceShare.workspace_id == ws.id)
+        .first()
+    )
+    if not share:
+        raise HTTPException(404, "Workspace share request not found")
+
+    share.status = req.status
+    share.approved_at = datetime.now(UTC)
+    share.approved_by = current_user.id
+    db.commit()
+    db.refresh(share)
+    return _workspace_share_response(share, ws)
+
+
+@app.delete(
+    "/api/workspaces/{workspace_id}/shares",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def disconnect_workspace_share(
+    workspace_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    ws_uuid = _as_uuid(workspace_id)
+    if not ws_uuid:
+        raise HTTPException(404, "Workspace not found")
+    ws = db.query(Workspace).filter(Workspace.id == ws_uuid).first()
+    if not ws:
+        raise HTTPException(404, "Workspace not found")
+
+    share = (
+        db.query(WorkspaceShare)
+        .filter(
+            WorkspaceShare.workspace_id == ws.id,
+            WorkspaceShare.user_id == current_user.id,
+        )
+        .first()
+    )
+    if not share:
+        raise HTTPException(404, "No workspace share found for this workspace")
+
+    db.delete(share)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.delete(
+    "/api/workspaces/{workspace_id}/shares/{share_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_workspace_share_by_id(
+    workspace_id: str,
+    share_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    ws_uuid = _as_uuid(workspace_id)
+    if not ws_uuid:
+        raise HTTPException(404, "Workspace not found")
+    ws = db.query(Workspace).filter(Workspace.id == ws_uuid).first()
+    if not ws:
+        raise HTTPException(404, "Workspace not found")
+
+    share_uuid = _as_uuid(share_id)
+    if not share_uuid:
+        raise HTTPException(404, "Workspace share request not found")
+
+    share = (
+        db.query(WorkspaceShare)
+        .filter(WorkspaceShare.id == share_uuid, WorkspaceShare.workspace_id == ws.id)
+        .first()
+    )
+    if not share:
+        raise HTTPException(404, "Workspace share not found")
+
+    if current_user.role != "superadmin" and share.user_id != current_user.id:
+        admin_check = next(
+            (m for m in ws.members if m.user_id == current_user.id and m.role == "admin"),
+            None,
+        )
+        if not admin_check:
+            raise HTTPException(403, "Workspace admin access required")
+
+    db.delete(share)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
