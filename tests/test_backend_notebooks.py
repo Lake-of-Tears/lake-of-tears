@@ -433,8 +433,8 @@ def test_get_notebook_workspace_and_role_non_member():
     mock_db = MagicMock()
     # Query for workspace returns ws
     mock_db.query.return_value.filter.return_value.first.return_value = ws
-    # Query for member returns None
-    mock_db.query.return_value.filter.return_value.first.side_effect = [ws, None]
+    # Query for workspace returns ws, member returns None, share returns None
+    mock_db.query.return_value.filter.return_value.first.side_effect = [ws, None, None]
 
     with pytest.raises(backend_main.HTTPException) as exc_info:
         auth.get_notebook_workspace_and_role(

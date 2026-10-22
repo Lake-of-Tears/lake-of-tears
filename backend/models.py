@@ -28,6 +28,11 @@ class User(Base):
     workspace_memberships: Mapped[list["WorkspaceMember"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    workspace_shares: Mapped[list["WorkspaceShare"]] = relationship(
+        foreign_keys="WorkspaceShare.user_id",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
 
     @property
     def has_password(self) -> bool:
@@ -73,6 +78,9 @@ class Workspace(Base):
     members: Mapped[list["WorkspaceMember"]] = relationship(
         back_populates="workspace", cascade="all, delete-orphan"
     )
+    shares: Mapped[list["WorkspaceShare"]] = relationship(
+        back_populates="workspace", cascade="all, delete-orphan"
+    )
 
 
 class WorkspaceMember(Base):
@@ -94,6 +102,35 @@ class WorkspaceMember(Base):
 
     workspace: Mapped["Workspace"] = relationship(back_populates="members")
     user: Mapped["User"] = relationship(back_populates="workspace_memberships")
+
+
+class WorkspaceShare(Base):
+    __tablename__ = "workspace_shares"
+    __table_args__ = (UniqueConstraint("workspace_id", "user_id", name="uq_workspace_share"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # 'pending' | 'approved' | 'rejected'
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    approved_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    workspace: Mapped["Workspace"] = relationship(back_populates="shares")
+    user: Mapped["User"] = relationship(foreign_keys=[user_id], back_populates="workspace_shares")
+    approver: Mapped["User | None"] = relationship(foreign_keys=[approved_by])
 
 
 # ── Catalog ───────────────────────────────────────────────────────────────────

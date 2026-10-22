@@ -129,6 +129,7 @@ class WorkspaceResponse(BaseModel):
     status: str = "active"
     # caller's role within this workspace (populated on the fly)
     my_role: str | None = None
+    is_shared: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -187,6 +188,30 @@ class UpdateMemberRequest(BaseModel):
 class UpdateWorkspaceRequest(BaseModel):
     name: str | None = None
     description: str | None = None
+
+
+class WorkspaceShareRequest(BaseModel):
+    note: str | None = None
+
+
+class WorkspaceShareReviewRequest(BaseModel):
+    status: Literal["approved", "rejected"]
+
+
+class WorkspaceShareResponse(BaseModel):
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    workspace_name: str
+    workspace_slug: str
+    user_id: uuid.UUID
+    user_email: str
+    user_display_name: str | None = None
+    status: Literal["pending", "approved", "rejected"]
+    requested_at: datetime
+    approved_at: datetime | None = None
+    approved_by: uuid.UUID | None = None
+
+    model_config = {"from_attributes": True}
 
 
 # ── Catalogs ──────────────────────────────────────────────────────────────────
