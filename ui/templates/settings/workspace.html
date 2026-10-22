@@ -66,7 +66,11 @@
   {% if request.state.user and (request.state.user.role == 'superadmin' or workspace.my_role == 'admin') %}
   {% set owned_catalogs = catalog_settings.owned if catalog_settings else [] %}
   {% set shared_catalogs = catalog_settings.shared if catalog_settings else [] %}
+  {% set shared_with_others = catalog_settings.shared_with_others if catalog_settings and catalog_settings.shared_with_others else [] %}
   {% set active_tab = request.query_params.get('tab', '') %}
+  {% set is_owned = active_tab == 'catalogs' or active_tab == 'owned' or active_tab == '' %}
+  {% set is_shared_with_me = active_tab == 'shared' or active_tab == 'shared_with_me' %}
+  {% set is_shared_with_others = active_tab == 'shared_with_others' %}
   <div class="card p-6 mb-6">
     <div class="flex items-center justify-between mb-4">
       <h2 class="text-sm font-semibold text-gray-300">Catalogs</h2>
@@ -77,18 +81,23 @@
     <div class="flex gap-1 mb-5 border-b border-white/[0.06]">
       <a href="?tab=catalogs"
          class="text-xs px-3 py-1.5 rounded-t border-b-2 transition-colors
-           {% if active_tab == 'catalogs' or active_tab == '' %}border-blue-500 text-blue-400{% else %}border-transparent text-gray-500 hover:text-gray-300{% endif %}">
+           {% if is_owned %}border-blue-500 text-blue-400{% else %}border-transparent text-gray-500 hover:text-gray-300{% endif %}">
         Owned ({{ owned_catalogs | length }})
       </a>
-      <a href="?tab=shared"
+      <a href="?tab=shared_with_me"
          class="text-xs px-3 py-1.5 rounded-t border-b-2 transition-colors
-           {% if active_tab == 'shared' %}border-blue-500 text-blue-400{% else %}border-transparent text-gray-500 hover:text-gray-300{% endif %}">
-        Shared ({{ shared_catalogs | length }})
+           {% if is_shared_with_me %}border-blue-500 text-blue-400{% else %}border-transparent text-gray-500 hover:text-gray-300{% endif %}">
+        Shared with me ({{ shared_catalogs | length }})
+      </a>
+      <a href="?tab=shared_with_others"
+         class="text-xs px-3 py-1.5 rounded-t border-b-2 transition-colors
+           {% if is_shared_with_others %}border-blue-500 text-blue-400{% else %}border-transparent text-gray-500 hover:text-gray-300{% endif %}">
+        Shared with others ({{ shared_with_others | length }})
       </a>
     </div>
 
     <!-- Owned catalogs tab -->
-    {% if active_tab != 'shared' %}
+    {% if is_owned %}
     {% if owned_catalogs %}
     <div class="space-y-1 mb-2">
       {% for cat in owned_catalogs %}
@@ -156,8 +165,8 @@
     {% endif %}
     {% endif %}
 
-    <!-- Shared catalogs tab -->
-    {% if active_tab == 'shared' %}
+    <!-- Shared with me tab -->
+    {% if is_shared_with_me %}
     {% if shared_catalogs %}
     <div class="space-y-1">
       {% for sc in shared_catalogs %}
@@ -207,6 +216,66 @@
     </div>
     {% else %}
     <p class="text-sm text-gray-500">No shared catalogs.</p>
+    {% endif %}
+    {% endif %}
+
+    <!-- Shared with others tab -->
+    {% if is_shared_with_others %}
+    {% if shared_with_others %}
+    <div class="space-y-1">
+      {% for item in shared_with_others %}
+      {% set is_pending = item.status == 'pending' %}
+      <div class="flex items-center gap-3 py-2.5 border-b border-white/[0.04] last:border-0">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="inline-flex items-center gap-1.5 text-xs">
+              <span class="text-[9px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-blue-950/60 text-blue-400 border border-blue-800/60 font-mono">Catalog</span>
+              <span class="font-mono font-medium text-blue-200">{{ item.catalog_name }}</span>
+            </span>
+            <span class="text-gray-600 text-xs">→</span>
+            <span class="inline-flex items-center gap-1.5 text-xs">
+              <span class="text-[9px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-gray-800 text-gray-400 border border-gray-700/60 font-mono">Shared with Workspace</span>
+              <span class="font-medium text-gray-200">{{ item.target_workspace_name }}</span>
+            </span>
+            {% if is_pending %}
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-yellow-900/30 text-yellow-500 border border-yellow-800/40 shrink-0">pending approval</span>
+            {% else %}
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-900/30 text-emerald-400 border border-emerald-800/40 shrink-0">active</span>
+            {% endif %}
+          </div>
+          <div class="flex items-center gap-2 mt-1 text-[11px] text-gray-500 flex-wrap">
+            {% if item.requester_email %}
+            <span>Requested by <span class="text-gray-400">{{ item.requester_email }}</span></span>
+            <span>·</span>
+            {% endif %}
+            <span>{{ item.requested_at[:10] if item.requested_at else '' }}</span>
+            {% if item.suspended %}<span class="text-[10px] text-yellow-500 font-mono ml-1">suspended</span>{% endif %}
+          </div>
+        </div>
+
+        <span class="inline-flex items-center gap-1.5 text-[11px] font-medium text-cyan-300 bg-cyan-950/40 border border-cyan-800/40 px-2.5 py-0.5 rounded-full shrink-0 font-mono">
+          <span class="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+          {{ item.mode or 'read' }}
+        </span>
+
+        {% if is_pending %}
+        <form action="/settings/workspace/catalogs/{{ item.catalog_id }}/access/{{ item.access_id }}/approve" method="post" class="shrink-0">
+          <button type="submit" class="text-xs px-2.5 py-1 rounded border border-emerald-700/50 text-emerald-500 hover:text-emerald-300 transition-colors">Approve</button>
+        </form>
+        <form action="/settings/workspace/catalogs/{{ item.catalog_id }}/access/{{ item.access_id }}/reject" method="post" class="shrink-0">
+          <button type="submit" class="text-xs px-2.5 py-1 rounded border border-gray-700 text-gray-500 hover:text-red-400 hover:border-red-600/50 transition-colors">Reject</button>
+        </form>
+        {% else %}
+        <form action="/settings/workspace/catalogs/{{ item.catalog_id }}/access/{{ item.access_id }}/revoke" method="post"
+              onsubmit="return confirm('Revoke shared access to catalog &quot;{{ item.catalog_name }}&quot; for workspace &quot;{{ item.target_workspace_name }}&quot;?')">
+          <button type="submit" class="text-xs px-2.5 py-1 rounded border border-gray-700 text-gray-500 hover:text-red-400 hover:border-red-600/50 transition-colors shrink-0">Revoke Share</button>
+        </form>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-sm text-gray-500">No catalogs shared with other workspaces.</p>
     {% endif %}
     {% endif %}
   </div>
