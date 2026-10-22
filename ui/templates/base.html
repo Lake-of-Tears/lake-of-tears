@@ -292,6 +292,8 @@
       <div class="flex items-center gap-3 shrink-0">
 
         <!-- Shared Objects Toggle -->
+        {% set _has_shared = (request.state.has_shared_access if request.state.has_shared_access is defined else false) or (shared_workspaces is defined and shared_workspaces) or (shared_workspaces_catalogs is defined and shared_workspaces_catalogs) %}
+        {% if _has_shared %}
         <button id="global-shared-objects-toggle"
                 onclick="toggleGlobalSharedObjects()"
                 title="Toggle Shared Workspace Objects Visibility"
@@ -303,6 +305,7 @@
           <span class="hidden md:inline" id="global-shared-toggle-label">Shared: Visible</span>
           <span class="w-2 h-2 rounded-full bg-cyan-400" id="global-shared-toggle-dot"></span>
         </button>
+        {% endif %}
 
         <!-- Theme toggle -->
         <div class="flex items-center gap-0.5 bg-black/20 rounded-md p-0.5" title="Theme">

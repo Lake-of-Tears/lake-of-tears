@@ -184,6 +184,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         request.state.user = None
         request.state.workspace = None
         request.state.workspaces = []
+        request.state.has_shared_access = False
         request.state.session_config = {
             "session_inactivity_timeout_minutes": 0,
             "session_max_hours": 24,
@@ -235,6 +236,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if not active and workspaces:
             active = workspaces[0]
         request.state.workspace = active
+        request.state.has_shared_access = bool(
+            any(w.get("is_shared") for w in workspaces)
+            or (active and active.get("has_shared_catalogs"))
+        )
 
         response = await call_next(request)
         if active and (not active_id or active_id != str(active["id"])):

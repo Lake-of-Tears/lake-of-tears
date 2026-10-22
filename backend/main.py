@@ -282,12 +282,29 @@ def _set_auth_cookie(
 
 
 def _workspace_response(ws: Workspace, user: User, is_shared: bool = False) -> WorkspaceResponse:
+    from sqlalchemy.orm import object_session
+
     member = next((m for m in ws.members if m.user_id == user.id), None)
     role = (
         member.role
         if member
         else ("superadmin" if user.role == "superadmin" else ("read" if is_shared else None))
     )
+    sess = object_session(ws)
+    has_shared_catalogs = False
+    if sess is not None:
+        has_shared_catalogs = (
+            sess.query(CatalogAccess.id)
+            .join(Catalog, Catalog.id == CatalogAccess.catalog_id)
+            .filter(
+                CatalogAccess.workspace_id == ws.id,
+                CatalogAccess.status == "approved",
+                CatalogAccess.suspended.is_(False),
+                Catalog.deleted_at.is_(None),
+            )
+            .first()
+            is not None
+        )
     return WorkspaceResponse(
         id=ws.id,
         name=ws.name,
@@ -298,6 +315,7 @@ def _workspace_response(ws: Workspace, user: User, is_shared: bool = False) -> W
         status=ws.status,
         my_role=role,
         is_shared=is_shared,
+        has_shared_catalogs=has_shared_catalogs,
     )
 
 

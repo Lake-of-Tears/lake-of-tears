@@ -24,19 +24,37 @@ def _make_token(sub="00000000-0000-0000-0000-000000000001", role="user"):
 
 
 def test_base_html_renders_global_shared_toggle_and_disconnect_modal():
-    """Verify base.html includes global toggle button and disconnect confirmation modal."""
+    """Verify base.html only renders global toggle button when shared access exists."""
     tok = _make_token()
-    workspaces = [
+    workspaces_no_shared = [
         {
             "id": "ws-1",
             "name": "Marketing",
             "slug": "marketing",
             "my_role": "admin",
             "is_shared": False,
+            "has_shared_catalogs": False,
         },
     ]
 
-    with patch.object(main, "_fetch_workspaces", return_value=workspaces):
+    with patch.object(main, "_fetch_workspaces", return_value=workspaces_no_shared):
+        resp = client.get("/", cookies={"lake_token": tok, "lake_workspace_id": "ws-1"})
+        assert resp.status_code == 200
+        html = resp.text
+        assert 'id="global-shared-objects-toggle"' not in html
+
+    workspaces_with_shared_catalog = [
+        {
+            "id": "ws-1",
+            "name": "Marketing",
+            "slug": "marketing",
+            "my_role": "admin",
+            "is_shared": False,
+            "has_shared_catalogs": True,
+        },
+    ]
+
+    with patch.object(main, "_fetch_workspaces", return_value=workspaces_with_shared_catalog):
         resp = client.get("/", cookies={"lake_token": tok, "lake_workspace_id": "ws-1"})
         assert resp.status_code == 200
         html = resp.text
