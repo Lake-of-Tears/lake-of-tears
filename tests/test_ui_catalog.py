@@ -594,7 +594,9 @@ def test_catalog_vector_sync_success_passes_workspace_context():
         patch.object(main, "AUTH_ENABLED", True),
         patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
         patch.object(main, "_backend_patch") as mock_patch,
-        patch.object(main, "_backend_post_with_error", return_value=(mock_table, None)) as mock_post,
+        patch.object(
+            main, "_backend_post_with_error", return_value=(mock_table, None)
+        ) as mock_post,
     ):
         res = client.post(
             "/catalog/vector-sync",
@@ -680,4 +682,3 @@ def test_catalog_vector_sync_backend_error():
         assert res.status_code == 500
         assert res.json()["ok"] is False
         assert res.json()["error"] == "Backend sync failed"
-
