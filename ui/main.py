@@ -700,10 +700,21 @@ async def catalog(request: Request):
             )
             or []
         )
+    owned_catalogs = []
+    ws_id = str(ws["id"]) if ws and isinstance(ws, dict) and ws.get("id") else None
     if isinstance(catalogs, list):
         for cat in catalogs:
-            if isinstance(cat, dict) and "schemas" in cat and isinstance(cat["schemas"], list):
-                cat["schemas"] = _sort_schemas(cat["schemas"])
+            if isinstance(cat, dict):
+                if "schemas" in cat and isinstance(cat["schemas"], list):
+                    cat["schemas"] = _sort_schemas(cat["schemas"])
+                if (
+                    ws_id
+                    and cat.get("owner_workspace_id")
+                    and str(cat.get("owner_workspace_id")) != ws_id
+                    and cat.get("my_access") != "owner"
+                ):
+                    continue
+                owned_catalogs.append(cat)
     shared_workspaces_catalogs = _resolve_ui_shared_catalogs(request)
     error = request.query_params.get("error")
     return templates.TemplateResponse(
@@ -711,7 +722,7 @@ async def catalog(request: Request):
         name="catalog.html",
         context={
             "request": request,
-            "catalogs": catalogs,
+            "catalogs": owned_catalogs,
             "shared_workspaces_catalogs": shared_workspaces_catalogs,
             "page": "catalog",
             "error": error,
@@ -957,10 +968,20 @@ def _resolve_ui_catalogs(request: Request) -> list[dict[str, Any]]:
         )
         if isinstance(res, list):
             catalogs = res
+    owned_catalogs: list[dict[str, Any]] = []
     for cat in catalogs:
-        if isinstance(cat, dict) and "schemas" in cat and isinstance(cat["schemas"], list):
-            cat["schemas"] = _sort_schemas(cat["schemas"])
-    return catalogs
+        if isinstance(cat, dict):
+            if "schemas" in cat and isinstance(cat["schemas"], list):
+                cat["schemas"] = _sort_schemas(cat["schemas"])
+            if (
+                ws_id
+                and cat.get("owner_workspace_id")
+                and str(cat.get("owner_workspace_id")) != str(ws_id)
+                and cat.get("my_access") != "owner"
+            ):
+                continue
+            owned_catalogs.append(cat)
+    return owned_catalogs
 
 
 def _resolve_ui_shared_catalogs(request: Request) -> list[dict[str, Any]]:
@@ -971,12 +992,56 @@ def _resolve_ui_shared_catalogs(request: Request) -> list[dict[str, Any]]:
     current_ws = getattr(request.state, "workspace", None) or {}
     current_ws_id = str(current_ws.get("id")) if current_ws.get("id") else None
 
+    groups: dict[str, dict[str, Any]] = {}
+
+    # 1. Catalogs shared directly into current workspace via CatalogAccess
+    if current_ws_id:
+        res = _backend_get(
+            f"/api/workspaces/{current_ws_id}/catalogs",
+            token,
+            workspace_id=current_ws_id,
+        )
+        if isinstance(res, list):
+            for cat in res:
+                if (
+                    isinstance(cat, dict)
+                    and cat.get("owner_workspace_id")
+                    and str(cat.get("owner_workspace_id")) != current_ws_id
+                    and cat.get("my_access") != "owner"
+                ):
+                    owner_id = str(cat["owner_workspace_id"])
+                    owner_name = cat.get("owner_workspace_name") or "External Workspace"
+                    owner_slug = cat.get("owner_workspace_slug") or owner_name.lower()
+                    if owner_id not in groups:
+                        groups[owner_id] = {
+                            "workspace": {
+                                "id": owner_id,
+                                "name": owner_name,
+                                "slug": owner_slug,
+                                "is_shared": True,
+                            },
+                            "catalogs": [],
+                        }
+                    cat_copy = dict(cat)
+                    cat_copy["is_shared"] = True
+                    cat_copy["source_workspace_id"] = owner_id
+                    cat_copy["source_workspace_name"] = owner_name
+                    cat_copy["source_workspace_slug"] = owner_slug
+                    if "schemas" in cat_copy and isinstance(cat_copy["schemas"], list):
+                        cat_copy["schemas"] = _sort_schemas(cat_copy["schemas"])
+                    groups[owner_id]["catalogs"].append(cat_copy)
+
+    # 2. Catalogs from approved shared workspaces via WorkspaceShare
     shared_workspaces = [
         w for w in workspaces if w.get("is_shared") and str(w.get("id")) != current_ws_id
     ]
-    result: list[dict[str, Any]] = []
     for ws in shared_workspaces:
         ws_id = str(ws["id"])
+        if ws_id not in groups:
+            groups[ws_id] = {
+                "workspace": ws,
+                "catalogs": [],
+            }
         res = _backend_get(
             f"/api/workspaces/{ws_id}/catalogs",
             token,
@@ -985,19 +1050,18 @@ def _resolve_ui_shared_catalogs(request: Request) -> list[dict[str, Any]]:
         cats = res if isinstance(res, list) else []
         for cat in cats:
             if isinstance(cat, dict):
-                cat["is_shared"] = True
-                cat["source_workspace_id"] = ws["id"]
-                cat["source_workspace_name"] = ws["name"]
-                cat["source_workspace_slug"] = ws["slug"]
-                if "schemas" in cat and isinstance(cat["schemas"], list):
-                    cat["schemas"] = _sort_schemas(cat["schemas"])
-        result.append(
-            {
-                "workspace": ws,
-                "catalogs": cats,
-            }
-        )
-    return result
+                if any(str(c.get("id")) == str(cat.get("id")) for c in groups[ws_id]["catalogs"]):
+                    continue
+                cat_copy = dict(cat)
+                cat_copy["is_shared"] = True
+                cat_copy["source_workspace_id"] = ws["id"]
+                cat_copy["source_workspace_name"] = ws["name"]
+                cat_copy["source_workspace_slug"] = ws["slug"]
+                if "schemas" in cat_copy and isinstance(cat_copy["schemas"], list):
+                    cat_copy["schemas"] = _sort_schemas(cat_copy["schemas"])
+                groups[ws_id]["catalogs"].append(cat_copy)
+
+    return list(groups.values())
 
 
 @app.get("/sql", response_class=HTMLResponse)
