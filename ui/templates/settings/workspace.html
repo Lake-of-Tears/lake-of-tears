@@ -63,20 +63,24 @@
   </div>
 
   <!-- Catalogs -->
-  {% if request.state.user and (request.state.user.role == 'superadmin' or workspace.my_role == 'admin') %}
+  {% set is_ws_admin = request.state.user and (request.state.user.role == 'superadmin' or workspace.my_role == 'admin') %}
+  {% set is_ws_member = request.state.user and not workspace.is_shared %}
+  {% if is_ws_member %}
   {% set owned_catalogs = catalog_settings.owned if catalog_settings else [] %}
   {% set shared_catalogs = catalog_settings.shared if catalog_settings else [] %}
   {% set shared_with_others = catalog_settings.shared_with_others if catalog_settings and catalog_settings.shared_with_others else [] %}
   {% set active_tab = request.query_params.get('tab', '') %}
-  {% set is_owned = active_tab == 'catalogs' or active_tab == 'owned' or active_tab == '' %}
+  {% set is_owned = active_tab == 'catalogs' or active_tab == 'owned' or active_tab == '' or (active_tab == 'shared_with_others' and not is_ws_admin) %}
   {% set is_shared_with_me = active_tab == 'shared' or active_tab == 'shared_with_me' %}
-  {% set is_shared_with_others = active_tab == 'shared_with_others' %}
+  {% set is_shared_with_others = active_tab == 'shared_with_others' and is_ws_admin %}
   <div class="card p-6 mb-6">
     <div class="flex items-center justify-between mb-4">
       <h2 class="text-sm font-semibold text-gray-300">Catalogs</h2>
       <div class="flex items-center gap-2">
         <button onclick="openCatalogDirectory()" class="text-xs px-2.5 py-1.5 rounded-md border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500 transition-colors">Request catalog</button>
+        {% if is_ws_admin %}
         <button onclick="openAddCatalogModal()" class="btn-primary text-xs px-2.5 py-1.5">+ Add catalog</button>
+        {% endif %}
       </div>
     </div>
     {% if catalog_error %}
@@ -95,11 +99,13 @@
            {% if is_shared_with_me %}border-blue-500 text-blue-400{% else %}border-transparent text-gray-500 hover:text-gray-300{% endif %}">
         Shared with me ({{ shared_catalogs | length }})
       </a>
+      {% if is_ws_admin %}
       <a href="?tab=shared_with_others"
          class="text-xs px-3 py-1.5 rounded-t border-b-2 transition-colors
            {% if is_shared_with_others %}border-blue-500 text-blue-400{% else %}border-transparent text-gray-500 hover:text-gray-300{% endif %}">
         Shared with others ({{ shared_with_others | length }})
       </a>
+      {% endif %}
     </div>
 
     <!-- Owned catalogs tab -->
@@ -143,7 +149,8 @@
         </div>
         {% if cat.is_default %}
         <span class="text-[11px] text-gray-600 shrink-0 italic">protected</span>
-        {% elif is_pending %}
+        {% elif is_ws_admin %}
+        {% if is_pending %}
         <form action="/settings/workspace/catalogs/{{ cat.id }}/reactivate" method="post" class="shrink-0">
           <button type="submit" class="text-xs px-2.5 py-1 rounded border border-emerald-700/50 text-emerald-500 hover:text-emerald-300 transition-colors">Reactivate</button>
         </form>
@@ -161,6 +168,7 @@
                 class="text-xs px-2.5 py-1 rounded border border-red-800/50 text-red-500 hover:text-red-300 transition-colors shrink-0">
           Delete now
         </button>
+        {% endif %}
         {% endif %}
         {% endif %}
       </div>
@@ -212,10 +220,12 @@
           <span class="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
           {{ sc.mode or 'read' }}
         </span>
+        {% if is_ws_admin %}
         <form action="/settings/workspace/catalogs/{{ sc.catalog_id }}/remove-shared" method="post"
               onsubmit="return confirm('Remove shared access to this catalog?')">
           <button type="submit" class="text-xs px-2.5 py-1 rounded border border-gray-700 text-gray-500 hover:text-red-400 hover:border-red-600/50 transition-colors shrink-0">Remove</button>
         </form>
+        {% endif %}
         {% endif %}
       </div>
       {% endfor %}
@@ -291,6 +301,7 @@
     {% endif %}
   </div>
 
+  {% if is_ws_admin %}
   <!-- Purge confirmation modal -->
   <div id="purge-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70">
     <div class="bg-[#1a1a1a] border border-red-900/50 rounded-xl shadow-2xl w-full max-w-md p-6">
@@ -367,6 +378,7 @@
     if (e.key === 'Escape') closeAddCatalogModal();
   });
   </script>
+  {% endif %}
 
   <!-- Catalog directory modal -->
   <div id="catalog-dir-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70">

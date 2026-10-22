@@ -1065,3 +1065,67 @@ def test_workspace_settings_inbound_requests_and_pending_shared_with_others_deta
         assert "No reason provided" in html
         assert 'id="request-reason-modal"' in html
         assert "Why do you need this catalog?" in html
+
+
+def test_workspace_settings_non_admin_member_sees_catalogs_and_request_button():
+    token = _make_token(role="user")
+    non_admin_ws = [
+        {
+            "id": "ws-100",
+            "slug": "dev",
+            "name": "Dev Workspace",
+            "role": "read",
+            "my_role": "read",
+            "is_shared": False,
+        }
+    ]
+    mock_catalog_settings = {
+        "owned": [
+            {
+                "id": "cat-1",
+                "name": "analytics",
+                "slug": "analytics",
+                "is_default": False,
+                "schemas": [{"name": "Bronze", "slug": "bronze"}],
+            }
+        ],
+        "shared": [
+            {
+                "access_id": "acc-1",
+                "catalog_id": "cat-2",
+                "catalog_name": "external_cat",
+                "owner_workspace_id": "ws-root",
+                "owner_workspace_name": "Default",
+                "status": "approved",
+                "suspended": False,
+                "mode": "read",
+                "schemas": [],
+            }
+        ],
+        "shared_with_others": [],
+    }
+
+    def mock_backend_get(path, *args, **kwargs):
+        if "settings/catalogs" in path:
+            return mock_catalog_settings
+        return []
+
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_fetch_workspaces", return_value=non_admin_ws),
+        patch.object(main, "_backend_get", side_effect=mock_backend_get),
+    ):
+        res = client.get(
+            "/settings/workspace?tab=catalogs",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-100"},
+        )
+        assert res.status_code == 200
+        html = res.text
+        assert "Request catalog" in html
+        assert "+ Add catalog" not in html
+        assert "Owned (1)" in html
+        assert "Shared with me (1)" in html
+        assert "?tab=shared_with_others" not in html
+        assert 'id="catalog-dir-modal"' in html
+        assert 'id="request-reason-modal"' in html
+        assert "/settings/workspace/catalogs/cat-1/delete" not in html
