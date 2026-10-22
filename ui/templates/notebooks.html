@@ -153,7 +153,7 @@
       </div>
 
       <!-- Actions -->
-      <div class="flex items-center gap-1.5 shrink-0">
+      <div id="notebook-actions" class="hidden flex items-center gap-1.5 shrink-0">
         {% if my_role != 'viewer' %}
         <button onclick="addCell('code')" title="Add Code Cell" class="btn-ghost text-xs py-1 px-2.5">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
@@ -1438,6 +1438,8 @@ async function openNotebook(path) {
   document.getElementById('current-filename').textContent = path.split('/').pop();
   document.getElementById('empty-state').classList.add('hidden');
   document.getElementById('notebook-canvas').classList.remove('hidden');
+  const actionsEl = document.getElementById('notebook-actions');
+  if (actionsEl) actionsEl.classList.remove('hidden');
 
   try {
     const url = new URL(window.location);
@@ -1469,6 +1471,7 @@ async function openNotebook(path) {
     }
   } catch (err) {
     showToast(err.message, 'error');
+    closeNotebook();
   }
 }
 
@@ -1478,6 +1481,8 @@ function closeNotebook() {
   document.getElementById('current-filename').textContent = 'No notebook selected';
   document.getElementById('notebook-canvas').classList.add('hidden');
   document.getElementById('empty-state').classList.remove('hidden');
+  const actionsEl = document.getElementById('notebook-actions');
+  if (actionsEl) actionsEl.classList.add('hidden');
 
   try {
     const url = new URL(window.location);
