@@ -893,3 +893,82 @@ def test_settings_workspace_catalog_access_revoke():
         mock_delete.assert_called_once_with(
             "/api/catalogs/cat-1/access/acc-10", token, workspace_id="ws-100"
         )
+
+
+def _admin_ws():
+    return [
+        {
+            "id": "ws-100",
+            "slug": "dev",
+            "name": "Dev Workspace",
+            "role": "admin",
+            "my_role": "admin",
+        }
+    ]
+
+
+def test_workspace_settings_renders_request_and_add_catalog_buttons():
+    token = _make_token()
+
+    def mock_backend_get(path, *args, **kwargs):
+        if "settings/catalogs" in path:
+            return {"owned": [], "shared": [], "shared_with_others": []}
+        return []
+
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_fetch_workspaces", return_value=_admin_ws()),
+        patch.object(main, "_backend_get", side_effect=mock_backend_get),
+    ):
+        res = client.get(
+            "/settings/workspace?tab=catalogs&catalog_error=Duplicate+name",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-100"},
+        )
+        assert res.status_code == 200
+        assert "Request catalog" in res.text
+        assert "+ Add catalog" in res.text
+        assert "openAddCatalogModal()" in res.text
+        assert "Duplicate name" in res.text
+
+
+def test_settings_catalog_create_success_redirects_to_owned_tab():
+    token = _make_token()
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_fetch_workspaces", return_value=_admin_ws()),
+        patch.object(main, "_backend_post_with_error", return_value=({"id": "c"}, None)) as post,
+    ):
+        res = client.post(
+            "/settings/workspace/catalogs/create",
+            data={"name": " Sales ", "description": ""},
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-100"},
+            follow_redirects=False,
+        )
+        assert res.status_code == 302
+        assert res.headers["location"] == "/settings/workspace?tab=catalogs&saved=catalog_created"
+        assert post.call_args.args[2]["name"] == "Sales"
+        assert post.call_args.args[2]["workspace_id"] == "ws-100"
+
+
+def test_settings_catalog_create_error_and_empty_name_redirect_inline():
+    token = _make_token()
+    cookies = {"lake_token": token, main._WORKSPACE_COOKIE: "ws-100"}
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_fetch_workspaces", return_value=_admin_ws()),
+        patch.object(main, "_backend_post_with_error", return_value=(None, "Name taken")),
+    ):
+        res = client.post(
+            "/settings/workspace/catalogs/create",
+            data={"name": "dup"},
+            cookies=cookies,
+            follow_redirects=False,
+        )
+        assert "catalog_error=Name+taken" in res.headers["location"]
+        res = client.post(
+            "/settings/workspace/catalogs/create",
+            data={"name": "   "},
+            cookies=cookies,
+            follow_redirects=False,
+        )
+        assert "catalog_error=Catalog+name+cannot+be+empty" in res.headers["location"]
