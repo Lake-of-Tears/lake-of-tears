@@ -290,6 +290,58 @@
         </div>
         {% endif %}
 
+        {% if shared_workspaces_catalogs %}
+        <div class="shared-with-you-section border-t border-gray-800/80 pt-3">
+          <div class="flex items-center justify-between mb-2">
+            <p class="text-[11px] font-semibold uppercase tracking-wider text-cyan-400 flex items-center gap-1.5">
+              <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+              </svg>
+              Shared with You
+            </p>
+          </div>
+          <div class="space-y-3">
+            {% for item in shared_workspaces_catalogs %}
+            <div class="space-y-1.5" data-shared-workspace-id="{{ item.workspace.id }}">
+              <div class="flex items-center justify-between text-[11px] text-gray-400 font-medium px-1">
+                <span class="flex items-center gap-1 truncate text-cyan-300">
+                  <span class="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+                  {{ item.workspace.name }}
+                </span>
+                <button type="button"
+                        onclick="openDisconnectShareModal('{{ item.workspace.id }}', '{{ item.workspace.name }}')"
+                        class="text-[9px] text-red-400/80 hover:text-red-300 px-1 py-0.5 rounded hover:bg-red-950/30 transition-colors"
+                        title="Disconnect shared workspace">
+                  Disconnect
+                </button>
+              </div>
+              {% for cat in item.catalogs %}
+                {% for sch in (cat.schemas or []) | sort_schemas %}
+                  {% for tbl in sch.tables or [] %}
+                  <div class="bg-cyan-950/10 border border-cyan-800/30 rounded p-2 hover:border-cyan-700/50 transition-colors">
+                    <div class="flex items-center justify-between gap-1">
+                      <div class="flex items-center gap-1.5 min-w-0">
+                        <span class="text-[9px] px-1 py-0.2 rounded bg-cyan-900/30 text-cyan-400 border border-cyan-800/30 font-medium">shared</span>
+                        <span class="font-mono text-cyan-300 font-medium truncate">{{ sch.slug|sql_ident }}.{{ tbl.slug|sql_ident }}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onclick="insertSqlSnippet('SELECT * FROM {{ sch.slug|sql_ident }}.{{ tbl.slug|sql_ident }} LIMIT 20')"
+                        class="text-[10px] text-cyan-400 hover:text-cyan-200 px-1.5 py-0.5 bg-cyan-900/30 rounded shrink-0"
+                      >
+                        Query
+                      </button>
+                    </div>
+                  </div>
+                  {% endfor %}
+                {% endfor %}
+              {% endfor %}
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+
         <div>
           <p class="text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-2">Lakehouse S3 Parquet Datasets</p>
           <div class="space-y-2">

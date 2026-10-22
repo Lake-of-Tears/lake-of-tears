@@ -704,11 +704,18 @@ async def catalog(request: Request):
         for cat in catalogs:
             if isinstance(cat, dict) and "schemas" in cat and isinstance(cat["schemas"], list):
                 cat["schemas"] = _sort_schemas(cat["schemas"])
+    shared_workspaces_catalogs = _resolve_ui_shared_catalogs(request)
     error = request.query_params.get("error")
     return templates.TemplateResponse(
         request=request,
         name="catalog.html",
-        context={"request": request, "catalogs": catalogs, "page": "catalog", "error": error},
+        context={
+            "request": request,
+            "catalogs": catalogs,
+            "shared_workspaces_catalogs": shared_workspaces_catalogs,
+            "page": "catalog",
+            "error": error,
+        },
     )
 
 
@@ -906,6 +913,11 @@ async def storage(request: Request):
         user.get("role") if is_superadmin else (ws.get("my_role") or ws.get("role") or "read")
     )
     can_delete = is_superadmin or user_role in ("admin", "write", "editor")
+    all_ws = getattr(request.state, "workspaces", None) or []
+    current_ws_id = str(ws.get("id")) if ws and ws.get("id") else None
+    shared_workspaces = [
+        w for w in all_ws if w.get("is_shared") and str(w.get("id")) != current_ws_id
+    ]
     return templates.TemplateResponse(
         request=request,
         name="storage.html",
@@ -918,6 +930,7 @@ async def storage(request: Request):
             "is_superadmin": is_superadmin,
             "user_role": user_role,
             "can_delete": can_delete,
+            "shared_workspaces": shared_workspaces,
         },
     )
 
@@ -950,11 +963,49 @@ def _resolve_ui_catalogs(request: Request) -> list[dict[str, Any]]:
     return catalogs
 
 
+def _resolve_ui_shared_catalogs(request: Request) -> list[dict[str, Any]]:
+    token = request.cookies.get("lake_token")
+    if not token:
+        return []
+    workspaces = getattr(request.state, "workspaces", None) or []
+    current_ws = getattr(request.state, "workspace", None) or {}
+    current_ws_id = str(current_ws.get("id")) if current_ws.get("id") else None
+
+    shared_workspaces = [
+        w for w in workspaces if w.get("is_shared") and str(w.get("id")) != current_ws_id
+    ]
+    result: list[dict[str, Any]] = []
+    for ws in shared_workspaces:
+        ws_id = str(ws["id"])
+        res = _backend_get(
+            f"/api/workspaces/{ws_id}/catalogs",
+            token,
+            workspace_id=ws_id,
+        )
+        cats = res if isinstance(res, list) else []
+        for cat in cats:
+            if isinstance(cat, dict):
+                cat["is_shared"] = True
+                cat["source_workspace_id"] = ws["id"]
+                cat["source_workspace_name"] = ws["name"]
+                cat["source_workspace_slug"] = ws["slug"]
+                if "schemas" in cat and isinstance(cat["schemas"], list):
+                    cat["schemas"] = _sort_schemas(cat["schemas"])
+        result.append(
+            {
+                "workspace": ws,
+                "catalogs": cats,
+            }
+        )
+    return result
+
+
 @app.get("/sql", response_class=HTMLResponse)
 async def sql_get(request: Request):
     query_sql = request.query_params.get("q") or request.query_params.get("sql")
     selected_sql = query_sql if query_sql else EXAMPLE_QUERIES[0]["sql"]
     catalogs = _resolve_ui_catalogs(request)
+    shared_workspaces_catalogs = _resolve_ui_shared_catalogs(request)
     return templates.TemplateResponse(
         request=request,
         name="sql.html",
@@ -965,6 +1016,7 @@ async def sql_get(request: Request):
             "sql": selected_sql,
             "example_queries": EXAMPLE_QUERIES,
             "catalogs": catalogs,
+            "shared_workspaces_catalogs": shared_workspaces_catalogs,
             "default_datasets": duckdb_ai.get_default_datasets(MINIO_BUCKET),
             "sql_ai_functions": duckdb_ai.SQL_AI_FUNCTIONS,
         },
@@ -1051,6 +1103,11 @@ async def pipelines(request: Request):
     user = request.state.user
     user_role = user.get("role") if user else "user"
     my_role = (ws.get("my_role") if ws else None) or user_role
+    all_ws = getattr(request.state, "workspaces", None) or []
+    current_ws_id = str(ws.get("id")) if ws and ws.get("id") else None
+    shared_workspaces = [
+        w for w in all_ws if w.get("is_shared") and str(w.get("id")) != current_ws_id
+    ]
     return templates.TemplateResponse(
         request=request,
         name="pipelines.html",
@@ -1058,6 +1115,7 @@ async def pipelines(request: Request):
             "request": request,
             "page": "pipelines",
             "workspace": ws,
+            "shared_workspaces": shared_workspaces,
             "user": user,
             "my_role": my_role,
         },
@@ -1070,6 +1128,11 @@ async def notebooks(request: Request):
     user = request.state.user
     user_role = user.get("role") if user else "user"
     my_role = (ws.get("my_role") if ws else None) or user_role
+    all_ws = getattr(request.state, "workspaces", None) or []
+    current_ws_id = str(ws.get("id")) if ws and ws.get("id") else None
+    shared_workspaces = [
+        w for w in all_ws if w.get("is_shared") and str(w.get("id")) != current_ws_id
+    ]
     return templates.TemplateResponse(
         request=request,
         name="notebooks.html",
@@ -1077,6 +1140,7 @@ async def notebooks(request: Request):
             "request": request,
             "page": "notebooks",
             "workspace": ws,
+            "shared_workspaces": shared_workspaces,
             "my_role": my_role,
         },
     )
@@ -1485,6 +1549,26 @@ async def settings_workspace_member_role(
     if ws and token:
         _backend_patch(f"/api/workspaces/{ws['id']}/members/{user_id}", token, {"role": role})
     return RedirectResponse(url="/settings/workspace", status_code=302)
+
+
+@app.delete("/api/workspaces/{workspace_id}/shares")
+async def ui_disconnect_workspace_share(workspace_id: str, request: Request):
+    token = _get_request_token(request)
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.delete(
+                f"{BACKEND_URL}/api/workspaces/{workspace_id}/shares",
+                headers=headers,
+                cookies=request.cookies,
+            )
+            if resp.status_code == 204:
+                return Response(status_code=204)
+            return JSONResponse(resp.json() if resp.content else {}, status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=502)
 
 
 # ── Settings: Admin ───────────────────────────────────────────────────────
@@ -1902,8 +1986,26 @@ def _get_notebook_auth_and_workspace(
         return JSONResponse({"detail": "Invalid or expired token"}, status_code=401)
 
     workspaces = _fetch_workspaces(token) or []
-    active_id = request.cookies.get(_WORKSPACE_COOKIE, "")
-    active = next((w for w in workspaces if str(w["id"]) == active_id), None)
+    req_ws = (
+        request.query_params.get("workspace")
+        or request.query_params.get("workspace_id")
+        or request.query_params.get("workspace_slug")
+        or request.headers.get("X-Workspace-Id")
+        or request.headers.get("X-Workspace-Slug")
+    )
+    active = None
+    if req_ws:
+        active = next(
+            (
+                w
+                for w in workspaces
+                if str(w.get("id")) == str(req_ws) or w.get("slug") == str(req_ws)
+            ),
+            None,
+        )
+    if not active:
+        active_id = request.cookies.get(_WORKSPACE_COOKIE, "")
+        active = next((w for w in workspaces if str(w["id"]) == active_id), None)
     if not active and workspaces:
         active = workspaces[0]
     if not active:
@@ -3316,7 +3418,11 @@ async def ui_browse_storage(
     params = {"prefix": prefix, "limit": limit}
     if continuation_token:
         params["continuation_token"] = continuation_token
-    if ws and ws.get("slug"):
+    if request.query_params.get("workspace_slug"):
+        params["workspace_slug"] = request.query_params["workspace_slug"]
+    elif request.query_params.get("workspace_id"):
+        params["workspace_id"] = request.query_params["workspace_id"]
+    elif ws and ws.get("slug"):
         params["workspace_slug"] = ws["slug"]
 
     try:
@@ -3339,7 +3445,11 @@ async def ui_get_object_metadata(request: Request, key: str):
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     ws = getattr(request.state, "workspace", None)
     params = {}
-    if ws and ws.get("slug"):
+    if request.query_params.get("workspace_slug"):
+        params["workspace_slug"] = request.query_params["workspace_slug"]
+    elif request.query_params.get("workspace_id"):
+        params["workspace_id"] = request.query_params["workspace_id"]
+    elif ws and ws.get("slug"):
         params["workspace_slug"] = ws["slug"]
 
     try:
@@ -3362,7 +3472,11 @@ async def ui_get_object_download(request: Request, key: str, expires_in: int = 3
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     ws = getattr(request.state, "workspace", None)
     params = {"expires_in": expires_in}
-    if ws and ws.get("slug"):
+    if request.query_params.get("workspace_slug"):
+        params["workspace_slug"] = request.query_params["workspace_slug"]
+    elif request.query_params.get("workspace_id"):
+        params["workspace_id"] = request.query_params["workspace_id"]
+    elif ws and ws.get("slug"):
         params["workspace_slug"] = ws["slug"]
 
     try:
@@ -3385,7 +3499,11 @@ async def ui_stream_object(request: Request, key: str):
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     ws = getattr(request.state, "workspace", None)
     params = {}
-    if ws and ws.get("slug"):
+    if request.query_params.get("workspace_slug"):
+        params["workspace_slug"] = request.query_params["workspace_slug"]
+    elif request.query_params.get("workspace_id"):
+        params["workspace_id"] = request.query_params["workspace_id"]
+    elif ws and ws.get("slug"):
         params["workspace_slug"] = ws["slug"]
 
     client = httpx.AsyncClient(timeout=60.0)
