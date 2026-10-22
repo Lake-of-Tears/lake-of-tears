@@ -1526,8 +1526,6 @@ def catalog_directory(
     )
     if not membership and current_user.role != "superadmin":
         raise HTTPException(403, "Not a member of this workspace")
-    if membership and membership.role != "admin" and current_user.role != "superadmin":
-        raise HTTPException(403, "Workspace admin access required")
 
     catalogs = (
         db.query(Catalog)
@@ -2120,26 +2118,24 @@ def request_access(
     if len(reason) > 500:
         raise HTTPException(400, "Reason must be 500 characters or fewer")
 
-    # caller must be a workspace admin in the given workspace (or superadmin)
+    # caller must be a workspace member in the given workspace (or superadmin)
     if req.workspace_id:
         membership = next(
             (
                 m
                 for m in current_user.workspace_memberships
-                if str(m.workspace_id) == req.workspace_id and m.role == "admin"
+                if str(m.workspace_id) == req.workspace_id
             ),
             None,
         )
         if not membership and current_user.role != "superadmin":
-            raise HTTPException(403, "Workspace admin access required to request catalog access")
+            raise HTTPException(403, "Workspace membership required to request catalog access")
         ws_id = membership.workspace_id if membership else req.workspace_id
     else:
-        admin_membership = next(
-            (m for m in current_user.workspace_memberships if m.role == "admin"), None
-        )
-        if not admin_membership and current_user.role != "superadmin":
-            raise HTTPException(403, "Workspace admin access required to request catalog access")
-        ws_id = admin_membership.workspace_id if admin_membership else catalog.owner_workspace_id
+        membership = next(iter(current_user.workspace_memberships), None)
+        if not membership and current_user.role != "superadmin":
+            raise HTTPException(403, "Workspace membership required to request catalog access")
+        ws_id = membership.workspace_id if membership else catalog.owner_workspace_id
     if str(ws_id) == str(catalog.owner_workspace_id):
         raise HTTPException(400, "Owner workspace already has full access")
 

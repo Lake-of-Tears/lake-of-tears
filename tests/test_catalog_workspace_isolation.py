@@ -523,5 +523,41 @@ def test_catalog_access_request_requires_reason_and_exposes_requester_details():
         assert pending_out[0]["requester_name"] == "Bob Beta"
         assert pending_out[0]["requester_email"] == "bob@lake.local"
         assert pending_out[0]["message"] == "Need payroll benchmarks for Q4 audit"
+
+        # 5. Non-admin member in ws_b can also browse directory and request access
+        dave_id = uuid.uuid4()
+        dave = User(
+            id=dave_id,
+            email="dave@lake.local",
+            display_name="Dave Reader",
+            role="user",
+            is_active=True,
+        )
+        session.add(dave)
+        session.add(WorkspaceMember(workspace_id=fix["ws_b"].id, user_id=dave_id, role="read"))
+        session.commit()
+        session.refresh(dave)
+        dave_token = jwt.encode(
+            {"sub": str(dave_id), "email": dave.email, "role": dave.role},
+            auth.SECRET_KEY,
+            algorithm="HS256",
+        )
+
+        resp_dir = client.get(
+            f"/api/catalogs/directory?workspace_id={fix['ws_b'].id}",
+            headers={"Authorization": f"Bearer {dave_token}"},
+        )
+        assert resp_dir.status_code == 200
+
+        resp_dave_req = client.post(
+            f"/api/catalogs/{fix['cat_a_private'].id}/access/request",
+            json={
+                "mode": "read",
+                "workspace_id": str(fix["ws_b"].id),
+                "message": "Read-only member requesting access for reporting",
+            },
+            headers={"Authorization": f"Bearer {dave_token}"},
+        )
+        assert resp_dave_req.status_code == 200
     finally:
         backend_main.app.dependency_overrides.clear()
