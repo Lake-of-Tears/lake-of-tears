@@ -130,6 +130,7 @@ class WorkspaceResponse(BaseModel):
     # caller's role within this workspace (populated on the fly)
     my_role: str | None = None
     is_shared: bool = False
+    has_shared_catalogs: bool = False
 
     model_config = {"from_attributes": True}
 
