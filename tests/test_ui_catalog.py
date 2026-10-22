@@ -972,3 +972,96 @@ def test_settings_catalog_create_error_and_empty_name_redirect_inline():
             follow_redirects=False,
         )
         assert "catalog_error=Catalog+name+cannot+be+empty" in res.headers["location"]
+
+
+def test_workspace_settings_inbound_requests_and_pending_shared_with_others_details():
+    token = _make_token()
+    mock_catalog_settings = {
+        "owned": [],
+        "shared": [],
+        "shared_with_others": [
+            {
+                "access_id": "acc-11",
+                "catalog_id": "cat-1",
+                "catalog_name": "default",
+                "target_workspace_id": "ws-300",
+                "target_workspace_name": "Marketing",
+                "target_workspace_slug": "marketing",
+                "requester_name": "Jane Doe",
+                "requester_email": "jane@example.com",
+                "message": "Need customer segments for Q4 campaign.",
+                "status": "pending",
+                "suspended": False,
+                "mode": "read",
+                "requested_at": "2026-10-22T11:00:00Z",
+            },
+            {
+                "access_id": "acc-12",
+                "catalog_id": "cat-1",
+                "catalog_name": "default",
+                "target_workspace_id": "ws-400",
+                "target_workspace_name": "Finance",
+                "target_workspace_slug": "finance",
+                "requester_name": None,
+                "requester_email": "finance@example.com",
+                "message": None,
+                "status": "pending",
+                "suspended": False,
+                "mode": "read",
+                "requested_at": "2026-10-22T12:00:00Z",
+            },
+        ],
+    }
+    mock_inbound = [
+        {
+            "access_id": "acc-11",
+            "catalog_id": "cat-1",
+            "catalog_name": "default",
+            "requesting_workspace_id": "ws-300",
+            "requesting_workspace_name": "Marketing",
+            "requester_name": "Jane Doe",
+            "requester_email": "jane@example.com",
+            "message": "Need customer segments for Q4 campaign.",
+            "mode": "read",
+            "status": "pending",
+            "requested_at": "2026-10-22T11:00:00Z",
+        },
+        {
+            "access_id": "acc-12",
+            "catalog_id": "cat-1",
+            "catalog_name": "default",
+            "requesting_workspace_id": "ws-400",
+            "requesting_workspace_name": "Finance",
+            "requester_name": None,
+            "requester_email": "finance@example.com",
+            "message": None,
+            "mode": "read",
+            "status": "pending",
+            "requested_at": "2026-10-22T12:00:00Z",
+        },
+    ]
+
+    def mock_backend_get(path, *args, **kwargs):
+        if "settings/catalogs" in path:
+            return mock_catalog_settings
+        if "access/requests/inbound" in path:
+            return mock_inbound
+        return []
+
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_fetch_workspaces", return_value=_admin_ws()),
+        patch.object(main, "_backend_get", side_effect=mock_backend_get),
+    ):
+        res = client.get(
+            "/settings/workspace?tab=shared_with_others",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-100"},
+        )
+        assert res.status_code == 200
+        html = res.text
+        assert "Jane Doe" in html
+        assert "jane@example.com" in html
+        assert "Need customer segments for Q4 campaign." in html
+        assert "No reason provided" in html
+        assert 'id="request-reason-modal"' in html
+        assert "Why do you need this catalog?" in html

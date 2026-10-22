@@ -388,7 +388,9 @@ class OutboundCatalogAccessItem(BaseModel):
     target_workspace_id: uuid.UUID
     target_workspace_name: str
     target_workspace_slug: str
+    requester_name: str | None = None
     requester_email: str | None = None
+    message: str | None = None
     status: str
     suspended: bool = False
     mode: str = "read"
@@ -420,6 +422,9 @@ class InboundAccessRequest(BaseModel):
     catalog_name: str
     requesting_workspace_id: uuid.UUID
     requesting_workspace_name: str | None
+    requester_name: str | None = None
+    requester_email: str | None = None
+    message: str | None = None
     mode: str
     requested_at: datetime
 

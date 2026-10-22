@@ -238,6 +238,8 @@ class CatalogAccess(Base):
     # 'pending' | 'approved' | 'rejected'
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     suspended: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Why the requester wants access (shown to the owning workspace's admins)
+    request_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     requested_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

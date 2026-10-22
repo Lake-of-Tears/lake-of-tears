@@ -250,13 +250,18 @@
             {% endif %}
           </div>
           <div class="flex items-center gap-2 mt-1 text-[11px] text-gray-500 flex-wrap">
-            {% if item.requester_email %}
-            <span>Requested by <span class="text-gray-400">{{ item.requester_email }}</span></span>
+            {% if item.requester_email or item.requester_name %}
+            <span>Requested by <span class="text-gray-400">{{ item.requester_name or item.requester_email }}</span>{% if item.requester_name and item.requester_email %} <span>&lt;{{ item.requester_email }}&gt;</span>{% endif %}</span>
             <span>·</span>
             {% endif %}
             <span>{{ item.requested_at[:10] if item.requested_at else '' }}</span>
             {% if item.suspended %}<span class="text-[10px] text-yellow-500 font-mono ml-1">suspended</span>{% endif %}
           </div>
+          {% if is_pending %}
+          <div class="mt-1 text-[11px] {% if item.message %}text-gray-300 italic{% else %}text-gray-600 italic{% endif %}">
+            {% if item.message %}“{{ item.message }}”{% else %}No reason provided{% endif %}
+          </div>
+          {% endif %}
         </div>
 
         <span class="inline-flex items-center gap-1.5 text-[11px] font-medium text-cyan-300 bg-cyan-950/40 border border-cyan-800/40 px-2.5 py-0.5 rounded-full shrink-0 font-mono">
@@ -472,7 +477,31 @@
     list.classList.remove('hidden');
   }
 
+  let _reasonTarget = null;
   function requestCatalogAccess(catalogId, btn) {
+    _reasonTarget = {catalogId, btn};
+    const input = document.getElementById('request-reason-input');
+    input.value = '';
+    document.getElementById('request-reason-error').classList.add('hidden');
+    document.getElementById('request-reason-modal').classList.remove('hidden');
+    setTimeout(() => input.focus(), 50);
+  }
+  function closeRequestReason() {
+    document.getElementById('request-reason-modal').classList.add('hidden');
+    _reasonTarget = null;
+  }
+  function confirmRequestReason() {
+    const reason = document.getElementById('request-reason-input').value.trim();
+    if (!reason) {
+      document.getElementById('request-reason-error').classList.remove('hidden');
+      return;
+    }
+    const t = _reasonTarget;
+    closeRequestReason();
+    if (t) submitCatalogAccessRequest(t.catalogId, t.btn, reason);
+  }
+
+  function submitCatalogAccessRequest(catalogId, btn, reason) {
     btn.disabled = true;
     btn.textContent = 'Pending…';
     btn.className = 'text-xs px-2.5 py-1 rounded border border-gray-700 text-gray-500 cursor-not-allowed shrink-0';
@@ -480,7 +509,7 @@
     fetch('/api/catalogs/' + catalogId + '/access/request', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({mode: 'read', workspace_id: _wsId}),
+      body: JSON.stringify({mode: 'read', workspace_id: _wsId, message: reason}),
     })
       .then(r => r.json())
       .then(data => {
@@ -506,9 +535,24 @@
   }
 
   document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape') closeCatalogDirectory();
+    if (e.key === 'Escape') { closeRequestReason(); closeCatalogDirectory(); }
   });
   </script>
+
+  <!-- Request reason modal -->
+  <div id="request-reason-modal" class="hidden fixed inset-0 z-[60] flex items-center justify-center bg-black/70">
+    <div class="bg-[#1a1a1a] border border-white/10 rounded-xl shadow-2xl w-full max-w-md p-6">
+      <h2 class="text-base font-semibold text-gray-200 mb-1">Why do you need this catalog?</h2>
+      <p class="text-xs text-gray-500 mb-3">The owning workspace's admins will see your name, email and this reason.</p>
+      <textarea id="request-reason-input" rows="4" maxlength="500" placeholder="e.g. Building the weekly revenue dashboard that needs the orders data"
+                class="input-dark w-full text-sm" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);"></textarea>
+      <p id="request-reason-error" class="hidden text-[11px] text-red-400 mt-1">A reason is required.</p>
+      <div class="flex gap-2 justify-end mt-4">
+        <button type="button" onclick="closeRequestReason()" class="btn-ghost">Cancel</button>
+        <button type="button" onclick="confirmRequestReason()" class="btn-primary">Send request</button>
+      </div>
+    </div>
+  </div>
   {% endif %}
 
   {% if inbound_requests %}
@@ -517,14 +561,29 @@
     <h2 class="text-sm font-semibold text-gray-300 mb-4">Inbound access requests ({{ inbound_requests | length }})</h2>
     <div class="space-y-1">
       {% for req in inbound_requests %}
-      <div class="flex items-center gap-3 py-2 border-b border-white/[0.04] last:border-0">
+      <div class="flex items-start gap-3 py-3 border-b border-white/[0.04] last:border-0">
         <div class="flex-1 min-w-0">
-          <div class="text-sm text-gray-300 truncate">
-            <span class="text-gray-400">{{ req.requesting_workspace_name or 'Unknown workspace' }}</span>
-            <span class="text-gray-600 mx-1">→</span>
-            <span class="text-gray-200">{{ req.catalog_name }}</span>
+          <div class="flex items-center gap-2 flex-wrap text-xs">
+            <span class="inline-flex items-center gap-1.5">
+              <span class="text-[9px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-gray-800 text-gray-400 border border-gray-700/60 font-mono">Workspace</span>
+              <span class="font-medium text-gray-200">{{ req.requesting_workspace_name or 'Unknown workspace' }}</span>
+            </span>
+            <span class="text-gray-600">→</span>
+            <span class="inline-flex items-center gap-1.5">
+              <span class="text-[9px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-blue-950/60 text-blue-400 border border-blue-800/60 font-mono">Catalog</span>
+              <span class="font-mono font-medium text-blue-200">{{ req.catalog_name }}</span>
+            </span>
+            <span class="inline-flex items-center gap-1.5 text-[11px] font-medium text-cyan-300 bg-cyan-950/40 border border-cyan-800/40 px-2 py-0.5 rounded-full font-mono">{{ req.mode }}</span>
           </div>
-          <div class="text-[11px] text-gray-500">{{ req.mode }} · {{ req.requested_at[:10] }}</div>
+          <div class="text-[11px] text-gray-500 mt-1.5">
+            Requested by
+            <span class="text-gray-300">{{ req.requester_name or req.requester_email or 'Unknown user' }}</span>
+            {% if req.requester_name and req.requester_email %}<span class="text-gray-500">&lt;{{ req.requester_email }}&gt;</span>{% endif %}
+            · {{ req.requested_at[:10] }}
+          </div>
+          <div class="mt-1.5 text-xs {% if req.message %}text-gray-300 border-l-2 border-gray-700 pl-2.5 italic{% else %}text-gray-600 italic{% endif %}">
+            {% if req.message %}“{{ req.message }}”{% else %}No reason provided{% endif %}
+          </div>
         </div>
         <form action="/settings/workspace/catalogs/{{ req.catalog_id }}/access/{{ req.access_id }}/approve" method="post" class="shrink-0">
           <button type="submit" class="text-xs px-2.5 py-1 rounded border border-emerald-700/50 text-emerald-500 hover:text-emerald-300 transition-colors">Approve</button>
