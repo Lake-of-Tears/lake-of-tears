@@ -381,9 +381,25 @@ class SharedCatalogSettingsItem(BaseModel):
     schemas: list[CatalogSchemaResponse] = []
 
 
+class OutboundCatalogAccessItem(BaseModel):
+    access_id: uuid.UUID
+    catalog_id: uuid.UUID
+    catalog_name: str
+    target_workspace_id: uuid.UUID
+    target_workspace_name: str
+    target_workspace_slug: str
+    requester_email: str | None = None
+    status: str
+    suspended: bool = False
+    mode: str = "read"
+    requested_at: datetime
+    reviewed_at: datetime | None = None
+
+
 class WorkspaceCatalogSettingsResponse(BaseModel):
     owned: list[CatalogResponse]
     shared: list[SharedCatalogSettingsItem]
+    shared_with_others: list[OutboundCatalogAccessItem] = []
 
 
 class CatalogDirectoryItem(BaseModel):

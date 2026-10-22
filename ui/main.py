@@ -1416,7 +1416,7 @@ def _backend_delete(
                 f"{BACKEND_URL}{path}",
                 headers=_build_backend_headers(token, workspace_id, workspace_slug),
             )
-        return resp.status_code == 200
+        return resp.status_code in (200, 204)
     except Exception:
         pass
     return False
@@ -1506,7 +1506,7 @@ async def settings_workspace_get(request: Request):
     ws = request.state.workspace
     token = request.cookies.get("lake_token")
     members = []
-    catalog_settings = {"owned": [], "shared": []}
+    catalog_settings = {"owned": [], "shared": [], "shared_with_others": []}
     error = request.query_params.get("error")
     saved = request.query_params.get("saved")
     inbound_requests = []
@@ -1967,7 +1967,9 @@ async def settings_catalog_approve_access(request: Request, catalog_id: str, acc
             {"status": "approved"},
             workspace_id=str(ws["id"]),
         )
-    return RedirectResponse(url="/settings/workspace", status_code=302)
+    return RedirectResponse(
+        url="/settings/workspace?tab=shared_with_others&saved=approved", status_code=302
+    )
 
 
 @app.post("/settings/workspace/catalogs/{catalog_id}/access/{access_id}/reject")
@@ -1981,7 +1983,24 @@ async def settings_catalog_reject_access(request: Request, catalog_id: str, acce
             {"status": "rejected"},
             workspace_id=str(ws["id"]),
         )
-    return RedirectResponse(url="/settings/workspace", status_code=302)
+    return RedirectResponse(
+        url="/settings/workspace?tab=shared_with_others&saved=rejected", status_code=302
+    )
+
+
+@app.post("/settings/workspace/catalogs/{catalog_id}/access/{access_id}/revoke")
+async def settings_catalog_revoke_access(request: Request, catalog_id: str, access_id: str):
+    ws = request.state.workspace
+    token = request.cookies.get("lake_token")
+    if token and ws:
+        _backend_delete(
+            f"/api/catalogs/{catalog_id}/access/{access_id}",
+            token,
+            workspace_id=str(ws["id"]),
+        )
+    return RedirectResponse(
+        url="/settings/workspace?tab=shared_with_others&saved=revoked", status_code=302
+    )
 
 
 # ── Catalog directory & access request (browser-side fetch proxies) ───────

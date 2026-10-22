@@ -778,7 +778,7 @@ def test_workspace_settings_catalogs_labels_shared_workspace_and_catalog():
         patch.object(main, "_backend_get", side_effect=mock_backend_get),
     ):
         res = client.get(
-            "/settings/workspace?tab=shared",
+            "/settings/workspace?tab=shared_with_me",
             cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-100"},
         )
         assert res.status_code == 200
@@ -791,3 +791,105 @@ def test_workspace_settings_catalogs_labels_shared_workspace_and_catalog():
         assert "bronze" in html
         assert "gold" in html
         assert "read" in html
+        assert "Shared with me (1)" in html
+        assert "Shared with others (0)" in html
+
+
+def test_workspace_settings_catalogs_labels_shared_with_others():
+    token = _make_token()
+    mock_workspaces = [
+        {
+            "id": "ws-100",
+            "slug": "dev",
+            "name": "Dev Workspace",
+            "role": "admin",
+            "my_role": "admin",
+        }
+    ]
+    mock_catalog_settings = {
+        "owned": [],
+        "shared": [],
+        "shared_with_others": [
+            {
+                "access_id": "acc-10",
+                "catalog_id": "cat-1",
+                "catalog_name": "default",
+                "target_workspace_id": "ws-200",
+                "target_workspace_name": "Analytics",
+                "target_workspace_slug": "analytics",
+                "requester_email": "analyst@example.com",
+                "status": "approved",
+                "suspended": False,
+                "mode": "read",
+                "requested_at": "2026-10-22T10:00:00Z",
+            },
+            {
+                "access_id": "acc-11",
+                "catalog_id": "cat-1",
+                "catalog_name": "default",
+                "target_workspace_id": "ws-300",
+                "target_workspace_name": "Marketing",
+                "target_workspace_slug": "marketing",
+                "requester_email": "marketing@example.com",
+                "status": "pending",
+                "suspended": False,
+                "mode": "read",
+                "requested_at": "2026-10-22T11:00:00Z",
+            },
+        ],
+    }
+
+    def mock_backend_get(path, *args, **kwargs):
+        if "settings/catalogs" in path:
+            return mock_catalog_settings
+        return []
+
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
+        patch.object(main, "_backend_get", side_effect=mock_backend_get),
+    ):
+        res = client.get(
+            "/settings/workspace?tab=shared_with_others",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-100"},
+        )
+        assert res.status_code == 200
+        html = res.text
+        assert "Shared with others (2)" in html
+        assert "Analytics" in html
+        assert "Marketing" in html
+        assert "analyst@example.com" in html
+        assert "active" in html
+        assert "pending approval" in html
+        assert "Revoke Share" in html
+        assert "Approve" in html
+        assert "Reject" in html
+
+
+def test_settings_workspace_catalog_access_revoke():
+    token = _make_token()
+    mock_workspaces = [
+        {
+            "id": "ws-100",
+            "slug": "dev",
+            "name": "Dev Workspace",
+            "role": "admin",
+            "my_role": "admin",
+        }
+    ]
+
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
+        patch.object(main, "_backend_delete", return_value=True) as mock_delete,
+    ):
+        res = client.post(
+            "/settings/workspace/catalogs/cat-1/access/acc-10/revoke",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-100"},
+            follow_redirects=False,
+        )
+        assert res.status_code == 302
+        assert "/settings/workspace?tab=shared_with_others&saved=revoked" in res.headers["location"]
+        mock_delete.assert_called_once_with(
+            "/api/catalogs/cat-1/access/acc-10", token, workspace_id="ws-100"
+        )

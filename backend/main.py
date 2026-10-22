@@ -77,6 +77,7 @@ from schemas import (
     DeleteWorkspaceRequest,
     InboundAccessRequest,
     LoginRequest,
+    OutboundCatalogAccessItem,
     PurgeCatalogRequest,
     RegisterRequest,
     RequestAccessRequest,
@@ -2462,9 +2463,43 @@ def workspace_catalog_settings(
             )
         )
 
+    owned_ids = [c.id for c in owned]
+    outbound_grants = (
+        db.query(CatalogAccess)
+        .filter(
+            CatalogAccess.catalog_id.in_(owned_ids),
+            CatalogAccess.status.in_(["pending", "approved"]),
+        )
+        .order_by(CatalogAccess.requested_at.desc())
+        .all()
+        if owned_ids
+        else []
+    )
+    shared_with_others = []
+    for grant in outbound_grants:
+        cat = grant.catalog
+        target_ws = grant.workspace
+        shared_with_others.append(
+            OutboundCatalogAccessItem(
+                access_id=grant.id,
+                catalog_id=grant.catalog_id,
+                catalog_name=cat.name if cat else "—",
+                target_workspace_id=grant.workspace_id,
+                target_workspace_name=target_ws.name if target_ws else "Unknown",
+                target_workspace_slug=target_ws.slug if target_ws else "unknown",
+                requester_email=grant.requester.email if grant.requester else None,
+                status=grant.status,
+                suspended=grant.suspended,
+                mode=grant.mode or "read",
+                requested_at=grant.requested_at,
+                reviewed_at=grant.reviewed_at,
+            )
+        )
+
     return WorkspaceCatalogSettingsResponse(
         owned=[_catalog_response(c, current_user, db) for c in owned],
         shared=shared,
+        shared_with_others=shared_with_others,
     )
 
 
