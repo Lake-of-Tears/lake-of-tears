@@ -88,7 +88,10 @@ def test_get_notebooks_page_renders_native_template():
         assert "CodeMirror" in response.text
         assert "Kernel Offline" in response.text
         assert "btn-audio-cue" in response.text
-        assert '<div id="notebook-actions" class="hidden flex items-center gap-1.5 shrink-0">' in response.text
+        assert (
+            '<div id="notebook-actions" class="hidden flex items-center gap-1.5 shrink-0">'
+            in response.text
+        )
         assert "playSuccessSound" in response.text
         assert "playErrorSound" in response.text
         assert '<iframe src="/jupyter/' not in response.text
