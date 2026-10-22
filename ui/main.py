@@ -1529,6 +1529,7 @@ async def settings_workspace_get(request: Request):
             "catalog_settings": catalog_settings,
             "inbound_requests": inbound_requests,
             "error": error,
+            "catalog_error": request.query_params.get("catalog_error"),
             "saved": saved,
         },
     )
@@ -1954,6 +1955,46 @@ async def settings_catalog_remove_shared(request: Request, catalog_id: str):
             workspace_id=str(ws["id"]),
         )
     return RedirectResponse(url="/settings/workspace?tab=catalogs", status_code=302)
+
+
+@app.post("/settings/workspace/catalogs/create")
+async def settings_catalog_create(
+    request: Request,
+    name: str = Form(...),
+    description: str = Form(""),
+):
+    token = request.cookies.get("lake_token")
+    if not token:
+        return RedirectResponse(url="/login?reason=session_expired", status_code=302)
+    ws = request.state.workspace
+    base = "/settings/workspace?tab=catalogs"
+    if not ws:
+        err = "No active workspace selected."
+        return RedirectResponse(
+            url=f"{base}&catalog_error={urllib.parse.quote_plus(err)}", status_code=302
+        )
+    name_clean = name.strip()
+    if not name_clean:
+        err = "Catalog name cannot be empty."
+        return RedirectResponse(
+            url=f"{base}&catalog_error={urllib.parse.quote_plus(err)}", status_code=302
+        )
+    ws_id = str(ws["id"])
+    _, error = _backend_post_with_error(
+        "/api/catalogs",
+        token,
+        {
+            "name": name_clean,
+            "description": description.strip() or None,
+            "workspace_id": ws_id,
+        },
+        workspace_id=ws_id,
+    )
+    if error:
+        return RedirectResponse(
+            url=f"{base}&catalog_error={urllib.parse.quote_plus(error)}", status_code=302
+        )
+    return RedirectResponse(url=f"{base}&saved=catalog_created", status_code=302)
 
 
 @app.post("/settings/workspace/catalogs/{catalog_id}/access/{access_id}/approve")

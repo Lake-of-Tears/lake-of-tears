@@ -74,8 +74,14 @@
   <div class="card p-6 mb-6">
     <div class="flex items-center justify-between mb-4">
       <h2 class="text-sm font-semibold text-gray-300">Catalogs</h2>
-      <button onclick="openCatalogDirectory()" class="text-xs px-2.5 py-1.5 rounded-md border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500 transition-colors">+ Add catalog</button>
+      <div class="flex items-center gap-2">
+        <button onclick="openCatalogDirectory()" class="text-xs px-2.5 py-1.5 rounded-md border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500 transition-colors">Request catalog</button>
+        <button onclick="openAddCatalogModal()" class="btn-primary text-xs px-2.5 py-1.5">+ Add catalog</button>
+      </div>
     </div>
+    {% if catalog_error %}
+    <div class="mb-4 px-3 py-2 rounded-md bg-red-900/30 border border-red-800/50 text-red-400 text-xs">{{ catalog_error }}</div>
+    {% endif %}
 
     <!-- Tab bar -->
     <div class="flex gap-1 mb-5 border-b border-white/[0.06]">
@@ -321,11 +327,47 @@
   });
   </script>
 
+  <!-- Add catalog modal -->
+  <div id="add-catalog-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+    <div class="bg-[#1a1a1a] border border-white/10 rounded-xl shadow-2xl w-full max-w-md p-6">
+      <h2 class="text-base font-semibold text-gray-200 mb-1">Add catalog</h2>
+      <p class="text-xs text-gray-500 mb-4">Create a new, empty catalog owned by <span class="text-gray-300">{{ workspace.name }}</span>.</p>
+      <form action="/settings/workspace/catalogs/create" method="post" class="flex flex-col gap-3">
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Name</label>
+          <input id="add-catalog-name" name="name" type="text" required autocomplete="off" maxlength="255"
+                 class="input-dark w-full" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Description (optional)</label>
+          <input name="description" type="text" autocomplete="off"
+                 class="input-dark w-full" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+        </div>
+        <div class="flex gap-2 justify-end mt-1">
+          <button type="button" onclick="closeAddCatalogModal()" class="btn-ghost">Cancel</button>
+          <button type="submit" class="btn-primary">Create catalog</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  <script>
+  function openAddCatalogModal() {
+    document.getElementById('add-catalog-modal').classList.remove('hidden');
+    setTimeout(() => document.getElementById('add-catalog-name').focus(), 50);
+  }
+  function closeAddCatalogModal() {
+    document.getElementById('add-catalog-modal').classList.add('hidden');
+  }
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeAddCatalogModal();
+  });
+  </script>
+
   <!-- Catalog directory modal -->
   <div id="catalog-dir-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70">
     <div class="bg-[#1a1a1a] border border-white/10 rounded-xl shadow-2xl w-full max-w-lg p-6">
       <div class="flex items-center justify-between mb-4">
-        <h2 class="text-base font-semibold text-gray-200">Browse catalogs</h2>
+        <h2 class="text-base font-semibold text-gray-200">Request catalog</h2>
         <button onclick="closeCatalogDirectory()" class="text-gray-500 hover:text-gray-300 transition-colors">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
