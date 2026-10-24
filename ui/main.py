@@ -66,13 +66,29 @@ MINIO_CONSOLE_URL = os.getenv("MINIO_CONSOLE_URL", "http://localhost:9001")
 SUPERSET_URL = os.getenv("SUPERSET_URL", "http://localhost:8088")
 JUPYTER_TOKEN = os.getenv("JUPYTER_TOKEN", "")
 
-SOURCES = ["stripe", "shopify", "hubspot", "postgres", "weather"]
+SOURCES = [
+    "weather",
+    "truenas",
+    "truenas_logs",
+    "jellyfin",
+    "tmdb",
+    "alexa",
+    "stripe",
+    "shopify",
+    "hubspot",
+    "postgres",
+]
 SOURCE_LABELS = {
+    "weather": "Open-Meteo Weather",
+    "truenas": "TrueNAS Storage",
+    "truenas_logs": "TrueNAS System Logs",
+    "jellyfin": "Jellyfin Activity",
+    "tmdb": "The Movie Database (TMDb)",
+    "alexa": "Alexa Smart Home",
     "stripe": "Stripe",
     "shopify": "Shopify",
     "hubspot": "HubSpot",
     "postgres": "PostgreSQL",
-    "weather": "Weather",
 }
 
 app = FastAPI(title="Lake of Tears")
@@ -330,7 +346,12 @@ def _get_bucket_stats(workspace_slug: str | None = None) -> dict[str, Any]:
                     prefix_stats[top]["last_modified"] = last_mod
 
                 for src in SOURCES:
-                    if f"/{src}/" in rel_key or rel_key.startswith(f"{src}/"):
+                    if (
+                        rel_key.startswith(f"raw/{src}/")
+                        or rel_key.startswith(f"{src}/")
+                        or f"/raw/{src}/" in rel_key
+                        or f"/{src}/" in rel_key
+                    ):
                         if (
                             source_last_modified[src] is None
                             or last_mod > source_last_modified[src]
@@ -683,7 +704,9 @@ async def logout():
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
-    stats = _get_bucket_stats()
+    ws = getattr(request.state, "workspace", None) or {}
+    slug = ws.get("slug")
+    stats = _get_bucket_stats(workspace_slug=slug)
     return templates.TemplateResponse(
         request=request,
         name="home.html",
@@ -1217,11 +1240,30 @@ async def notebooks(request: Request):
 
 @app.get("/ingest", response_class=HTMLResponse)
 async def ingest(request: Request):
-    stats = _get_bucket_stats()
+    user = getattr(request.state, "user", None) or {}
+    ws = getattr(request.state, "workspace", None) or {}
+    slug = ws.get("slug")
+    stats = _get_bucket_stats(workspace_slug=slug)
+
+    all_ws = getattr(request.state, "workspaces", None) or []
+    current_ws_id = str(ws.get("id")) if ws and ws.get("id") else None
+    shared_workspaces = [
+        w for w in all_ws if w.get("is_shared") and str(w.get("id")) != current_ws_id
+    ]
+    is_superadmin = user.get("role") == "superadmin"
+    my_role = user.get("role") if is_superadmin else (ws.get("my_role") or ws.get("role") or "read")
+
     return templates.TemplateResponse(
         request=request,
         name="ingest.html",
-        context={"request": request, "stats": stats, "page": "ingest"},
+        context={
+            "request": request,
+            "stats": stats,
+            "page": "ingest",
+            "workspace": ws,
+            "shared_workspaces": shared_workspaces,
+            "my_role": my_role,
+        },
     )
 
 

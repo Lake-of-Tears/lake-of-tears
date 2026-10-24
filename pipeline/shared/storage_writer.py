@@ -39,22 +39,37 @@ def get_duckdb_con() -> duckdb.DuckDBPyConnection:
     return con
 
 
+def resolve_workspace(workspace: str | None = None) -> str:
+    """Resolve and clean the target workspace slug.
+
+    Precedence:
+    1. Explicit workspace parameter
+    2. WORKSPACE_SLUG environment variable
+    3. WORKSPACE environment variable
+    4. Fallback: "default"
+    """
+    raw = workspace or os.environ.get("WORKSPACE_SLUG") or os.environ.get("WORKSPACE") or "default"
+    clean = raw.replace("\\", "/").strip("/ ")
+    return clean or "default"
+
+
 def write_to_storage(
     df,
     source: str | None = None,
     date_str: str | None = None,
     *,
+    workspace: str | None = None,
     catalog: str | None = None,
     schema: str | None = None,
     table: str | None = None,
 ):
-    """Write a DataFrame to MinIO as Parquet.
+    """Write a DataFrame to MinIO as Parquet scoped to a workspace prefix.
 
-    Legacy usage: write_to_storage(df, source="stripe_charges", date_str="2024-01-01")
-      → s3://datalake/raw/stripe_charges/year=.../
+    Workspace usage: write_to_storage(df, source="stripe_charges", date_str="2024-01-01", workspace="dev")
+      → s3://datalake/workspaces/dev/raw/stripe_charges/year=.../
 
-    Catalog usage: write_to_storage(df, date_str="2024-01-01", catalog="production", schema="revenue", table="stripe_charges")
-      → s3://datalake/production/revenue/stripe_charges/year=.../
+    Catalog usage: write_to_storage(df, date_str="2024-01-01", workspace="dev", catalog="production", schema="revenue", table="stripe_charges")
+      → s3://datalake/workspaces/dev/production/revenue/stripe_charges/year=.../
     """
     if date_str is None:
         from datetime import date
@@ -62,14 +77,25 @@ def write_to_storage(
         date_str = date.today().isoformat()
 
     y, m, d = date_str[:4], date_str[5:7], date_str[8:10]
+    ws = resolve_workspace(workspace)
 
     if catalog and schema and table:
-        path = f"s3://datalake/{catalog}/{schema}/{table}/year={y}/month={m}/day={d}/data.parquet"
+        path = f"s3://datalake/workspaces/{ws}/{catalog}/{schema}/{table}/year={y}/month={m}/day={d}/data.parquet"
     elif source:
-        path = f"s3://datalake/raw/{source}/year={y}/month={m}/day={d}/data.parquet"
+        clean_source = source.strip("/")
+        path = f"s3://datalake/workspaces/{ws}/raw/{clean_source}/year={y}/month={m}/day={d}/data.parquet"
     else:
         raise ValueError("Either 'source' or all of 'catalog', 'schema', 'table' must be provided")
 
     con = get_duckdb_con()
     con.register("df", df)
     con.execute(f"COPY df TO '{path}' (FORMAT PARQUET)")
+    return path
+
+
+class StorageWriter:
+    """Helper class exposing write_to_storage."""
+
+    @staticmethod
+    def write(df, source: str | None = None, date_str: str | None = None, **kwargs):
+        return write_to_storage(df, source=source, date_str=date_str, **kwargs)
