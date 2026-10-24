@@ -1,13 +1,13 @@
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parents[2]))
-
+import argparse
 import os
+import sys
 from datetime import date, timedelta
+from pathlib import Path
 
 import pandas as pd
 import requests
+
+sys.path.insert(0, str(Path(__file__).parents[2]))
 from storage_writer import write_to_storage
 
 # State College, PA — override via env if needed
@@ -53,6 +53,18 @@ def fetch_weather(lat: float, lon: float, target_date: str) -> pd.DataFrame:
 
 
 if __name__ == "__main__":
-    yesterday = str(date.today() - timedelta(days=1))
-    df = fetch_weather(LATITUDE, LONGITUDE, yesterday)
-    write_to_storage(df, "weather", yesterday)
+    parser = argparse.ArgumentParser(description="Ingest weather data into datalake")
+    parser.add_argument(
+        "--workspace",
+        default=os.getenv("WORKSPACE_SLUG", os.getenv("WORKSPACE", "default")),
+        help="Target workspace slug (default: default)",
+    )
+    parser.add_argument(
+        "--date",
+        default=str(date.today() - timedelta(days=1)),
+        help="Target date YYYY-MM-DD (defaults to yesterday)",
+    )
+    args, _ = parser.parse_known_args()
+
+    df = fetch_weather(LATITUDE, LONGITUDE, args.date)
+    write_to_storage(df, "weather", args.date, workspace=args.workspace)

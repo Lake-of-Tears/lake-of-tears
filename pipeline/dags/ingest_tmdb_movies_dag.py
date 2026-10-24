@@ -78,11 +78,14 @@ def _find_source_notebook() -> str:
     )
 
 
-def _upload_run_artifact_to_s3(executed_path: str, execution_ts: str) -> str:
-    """Upload executed notebook artifact to MinIO S3."""
+def _upload_run_artifact_to_s3(
+    executed_path: str, execution_ts: str, workspace_slug: str = "default"
+) -> str:
+    """Upload executed notebook artifact to MinIO S3 under workspace prefix."""
     import boto3
 
-    s3_key = f"notebook_runs/default/tmdb_daily_movies/{execution_ts}.ipynb"
+    clean_ws = (workspace_slug or "default").strip("/")
+    s3_key = f"notebook_runs/{clean_ws}/tmdb_daily_movies/{execution_ts}.ipynb"
     s3 = boto3.client(
         "s3",
         endpoint_url=f"http://{MINIO_ENDPOINT}",
@@ -98,7 +101,7 @@ def _upload_run_artifact_to_s3(executed_path: str, execution_ts: str) -> str:
 
 
 def run_tmdb_notebook_pipeline(**context) -> dict[str, Any]:
-    """Execute the TMDb ingestion notebook headlessly via Papermill."""
+    """Execute the TMDb ingestion notebook headlessly via Papermill with workspace context."""
     import papermill as pm
 
     ds = context.get("ds", datetime.now(UTC).strftime("%Y-%m-%d"))
@@ -109,6 +112,12 @@ def run_tmdb_notebook_pipeline(**context) -> dict[str, Any]:
 
     dag_run = context.get("dag_run")
     conf = dag_run.conf if dag_run and dag_run.conf else {}
+    workspace_slug = (
+        conf.get("workspace")
+        or context.get("params", {}).get("workspace")
+        or os.getenv("WORKSPACE_SLUG", os.getenv("WORKSPACE", "default"))
+    ).strip("/") or "default"
+
     tmdb_key = (
         conf.get("TMDB_API_KEY")
         or context.get("params", {}).get("TMDB_API_KEY")
@@ -124,6 +133,7 @@ def run_tmdb_notebook_pipeline(**context) -> dict[str, Any]:
 
     parameters = {
         "INGEST_DATE": str(ds),
+        "WORKSPACE_SLUG": workspace_slug,
         "MINIO_ENDPOINT": MINIO_ENDPOINT,
         "MINIO_ACCESS_KEY": MINIO_ACCESS_KEY,
         "MINIO_SECRET_KEY": MINIO_SECRET_KEY,
@@ -140,11 +150,14 @@ def run_tmdb_notebook_pipeline(**context) -> dict[str, Any]:
             parameters=parameters,
             log_output=True,
         )
-        s3_key = _upload_run_artifact_to_s3(output_file, execution_ts)
+        s3_key = _upload_run_artifact_to_s3(
+            output_file, execution_ts, workspace_slug=workspace_slug
+        )
 
     return {
         "status": "success",
         "ingest_date": ds,
+        "workspace": workspace_slug,
         "s3_key": s3_key,
         "execution_ts": execution_ts,
     }
@@ -155,8 +168,16 @@ with DAG(
     schedule="0 2 * * *",  # Daily at 02:00 UTC
     start_date=datetime(2026, 1, 1),
     catchup=False,
-    tags=["ingestion", "tmdb", "notebooks", "movies", "notebook:tmdb_daily_movies_ingest.ipynb"],
-    doc_md="Daily ingestion of trending and popular movies from TheMovieDB into s3://datalake/raw/tmdb/movies/ via Papermill.",
+    tags=[
+        "ingestion",
+        "tmdb",
+        "notebooks",
+        "movies",
+        "workspace:default",
+        "notebook:tmdb_daily_movies_ingest.ipynb",
+    ],
+    params={"workspace": "default"},
+    doc_md="Daily ingestion of trending and popular movies from TheMovieDB into s3://datalake/workspaces/<workspace>/raw/tmdb/movies/ via Papermill.",
     default_args=default_args,
 ) as dag:
     PythonOperator(

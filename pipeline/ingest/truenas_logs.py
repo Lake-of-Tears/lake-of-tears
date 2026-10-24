@@ -12,6 +12,7 @@ Runs at 00:00 daily so it captures the day that just ended.
 SSH key (root@TRUENAS_HOST) must already be in place on the VM.
 """
 
+import argparse
 import hashlib
 import json
 import os
@@ -147,8 +148,9 @@ def fetch_alerts():
     return entries
 
 
-def main():
-    print(f"Ingesting TrueNAS logs for {YESTERDAY}")
+def main(workspace: str | None = None, target_date: str | None = None):
+    chosen_date = target_date or YESTERDAY
+    print(f"Ingesting TrueNAS logs for {chosen_date}")
 
     journal = fetch_journal_logs()
     alerts = fetch_alerts()
@@ -163,12 +165,25 @@ def main():
     df["id"] = df["content"].apply(
         lambda t: hashlib.md5(t.encode(), usedforsecurity=False).hexdigest()
     )
-    df["source_date"] = YESTERDAY
+    df["source_date"] = chosen_date
     df["ingested_at"] = pd.Timestamp.now()
 
-    write_to_storage(df, "truenas_logs", YESTERDAY)
-    print(f"Wrote {len(df)} log entries → s3://datalake/raw/truenas_logs/ ({YESTERDAY})")
+    target_ws = workspace or os.getenv("WORKSPACE_SLUG", os.getenv("WORKSPACE", "default"))
+    path = write_to_storage(df, "truenas_logs", chosen_date, workspace=target_ws)
+    print(f"Wrote {len(df)} log entries → {path} ({chosen_date})")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Ingest TrueNAS system logs into datalake")
+    parser.add_argument(
+        "--workspace",
+        default=os.getenv("WORKSPACE_SLUG", os.getenv("WORKSPACE", "default")),
+        help="Target workspace slug (default: default)",
+    )
+    parser.add_argument(
+        "--date",
+        default=YESTERDAY,
+        help="Target date YYYY-MM-DD (defaults to yesterday)",
+    )
+    args, _ = parser.parse_known_args()
+    main(workspace=args.workspace, target_date=args.date)

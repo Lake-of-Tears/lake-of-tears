@@ -48,3 +48,4 @@ minio-data/
 airflow/
 !docker/airflow/
 notebooks/
+.aider*

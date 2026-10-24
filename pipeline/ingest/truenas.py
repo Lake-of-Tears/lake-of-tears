@@ -1,14 +1,13 @@
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parents[2]))
-
+import argparse
 import os
 import sys
 from datetime import date
+from pathlib import Path
 
 import pandas as pd
 import requests
+
+sys.path.insert(0, str(Path(__file__).parents[2]))
 from storage_writer import write_to_storage
 
 TRUENAS_URL = f"http://{os.environ.get('TRUENAS_HOST', '')}/api/v2.0"
@@ -47,11 +46,25 @@ def fetch_disk_info() -> pd.DataFrame:
 
 
 if __name__ == "__main__":
-    today = str(date.today())
+    parser = argparse.ArgumentParser(
+        description="Ingest TrueNAS pool stats and disk info into datalake"
+    )
+    parser.add_argument(
+        "--workspace",
+        default=os.getenv("WORKSPACE_SLUG", os.getenv("WORKSPACE", "default")),
+        help="Target workspace slug (default: default)",
+    )
+    parser.add_argument(
+        "--date",
+        default=str(date.today()),
+        help="Target date YYYY-MM-DD (defaults to today)",
+    )
+    args, _ = parser.parse_known_args()
+
     pool_df = fetch_pool_stats()
-    pool_df["source_date"] = today
-    write_to_storage(pool_df, "truenas", today)
+    pool_df["source_date"] = args.date
+    write_to_storage(pool_df, "truenas", args.date, workspace=args.workspace)
     disk_df = fetch_disk_info()
     if not disk_df.empty:
-        disk_df["source_date"] = today
-        write_to_storage(disk_df, "truenas_disks", today)
+        disk_df["source_date"] = args.date
+        write_to_storage(disk_df, "truenas_disks", args.date, workspace=args.workspace)

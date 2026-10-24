@@ -6,8 +6,14 @@
 
   <div class="flex items-center justify-between">
     <div>
-      <h1 class="text-xl font-semibold text-gray-100">Data Ingestion</h1>
-      <p class="text-sm text-gray-500 mt-1">Configured data sources and their last sync status.</p>
+      <div class="flex items-center gap-3">
+        <h1 class="text-xl font-semibold text-gray-100">Data Ingestion</h1>
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-cyan-950/80 text-cyan-400 border border-cyan-800/60 font-mono">
+          <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+          Workspace: {{ workspace.slug or 'default' }}
+        </span>
+      </div>
+      <p class="text-sm text-gray-500 mt-1">Configured data sources, sync status, and landed partitions strictly scoped to <span class="font-mono text-xs text-gray-400">workspaces/{{ workspace.slug or 'default' }}/</span>.</p>
     </div>
     <a href="/pipelines" class="btn-primary text-sm">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
@@ -21,7 +27,7 @@
       <thead>
         <tr class="border-b border-gray-800 text-left">
           <th class="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Source</th>
-          <th class="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">S3 Path</th>
+          <th class="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Workspace Landing Path</th>
           <th class="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-right">Last Sync</th>
           <th class="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-right">Status</th>
         </tr>
@@ -38,7 +44,7 @@
               <span class="font-medium text-gray-200">{{ src.label }}</span>
             </div>
           </td>
-          <td class="px-5 py-4 font-mono text-xs text-gray-500">raw/{{ src.key }}/</td>
+          <td class="px-5 py-4 font-mono text-xs text-gray-400">workspaces/{{ workspace.slug or 'default' }}/raw/{{ src.key }}/</td>
           <td class="px-5 py-4 text-gray-500 text-right text-xs">{{ src.last_modified_str }}</td>
           <td class="px-5 py-4 text-right">
             {% if src.status == 'green' %}
@@ -59,8 +65,8 @@
     <h2 class="text-sm font-semibold text-gray-300 mb-3">Adding a new source</h2>
     <ol class="space-y-1.5 text-sm text-gray-500 list-decimal list-inside">
       <li>Create <code class="text-xs bg-gray-800 px-1 rounded text-gray-400">pipeline/ingest/my_source.py</code> — fetch, normalize, write via <code class="text-xs bg-gray-800 px-1 rounded text-gray-400">StorageWriter</code></li>
-      <li>Create <code class="text-xs bg-gray-800 px-1 rounded text-gray-400">pipeline/dags/ingest_my_source_dag.py</code> — Airflow schedule</li>
-      <li>Add source name to <code class="text-xs bg-gray-800 px-1 rounded text-gray-400">SOURCES</code> in <code class="text-xs bg-gray-800 px-1 rounded text-gray-400">pipeline/embed/embed_sources.py</code></li>
+      <li>Create <code class="text-xs bg-gray-800 px-1 rounded text-gray-400">pipeline/dags/ingest_my_source_dag.py</code> — Airflow schedule with workspace parameterization</li>
+      <li>Add source name to <code class="text-xs bg-gray-800 px-1 rounded text-gray-400">SOURCES</code> in <code class="text-xs bg-gray-800 px-1 rounded text-gray-400">pipeline/embed/embed_sources.py</code> and <code class="text-xs bg-gray-800 px-1 rounded text-gray-400">ui/main.py</code></li>
       <li>Add <code class="text-xs bg-gray-800 px-1 rounded text-gray-400">_text_my_source(row)</code> for embedding text representation</li>
     </ol>
   </div>

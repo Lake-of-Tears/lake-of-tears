@@ -41,14 +41,29 @@ MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "datalake")
 MINIO_SECURE = os.getenv("MINIO_SECURE", "false").lower() in ("true", "1")
 
-SOURCES = ["stripe", "shopify", "hubspot", "weather", "truenas", "jellyfin"]
+SOURCES = [
+    "weather",
+    "truenas",
+    "truenas_logs",
+    "jellyfin",
+    "tmdb",
+    "alexa",
+    "stripe",
+    "shopify",
+    "hubspot",
+    "postgres",
+]
 SOURCE_LABELS = {
+    "weather": "Open-Meteo Weather",
+    "truenas": "TrueNAS Storage",
+    "truenas_logs": "TrueNAS System Logs",
+    "jellyfin": "Jellyfin Activity",
+    "tmdb": "The Movie Database (TMDb)",
+    "alexa": "Alexa Smart Home",
     "stripe": "Stripe Charges",
     "shopify": "Shopify Orders",
     "hubspot": "HubSpot Contacts",
-    "weather": "Open-Meteo Weather",
-    "truenas": "TrueNAS Storage",
-    "jellyfin": "Jellyfin Activity",
+    "postgres": "App Database",
 }
 
 
@@ -720,7 +735,12 @@ def get_bucket_summary(
                     prefix_stats[top]["last_modified"] = last_mod
 
                 for src in SOURCES:
-                    if f"/{src}/" in rel_key or rel_key.startswith(f"{src}/"):
+                    if (
+                        rel_key.startswith(f"raw/{src}/")
+                        or rel_key.startswith(f"{src}/")
+                        or f"/raw/{src}/" in rel_key
+                        or f"/{src}/" in rel_key
+                    ):
                         if (
                             source_last_modified[src] is None
                             or last_mod > source_last_modified[src]
