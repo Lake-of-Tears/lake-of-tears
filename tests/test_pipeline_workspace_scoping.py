@@ -1,14 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import importlib.util
 import os
 import sys
-import tempfile
 import types
-import uuid
-from datetime import UTC, datetime
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -28,8 +23,8 @@ papermill = types.ModuleType("papermill")
 papermill.execute_notebook = MagicMock()
 sys.modules["papermill"] = papermill
 
-from backend import pipeline_service
-from pipeline.dags import run_notebook_dag
+from backend import pipeline_service  # noqa: E402
+from pipeline.dags import run_notebook_dag  # noqa: E402
 
 
 def test_dag_accessibility_strict_workspace_isolation():
@@ -73,7 +68,9 @@ def test_list_workspace_dags_filters_strictly():
         patch("backend.pipeline_service.httpx.AsyncClient") as mock_client,
     ):
         mock_instance = AsyncMock()
-        mock_instance.get.return_value = MagicMock(status_code=200, json=lambda: {"dags": airflow_dags})
+        mock_instance.get.return_value = MagicMock(
+            status_code=200, json=lambda: {"dags": airflow_dags}
+        )
         mock_client.return_value.__aenter__.return_value = mock_instance
 
         # Query for workspace alpha
@@ -236,7 +233,10 @@ def test_run_notebook_dag_injects_workspace_parameters_and_env():
 
     with (
         patch("pipeline.dags.run_notebook_dag._fetch_source_notebook", return_value={"cells": []}),
-        patch("pipeline.dags.run_notebook_dag._upload_artifact_to_s3", return_value="notebook_runs/finance/quarterly_report/20261025.ipynb") as mock_upload,
+        patch(
+            "pipeline.dags.run_notebook_dag._upload_artifact_to_s3",
+            return_value="notebook_runs/finance/quarterly_report/20261025.ipynb",
+        ) as mock_upload,
         patch("papermill.execute_notebook", side_effect=mock_pm_execute),
     ):
         res = run_notebook_dag.execute_notebook_task(dag_run=mock_dag_run)

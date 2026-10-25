@@ -648,7 +648,9 @@ async def get_dag_run(
             if dag_id == "run_notebook":
                 run_ws = conf.get("workspace_slug") or conf.get("workspace")
                 if run_ws != workspace_slug:
-                    raise HTTPException(404, f"Run {run_id} not found in workspace {workspace_slug}")
+                    raise HTTPException(
+                        404, f"Run {run_id} not found in workspace {workspace_slug}"
+                    )
 
             start = r.get("start_date")
             end = r.get("end_date")
@@ -1136,9 +1138,7 @@ async def update_pipeline_schedule(
 
     is_workspace_dag = clean_id.startswith(f"ws_{workspace_slug}_")
     if clean_id.startswith("ws_") and not is_workspace_dag:
-        raise HTTPException(
-            404, f"Pipeline '{dag_id}' not found in workspace '{workspace_slug}'"
-        )
+        raise HTTPException(404, f"Pipeline '{dag_id}' not found in workspace '{workspace_slug}'")
 
     if not is_workspace_dag and not is_superadmin and role != "admin":
         raise HTTPException(

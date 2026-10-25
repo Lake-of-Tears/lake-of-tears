@@ -84,9 +84,9 @@ def execute_notebook_task(**context) -> dict[str, Any]:
     dag_run = context.get("dag_run")
     conf = dag_run.conf if dag_run and dag_run.conf else {}
 
-    workspace_slug = (
-        conf.get("workspace_slug") or conf.get("workspace") or "default"
-    ).strip("/") or "default"
+    workspace_slug = (conf.get("workspace_slug") or conf.get("workspace") or "default").strip(
+        "/"
+    ) or "default"
     notebook_path = conf.get("notebook_path", "analysis.ipynb")
     parameters = conf.get("parameters", {})
     triggered_by = conf.get("triggered_by", "system")
