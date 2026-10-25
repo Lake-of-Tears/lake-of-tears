@@ -2863,7 +2863,7 @@
     if (!confirm(`Are you sure you want to cancel run ${runId}?`)) return;
 
     try {
-      const wsQuery = currentWorkspace ? `?workspace_slug=${encodeURIComponent(currentWorkspace)}` : '';
+      const wsQuery = currentWorkspaceSlug ? `?workspace_slug=${encodeURIComponent(currentWorkspaceSlug)}` : '';
       const res = await fetch(`/api/pipelines/${dagId}/runs/${runId}/cancel${wsQuery}`, {
         method: 'POST',
       });
@@ -2885,7 +2885,7 @@
     listEl.innerHTML = '<div class="py-8 text-center text-gray-500">Loading historical runs...</div>';
 
     try {
-      const wsQuery = currentWorkspace ? `?workspace_slug=${encodeURIComponent(currentWorkspace)}` : '';
+      const wsQuery = currentWorkspaceSlug ? `?workspace_slug=${encodeURIComponent(currentWorkspaceSlug)}` : '';
       const res = await fetch(`/api/pipelines/${dagId}/runs${wsQuery}`);
       if (!res.ok) throw new Error('Failed to load runs');
       const data = await res.json();
@@ -2956,7 +2956,7 @@
     document.getElementById('log-pre').textContent = `Loading task instances for ${runId}...`;
 
     try {
-      const wsQuery = currentWorkspace ? `?workspace_slug=${encodeURIComponent(currentWorkspace)}` : '';
+      const wsQuery = currentWorkspaceSlug ? `?workspace_slug=${encodeURIComponent(currentWorkspaceSlug)}` : '';
       const res = await fetch(`/api/pipelines/${dagId}/runs/${runId}/tasks${wsQuery}`);
       if (!res.ok) throw new Error('Failed to load task instances');
       const data = await res.json();
@@ -2984,7 +2984,7 @@
 
   async function loadTaskLogs(dagId, runId, taskId, tryNum) {
     try {
-      const wsParam = currentWorkspace ? `&workspace_slug=${encodeURIComponent(currentWorkspace)}` : '';
+      const wsParam = currentWorkspaceSlug ? `&workspace_slug=${encodeURIComponent(currentWorkspaceSlug)}` : '';
       const res = await fetch(`/api/pipelines/${dagId}/runs/${runId}/tasks/${taskId}/logs?try_number=${tryNum}${wsParam}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
