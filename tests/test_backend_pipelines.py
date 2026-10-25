@@ -324,6 +324,16 @@ def test_pipelines_viewer_can_read_all():
             )
             assert res_logs.status_code == 200
             assert "Execution log line 1" in res_logs.json()["content"]
+
+            # 5. Get runs using cookie lake_workspace_id without X-Workspace-Id header
+            cookie_headers = {"Authorization": f"Bearer {token}"}
+            res_cookie_runs = client.get(
+                "/api/v1/pipelines/ws_analytics_daily_etl/runs",
+                headers=cookie_headers,
+                cookies={"lake_workspace_id": str(workspace.id)},
+            )
+            assert res_cookie_runs.status_code == 200
+            assert len(res_cookie_runs.json()["runs"]) == 1
     finally:
         backend_main.app.dependency_overrides.clear()
 

@@ -2863,7 +2863,8 @@
     if (!confirm(`Are you sure you want to cancel run ${runId}?`)) return;
 
     try {
-      const res = await fetch(`/api/pipelines/${dagId}/runs/${runId}/cancel`, {
+      const wsQuery = currentWorkspace ? `?workspace_slug=${encodeURIComponent(currentWorkspace)}` : '';
+      const res = await fetch(`/api/pipelines/${dagId}/runs/${runId}/cancel${wsQuery}`, {
         method: 'POST',
       });
       const data = await res.json();
@@ -2884,7 +2885,8 @@
     listEl.innerHTML = '<div class="py-8 text-center text-gray-500">Loading historical runs...</div>';
 
     try {
-      const res = await fetch(`/api/pipelines/${dagId}/runs`);
+      const wsQuery = currentWorkspace ? `?workspace_slug=${encodeURIComponent(currentWorkspace)}` : '';
+      const res = await fetch(`/api/pipelines/${dagId}/runs${wsQuery}`);
       if (!res.ok) throw new Error('Failed to load runs');
       const data = await res.json();
       const runs = data.runs || [];
@@ -2954,7 +2956,8 @@
     document.getElementById('log-pre').textContent = `Loading task instances for ${runId}...`;
 
     try {
-      const res = await fetch(`/api/pipelines/${dagId}/runs/${runId}/tasks`);
+      const wsQuery = currentWorkspace ? `?workspace_slug=${encodeURIComponent(currentWorkspace)}` : '';
+      const res = await fetch(`/api/pipelines/${dagId}/runs/${runId}/tasks${wsQuery}`);
       if (!res.ok) throw new Error('Failed to load task instances');
       const data = await res.json();
       const tasks = data.tasks || [];
@@ -2981,7 +2984,8 @@
 
   async function loadTaskLogs(dagId, runId, taskId, tryNum) {
     try {
-      const res = await fetch(`/api/pipelines/${dagId}/runs/${runId}/tasks/${taskId}/logs?try_number=${tryNum}`);
+      const wsParam = currentWorkspace ? `&workspace_slug=${encodeURIComponent(currentWorkspace)}` : '';
+      const res = await fetch(`/api/pipelines/${dagId}/runs/${runId}/tasks/${taskId}/logs?try_number=${tryNum}${wsParam}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const rawContent = data.content || 'No log output.';
