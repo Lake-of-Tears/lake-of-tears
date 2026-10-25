@@ -1,0 +1,14 @@
+id: github
+name: GitHub Activity & Audit
+version: 1.0.0
+category: Developer Tools
+author: Lake of Tears Community
+description: Ingest organization repository events, pull requests, commits, and enterprise audit logs.
+icon: git-branch
+dag_id: ingest_github
+default_schedule: 0 * * * *
+docs_url: https://docs.github.com/en/rest
+parameters[3]{name,type,description}:
+  organization,string,GitHub Organization or Owner
+  access_token,string,GitHub Personal Access Token or App Token
+  events,string,Event types to stream (e.g. issues,pull_requests)

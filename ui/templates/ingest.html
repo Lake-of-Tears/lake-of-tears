@@ -1,82 +1,913 @@
 {% extends "base.html" %}
-{% block title %}Data Ingestion — Lake of Tears{% endblock %}
+{% block title %}Add Data — Lake of Tears{% endblock %}
 {% block content %}
 
-<div class="max-w-5xl mx-auto space-y-6">
+<div class="max-w-6xl mx-auto space-y-6">
 
-  <div class="flex items-center justify-between">
+  <!-- ── Header ──────────────────────────────────────────────────────────── -->
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
     <div>
       <div class="flex items-center gap-3">
-        <h1 class="text-xl font-semibold text-gray-100">Data Ingestion</h1>
+        <h1 class="text-xl font-semibold text-gray-100">Add Data</h1>
         <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-cyan-950/80 text-cyan-400 border border-cyan-800/60 font-mono">
           <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
           Workspace: {{ workspace.slug or 'default' }}
         </span>
+        {% if my_role == 'read' %}
+        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-amber-950/60 text-amber-400 border border-amber-800/40">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+          Read-Only Mode
+        </span>
+        {% endif %}
       </div>
-      <p class="text-sm text-gray-500 mt-1">Configured data sources, sync status, and landed partitions strictly scoped to <span class="font-mono text-xs text-gray-400">workspaces/{{ workspace.slug or 'default' }}/</span>.</p>
+      <p class="text-sm text-gray-500 mt-1">Ingest new datasets, register workspace storage paths, and manage live connector feeds.</p>
     </div>
-    <a href="/pipelines" class="btn-primary text-sm">
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-      Open Airflow
-    </a>
+    <div class="flex items-center gap-2">
+      <a href="/catalog" class="btn-ghost border border-gray-700/80 hover:border-gray-600 text-xs">
+        <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M3 14h18M10 3v18M3 6a3 3 0 013-3h12a3 3 0 013 3v12a3 3 0 01-3 3H6a3 3 0 01-3-3V6z"/></svg>
+        Catalog Explorer
+      </a>
+    </div>
   </div>
 
-  {% if stats.ok %}
-  <div class="card overflow-hidden">
-    <table class="w-full text-sm">
-      <thead>
-        <tr class="border-b border-gray-800 text-left">
-          <th class="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Source</th>
-          <th class="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Workspace Landing Path</th>
-          <th class="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-right">Last Sync</th>
-          <th class="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-right">Status</th>
-        </tr>
-      </thead>
-      <tbody class="divide-y divide-gray-800/60">
-        {% for src in stats.sources %}
-        <tr class="hover:bg-white/[0.02] transition-colors">
-          <td class="px-5 py-4">
-            <div class="flex items-center gap-2.5">
-              <span class="w-2 h-2 rounded-full shrink-0
-                {% if src.status == 'green' %}bg-emerald-400
-                {% elif src.status == 'yellow' %}bg-yellow-400
-                {% else %}bg-gray-700{% endif %}"></span>
-              <span class="font-medium text-gray-200">{{ src.label }}</span>
+  <!-- ── Sub-Tabs ────────────────────────────────────────────────────────── -->
+  <div class="border-b border-gray-800 flex items-center gap-8">
+    <button id="tab-btn-add" onclick="switchTab('add')" class="pb-3 text-sm font-medium border-b-2 border-blue-500 text-white flex items-center gap-2 transition-colors">
+      <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+      Add New Data
+    </button>
+    <button id="tab-btn-feeds" onclick="switchTab('feeds')" class="pb-3 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200 flex items-center gap-2 transition-colors">
+      <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+      Active Feeds & Connectors
+      <span class="px-1.5 py-0.2 rounded-full text-[10px] bg-gray-800 text-gray-400 font-mono">{{ connectors | length }}</span>
+    </button>
+  </div>
+
+  <!-- ── TAB 1: ADD NEW DATA ─────────────────────────────────────────────── -->
+  <div id="tab-content-add" class="space-y-6">
+
+    <!-- Card 1: File to Table Wizard -->
+    <div class="card p-6">
+      <div class="flex items-start justify-between mb-4">
+        <div>
+          <h2 class="text-base font-semibold text-gray-100 flex items-center gap-2">
+            <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+            Create or Modify Table (File Upload)
+          </h2>
+          <p class="text-xs text-gray-400 mt-1">
+            Drop CSV, TSV, JSON, NDJSON, or Parquet files. DuckDB will automatically infer schema, generate date partitions, and register the catalog table in MinIO.
+          </p>
+        </div>
+        <span class="text-[11px] font-mono text-gray-500 bg-gray-800/80 px-2 py-1 rounded">
+          Hive Date-Partitioned Parquet
+        </span>
+      </div>
+
+      <!-- Dropzone -->
+      <div id="dropzone"
+           ondragover="handleDragOver(event)"
+           ondragleave="handleDragLeave(event)"
+           ondrop="handleFileDrop(event)"
+           class="border-2 border-dashed border-gray-700 hover:border-blue-500/70 rounded-xl p-8 text-center transition-all bg-gray-800/20 hover:bg-blue-950/10 cursor-pointer relative {% if my_role == 'read' %}opacity-60 pointer-events-none{% endif %}">
+        <input type="file" id="file-input" class="hidden" accept=".csv,.tsv,.json,.ndjson,.jsonl,.parquet,.pq" onchange="handleFileSelect(event)"/>
+        <div class="flex flex-col items-center justify-center gap-2.5 pointer-events-none">
+          <div class="w-12 h-12 rounded-full bg-blue-600/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+          </div>
+          <div>
+            <span class="text-sm font-medium text-gray-200">Drag and drop file here, or <span class="text-blue-400 hover:underline">browse</span></span>
+            <p class="text-xs text-gray-500 mt-0.5">Supports CSV, TSV, JSON, NDJSON, Parquet (up to 500 MB)</p>
+          </div>
+        </div>
+      </div>
+      {% if my_role == 'read' %}
+      <p class="text-[11px] text-amber-400/80 italic mt-2">Uploading is disabled because you have read-only access to this workspace.</p>
+      {% endif %}
+
+      <!-- Loading State -->
+      <div id="preview-loading" class="hidden py-10 flex flex-col items-center justify-center gap-3">
+        <div class="w-7 h-7 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+        <span class="text-xs text-gray-400 font-mono">Running DuckDB schema inference & preview...</span>
+      </div>
+
+      <!-- Preview & Configuration Step -->
+      <div id="preview-section" class="hidden mt-6 space-y-6 pt-6 border-t border-gray-800">
+
+        <!-- File summary bar -->
+        <div class="flex items-center justify-between p-3 rounded-lg bg-gray-800/40 border border-gray-700/60 text-xs">
+          <div class="flex items-center gap-2.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+            <span class="font-medium text-gray-200" id="preview-filename">data.csv</span>
+            <span class="font-mono text-gray-500" id="preview-format">CSV</span>
+            <span class="text-gray-500">&middot;</span>
+            <span class="text-gray-400 font-mono" id="preview-col-count">0 columns</span>
+          </div>
+          <button type="button" onclick="resetWizard()" class="text-gray-400 hover:text-gray-200 text-xs transition-colors">
+            Change file
+          </button>
+        </div>
+
+        <!-- Inferred Data Preview Table -->
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="text-xs font-semibold uppercase tracking-wider text-gray-400">Live Preview & Inferred Column Types (First 10 rows)</h3>
+            <span class="text-[11px] text-gray-500">Auto-detected via DuckDB</span>
+          </div>
+          <div class="border border-gray-800 rounded-lg overflow-x-auto max-h-[300px] bg-black/30">
+            <table class="w-full text-left text-xs divide-y divide-gray-800" id="preview-table">
+              <thead class="bg-gray-800/70 sticky top-0 z-10" id="preview-thead">
+                <!-- Dynamically populated -->
+              </thead>
+              <tbody class="divide-y divide-gray-800/60 font-mono text-[11px]" id="preview-tbody">
+                <!-- Dynamically populated -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Destination Picker Form -->
+        <form id="ingest-form" onsubmit="submitTableCreation(event)" class="space-y-4 pt-2">
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+            <!-- Catalog Picker -->
+            <div>
+              <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">Destination Catalog</label>
+              <select id="dest-catalog" onchange="handleCatalogChange()" class="input-dark text-xs" required>
+                {% for cat in catalogs %}
+                <option value="{{ cat.id }}" data-slug="{{ cat.slug or cat.name }}">{{ cat.name }} ({{ cat.slug or cat.name }})</option>
+                {% endfor %}
+              </select>
             </div>
-          </td>
-          <td class="px-5 py-4 font-mono text-xs text-gray-400">workspaces/{{ workspace.slug or 'default' }}/raw/{{ src.key }}/</td>
-          <td class="px-5 py-4 text-gray-500 text-right text-xs">{{ src.last_modified_str }}</td>
-          <td class="px-5 py-4 text-right">
-            {% if src.status == 'green' %}
-              <span class="badge-green">Synced</span>
-            {% elif src.status == 'yellow' %}
-              <span class="badge-yellow">Stale</span>
-            {% else %}
-              <span class="badge-red">No data</span>
-            {% endif %}
-          </td>
-        </tr>
+
+            <!-- Schema Picker -->
+            <div>
+              <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">Destination Schema</label>
+              <select id="dest-schema" onchange="handleSchemaChange()" class="input-dark text-xs" required>
+                <!-- Dynamically populated from selected catalog -->
+              </select>
+              <input type="text" id="dest-new-schema-input" placeholder="Enter new schema name (e.g. bronze)" class="input-dark text-xs mt-2 hidden" />
+            </div>
+
+            <!-- Table Name -->
+            <div>
+              <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">Table Name</label>
+              <input type="text" id="dest-table-name" class="input-dark text-xs font-mono" placeholder="table_name" required pattern="[A-Za-z0-9_-]+" />
+            </div>
+          </div>
+
+          <!-- Ingestion Mode Selector -->
+          <div class="p-3.5 rounded-lg bg-gray-800/30 border border-gray-700/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div>
+              <div class="font-medium text-gray-200">Ingestion Mode</div>
+              <p class="text-gray-500 text-[11px] mt-0.5">Choose how to handle data landing if the table already exists in this schema.</p>
+            </div>
+            <div class="flex items-center gap-4">
+              <label class="flex items-center gap-2 cursor-pointer text-gray-300">
+                <input type="radio" name="ingest_mode" value="create_new" checked class="text-blue-600 focus:ring-blue-500"/>
+                <span>Create New Table</span>
+              </label>
+              <label class="flex items-center gap-2 cursor-pointer text-gray-300">
+                <input type="radio" name="ingest_mode" value="append" class="text-blue-600 focus:ring-blue-500"/>
+                <span>Append / Overwrite</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Description optional -->
+          <div>
+            <label class="block text-xs font-medium text-gray-400 mb-1">Description (Optional)</label>
+            <input type="text" id="dest-description" class="input-dark text-xs" placeholder="e.g. Ingested raw export dataset"/>
+          </div>
+
+          <!-- Managed Hive Path Preview -->
+          <div class="text-[11px] text-gray-500 font-mono flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5 text-cyan-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            <span>Target Hive landing path: <span class="text-cyan-400" id="hive-path-preview">s3://datalake/workspaces/{{ workspace.slug or 'default' }}/...</span></span>
+          </div>
+
+          <!-- Error Alert Banner -->
+          <div id="create-error-banner" class="hidden p-3 rounded-lg bg-red-950/60 border border-red-800/60 text-red-300 text-xs"></div>
+
+          <!-- Submit Buttons -->
+          <div class="flex items-center justify-end gap-3 pt-2">
+            <button type="button" onclick="resetWizard()" class="btn-ghost text-xs">Cancel</button>
+            <button type="submit" id="btn-submit-create" class="btn-primary text-xs flex items-center gap-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+              Create Table & Ingest Data
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Success Result Box -->
+      <div id="success-section" class="hidden mt-6 p-5 rounded-xl bg-emerald-950/20 border border-emerald-800/40 space-y-4">
+        <div class="flex items-center gap-2.5 text-emerald-400 font-medium text-sm">
+          <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          <span>Table successfully created and registered in catalog!</span>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs bg-black/40 p-3 rounded-lg border border-gray-800">
+          <div>
+            <span class="text-gray-500">SQL Identifier:</span>
+            <span class="font-mono text-gray-200 ml-2" id="success-sql-view">bronze.table</span>
+          </div>
+          <div>
+            <span class="text-gray-500">Total Rows Landed:</span>
+            <span class="font-mono text-emerald-400 ml-2" id="success-row-count">0</span>
+          </div>
+          <div class="sm:col-span-2">
+            <span class="text-gray-500">Managed S3 Pattern:</span>
+            <span class="font-mono text-cyan-400 ml-2 text-[11px] break-all" id="success-s3-path">s3://...</span>
+          </div>
+        </div>
+        <div class="flex items-center gap-3 pt-1">
+          <a id="success-sql-link" href="/sql" class="btn-primary text-xs">Query in SQL Editor &rarr;</a>
+          <a id="success-catalog-link" href="/catalog" class="btn-ghost border border-gray-700 text-xs text-gray-200">View in Catalog Explorer</a>
+          <button type="button" onclick="resetWizard()" class="btn-ghost text-xs ml-auto">Ingest another file</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Card 2: Register Existing S3 Path -->
+    <div class="card p-6">
+      <div class="flex items-start justify-between mb-4">
+        <div>
+          <h2 class="text-base font-semibold text-gray-100 flex items-center gap-2">
+            <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg>
+            Register Existing S3 Path to Table
+          </h2>
+          <p class="text-xs text-gray-400 mt-1">
+            Browse and link existing workspace Parquet files (e.g. <code class="text-gray-300 font-mono">workspaces/{{ workspace.slug or 'default' }}/raw/postgres/</code>). Runs DuckDB schema inference and registers as an active catalog table.
+          </p>
+        </div>
+        <span class="text-[11px] font-mono text-gray-500 bg-gray-800/80 px-2 py-1 rounded">
+          Zero-Copy Registration
+        </span>
+      </div>
+
+      <form id="register-s3-form" onsubmit="submitRegisterS3(event)" class="space-y-4">
+        <div>
+          <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">Workspace Storage Path or Folder</label>
+          <div class="relative">
+            <input type="text" id="reg-s3-path" list="workspace-s3-suggestions" class="input-dark text-xs font-mono pl-8" placeholder="workspaces/{{ workspace.slug or 'default' }}/raw/postgres/" required />
+            <span class="absolute left-2.5 top-2.5 text-gray-500 text-xs font-mono">s3://</span>
+          </div>
+          <datalist id="workspace-s3-suggestions">
+            <option value="workspaces/{{ workspace.slug or 'default' }}/raw/postgres/"></option>
+            <option value="workspaces/{{ workspace.slug or 'default' }}/raw/stripe/"></option>
+            <option value="workspaces/{{ workspace.slug or 'default' }}/raw/shopify/"></option>
+            <option value="workspaces/{{ workspace.slug or 'default' }}/raw/hubspot/"></option>
+            <option value="workspaces/{{ workspace.slug or 'default' }}/raw/kafka/"></option>
+            <option value="workspaces/{{ workspace.slug or 'default' }}/raw/events/"></option>
+          </datalist>
+          <p class="text-[11px] text-gray-500 mt-1">Directory paths are automatically expanded to match all partitioned Parquet files (<span class="font-mono text-gray-400">**/*.parquet</span>).</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">Catalog</label>
+            <select id="reg-catalog" onchange="handleRegCatalogChange()" class="input-dark text-xs" required>
+              {% for cat in catalogs %}
+              <option value="{{ cat.id }}" data-slug="{{ cat.slug or cat.name }}">{{ cat.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">Schema</label>
+            <select id="reg-schema" onchange="handleRegSchemaChange()" class="input-dark text-xs" required></select>
+            <input type="text" id="reg-new-schema-input" placeholder="New schema name" class="input-dark text-xs mt-2 hidden" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">Table Name</label>
+            <input type="text" id="reg-table-name" class="input-dark text-xs font-mono" placeholder="table_name" required pattern="[A-Za-z0-9_-]+" />
+          </div>
+        </div>
+
+        <div id="reg-error-banner" class="hidden p-3 rounded-lg bg-red-950/60 border border-red-800/60 text-red-300 text-xs"></div>
+        <div id="reg-success-banner" class="hidden p-3 rounded-lg bg-emerald-950/60 border border-emerald-800/60 text-emerald-300 text-xs"></div>
+
+        <div class="flex items-center justify-end gap-3 pt-2">
+          <button type="submit" id="btn-submit-reg" class="btn-primary text-xs flex items-center gap-2 {% if my_role == 'read' %}opacity-60 pointer-events-none{% endif %}">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+            Register Existing Parquet Path
+          </button>
+        </div>
+      </form>
+    </div>
+
+  </div>
+
+  <!-- ── TAB 2: ACTIVE FEEDS & CONNECTORS ───────────────────────────────── -->
+  <div id="tab-content-feeds" class="hidden space-y-8">
+
+    <!-- 1. Active Workspace Feeds Section -->
+    <div class="space-y-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-sm font-semibold text-gray-200 flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+            Active Workspace Feeds
+          </h2>
+          <p class="text-xs text-gray-500 mt-0.5">Automated connector pipelines actively landing partitioned Parquet into <span class="font-mono text-gray-400">workspaces/{{ workspace.slug or 'default' }}/raw/</span>.</p>
+        </div>
+        <a href="/pipelines" class="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 transition-colors">
+          <span>Manage Pipelines</span>
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+        </a>
+      </div>
+
+      {% if active_feeds %}
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="active-feeds-grid">
+        {% for conn in active_feeds %}
+        <div class="card p-5 flex flex-col justify-between gap-4 border border-emerald-900/30 bg-emerald-950/[0.08]" id="active-card-{{ conn.id }}">
+          <div>
+            <div class="flex items-start justify-between gap-2">
+              <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-lg bg-gray-800 border border-gray-700 flex items-center justify-center shrink-0 text-blue-400 font-mono text-xs font-bold">
+                  {{ conn.name[:2] | upper }}
+                </div>
+                <div>
+                  <h3 class="text-sm font-medium text-gray-200">{{ conn.name }}</h3>
+                  <span class="text-[11px] font-mono text-gray-500">{{ conn.dag_id }}</span>
+                </div>
+              </div>
+              <span class="badge-green shrink-0"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Synced</span>
+            </div>
+            <p class="text-xs text-gray-400 mt-2.5">{{ conn.description }}</p>
+            <div class="mt-3.5 space-y-1.5 text-[11px] bg-black/30 p-2.5 rounded-md border border-gray-800">
+              <div class="flex items-center justify-between text-gray-500">
+                <span>Landing Path:</span>
+                <span class="font-mono text-gray-300 truncate max-w-[190px]" title="{{ conn.landing_path }}">{{ conn.landing_path }}</span>
+              </div>
+              <div class="flex items-center justify-between text-gray-500">
+                <span>Last Landed Sync:</span>
+                <span class="font-mono text-gray-300">{{ conn.last_modified_str }}</span>
+              </div>
+            </div>
+          </div>
+          <div class="pt-2 border-t border-gray-800/80 flex items-center justify-between gap-2">
+            <a href="/pipelines" class="text-xs text-gray-400 hover:text-gray-200 transition-colors">Run History &rarr;</a>
+            <button
+              type="button"
+              onclick="triggerSync('{{ conn.dag_id }}', '{{ conn.name }}', this)"
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white transition-colors cursor-pointer {% if my_role == 'read' %}opacity-50 pointer-events-none{% endif %}"
+              {% if my_role == 'read' %}title="Write permissions required to trigger syncs"{% endif %}
+            >
+              <svg class="w-3.5 h-3.5 sync-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+              <span class="sync-text">Trigger Sync Now</span>
+            </button>
+          </div>
+        </div>
         {% endfor %}
-      </tbody>
-    </table>
+      </div>
+      {% else %}
+      <div class="card p-6 text-center flex flex-col items-center justify-center gap-2 border-dashed border-gray-800 bg-gray-900/30">
+        <div class="w-9 h-9 rounded-full bg-blue-600/10 border border-blue-500/20 flex items-center justify-center text-blue-400 mb-0.5">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        </div>
+        <h3 class="text-xs font-medium text-gray-200">No active feeds currently syncing into this workspace</h3>
+        <p class="text-[11px] text-gray-500 max-w-sm">Select an integration from the community directory below to trigger or configure automated ingestion.</p>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- 2. Community Connectors Marketplace -->
+    <div class="space-y-4 pt-2">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <div class="flex items-center gap-2.5">
+            <h2 class="text-sm font-semibold text-gray-200">Community Connector Marketplace</h2>
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono bg-purple-950/80 text-purple-300 border border-purple-800/60">
+              Token-Oriented Object Notation (.toon)
+            </span>
+          </div>
+          <p class="text-xs text-gray-500 mt-0.5">Extensible integration catalog loaded dynamically from <code class="font-mono text-gray-400">pipeline/connectors/*/connector.toon</code>.</p>
+        </div>
+
+        <!-- Category Filter Pills -->
+        <div class="flex items-center gap-1.5 overflow-x-auto pb-1 max-w-full" id="category-pills">
+          <button type="button" onclick="filterCategory('all', this)" class="category-pill px-2.5 py-1 rounded-md text-xs font-medium bg-blue-600 text-white transition-colors cursor-pointer">
+            All ({{ community_connectors | length }})
+          </button>
+          {% for cat in categories %}
+          <button type="button" onclick="filterCategory('{{ cat }}', this)" class="category-pill px-2.5 py-1 rounded-md text-xs font-medium bg-gray-800 text-gray-400 hover:text-gray-200 hover:bg-gray-700 transition-colors cursor-pointer whitespace-nowrap">
+            {{ cat }}
+          </button>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Community Connectors Grid -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="community-grid">
+        {% for conn in community_connectors %}
+        <div class="card p-5 flex flex-col justify-between gap-4 border border-gray-800 hover:border-gray-700 transition-all community-card" data-category="{{ conn.category }}" id="community-card-{{ conn.id }}">
+          <div>
+            <div class="flex items-start justify-between gap-2">
+              <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-lg bg-gray-800 border border-gray-700 flex items-center justify-center shrink-0 text-cyan-400 font-mono text-xs font-bold">
+                  {{ conn.name[:2] | upper }}
+                </div>
+                <div>
+                  <h3 class="text-sm font-medium text-gray-200">{{ conn.name }}</h3>
+                  <span class="text-[10px] font-mono text-gray-500">v{{ conn.version or '1.0.0' }} &middot; {{ conn.category }}</span>
+                </div>
+              </div>
+              {% if conn.has_data %}
+              <span class="badge-green shrink-0 text-[10px]">Active</span>
+              {% else %}
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-gray-800 text-gray-400 border border-gray-700/60 font-mono">Available</span>
+              {% endif %}
+            </div>
+
+            <p class="text-xs text-gray-400 mt-2.5 leading-relaxed">{{ conn.description }}</p>
+
+            {% if conn.parameters %}
+            <div class="mt-3 text-[10px] text-gray-500 font-mono">
+              <span class="text-gray-400 font-semibold uppercase tracking-wider text-[9px]">Config Parameters:</span>
+              <div class="flex flex-wrap gap-1 mt-1">
+                {% for param in conn.parameters %}
+                <span class="px-1.5 py-0.5 rounded bg-black/40 border border-gray-800 text-gray-400">{{ param.name }}: {{ param.type }}</span>
+                {% endfor %}
+              </div>
+            </div>
+            {% endif %}
+          </div>
+
+          <div class="pt-3 border-t border-gray-800/80 flex items-center justify-between gap-2">
+            {% if conn.docs_url %}
+            <a href="{{ conn.docs_url }}" target="_blank" class="text-xs text-gray-400 hover:text-blue-400 transition-colors flex items-center gap-1">
+              <span>Docs</span>
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+            </a>
+            {% else %}
+            <span class="text-[11px] text-gray-600 font-mono">{{ conn.author or 'Community' }}</span>
+            {% endif %}
+
+            <button
+              type="button"
+              onclick="triggerSync('{{ conn.dag_id }}', '{{ conn.name }}', this)"
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white transition-colors cursor-pointer {% if my_role == 'read' %}opacity-50 pointer-events-none{% endif %}"
+              {% if my_role == 'read' %}title="Write permissions required to trigger syncs"{% endif %}
+            >
+              <svg class="w-3.5 h-3.5 sync-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+              <span class="sync-text">Trigger Sync</span>
+            </button>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- 3. Contribution Callout Banner -->
+    <div class="card p-5 border border-dashed border-gray-800 bg-gray-900/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div class="flex items-start gap-3">
+        <div class="w-8 h-8 rounded-lg bg-purple-950/60 border border-purple-800/60 flex items-center justify-center text-purple-400 shrink-0">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+        </div>
+        <div>
+          <h4 class="text-xs font-semibold text-gray-200">Want to build or contribute a connector?</h4>
+          <p class="text-xs text-gray-500 mt-0.5">Define your schema in <code class="text-purple-300 font-mono">pipeline/connectors/&lt;name&gt;/connector.toon</code>, write your extraction script, and submit a PR.</p>
+        </div>
+      </div>
+      <a href="https://github.com/Lake-of-Tears/lake-of-tears/tree/main/pipeline/connectors" target="_blank" class="btn-ghost border border-gray-700 hover:border-gray-600 text-xs shrink-0 text-gray-300">
+        Read TOON Guide &rarr;
+      </a>
+    </div>
+
   </div>
 
-  <div class="card p-5">
-    <h2 class="text-sm font-semibold text-gray-300 mb-3">Adding a new source</h2>
-    <ol class="space-y-1.5 text-sm text-gray-500 list-decimal list-inside">
-      <li>Create <code class="text-xs bg-gray-800 px-1 rounded text-gray-400">pipeline/ingest/my_source.py</code> — fetch, normalize, write via <code class="text-xs bg-gray-800 px-1 rounded text-gray-400">StorageWriter</code></li>
-      <li>Create <code class="text-xs bg-gray-800 px-1 rounded text-gray-400">pipeline/dags/ingest_my_source_dag.py</code> — Airflow schedule with workspace parameterization</li>
-      <li>Add source name to <code class="text-xs bg-gray-800 px-1 rounded text-gray-400">SOURCES</code> in <code class="text-xs bg-gray-800 px-1 rounded text-gray-400">pipeline/embed/embed_sources.py</code> and <code class="text-xs bg-gray-800 px-1 rounded text-gray-400">ui/main.py</code></li>
-      <li>Add <code class="text-xs bg-gray-800 px-1 rounded text-gray-400">_text_my_source(row)</code> for embedding text representation</li>
-    </ol>
+  <!-- Toast Notification Container -->
+  <div id="toast" class="fixed bottom-6 right-6 hidden z-50 px-4 py-3 rounded-lg shadow-xl text-xs font-medium border flex items-center gap-2.5 transition-all">
+    <span id="toast-message"></span>
   </div>
-
-  {% else %}
-  <div class="card p-8 text-center">
-    <p class="text-gray-500 text-sm">Could not connect to MinIO.</p>
-    <p class="text-gray-600 text-xs mt-1 font-mono">{{ stats.error }}</p>
-  </div>
-  {% endif %}
 
 </div>
+
+<!-- ── Client Scripts ─────────────────────────────────────────────────────── -->
+<script>
+  const catalogsData = {{ catalogs | tojson if catalogs else '[]' }};
+  const activeWorkspaceSlug = "{{ workspace.slug or 'default' }}";
+  let activeUploadedFile = null;
+  let inferredSchemaColumns = [];
+
+  // Sub-Tab Switcher
+  function switchTab(tab) {
+    const tabAdd = document.getElementById('tab-content-add');
+    const tabFeeds = document.getElementById('tab-content-feeds');
+    const btnAdd = document.getElementById('tab-btn-add');
+    const btnFeeds = document.getElementById('tab-btn-feeds');
+
+    if (tab === 'add') {
+      tabAdd.classList.remove('hidden');
+      tabFeeds.classList.add('hidden');
+      btnAdd.className = "pb-3 text-sm font-medium border-b-2 border-blue-500 text-white flex items-center gap-2 transition-colors";
+      btnFeeds.className = "pb-3 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200 flex items-center gap-2 transition-colors";
+    } else {
+      tabAdd.classList.add('hidden');
+      tabFeeds.classList.remove('hidden');
+      btnFeeds.className = "pb-3 text-sm font-medium border-b-2 border-blue-500 text-white flex items-center gap-2 transition-colors";
+      btnAdd.className = "pb-3 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200 flex items-center gap-2 transition-colors";
+    }
+  }
+
+  // Populate Schemas for Select Dropdown
+  function populateSchemas(catalogId, selectElem, allowNew = true) {
+    selectElem.innerHTML = '';
+    const cat = catalogsData.find(c => String(c.id) === String(catalogId));
+    if (cat && cat.schemas && cat.schemas.length > 0) {
+      cat.schemas.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = `${s.name} (${s.slug || s.name})`;
+        selectElem.appendChild(opt);
+      });
+    }
+    if (allowNew) {
+      const newOpt = document.createElement('option');
+      newOpt.value = "new";
+      newOpt.textContent = "+ Create new schema...";
+      selectElem.appendChild(newOpt);
+    }
+  }
+
+  function handleCatalogChange() {
+    const catSelect = document.getElementById('dest-catalog');
+    const schemaSelect = document.getElementById('dest-schema');
+    populateSchemas(catSelect.value, schemaSelect, true);
+    handleSchemaChange();
+    updateHivePreview();
+  }
+
+  function handleSchemaChange() {
+    const schemaSelect = document.getElementById('dest-schema');
+    const newInput = document.getElementById('dest-new-schema-input');
+    if (schemaSelect.value === 'new') {
+      newInput.classList.remove('hidden');
+      newInput.required = true;
+    } else {
+      newInput.classList.add('hidden');
+      newInput.required = false;
+    }
+    updateHivePreview();
+  }
+
+  function handleRegCatalogChange() {
+    const catSelect = document.getElementById('reg-catalog');
+    const schemaSelect = document.getElementById('reg-schema');
+    populateSchemas(catSelect.value, schemaSelect, true);
+    handleRegSchemaChange();
+  }
+
+  function handleRegSchemaChange() {
+    const schemaSelect = document.getElementById('reg-schema');
+    const newInput = document.getElementById('reg-new-schema-input');
+    if (schemaSelect.value === 'new') {
+      newInput.classList.remove('hidden');
+      newInput.required = true;
+    } else {
+      newInput.classList.add('hidden');
+      newInput.required = false;
+    }
+  }
+
+  function updateHivePreview() {
+    const catSelect = document.getElementById('dest-catalog');
+    const schemaSelect = document.getElementById('dest-schema');
+    const newSchemaInput = document.getElementById('dest-new-schema-input');
+    const tableInput = document.getElementById('dest-table-name');
+
+    const catOption = catSelect.options[catSelect.selectedIndex];
+    const catSlug = catOption ? (catOption.dataset.slug || 'default') : 'default';
+
+    let schSlug = 'bronze';
+    if (schemaSelect.value === 'new') {
+      schSlug = (newSchemaInput.value.trim() || 'custom_schema').toLowerCase().replace(/[^a-z0-9_]/g, '_');
+    } else {
+      const schOption = schemaSelect.options[schemaSelect.selectedIndex];
+      schSlug = schOption ? schOption.textContent.split(' ')[0] : 'bronze';
+    }
+
+    const tblSlug = (tableInput.value.trim() || 'table_name').toLowerCase().replace(/[^a-z0-9_]/g, '_');
+    const now = new Date();
+    const y = now.getUTCFullYear();
+    const m = String(now.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(now.getUTCDate()).padStart(2, '0');
+
+    document.getElementById('hive-path-preview').textContent =
+      `s3://datalake/workspaces/${activeWorkspaceSlug}/${catSlug}/${schSlug}/${tblSlug}/year=${y}/month=${m}/day=${d}/data.parquet`;
+  }
+
+  document.getElementById('dest-table-name')?.addEventListener('input', updateHivePreview);
+  document.getElementById('dest-new-schema-input')?.addEventListener('input', updateHivePreview);
+
+  // Drag and Drop Handling
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('file-input');
+
+  dropzone?.addEventListener('click', () => fileInput?.click());
+
+  function handleDragOver(e) {
+    e.preventDefault();
+    dropzone?.classList.add('border-blue-500', 'bg-blue-950/20');
+  }
+
+  function handleDragLeave(e) {
+    e.preventDefault();
+    dropzone?.classList.remove('border-blue-500', 'bg-blue-950/20');
+  }
+
+  function handleFileDrop(e) {
+    e.preventDefault();
+    dropzone?.classList.remove('border-blue-500', 'bg-blue-950/20');
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      processUploadedFile(e.dataTransfer.files[0]);
+    }
+  }
+
+  function handleFileSelect(e) {
+    if (e.target.files && e.target.files[0]) {
+      processUploadedFile(e.target.files[0]);
+    }
+  }
+
+  // Upload and Request Preview
+  async function processUploadedFile(file) {
+    activeUploadedFile = file;
+    dropzone.classList.add('hidden');
+    document.getElementById('preview-loading').classList.remove('hidden');
+    document.getElementById('create-error-banner').classList.add('hidden');
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const resp = await fetch('/api/ingest/preview-file', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await resp.json();
+
+      document.getElementById('preview-loading').classList.add('hidden');
+
+      if (!resp.ok || !data.ok) {
+        throw new Error(data.error || 'Failed to infer schema and preview file');
+      }
+
+      renderPreview(data);
+    } catch (err) {
+      document.getElementById('preview-loading').classList.add('hidden');
+      dropzone.classList.remove('hidden');
+      showToast(err.message, true);
+    }
+  }
+
+  function renderPreview(data) {
+    document.getElementById('preview-section').classList.remove('hidden');
+    document.getElementById('preview-filename').textContent = data.filename;
+    document.getElementById('preview-format').textContent = data.format.toUpperCase();
+    document.getElementById('preview-col-count').textContent = `${data.columns.length} columns`;
+    document.getElementById('dest-table-name').value = data.suggested_table_name;
+
+    inferredSchemaColumns = data.columns;
+
+    // Populate columns header
+    const thead = document.getElementById('preview-thead');
+    thead.innerHTML = '';
+    const headerRow = document.createElement('tr');
+    data.columns.forEach(col => {
+      const th = document.createElement('th');
+      th.className = "px-3 py-2 text-left font-semibold text-gray-300 border-b border-gray-700 whitespace-nowrap";
+      th.innerHTML = `
+        <div class="flex items-center gap-1.5">
+          <span>${col.name}</span>
+          <span class="px-1 py-0.5 rounded text-[9px] bg-gray-700/80 text-blue-300 font-mono">${col.type}</span>
+        </div>
+      `;
+      headerRow.appendChild(th);
+    });
+    thead.appendChild(headerRow);
+
+    // Populate rows
+    const tbody = document.getElementById('preview-tbody');
+    tbody.innerHTML = '';
+    (data.rows || []).forEach(row => {
+      const tr = document.createElement('tr');
+      tr.className = "hover:bg-white/[0.02]";
+      row.forEach(cell => {
+        const td = document.createElement('td');
+        td.className = "px-3 py-1.5 text-gray-300 border-b border-gray-800/40 whitespace-nowrap max-w-xs truncate";
+        td.textContent = cell !== null ? String(cell) : 'null';
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+
+    handleCatalogChange();
+  }
+
+  // Submit Table Creation
+  async function submitTableCreation(e) {
+    e.preventDefault();
+    if (!activeUploadedFile) return;
+
+    const btn = document.getElementById('btn-submit-create');
+    const errBanner = document.getElementById('create-error-banner');
+    errBanner.classList.add('hidden');
+
+    const catSelect = document.getElementById('dest-catalog');
+    const schemaSelect = document.getElementById('dest-schema');
+    const newSchemaInput = document.getElementById('dest-new-schema-input');
+    const tableInput = document.getElementById('dest-table-name');
+    const descInput = document.getElementById('dest-description');
+    const mode = document.querySelector('input[name="ingest_mode"]:checked')?.value || 'create_new';
+
+    const formData = new FormData();
+    formData.append('file', activeUploadedFile);
+    formData.append('catalog_id', catSelect.value);
+    formData.append('schema_id', schemaSelect.value);
+    if (schemaSelect.value === 'new') {
+      formData.append('schema_name', newSchemaInput.value.trim());
+    }
+    formData.append('table_name', tableInput.value.trim());
+    formData.append('mode', mode);
+    if (descInput.value.trim()) {
+      formData.append('description', descInput.value.trim());
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = `<span class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span> Ingesting...`;
+
+    try {
+      const resp = await fetch('/api/ingest/create-table-from-file', {
+        method: 'POST',
+        body: formData,
+      });
+      const res = await resp.json();
+
+      if (!resp.ok || !res.ok) {
+        throw new Error(res.error || 'Failed to create table and ingest file');
+      }
+
+      // Show success section
+      document.getElementById('preview-section').classList.add('hidden');
+      const succ = document.getElementById('success-section');
+      succ.classList.remove('hidden');
+
+      document.getElementById('success-sql-view').textContent = res.sql_view;
+      document.getElementById('success-row-count').textContent = (res.row_count || 0).toLocaleString();
+      document.getElementById('success-s3-path').textContent = res.s3_path_pattern;
+      document.getElementById('success-sql-link').href = res.sql_url;
+      document.getElementById('success-catalog-link').href = res.catalog_url;
+
+      showToast(`Table "${res.sql_view}" created successfully!`);
+    } catch (err) {
+      errBanner.textContent = err.message;
+      errBanner.classList.remove('hidden');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg> Create Table & Ingest Data`;
+    }
+  }
+
+  // Submit Register S3 Path
+  async function submitRegisterS3(e) {
+    e.preventDefault();
+    const btn = document.getElementById('btn-submit-reg');
+    const errBanner = document.getElementById('reg-error-banner');
+    const succBanner = document.getElementById('reg-success-banner');
+    errBanner.classList.add('hidden');
+    succBanner.classList.add('hidden');
+
+    const s3Path = document.getElementById('reg-s3-path').value.trim();
+    const catSelect = document.getElementById('reg-catalog');
+    const schemaSelect = document.getElementById('reg-schema');
+    const newSchemaInput = document.getElementById('reg-new-schema-input');
+    const tableInput = document.getElementById('reg-table-name');
+
+    const payload = {
+      s3_path: s3Path,
+      catalog_id: catSelect.value,
+      schema_id: schemaSelect.value,
+      schema_name: schemaSelect.value === 'new' ? newSchemaInput.value.trim() : null,
+      table_name: tableInput.value.trim(),
+    };
+
+    btn.disabled = true;
+    btn.innerHTML = `<span class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span> Inspecting & Registering...`;
+
+    try {
+      const resp = await fetch('/api/ingest/register-s3-path', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const res = await resp.json();
+
+      if (!resp.ok || !res.ok) {
+        throw new Error(res.error || 'Failed to register S3 Parquet table');
+      }
+
+      succBanner.innerHTML = `
+        <div class="flex items-center justify-between">
+          <span>Table registered as <strong class="font-mono text-emerald-200">${res.sql_view}</strong> (${res.columns.length} columns inferred)!</span>
+          <a href="${res.sql_url}" class="text-xs text-emerald-200 underline font-semibold ml-3">Query now &rarr;</a>
+        </div>
+      `;
+      succBanner.classList.remove('hidden');
+      showToast(`Table "${res.sql_view}" registered successfully!`);
+    } catch (err) {
+      errBanner.textContent = err.message;
+      errBanner.classList.remove('hidden');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg> Register Existing Parquet Path`;
+    }
+  }
+
+  function resetWizard() {
+    activeUploadedFile = null;
+    inferredSchemaColumns = [];
+    document.getElementById('file-input').value = '';
+    document.getElementById('preview-section').classList.add('hidden');
+    document.getElementById('success-section').classList.add('hidden');
+    document.getElementById('dropzone').classList.remove('hidden');
+    document.getElementById('create-error-banner').classList.add('hidden');
+  }
+
+  // Category Filtering
+  function filterCategory(cat, btn) {
+    document.querySelectorAll('.category-pill').forEach(p => {
+      p.className = "category-pill px-2.5 py-1 rounded-md text-xs font-medium bg-gray-800 text-gray-400 hover:text-gray-200 hover:bg-gray-700 transition-colors cursor-pointer whitespace-nowrap";
+    });
+    btn.className = "category-pill px-2.5 py-1 rounded-md text-xs font-medium bg-blue-600 text-white transition-colors cursor-pointer whitespace-nowrap";
+
+    document.querySelectorAll('.community-card').forEach(card => {
+      if (cat === 'all' || card.dataset.category === cat) {
+        card.classList.remove('hidden');
+      } else {
+        card.classList.add('hidden');
+      }
+    });
+  }
+
+  // Trigger Sync Now for Connector Cards
+  async function triggerSync(dagId, connName, btn) {
+    if (!dagId) return;
+
+    const origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `<span class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span> Triggering...`;
+
+    try {
+      const resp = await fetch(`/api/pipelines/${encodeURIComponent(dagId)}/trigger`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conf: { workspace: activeWorkspaceSlug } }),
+      });
+      const data = await resp.json();
+
+      if (!resp.ok) {
+        throw new Error(data.error || data.detail || 'Failed to trigger Airflow sync');
+      }
+
+      showToast(`Sync triggered for ${connName}! Run ID: ${data.dag_run_id || 'active'}`);
+    } catch (err) {
+      showToast(err.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = origHtml;
+    }
+  }
+
+  // Toast Helper
+  let toastTimer = null;
+  function showToast(msg, isError = false) {
+    const toast = document.getElementById('toast');
+    const toastMsg = document.getElementById('toast-message');
+    toastMsg.textContent = msg;
+
+    if (isError) {
+      toast.className = "fixed bottom-6 right-6 z-50 px-4 py-3 rounded-lg shadow-xl text-xs font-medium border flex items-center gap-2.5 bg-red-950/90 text-red-200 border-red-800";
+    } else {
+      toast.className = "fixed bottom-6 right-6 z-50 px-4 py-3 rounded-lg shadow-xl text-xs font-medium border flex items-center gap-2.5 bg-emerald-950/90 text-emerald-200 border-emerald-800";
+    }
+
+    toast.classList.remove('hidden');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.add('hidden'), 4500);
+  }
+
+  // Initial setup
+  document.addEventListener('DOMContentLoaded', () => {
+    const destCat = document.getElementById('dest-catalog');
+    if (destCat && destCat.value) {
+      handleCatalogChange();
+    }
+    const regCat = document.getElementById('reg-catalog');
+    if (regCat && regCat.value) {
+      handleRegCatalogChange();
+    }
+  });
+</script>
+
 {% endblock %}

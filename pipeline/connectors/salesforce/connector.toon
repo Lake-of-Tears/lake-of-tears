@@ -1,0 +1,14 @@
+id: salesforce
+name: Salesforce CRM
+version: 1.0.0
+category: CRM & Sales
+author: Lake of Tears Community
+description: Incremental synchronization of standard and custom Salesforce objects including Accounts, Contacts, Leads, and Opportunities.
+icon: users
+dag_id: ingest_salesforce
+default_schedule: 0 3 * * *
+docs_url: https://developer.salesforce.com/docs
+parameters[3]{name,type,description}:
+  instance_url,string,Salesforce instance URL
+  client_id,string,Connected App Client ID
+  objects,string,Comma-separated list of objects to sync

@@ -11,9 +11,8 @@ from ai_gateway import generate
 from storage_writer import get_duckdb_con, write_to_storage
 
 SOURCES = {
-    "jellyfin": ("Name", "raw/jellyfin/**/*.parquet"),
-    "truenas": ("name", "raw/truenas/**/*.parquet"),
-    "weather": ("temperature_2m", "raw/weather/**/*.parquet"),
+    "audit_logs": ("message", "raw/audit_logs/**/*.parquet"),
+    "events": ("payload", "raw/events/**/*.parquet"),
 }
 
 

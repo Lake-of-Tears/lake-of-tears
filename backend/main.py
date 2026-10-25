@@ -1937,13 +1937,16 @@ def create_table(
     slug = _slugify(req.name)
     if db.query(CatalogTable).filter_by(schema_id=sch_uuid, slug=slug).first():
         raise HTTPException(400, f"Table slug '{slug}' already exists in this schema")
+    col_defs = (
+        [c.model_dump() for c in req.column_defs] if req.column_defs is not None else []
+    )
     table = CatalogTable(
         schema_id=schema.id,
         name=req.name.strip(),
         slug=slug,
         description=req.description,
         s3_path_pattern=req.s3_path_pattern,
-        column_defs=[],
+        column_defs=col_defs,
     )
     db.add(table)
     db.commit()

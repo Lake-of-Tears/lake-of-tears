@@ -1,0 +1,15 @@
+id: snowflake
+name: Snowflake Data Warehouse
+version: 1.0.0
+category: Databases & Warehouses
+author: Lake of Tears Community
+description: Federated zero-copy sync or batch extract from Snowflake tables and views into Lakehouse Parquet.
+icon: cloud
+dag_id: ingest_snowflake
+default_schedule: 0 2 * * *
+docs_url: https://docs.snowflake.com/
+parameters[4]{name,type,description}:
+  account_identifier,string,Snowflake account identifier
+  warehouse,string,Virtual warehouse name
+  database,string,Source database name
+  schema,string,Source schema name

@@ -1,0 +1,13 @@
+id: google_analytics
+name: Google Analytics 4
+version: 1.0.0
+category: Marketing & Analytics
+author: Lake of Tears Community
+description: Daily ingestion of GA4 web and app traffic events, dimensions, and conversion metrics.
+icon: activity
+dag_id: ingest_google_analytics
+default_schedule: 0 5 * * *
+docs_url: https://developers.google.com/analytics
+parameters[2]{name,type,description}:
+  property_id,string,GA4 Property ID
+  credentials_json,string,Google Service Account Key JSON

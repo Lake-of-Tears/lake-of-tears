@@ -1,0 +1,13 @@
+id: shopify
+name: Shopify Commerce
+version: 1.0.0
+category: E-Commerce
+author: Lake of Tears Community
+description: Synchronize store orders, inventory fulfillment levels, customer carts, and sales lines.
+icon: shopping-bag
+dag_id: ingest_shopify
+default_schedule: 0 3 * * *
+docs_url: https://shopify.dev/docs/api
+parameters[2]{name,type,description}:
+  shop_url,string,Store domain (e.g. store.myshopify.com)
+  access_token,string,Admin API Access Token

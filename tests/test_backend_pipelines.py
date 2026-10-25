@@ -500,7 +500,7 @@ def test_delete_pipeline_protection_and_rules():
                 "Cannot delete protected or non-workspace pipeline" in res_system.json()["detail"]
             )
 
-            res_ingest = client.delete("/api/v1/pipelines/ingest_weather_dag", headers=headers)
+            res_ingest = client.delete("/api/v1/pipelines/refresh_catalog_schemas_dag", headers=headers)
             assert res_ingest.status_code == 400
             assert (
                 "Cannot delete protected or non-workspace pipeline" in res_ingest.json()["detail"]
@@ -910,7 +910,7 @@ def test_pipeline_settings_patch_description_and_name():
 
 def test_pipeline_service_resolves_known_pipeline_notebooks():
     dag = {
-        "dag_id": "ingest_tmdb_movies",
+        "dag_id": "pubmed_ingest",
         "tags": [
             {"name": "ingestion"},
             {"name": "notebooks"},
@@ -928,9 +928,9 @@ def test_pipeline_service_resolves_known_pipeline_notebooks():
         mock_client.return_value.__aenter__.return_value = mock_instance
         res = asyncio.run(pipeline_service.list_workspace_dags("default", is_superadmin=True))
         assert len(res) == 1
-        assert res[0]["dag_id"] == "ingest_tmdb_movies"
+        assert res[0]["dag_id"] == "pubmed_ingest"
         assert res[0]["is_notebook_job"] is True
-        assert res[0]["notebook_path"] == "tmdb_daily_movies_ingest.ipynb"
+        assert res[0]["notebook_path"] == "pubmed_ingest.ipynb"
 
 
 def test_pipeline_service_resolves_notebook_tag():
@@ -1170,12 +1170,12 @@ async def test_update_pipeline_schedule_builtin_dag_rbac():
 
     with tempfile.TemporaryDirectory() as tmpdir:
         dags_dir = Path(tmpdir)
-        py_file = dags_dir / "ingest_tmdb_movies_dag.py"
+        py_file = dags_dir / "sample_etl_pipeline_dag.py"
         py_file.write_text(
             """
 from airflow import DAG
 with DAG(
-    dag_id="ingest_tmdb_movies",
+    dag_id="sample_etl_pipeline",
     schedule="0 2 * * *",
 ) as dag:
     pass
@@ -1188,7 +1188,7 @@ with DAG(
             with pytest.raises(HTTPException) as exc_info:
                 await pipeline_service.update_pipeline_schedule(
                     workspace_slug="analytics",
-                    dag_id="ingest_tmdb_movies",
+                    dag_id="sample_etl_pipeline",
                     schedule_interval="0 4 * * *",
                     is_superadmin=False,
                     role="member",
@@ -1199,12 +1199,12 @@ with DAG(
             # Admin role should succeed
             res = await pipeline_service.update_pipeline_schedule(
                 workspace_slug="analytics",
-                dag_id="ingest_tmdb_movies",
+                dag_id="sample_etl_pipeline",
                 schedule_interval="0 4 * * *",
                 is_superadmin=False,
                 role="admin",
             )
-            assert res["dag_id"] == "ingest_tmdb_movies"
+            assert res["dag_id"] == "sample_etl_pipeline"
             assert res["schedule_interval"] == "0 4 * * *"
 
             content = py_file.read_text(encoding="utf-8")

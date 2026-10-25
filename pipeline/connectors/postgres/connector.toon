@@ -1,0 +1,15 @@
+id: postgres
+name: PostgreSQL Database
+version: 1.0.0
+category: Databases & Warehouses
+author: Lake of Tears Community
+description: Batch extraction or CDC replica synchronization from PostgreSQL tables into Parquet.
+icon: database
+dag_id: ingest_postgres
+default_schedule: 0 1 * * *
+docs_url: https://www.postgresql.org/docs/
+parameters[4]{name,type,description}:
+  host,string,PostgreSQL host or endpoint
+  port,int,PostgreSQL port (default 5432)
+  database,string,Database name
+  username,string,Database user

@@ -32,17 +32,17 @@ def sentences(n: int) -> str:
 # ── configuration and defaults ────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("source", ["jellyfin", "truenas", "weather", "truenas_logs"])
+@pytest.mark.parametrize("source", ["events", "audit_logs", "webhook_payloads"])
 def test_shipped_structured_sources_stay_record_level(source):
     config = embed_sources.source_config(source)
     assert config["chunking"] == "document"
     assert isinstance(embed_sources.build_chunker(config), DocumentChunker)
 
 
-def test_alexa_style_sources_with_a_text_function_default_to_document():
-    config = embed_sources.source_config("alexa", "raw/alexa/**/*.parquet")
+def test_structured_sources_with_a_text_function_default_to_document():
+    config = embed_sources.source_config("events", "raw/events/**/*.parquet")
     assert config["chunking"] == "document"
-    assert config["glob"] == "raw/alexa/**/*.parquet"
+    assert config["glob"] == "raw/events/**/*.parquet"
 
 
 def test_an_unregistered_text_source_defaults_to_recursive_512_64():
@@ -169,13 +169,13 @@ def test_folder_partition_columns_are_not_copied_into_metadata(run_embed):
 
 def test_structured_rows_keep_one_chunk_and_their_old_ids(run_embed):
     raw = pd.DataFrame(
-        [{"timestamp": "2026-10-16T01:00", "temperature_2m": 50, "source_date": "2026-10-16"}]
+        [{"event_type": "user_login", "action": "login_success", "source_date": "2026-10-16"}]
     )
-    out = run_embed("weather", raw, "raw/weather/**/*.parquet")
+    out = run_embed("events", raw, "raw/events/**/*.parquet")
     assert len(out) == 1
     row = out.iloc[0]
     assert row["id"] == row["parent_id"] and (row["chunk_index"], row["total_chunks"]) == (0, 1)
-    assert row["content"].startswith("Weather 2026-10-16T01:00")
+    assert row["content"].startswith("user_login")
 
 
 def test_a_run_with_no_text_writes_nothing(run_embed):

@@ -1,0 +1,15 @@
+id: s3
+name: Amazon S3 / Cloud Storage
+version: 1.0.0
+category: Object Storage
+author: Lake of Tears Community
+description: Sync and ingest Parquet, CSV, or JSON datasets directly from external S3 buckets or compatible storage.
+icon: cloud
+dag_id: ingest_s3
+default_schedule: 0 4 * * *
+docs_url: https://aws.amazon.com/s3/
+parameters[4]{name,type,description}:
+  source_bucket,string,Source S3 bucket name
+  source_prefix,string,Path prefix or folder to sync
+  region,string,AWS Region
+  file_pattern,string,File matching pattern (e.g. *.parquet)

@@ -1,0 +1,14 @@
+id: webhook
+name: Generic REST Webhook
+version: 1.0.0
+category: APIs & Webhooks
+author: Lake of Tears Community
+description: Catch incoming HTTP JSON payloads, validate HMAC signatures, and buffer into landing Parquet partitions.
+icon: globe
+dag_id: ingest_webhook
+default_schedule: continuous
+docs_url: https://lakeoftears.dev/docs/connectors/webhook
+parameters[3]{name,type,description}:
+  endpoint_path,string,Relative URL path for the webhook
+  secret_header,string,Header name containing HMAC signature
+  batch_size,int,Micro-batch buffer size in records (default 500)

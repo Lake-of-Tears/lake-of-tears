@@ -26,15 +26,23 @@
       <h1 class="text-xl font-semibold text-gray-100">Catalog</h1>
       <p class="text-sm text-gray-500 mt-0.5">Browse schemas and tables your workspace has access to</p>
     </div>
-    {% if request.state.user %}
-    <button onclick="document.getElementById('create-catalog-modal').classList.remove('hidden')"
-            class="btn-primary">
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
-      </svg>
-      New Catalog
-    </button>
-    {% endif %}
+    <div class="flex items-center gap-2">
+      <a href="/ingest" class="btn-ghost border border-gray-700 hover:border-gray-600 text-gray-200">
+        <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+        </svg>
+        Add Data
+      </a>
+      {% if request.state.user %}
+      <button onclick="document.getElementById('create-catalog-modal').classList.remove('hidden')"
+              class="btn-primary">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+        </svg>
+        New Catalog
+      </button>
+      {% endif %}
+    </div>
   </div>
 
   <!-- Empty state -->

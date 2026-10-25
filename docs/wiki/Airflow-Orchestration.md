@@ -55,10 +55,6 @@ The Lake UI's pipeline pages call Airflow's REST API with HTTP basic auth (`AIRF
 
 | DAG | File | Schedule | Operator | Purpose |
 |---|---|---|---|---|
-| `ingest_weather` | `ingest_weather_dag.py` | daily 06:00 | Bash | Open-Meteo weather to `raw/weather/` |
-| `ingest_truenas` | `ingest_truenas_dag.py` | hourly | Bash | TrueNAS pools and disks |
-| `ingest_truenas_logs` | `ingest_truenas_logs_dag.py` | daily 00:00 | Bash | TrueNAS journal and alerts |
-| `ingest_jellyfin` | `ingest_jellyfin_dag.py` | every 6 hours | Bash | Jellyfin activity |
 | `embed_sources` | `embed_sources_dag.py` | daily 06:30 | Bash | Vector embeddings into `embeddings/` |
 | `summarize` | `summarize_dag.py` | daily 07:00 | Bash | AI daily summaries |
 | `anomaly_detect` | `anomaly_detect_dag.py` | daily 08:00 | Bash | Isolation Forest anomaly detection |

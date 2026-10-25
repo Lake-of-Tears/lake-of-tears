@@ -174,17 +174,17 @@ def test_get_bucket_stats_isolated_to_active_workspace():
     now = datetime.now(UTC)
     mock_objects = [
         {
-            "Key": "workspaces/dev/raw/weather/year=2026/month=10/day=24/data.parquet",
+            "Key": "workspaces/dev/raw/postgres/year=2026/month=10/day=24/data.parquet",
             "Size": 1024,
             "LastModified": now,
         },
         {
-            "Key": "workspaces/prod/raw/truenas/year=2026/month=10/day=24/data.parquet",
+            "Key": "workspaces/prod/raw/stripe/year=2026/month=10/day=24/data.parquet",
             "Size": 2048,
             "LastModified": now,
         },
         {
-            "Key": "raw/weather/year=2026/month=10/day=24/data.parquet",
+            "Key": "raw/postgres/year=2026/month=10/day=24/data.parquet",
             "Size": 4096,
             "LastModified": now,
         },
@@ -207,21 +207,21 @@ def test_get_bucket_stats_isolated_to_active_workspace():
         assert dev_stats["workspace"] == "dev"
         assert dev_stats["total_objects"] == 1
         assert dev_stats["total_size"] == "1.0 KB"
-        # Find weather source in dev
-        weather_dev = next(s for s in dev_stats["sources"] if s["key"] == "weather")
-        assert weather_dev["status"] == "green"
-        truenas_dev = next(s for s in dev_stats["sources"] if s["key"] == "truenas")
-        assert truenas_dev["status"] == "red"  # No data in dev
+        # Find postgres source in dev
+        postgres_dev = next(s for s in dev_stats["sources"] if s["key"] == "postgres")
+        assert postgres_dev["status"] == "green"
+        stripe_dev = next(s for s in dev_stats["sources"] if s["key"] == "stripe")
+        assert stripe_dev["status"] == "red"  # No data in dev
 
         # Stats for prod workspace
         prod_stats = _get_bucket_stats(workspace_slug="prod")
         assert prod_stats["workspace"] == "prod"
         assert prod_stats["total_objects"] == 1
         assert prod_stats["total_size"] == "2.0 KB"
-        weather_prod = next(s for s in prod_stats["sources"] if s["key"] == "weather")
-        assert weather_prod["status"] == "red"  # No data in prod
-        truenas_prod = next(s for s in prod_stats["sources"] if s["key"] == "truenas")
-        assert truenas_prod["status"] == "green"
+        postgres_prod = next(s for s in prod_stats["sources"] if s["key"] == "postgres")
+        assert postgres_prod["status"] == "red"  # No data in prod
+        stripe_prod = next(s for s in prod_stats["sources"] if s["key"] == "stripe")
+        assert stripe_prod["status"] == "green"
 
 
 # ── 4. UI Ingestion Route & Template Rendering ─────────────────────────────────
@@ -241,7 +241,7 @@ def test_ui_ingest_page_workspace_context():
     now = datetime(2026, 10, 24, 12, 0, 0, tzinfo=UTC)
     mock_objects = [
         {
-            "Key": "workspaces/analytics/raw/weather/year=2026/month=10/day=24/data.parquet",
+            "Key": "workspaces/analytics/raw/postgres/year=2026/month=10/day=24/data.parquet",
             "Size": 1024,
             "LastModified": now,
         },
@@ -266,88 +266,25 @@ def test_ui_ingest_page_workspace_context():
         # Check workspace badge
         assert "Workspace: analytics" in html
         # Check S3 jailed path rendered in table
-        assert "workspaces/analytics/raw/weather/" in html
-        assert "workspaces/analytics/raw/truenas/" in html
+        assert "workspaces/analytics/raw/postgres/" in html
 
 
-# ── 5. Airflow DAGs Workspace Parameterization ─────────────────────────────────
+# ── 5. Airflow System DAGs Verification ─────────────────────────────────────────
 
 
-def test_airflow_ingestion_dags_parameterization(monkeypatch):
-    """Verify shipped Airflow DAGs define workspace parameter and inject WORKSPACE_SLUG into BashOperator env."""
-    airflow = types.ModuleType("airflow")
-    created_dags = {}
+def test_airflow_system_dags_presence():
+    """Verify core platform DAGs exist in pipeline/dags without legacy hardcoded feeds."""
+    dags_dir = Path(__file__).parents[1] / "pipeline" / "dags"
+    assert (dags_dir / "run_notebook_dag.py").exists()
+    assert (dags_dir / "refresh_catalog_schemas_dag.py").exists()
+    assert (dags_dir / "embed_sources_dag.py").exists()
 
-    class FakeDAG:
-        def __init__(self, dag_id, **kwargs):
-            self.dag_id = dag_id
-            self.params = kwargs.get("params", {})
-            self.tags = kwargs.get("tags", [])
-            self.doc_md = kwargs.get("doc_md", "")
-            self.tasks = {}
-            created_dags[dag_id] = self
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc_val, exc_tb):
-            pass
-
-        def get_task(self, task_id):
-            return self.tasks[task_id]
-
-    airflow.DAG = FakeDAG
-
-    class FakeBashOperator:
-        def __init__(self, task_id, bash_command, env=None, **kwargs):
-            self.task_id = task_id
-            self.bash_command = bash_command
-            self.env = env or {}
-            # Register on latest DAG
-            if created_dags:
-                list(created_dags.values())[-1].tasks[task_id] = self
-
-    class FakePythonOperator:
-        def __init__(self, task_id, python_callable, **kwargs):
-            self.task_id = task_id
-            self.python_callable = python_callable
-            if created_dags:
-                list(created_dags.values())[-1].tasks[task_id] = self
-
-    operators = types.ModuleType("airflow.operators")
-    bash = types.ModuleType("airflow.operators.bash")
-    bash.BashOperator = FakeBashOperator
-    python = types.ModuleType("airflow.operators.python")
-    python.PythonOperator = FakePythonOperator
-
-    monkeypatch.setitem(sys.modules, "airflow", airflow)
-    monkeypatch.setitem(sys.modules, "airflow.operators", operators)
-    monkeypatch.setitem(sys.modules, "airflow.operators.bash", bash)
-    monkeypatch.setitem(sys.modules, "airflow.operators.python", python)
-
-    dag_files = [
+    # Legacy hardcoded homelab DAGs should not exist
+    for legacy in [
         "ingest_weather_dag.py",
         "ingest_truenas_dag.py",
         "ingest_truenas_logs_dag.py",
         "ingest_jellyfin_dag.py",
         "ingest_tmdb_movies_dag.py",
-    ]
-
-    dags_dir = Path(__file__).parents[1] / "pipeline" / "dags"
-
-    for dag_file in dag_files:
-        spec = importlib.util.spec_from_file_location(dag_file[:-3], dags_dir / dag_file)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-
-    for dag_id in ["ingest_weather", "ingest_truenas", "ingest_truenas_logs", "ingest_jellyfin"]:
-        dag = created_dags[dag_id]
-        assert dag.params.get("workspace") == "default"
-        assert "workspace:default" in dag.tags
-        task = dag.get_task("run")
-        assert "WORKSPACE_SLUG" in task.env
-        assert "dag_run.conf.get('workspace'" in task.env["WORKSPACE_SLUG"]
-
-    tmdb_dag = created_dags["ingest_tmdb_movies"]
-    assert tmdb_dag.params.get("workspace") == "default"
-    assert "workspace:default" in tmdb_dag.tags
+    ]:
+        assert not (dags_dir / legacy).exists()

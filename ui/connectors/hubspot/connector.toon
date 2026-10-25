@@ -1,0 +1,12 @@
+id: hubspot
+name: HubSpot CRM
+version: 1.0.0
+category: CRM & Sales
+author: Lake of Tears Community
+description: Sync inbound contacts, company accounts, sales pipeline deals, and campaign engagements.
+icon: users
+dag_id: ingest_hubspot
+default_schedule: 0 4 * * *
+docs_url: https://developers.hubspot.com/docs/api/overview
+parameters[1]{name,type,description}:
+  access_token,string,HubSpot Private App Access Token

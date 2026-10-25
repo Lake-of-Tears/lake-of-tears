@@ -1,0 +1,15 @@
+id: kafka
+name: Apache Kafka
+version: 1.0.0
+category: Streaming & Events
+author: Lake of Tears Community
+description: Real-time event streaming consumer with micro-batching into partitioned Parquet lakehouse storage.
+icon: zap
+dag_id: ingest_kafka
+default_schedule: continuous
+docs_url: https://kafka.apache.org/documentation/
+parameters[4]{name,type,description}:
+  bootstrap_servers,string,Kafka bootstrap server list
+  topic,string,Topic name to consume
+  group_id,string,Consumer group ID
+  auto_offset_reset,string,Offset reset policy (earliest or latest)

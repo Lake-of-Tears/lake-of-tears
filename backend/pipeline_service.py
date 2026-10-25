@@ -55,7 +55,7 @@ PRESET_MAP = {
 }
 
 KNOWN_PIPELINE_NOTEBOOKS: dict[str, str] = {
-    "ingest_tmdb_movies": "tmdb_daily_movies_ingest.ipynb",
+    "pubmed_ingest": "pubmed_ingest.ipynb",
 }
 
 PROTECTED_SYSTEM_DAGS: set[str] = {

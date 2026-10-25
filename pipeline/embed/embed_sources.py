@@ -20,51 +20,32 @@ from chunking import (
 from storage_writer import get_duckdb_con
 
 
-def _text_jellyfin(row) -> str:
+def _text_events(row) -> str:
     parts = [
         str(row[c])
-        for c in ("Name", "Type", "ShortOverview")
+        for c in ("event_type", "action", "description", "name")
         if pd.notna(row.get(c)) and str(row.get(c, "")).strip()
     ]
-    return " | ".join(parts) or "Jellyfin activity"
+    return " | ".join(parts) or "System Event"
 
 
-def _text_truenas(row) -> str:
-    name = row.get("name", "unknown")
-    status = row.get("status", "unknown")
-    allocated_gb = (row.get("allocated") or 0) / (1024**3)
-    free_gb = (row.get("free") or 0) / (1024**3)
-    return f"Pool {name}: {status}, {allocated_gb:.1f}GB used, {free_gb:.1f}GB free"
+def _text_audit_logs(row) -> str:
+    return str(row.get("message") or row.get("content") or "Audit log entry").strip()
 
 
-def _text_weather(row) -> str:
-    return (
-        f"Weather {row.get('timestamp', '')}: {row.get('temperature_2m', '')}F apparent "
-        f"{row.get('apparent_temperature', '')}F, {row.get('relative_humidity_2m', '')}% humidity, "
-        f"{row.get('precipitation', 0)}in precip, {row.get('wind_speed_10m', '')}mph wind"
-    )
-
-
-def _text_alexa(row) -> str:
-    for col in ("utteranceText", "utterance", "query", "text", "description"):
+def _text_webhook_payloads(row) -> str:
+    for col in ("payload", "body", "data", "text", "description"):
         val = row.get(col)
         if pd.notna(val) and str(val).strip():
             return str(val)
     vals = [str(v) for v in row.values() if isinstance(v, str) and str(v).strip()]
-    return " | ".join(vals[:5]) or "Alexa activity"
-
-
-def _text_truenas_logs(row) -> str:
-    # content is pre-formatted by ingest_truenas_logs.py: "[unit] PRIORITY: message"
-    return str(row.get("content", "")).strip() or "TrueNAS log entry"
+    return " | ".join(vals[:5]) or "Webhook payload"
 
 
 TEXT_FN = {
-    "jellyfin": _text_jellyfin,
-    "truenas": _text_truenas,
-    "weather": _text_weather,
-    "alexa": _text_alexa,
-    "truenas_logs": _text_truenas_logs,
+    "events": _text_events,
+    "audit_logs": _text_audit_logs,
+    "webhook_payloads": _text_webhook_payloads,
 }
 
 # Sources embedded every day. Each entry is a dict:
@@ -77,24 +58,19 @@ TEXT_FN = {
 #   chunk_size, chunk_overlap   for "recursive", in characters (default 512 and 64)
 #   window        for "agentic", characters sent to the model per call (default 4000)
 SOURCES: dict[str, dict[str, Any]] = {
-    "jellyfin": {
-        "glob": "raw/jellyfin/**/*.parquet",
-        "text_fn": _text_jellyfin,
+    "events": {
+        "glob": "raw/events/**/*.parquet",
+        "text_fn": _text_events,
         "chunking": "document",
     },
-    "truenas": {
-        "glob": "raw/truenas/**/*.parquet",
-        "text_fn": _text_truenas,
+    "audit_logs": {
+        "glob": "raw/audit_logs/**/*.parquet",
+        "text_fn": _text_audit_logs,
         "chunking": "document",
     },
-    "weather": {
-        "glob": "raw/weather/**/*.parquet",
-        "text_fn": _text_weather,
-        "chunking": "document",
-    },
-    "truenas_logs": {
-        "glob": "raw/truenas_logs/**/*.parquet",
-        "text_fn": _text_truenas_logs,
+    "webhook_payloads": {
+        "glob": "raw/webhook_payloads/**/*.parquet",
+        "text_fn": _text_webhook_payloads,
         "chunking": "document",
     },
 }

@@ -265,6 +265,7 @@ class CreateTableRequest(BaseModel):
     name: str
     description: str | None = None
     s3_path_pattern: str | None = None
+    column_defs: list[ColumnDef] | None = None
 
     @field_validator("name")
     @classmethod

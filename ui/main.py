@@ -41,13 +41,35 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 
 try:
-    from ui import ai_gateway_client, duckdb_ai, duckdb_pool, notebook_proxy, sql_guardrails
+    from ui import (
+        ai_gateway_client,
+        duckdb_ai,
+        duckdb_pool,
+        ingest_service,
+        notebook_proxy,
+        sql_guardrails,
+    )
 except ImportError:
     import ai_gateway_client
     import duckdb_ai
     import duckdb_pool
+    import ingest_service
     import notebook_proxy
     import sql_guardrails
+
+try:
+    from pipeline.shared.connector_registry import registry as connector_registry
+except ImportError:
+    try:
+        from ui.connector_registry import registry as connector_registry
+    except ImportError:
+        try:
+            from connector_registry import registry as connector_registry
+        except ImportError:
+            import sys
+
+            sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+            from pipeline.shared.connector_registry import registry as connector_registry
 
 logger = logging.getLogger("lake.ui")
 
@@ -67,28 +89,32 @@ SUPERSET_URL = os.getenv("SUPERSET_URL", "http://localhost:8088")
 JUPYTER_TOKEN = os.getenv("JUPYTER_TOKEN", "")
 
 SOURCES = [
-    "weather",
-    "truenas",
-    "truenas_logs",
-    "jellyfin",
-    "tmdb",
-    "alexa",
+    "postgres",
+    "mysql",
+    "snowflake",
+    "kafka",
+    "s3",
     "stripe",
     "shopify",
     "hubspot",
-    "postgres",
+    "salesforce",
+    "google_analytics",
+    "github",
+    "webhook",
 ]
 SOURCE_LABELS = {
-    "weather": "Open-Meteo Weather",
-    "truenas": "TrueNAS Storage",
-    "truenas_logs": "TrueNAS System Logs",
-    "jellyfin": "Jellyfin Activity",
-    "tmdb": "The Movie Database (TMDb)",
-    "alexa": "Alexa Smart Home",
+    "postgres": "PostgreSQL",
+    "mysql": "MySQL",
+    "snowflake": "Snowflake",
+    "kafka": "Apache Kafka",
+    "s3": "Amazon S3 / Storage",
     "stripe": "Stripe",
     "shopify": "Shopify",
     "hubspot": "HubSpot",
-    "postgres": "PostgreSQL",
+    "salesforce": "Salesforce",
+    "google_analytics": "Google Analytics 4",
+    "github": "GitHub",
+    "webhook": "REST Webhook",
 }
 
 app = FastAPI(title="Lake of Tears")
@@ -358,13 +384,33 @@ def _get_bucket_stats(workspace_slug: str | None = None) -> dict[str, Any]:
                         ):
                             source_last_modified[src] = last_mod
 
+                # Also detect any dynamic or existing source folders under raw/
+                if rel_key.startswith("raw/"):
+                    parts = rel_key.split("/")
+                    if len(parts) > 1 and parts[1]:
+                        detected_src = parts[1]
+                        if detected_src not in source_last_modified:
+                            source_last_modified[detected_src] = last_mod
+                        elif (
+                            source_last_modified[detected_src] is None
+                            or last_mod > source_last_modified[detected_src]
+                        ):
+                            source_last_modified[detected_src] = last_mod
+
+        # Collect all sources (configured SOURCES plus dynamically detected sources with data)
+        all_source_keys = list(SOURCES)
+        for src in source_last_modified:
+            if src not in all_source_keys:
+                all_source_keys.append(src)
+
         sources = []
-        for src in SOURCES:
+        for src in all_source_keys:
             lm = source_last_modified[src]
+            label = SOURCE_LABELS.get(src, src.replace("_", " ").title())
             sources.append(
                 {
                     "key": src,
-                    "label": SOURCE_LABELS[src],
+                    "label": label,
                     "last_modified": lm,
                     "last_modified_str": lm.strftime("%Y-%m-%d %H:%M UTC") if lm else "Never",
                     "status": _source_status(lm),
@@ -947,7 +993,7 @@ async def storage(request: Request):
     ws = getattr(request.state, "workspace", None) or {}
     slug = ws.get("slug")
     stats = _get_bucket_stats(workspace_slug=slug)
-    is_superadmin = user.get("role") == "superadmin"
+    is_superadmin = user.get("role") in ("superadmin", "admin")
     user_role = (
         user.get("role") if is_superadmin else (ws.get("my_role") or ws.get("role") or "read")
     )
@@ -1238,19 +1284,30 @@ async def notebooks(request: Request):
     )
 
 
+def _get_workspace_connectors(
+    workspace_slug: str | None, stats: dict[str, Any]
+) -> dict[str, Any]:
+    return connector_registry.resolve_workspace_feeds(workspace_slug, stats)
+
+
 @app.get("/ingest", response_class=HTMLResponse)
 async def ingest(request: Request):
     user = getattr(request.state, "user", None) or {}
     ws = getattr(request.state, "workspace", None) or {}
     slug = ws.get("slug")
     stats = _get_bucket_stats(workspace_slug=slug)
+    catalogs = _resolve_ui_catalogs(request)
+    feeds_data = _get_workspace_connectors(workspace_slug=slug, stats=stats)
+    active_feeds = feeds_data["active_feeds"]
+    community_connectors = feeds_data["community_connectors"]
+    categories = feeds_data["categories"]
 
     all_ws = getattr(request.state, "workspaces", None) or []
     current_ws_id = str(ws.get("id")) if ws and ws.get("id") else None
     shared_workspaces = [
         w for w in all_ws if w.get("is_shared") and str(w.get("id")) != current_ws_id
     ]
-    is_superadmin = user.get("role") == "superadmin"
+    is_superadmin = user.get("role") in ("superadmin", "admin")
     my_role = user.get("role") if is_superadmin else (ws.get("my_role") or ws.get("role") or "read")
 
     return templates.TemplateResponse(
@@ -1259,11 +1316,375 @@ async def ingest(request: Request):
         context={
             "request": request,
             "stats": stats,
+            "active_feeds": active_feeds,
+            "community_connectors": community_connectors,
+            "categories": categories,
+            "connectors": active_feeds if active_feeds else community_connectors,
+            "catalogs": catalogs,
             "page": "ingest",
             "workspace": ws,
             "shared_workspaces": shared_workspaces,
             "my_role": my_role,
         },
+    )
+
+
+@app.post("/api/ingest/preview-file")
+async def api_ingest_preview_file(
+    request: Request,
+    file: UploadFile = File(...),
+):
+    token = _get_request_token(request)
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"ok": False, "error": "Not authenticated"}, status_code=401)
+
+    try:
+        content = await file.read()
+        res = ingest_service.preview_uploaded_file(content, file.filename or "data.csv")
+        return JSONResponse(res, status_code=200 if res.get("ok") else 400)
+    except Exception as exc:
+        logger.error("Failed to preview file: %s", exc)
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
+@app.post("/api/ingest/create-table-from-file")
+async def api_ingest_create_table_from_file(
+    request: Request,
+    file: UploadFile = File(...),
+    catalog_id: str = Form(...),
+    schema_id: str = Form(...),
+    schema_name: str | None = Form(None),
+    table_name: str = Form(...),
+    mode: str = Form("create_new"),
+    description: str | None = Form(None),
+):
+    token = _get_request_token(request)
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"ok": False, "error": "Not authenticated"}, status_code=401)
+
+    user = getattr(request.state, "user", None) or {}
+    ws = getattr(request.state, "workspace", None) or {}
+    ws_slug = (ws.get("slug") if isinstance(ws, dict) else getattr(ws, "slug", None)) or "default"
+    ws_id = str(ws.get("id")) if isinstance(ws, dict) and ws.get("id") else None
+
+    is_superadmin = user.get("role") in ("superadmin", "admin")
+    my_role = user.get("role") if is_superadmin else (ws.get("my_role") or ws.get("role") or "read")
+    if my_role not in ("admin", "write", "superadmin", "owner"):
+        return JSONResponse(
+            {"ok": False, "error": "Write or Admin workspace permissions required to create tables"},
+            status_code=403,
+        )
+
+    filename = file.filename or "upload"
+    clean_table_name = ingest_service.slugify(table_name)
+    if not clean_table_name:
+        return JSONResponse({"ok": False, "error": "Invalid table name"}, status_code=400)
+
+    try:
+        content = await file.read()
+        parquet_path, columns, row_count = ingest_service.convert_to_parquet_file(content, filename)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": f"File conversion failed: {exc}"}, status_code=400)
+
+    try:
+        catalogs = _resolve_ui_catalogs(request)
+        target_catalog = next((c for c in catalogs if str(c.get("id")) == str(catalog_id)), None)
+        if not target_catalog:
+            return JSONResponse(
+                {"ok": False, "error": "Target catalog not found or access denied"}, status_code=404
+            )
+
+        cat_slug = target_catalog.get("slug") or target_catalog.get("name") or "default"
+
+        actual_schema_id = schema_id
+        target_schema = None
+        if schema_id == "new":
+            if not schema_name or not schema_name.strip():
+                return JSONResponse(
+                    {"ok": False, "error": "Schema name required for new schema"}, status_code=400
+                )
+            clean_schema_name = ingest_service.slugify(schema_name)
+            created_schema = _backend_post(
+                f"/api/catalogs/{catalog_id}/schemas",
+                token,
+                {
+                    "name": clean_schema_name,
+                    "description": "Schema created via Add Data wizard",
+                },
+                workspace_id=ws_id,
+                workspace_slug=ws_slug,
+            )
+            if not created_schema or not created_schema.get("id"):
+                return JSONResponse(
+                    {"ok": False, "error": "Failed to create new schema"}, status_code=500
+                )
+            actual_schema_id = str(created_schema["id"])
+            target_schema = created_schema
+        else:
+            target_schema = next(
+                (s for s in target_catalog.get("schemas", []) if str(s.get("id")) == str(schema_id)),
+                None,
+            )
+            if not target_schema:
+                return JSONResponse({"ok": False, "error": "Target schema not found"}, status_code=404)
+
+        sch_slug = target_schema.get("slug") or target_schema.get("name") or "bronze"
+
+        existing_table = next(
+            (
+                t
+                for t in target_schema.get("tables", [])
+                if t.get("slug") == clean_table_name or t.get("name") == clean_table_name
+            ),
+            None,
+        )
+
+        if existing_table and mode == "create_new":
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": f"Table '{clean_table_name}' already exists in schema '{sch_slug}'. Choose a different name or select 'Append / Overwrite' mode.",
+                },
+                status_code=409,
+            )
+
+        s3_key, s3_path_pattern = ingest_service.build_managed_hive_path(
+            workspace_slug=ws_slug,
+            catalog_slug=cat_slug,
+            schema_slug=sch_slug,
+            table_slug=clean_table_name,
+            mode=mode,
+        )
+
+        s3 = _s3_client()
+        s3.upload_file(parquet_path, MINIO_BUCKET, s3_key)
+
+        table_id = None
+        if existing_table:
+            table_id = str(existing_table["id"])
+            _backend_patch(
+                f"/api/catalogs/{catalog_id}/schemas/{actual_schema_id}/tables/{table_id}",
+                token,
+                {
+                    "s3_path_pattern": s3_path_pattern,
+                    "column_defs": columns,
+                    "description": description or existing_table.get("description"),
+                },
+                workspace_id=ws_id,
+                workspace_slug=ws_slug,
+            )
+        else:
+            res_table = _backend_post(
+                f"/api/catalogs/{catalog_id}/schemas/{actual_schema_id}/tables",
+                token,
+                {
+                    "name": clean_table_name,
+                    "description": description or f"Managed table ingested from {filename}",
+                    "s3_path_pattern": s3_path_pattern,
+                    "column_defs": columns,
+                },
+                workspace_id=ws_id,
+                workspace_slug=ws_slug,
+            )
+            if not res_table or not res_table.get("id"):
+                return JSONResponse(
+                    {"ok": False, "error": "Failed to register table metadata"}, status_code=500
+                )
+            table_id = str(res_table["id"])
+
+        try:
+            with duckdb_pool_instance.acquire() as con:
+                con.execute(f'CREATE SCHEMA IF NOT EXISTS "{sch_slug}"')
+                con.execute(
+                    f'CREATE OR REPLACE VIEW "{sch_slug}"."{clean_table_name}" AS '
+                    f"SELECT * FROM read_parquet('{s3_path_pattern}')"
+                )
+        except Exception as v_exc:
+            logger.warning(
+                "Could not register local DuckDB view for %s.%s: %s",
+                sch_slug,
+                clean_table_name,
+                v_exc,
+            )
+
+        return JSONResponse(
+            {
+                "ok": True,
+                "table_id": table_id,
+                "catalog_slug": cat_slug,
+                "schema_slug": sch_slug,
+                "table_name": clean_table_name,
+                "s3_path_pattern": s3_path_pattern,
+                "columns": columns,
+                "row_count": row_count,
+                "sql_view": f"{sch_slug}.{clean_table_name}",
+                "sql_url": f'/sql?query=SELECT * FROM "{sch_slug}"."{clean_table_name}" LIMIT 10',
+                "catalog_url": f"/catalog#{cat_slug}",
+            }
+        )
+    finally:
+        if os.path.exists(parquet_path):
+            try:
+                os.remove(parquet_path)
+            except OSError:
+                pass
+
+
+@app.post("/api/ingest/register-s3-path")
+async def api_ingest_register_s3_path(request: Request):
+    token = _get_request_token(request)
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"ok": False, "error": "Not authenticated"}, status_code=401)
+
+    user = getattr(request.state, "user", None) or {}
+    ws = getattr(request.state, "workspace", None) or {}
+    ws_slug = (ws.get("slug") if isinstance(ws, dict) else getattr(ws, "slug", None)) or "default"
+    ws_id = str(ws.get("id")) if isinstance(ws, dict) and ws.get("id") else None
+
+    is_superadmin = user.get("role") in ("superadmin", "admin")
+    my_role = user.get("role") if is_superadmin else (ws.get("my_role") or ws.get("role") or "read")
+    if my_role not in ("admin", "write", "superadmin", "owner"):
+        return JSONResponse(
+            {"ok": False, "error": "Write or Admin workspace permissions required to register tables"},
+            status_code=403,
+        )
+
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Invalid JSON body"}, status_code=400)
+
+    raw_path = (data.get("s3_path") or "").strip()
+    catalog_id = data.get("catalog_id")
+    schema_id = data.get("schema_id")
+    schema_name = data.get("schema_name")
+    table_name = (data.get("table_name") or "").strip()
+    description = data.get("description")
+
+    if not raw_path or not catalog_id or not schema_id or not table_name:
+        return JSONResponse(
+            {"ok": False, "error": "s3_path, catalog_id, schema_id, and table_name are required"},
+            status_code=400,
+        )
+
+    try:
+        jailed_s3 = ingest_service.validate_and_jail_s3_path(raw_path, ws_slug, bucket=MINIO_BUCKET)
+    except ValueError as val_err:
+        return JSONResponse({"ok": False, "error": str(val_err)}, status_code=400)
+
+    try:
+        with duckdb_pool_instance.acquire() as con:
+            columns = ingest_service.inspect_s3_parquet_path(jailed_s3, con=con)
+    except Exception as exc:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": f"Failed to inspect Parquet schema at '{jailed_s3}': {exc}. Ensure the path contains valid Parquet files.",
+            },
+            status_code=400,
+        )
+
+    clean_table_name = ingest_service.slugify(table_name)
+    catalogs = _resolve_ui_catalogs(request)
+    target_catalog = next((c for c in catalogs if str(c.get("id")) == str(catalog_id)), None)
+    if not target_catalog:
+        return JSONResponse({"ok": False, "error": "Catalog not found"}, status_code=404)
+
+    cat_slug = target_catalog.get("slug") or target_catalog.get("name") or "default"
+    actual_schema_id = schema_id
+    target_schema = None
+
+    if schema_id == "new":
+        if not schema_name or not schema_name.strip():
+            return JSONResponse(
+                {"ok": False, "error": "Schema name required for new schema"}, status_code=400
+            )
+        clean_schema_name = ingest_service.slugify(schema_name)
+        created_schema = _backend_post(
+            f"/api/catalogs/{catalog_id}/schemas",
+            token,
+            {"name": clean_schema_name, "description": "Created via Add Data hub"},
+            workspace_id=ws_id,
+            workspace_slug=ws_slug,
+        )
+        if not created_schema or not created_schema.get("id"):
+            return JSONResponse(
+                {"ok": False, "error": "Failed to create new schema"}, status_code=500
+            )
+        actual_schema_id = str(created_schema["id"])
+        target_schema = created_schema
+    else:
+        target_schema = next(
+            (s for s in target_catalog.get("schemas", []) if str(s.get("id")) == str(schema_id)),
+            None,
+        )
+        if not target_schema:
+            return JSONResponse({"ok": False, "error": "Target schema not found"}, status_code=404)
+
+    sch_slug = target_schema.get("slug") or target_schema.get("name") or "bronze"
+
+    res_table = _backend_post(
+        f"/api/catalogs/{catalog_id}/schemas/{actual_schema_id}/tables",
+        token,
+        {
+            "name": clean_table_name,
+            "description": description or f"Registered from {jailed_s3}",
+            "s3_path_pattern": jailed_s3,
+            "column_defs": columns,
+        },
+        workspace_id=ws_id,
+        workspace_slug=ws_slug,
+    )
+    if not res_table or not res_table.get("id"):
+        return JSONResponse(
+            {"ok": False, "error": "Failed to register table metadata"}, status_code=500
+        )
+
+    table_id = str(res_table["id"])
+
+    try:
+        with duckdb_pool_instance.acquire() as con:
+            con.execute(f'CREATE SCHEMA IF NOT EXISTS "{sch_slug}"')
+            con.execute(
+                f'CREATE OR REPLACE VIEW "{sch_slug}"."{clean_table_name}" AS '
+                f"SELECT * FROM read_parquet('{jailed_s3}')"
+            )
+    except Exception as v_exc:
+        logger.warning("Could not register local DuckDB view: %s", v_exc)
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "table_id": table_id,
+            "catalog_slug": cat_slug,
+            "schema_slug": sch_slug,
+            "table_name": clean_table_name,
+            "s3_path_pattern": jailed_s3,
+            "columns": columns,
+            "sql_view": f"{sch_slug}.{clean_table_name}",
+            "sql_url": f'/sql?query=SELECT * FROM "{sch_slug}"."{clean_table_name}" LIMIT 10',
+            "catalog_url": f"/catalog#{cat_slug}",
+        }
+    )
+
+
+@app.get("/api/ingest/connectors")
+async def api_ingest_connectors(request: Request):
+    token = _get_request_token(request)
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"ok": False, "error": "Not authenticated"}, status_code=401)
+    ws = getattr(request.state, "workspace", None) or {}
+    slug = ws.get("slug")
+    stats = _get_bucket_stats(workspace_slug=slug)
+    feeds_data = _get_workspace_connectors(workspace_slug=slug, stats=stats)
+    return JSONResponse(
+        {
+            "ok": True,
+            "active_feeds": feeds_data["active_feeds"],
+            "community_connectors": feeds_data["community_connectors"],
+            "categories": feeds_data["categories"],
+            "connectors": feeds_data["community_connectors"],
+        }
     )
 
 
@@ -2591,7 +3012,7 @@ async def api_workspace_manifest(request: Request):
         {"title": "SQL Editor", "subtitle": "DuckDB SQL queries", "url": "/sql"},
         {"title": "Visualizations", "subtitle": "Apache Superset dashboards", "url": "/dashboards"},
         {"title": "Pipelines", "subtitle": "Apache Airflow DAGs", "url": "/pipelines"},
-        {"title": "Data Ingestion", "subtitle": "Connectors & ingestion status", "url": "/ingest"},
+        {"title": "Add Data", "subtitle": "Data ingestion launchpad & connectors", "url": "/ingest"},
         {"title": "AI Query", "subtitle": "Gemini natural language SQL", "url": "/ai"},
         {
             "title": "Anomaly Detection",
@@ -2883,7 +3304,7 @@ async def api_workspace_search(request: Request, q: str = ""):
         {"title": "SQL Editor", "subtitle": "DuckDB SQL queries", "url": "/sql"},
         {"title": "Visualizations", "subtitle": "Apache Superset dashboards", "url": "/dashboards"},
         {"title": "Pipelines", "subtitle": "Apache Airflow DAGs", "url": "/pipelines"},
-        {"title": "Data Ingestion", "subtitle": "Connectors & ingestion status", "url": "/ingest"},
+        {"title": "Add Data", "subtitle": "Data ingestion launchpad & connectors", "url": "/ingest"},
         {"title": "AI Query", "subtitle": "Gemini natural language SQL", "url": "/ai"},
         {
             "title": "Anomaly Detection",

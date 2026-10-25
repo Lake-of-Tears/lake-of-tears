@@ -1,0 +1,15 @@
+id: mysql
+name: MySQL Database
+version: 1.0.0
+category: Databases & Warehouses
+author: Lake of Tears Community
+description: Batch extraction or CDC replica synchronization from MySQL tables into Parquet.
+icon: database
+dag_id: ingest_mysql
+default_schedule: 0 1 * * *
+docs_url: https://dev.mysql.com/doc/
+parameters[4]{name,type,description}:
+  host,string,MySQL host or RDS endpoint
+  port,int,MySQL port (default 3306)
+  database,string,Database name
+  username,string,Database user

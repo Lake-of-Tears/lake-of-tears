@@ -1,0 +1,13 @@
+id: stripe
+name: Stripe Financial
+version: 1.0.0
+category: Finance & SaaS
+author: Lake of Tears Community
+description: Ingest daily balance transactions, customer subscriptions, charges, and refunds.
+icon: credit-card
+dag_id: ingest_stripe
+default_schedule: 0 2 * * *
+docs_url: https://stripe.com/docs/api
+parameters[2]{name,type,description}:
+  api_key,string,Stripe Restricted or Secret Key
+  sync_history_days,int,Number of lookback days (default 30)

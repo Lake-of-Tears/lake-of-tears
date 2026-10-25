@@ -31,15 +31,13 @@ s3://datalake/
 
 The shared helper, `write_to_storage()` in `pipeline/shared/storage_writer.py`, builds the path, connects DuckDB to MinIO with the `httpfs` extension and runs `COPY df TO 's3://...' (FORMAT PARQUET)`. Your script never talks to S3 directly.
 
-### Pipelines that ship today
+### Ingestion Methods in Lake of Tears
 
-| Source | Script | DAG | Schedule | Output |
-|---|---|---|---|---|
-| Open-Meteo weather | `pipeline/ingest/weather.py` | `ingest_weather` | daily 06:00 | `raw/weather/` |
-| TrueNAS pools and disks | `pipeline/ingest/truenas.py` | `ingest_truenas` | hourly | `raw/truenas/`, `raw/truenas_disks/` |
-| TrueNAS system logs | `pipeline/ingest/truenas_logs.py` | `ingest_truenas_logs` | daily 00:00 | `raw/truenas_logs/` |
-| Jellyfin activity | `pipeline/ingest/jellyfin.py` | `ingest_jellyfin` | every 6 hours | `raw/jellyfin/` |
-| Alexa exports | `pipeline/ingest/alexa.py` | none yet | run by hand | `raw/alexa/` |
+Lake of Tears supports three primary methods of data ingestion into the Lakehouse:
+1. **Add Data Hub (UI):** Upload CSV, TSV, JSON, NDJSON, or Parquet files with live schema preview and automatic Hive partitioning.
+2. **Zero-Copy S3 Registration (UI & API):** Point to any workspace S3 folder to register existing Parquet files into the catalog.
+3. **TOON Community Connectors:** Declarative `connector.toon` manifests in `pipeline/connectors/` (PostgreSQL, MySQL, Snowflake, Kafka, S3, Stripe, Shopify, HubSpot, etc.).
+4. **Notebook Jobs:** Parameterized Jupyter notebooks executed on a schedule via Airflow (`run_notebook_dag`).
 
 ## 2. Tutorial: add an `example_orders` source
 
