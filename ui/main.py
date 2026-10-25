@@ -2543,11 +2543,6 @@ async def api_workspace_manifest(request: Request):
     if not pipelines_raw:
         pipelines_raw = [
             {
-                "dag_id": "run_notebook",
-                "name": "run_notebook",
-                "desc": "On-demand execution of notebooks via Airflow",
-            },
-            {
                 "dag_id": "daily_ingest",
                 "name": "daily_ingest",
                 "desc": "Scheduled ingestion & normalization",
@@ -2832,11 +2827,6 @@ async def api_workspace_search(request: Request, q: str = ""):
 
     if not pipelines_list:
         pipelines_list = [
-            {
-                "dag_id": "run_notebook",
-                "name": "run_notebook",
-                "desc": "On-demand execution of notebooks via Airflow",
-            },
             {
                 "dag_id": "daily_ingest",
                 "name": "daily_ingest",

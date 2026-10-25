@@ -171,7 +171,7 @@ def test_workspace_dev_never_affects_workspace_prod_storage():
 def test_get_bucket_stats_isolated_to_active_workspace():
     """Acceptance Criteria: Ingestion summary page reports metrics solely for the active workspace."""
     # Mock S3 objects: Dev has weather data, Prod has truenas data, Root has legacy data
-    now = datetime(2026, 10, 24, 12, 0, 0, tzinfo=UTC)
+    now = datetime.now(UTC)
     mock_objects = [
         {
             "Key": "workspaces/dev/raw/weather/year=2026/month=10/day=24/data.parquet",

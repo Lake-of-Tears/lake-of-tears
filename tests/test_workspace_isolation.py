@@ -190,11 +190,12 @@ def test_pipeline_dag_accessibility_strictly_jailed_for_superadmin():
         )
         is True
     )
+    # Global runner DAG (run_notebook) is strictly excluded from workspace DAG lists (#256)
     assert (
         pipeline_service.is_dag_accessible_by_workspace(
             dag_system_runner, ws_analytics.slug, is_superadmin=True
         )
-        is True
+        is False
     )
     assert (
         pipeline_service.is_dag_accessible_by_workspace(
