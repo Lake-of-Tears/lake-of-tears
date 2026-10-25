@@ -91,11 +91,12 @@ The Pipelines page of a workspace lists a DAG when any of these is true:
 |---|---|
 | The `dag_id` starts with `ws_<slug>_` | `ws_default_daily_report` |
 | The DAG has the tag `workspace:<slug>` | `tags=["ingestion", "workspace:default"]` |
-| The DAG is `run_notebook` | always visible |
 
-A DAG that matches none of these (for example the shipped `purge_*` maintenance DAGs) is not listed for regular users.
+A DAG that matches none of these (for example untagged maintenance DAGs) is not listed.
 
-**Superadmins see every DAG in every workspace.** This is intentional: a superadmin administers the whole instance, so the workspace badge on the Pipelines page does not filter their list. The rule lives in one function, `is_dag_accessible_by_workspace` in `backend/pipeline_service.py`, and is the place to tighten if a dedicated access-control (AAA) solution is deployed later.
+The global on-demand runner DAG (`run_notebook`) is strictly an internal headless executor and is excluded from workspace DAG listings. Furthermore, execution runs and logs for `run_notebook` are strictly scoped to the workspace in which the notebook was triggered.
+
+Superadmins are strictly jailed to the active workspace context (enforced in `is_dag_accessible_by_workspace` in `backend/pipeline_service.py`), preventing cross-workspace leakage of DAGs, runs, or execution logs.
 
 ### Schedules, catchup and retries
 

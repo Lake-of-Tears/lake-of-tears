@@ -148,23 +148,25 @@ def resolve_workspace_dag_id(workspace_slug: str, pipeline_title: str) -> str:
 def is_dag_accessible_by_workspace(
     dag_data: dict[str, Any], workspace_slug: str, is_superadmin: bool = False
 ) -> bool:
-    """Check if a DAG belongs to the specified workspace."""
+    """Check if a DAG belongs strictly to the specified workspace.
+
+    Strict workspace isolation rule:
+    A DAG is accessible if and only if:
+    1. Its dag_id starts with 'ws_{workspace_slug}_', OR
+    2. It carries a tag 'workspace:{workspace_slug}'
+    Global runners ('run_notebook') and untagged DAGs are strictly NOT workspace pipelines.
+    """
     dag_id = dag_data.get("dag_id", "")
+    if dag_id == "run_notebook":
+        return False
     prefix = f"ws_{workspace_slug}_"
-    if dag_id.startswith(prefix) or dag_id == "run_notebook":
+    if dag_id.startswith(prefix):
         return True
     tags = dag_data.get("tags", [])
     expected_tag = f"workspace:{workspace_slug}"
     for tag in tags:
         tag_name = tag.get("name") if isinstance(tag, dict) else str(tag)
         if tag_name == expected_tag:
-            return True
-    if workspace_slug == "default" and not dag_id.startswith("ws_"):
-        has_other_ws_tag = any(
-            (t.get("name") if isinstance(t, dict) else str(t)).startswith("workspace:")
-            for t in tags
-        )
-        if not has_other_ws_tag:
             return True
     return False
 
@@ -333,7 +335,6 @@ async def list_workspace_dags(
                     "notebook" in tags
                     or "notebooks" in tags
                     or dag_id.startswith(f"ws_{workspace_slug}_")
-                    or dag_id == "run_notebook"
                 )
 
                 nb_path = None
@@ -437,7 +438,6 @@ async def get_dag_details(
                 "notebook" in tags
                 or "notebooks" in tags
                 or dag_id.startswith(f"ws_{workspace_slug}_")
-                or dag_id == "run_notebook"
             )
 
             nb_path = None
@@ -525,6 +525,12 @@ async def trigger_dag_run(
     is_superadmin: bool = False,
 ) -> dict[str, Any]:
     """Trigger manual execution of a workspace pipeline."""
+    if dag_id == "run_notebook":
+        raise HTTPException(
+            400,
+            "Direct triggering of 'run_notebook' via pipeline endpoint is prohibited. Use notebook execution endpoints.",
+        )
+
     # Verify access first
     await get_dag_details(workspace_slug, dag_id, is_superadmin)
 
@@ -567,8 +573,9 @@ async def list_dag_runs(
     workspace_slug: str, dag_id: str, limit: int = 25, is_superadmin: bool = False
 ) -> list[dict[str, Any]]:
     """List historical execution runs for a workspace pipeline."""
-    # Verify access first
-    await get_dag_details(workspace_slug, dag_id, is_superadmin)
+    # Verify access first (run_notebook is filtered by conf below)
+    if dag_id != "run_notebook":
+        await get_dag_details(workspace_slug, dag_id, is_superadmin)
 
     api_base = get_airflow_api_base()
     auth = get_airflow_auth()
@@ -576,9 +583,10 @@ async def list_dag_runs(
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
+            fetch_limit = limit * 5 if dag_id == "run_notebook" else limit
             resp = await client.get(
                 url,
-                params={"order_by": "-execution_date", "limit": limit},
+                params={"order_by": "-execution_date", "limit": fetch_limit},
                 auth=auth,
             )
             if resp.status_code != 200:
@@ -587,6 +595,12 @@ async def list_dag_runs(
             runs = data.get("dag_runs", [])
             results = []
             for r in runs:
+                conf = r.get("conf") or {}
+                if dag_id == "run_notebook":
+                    run_ws = conf.get("workspace_slug") or conf.get("workspace")
+                    if run_ws != workspace_slug:
+                        continue
+
                 start = r.get("start_date")
                 end = r.get("end_date")
                 state = r.get("state")
@@ -598,9 +612,11 @@ async def list_dag_runs(
                         "start_date": start,
                         "end_date": end,
                         "duration_seconds": _calculate_duration(start, end, state),
-                        "conf": r.get("conf", {}),
+                        "conf": conf,
                     }
                 )
+                if len(results) >= limit:
+                    break
             return results
     except HTTPException:
         raise
@@ -612,8 +628,9 @@ async def list_dag_runs(
 async def get_dag_run(
     workspace_slug: str, dag_id: str, run_id: str, is_superadmin: bool = False
 ) -> dict[str, Any]:
-    """Get single DAG run details."""
-    await get_dag_details(workspace_slug, dag_id, is_superadmin)
+    """Get single DAG run details, verifying workspace ownership."""
+    if dag_id != "run_notebook":
+        await get_dag_details(workspace_slug, dag_id, is_superadmin)
 
     api_base = get_airflow_api_base()
     auth = get_airflow_auth()
@@ -627,6 +644,14 @@ async def get_dag_run(
             if resp.status_code != 200:
                 raise HTTPException(resp.status_code, f"Failed to fetch DAG run: {resp.text}")
             r = resp.json()
+            conf = r.get("conf") or {}
+            if dag_id == "run_notebook":
+                run_ws = conf.get("workspace_slug") or conf.get("workspace")
+                if run_ws != workspace_slug:
+                    raise HTTPException(
+                        404, f"Run {run_id} not found in workspace {workspace_slug}"
+                    )
+
             start = r.get("start_date")
             end = r.get("end_date")
             state = r.get("state")
@@ -637,7 +662,7 @@ async def get_dag_run(
                 "start_date": start,
                 "end_date": end,
                 "duration_seconds": _calculate_duration(start, end, state),
-                "conf": r.get("conf", {}),
+                "conf": conf,
             }
     except HTTPException:
         raise
@@ -650,7 +675,10 @@ async def list_task_instances(
     workspace_slug: str, dag_id: str, run_id: str, is_superadmin: bool = False
 ) -> list[dict[str, Any]]:
     """List task instances for a specific pipeline execution run."""
-    await get_dag_details(workspace_slug, dag_id, is_superadmin)
+    if dag_id == "run_notebook":
+        await get_dag_run(workspace_slug, dag_id, run_id, is_superadmin)
+    else:
+        await get_dag_details(workspace_slug, dag_id, is_superadmin)
 
     api_base = get_airflow_api_base()
     auth = get_airflow_auth()
@@ -697,7 +725,10 @@ async def get_task_log(
     is_superadmin: bool = False,
 ) -> dict[str, Any]:
     """Fetch task instance execution logs."""
-    await get_dag_details(workspace_slug, dag_id, is_superadmin)
+    if dag_id == "run_notebook":
+        await get_dag_run(workspace_slug, dag_id, run_id, is_superadmin)
+    else:
+        await get_dag_details(workspace_slug, dag_id, is_superadmin)
 
     api_base = get_airflow_api_base()
     auth = get_airflow_auth()
@@ -859,13 +890,29 @@ def _run_notebook_callable(**context):
         out_file = os.path.join(tmpdir, "output.ipynb")
         with open(in_file, "w", encoding="utf-8") as f:
             json.dump(nb_dict, f)
-        pm.execute_notebook(input_path=in_file, output_path=out_file, parameters=raw_params, log_output=True)
 
-        # 3. Archive to MinIO S3
         minio_endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000")
         minio_access = os.getenv("MINIO_ACCESS_KEY", "")
         minio_secret = os.getenv("MINIO_SECRET_KEY", "")
         bucket = os.getenv("MINIO_BUCKET", "datalake")
+
+        merged_params = {{
+            "WORKSPACE_SLUG": workspace_slug,
+            "WORKSPACE": workspace_slug,
+            "NOTEBOOK_PATH": notebook_path,
+            "MINIO_ENDPOINT": minio_endpoint,
+            "MINIO_ACCESS_KEY": minio_access,
+            "MINIO_SECRET_KEY": minio_secret,
+            "MINIO_BUCKET": bucket,
+        }}
+        merged_params.update(raw_params)
+
+        os.environ["WORKSPACE_SLUG"] = workspace_slug
+        os.environ["WORKSPACE"] = workspace_slug
+
+        pm.execute_notebook(input_path=in_file, output_path=out_file, parameters=merged_params, log_output=True)
+
+        # 3. Archive to MinIO S3
         s3_key = f"notebook_runs/{{workspace_slug}}/{{notebook_path.replace('.ipynb', '')}}/{{execution_ts}}.ipynb"
 
         s3 = boto3.client(
@@ -1089,7 +1136,9 @@ async def update_pipeline_schedule(
             400, "Schedule for run_notebook cannot be modified (on-demand headless runner)"
         )
 
-    is_workspace_dag = clean_id.startswith(f"ws_{workspace_slug}_") or clean_id.startswith("ws_")
+    is_workspace_dag = clean_id.startswith(f"ws_{workspace_slug}_")
+    if clean_id.startswith("ws_") and not is_workspace_dag:
+        raise HTTPException(404, f"Pipeline '{dag_id}' not found in workspace '{workspace_slug}'")
 
     if not is_workspace_dag and not is_superadmin and role != "admin":
         raise HTTPException(

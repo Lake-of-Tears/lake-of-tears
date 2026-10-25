@@ -130,9 +130,12 @@ def test_is_dag_accessible_by_workspace():
         dag_tagged, "finance", is_superadmin=True
     )
 
-    # Global run_notebook is accessible
-    assert pipeline_service.is_dag_accessible_by_workspace(
+    # Global run_notebook is an internal runner and strictly excluded from workspace DAG lists (#256)
+    assert not pipeline_service.is_dag_accessible_by_workspace(
         {"dag_id": "run_notebook", "tags": []}, "finance"
+    )
+    assert not pipeline_service.is_dag_accessible_by_workspace(
+        {"dag_id": "run_notebook", "tags": []}, "default"
     )
 
 
@@ -898,7 +901,11 @@ def test_pipeline_settings_patch_description_and_name():
 def test_pipeline_service_resolves_known_pipeline_notebooks():
     dag = {
         "dag_id": "ingest_tmdb_movies",
-        "tags": [{"name": "ingestion"}, {"name": "notebooks"}],
+        "tags": [
+            {"name": "ingestion"},
+            {"name": "notebooks"},
+            {"name": "workspace:default"},
+        ],
         "is_paused": False,
     }
     with (

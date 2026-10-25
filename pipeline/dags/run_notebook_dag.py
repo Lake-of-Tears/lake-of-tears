@@ -84,7 +84,9 @@ def execute_notebook_task(**context) -> dict[str, Any]:
     dag_run = context.get("dag_run")
     conf = dag_run.conf if dag_run and dag_run.conf else {}
 
-    workspace_slug = conf.get("workspace_slug", "default")
+    workspace_slug = (conf.get("workspace_slug") or conf.get("workspace") or "default").strip(
+        "/"
+    ) or "default"
     notebook_path = conf.get("notebook_path", "analysis.ipynb")
     parameters = conf.get("parameters", {})
     triggered_by = conf.get("triggered_by", "system")
@@ -96,6 +98,21 @@ def execute_notebook_task(**context) -> dict[str, Any]:
         notebook_path,
         triggered_by,
     )
+
+    # Inject workspace execution context parameters and environment variables
+    merged_parameters = {
+        "WORKSPACE_SLUG": workspace_slug,
+        "WORKSPACE": workspace_slug,
+        "NOTEBOOK_PATH": notebook_path,
+        "MINIO_ENDPOINT": MINIO_ENDPOINT,
+        "MINIO_ACCESS_KEY": MINIO_ACCESS_KEY,
+        "MINIO_SECRET_KEY": MINIO_SECRET_KEY,
+        "MINIO_BUCKET": MINIO_BUCKET,
+    }
+    merged_parameters.update(parameters)
+
+    os.environ["WORKSPACE_SLUG"] = workspace_slug
+    os.environ["WORKSPACE"] = workspace_slug
 
     # 1. Fetch source notebook
     nb_dict = _fetch_source_notebook(workspace_slug, notebook_path)
@@ -111,7 +128,7 @@ def execute_notebook_task(**context) -> dict[str, Any]:
         pm.execute_notebook(
             input_path=input_file,
             output_path=output_file,
-            parameters=parameters,
+            parameters=merged_parameters,
             log_output=True,
         )
 
