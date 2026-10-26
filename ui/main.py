@@ -2212,6 +2212,12 @@ async def ui_disconnect_workspace_share(workspace_id: str, request: Request):
     if not token and AUTH_ENABLED:
         return JSONResponse({"detail": "Not authenticated"}, status_code=401)
     headers = {"Authorization": f"Bearer {token}"} if token else {}
+    active_ws = getattr(request.state, "workspace", None) or {}
+    active_ws_id = (
+        str(active_ws.get("id")) if isinstance(active_ws, dict) and active_ws.get("id") else ""
+    )
+    if active_ws_id:
+        headers["X-Workspace-Id"] = active_ws_id
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.delete(
@@ -2544,7 +2550,9 @@ async def settings_catalog_remove_shared(request: Request, catalog_id: str):
             token,
             workspace_id=str(ws["id"]),
         )
-    return RedirectResponse(url="/settings/workspace?tab=catalogs", status_code=302)
+    return RedirectResponse(
+        url="/settings/workspace?tab=shared_with_me&saved=removed", status_code=302
+    )
 
 
 @app.post("/settings/workspace/catalogs/create")

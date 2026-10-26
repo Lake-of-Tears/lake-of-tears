@@ -1019,6 +1019,8 @@ def review_workspace_share(
 )
 def disconnect_workspace_share(
     workspace_id: str,
+    x_workspace_id: str | None = Header(None, alias="X-Workspace-Id"),
+    current_workspace_id: str | None = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1029,6 +1031,9 @@ def disconnect_workspace_share(
     if not ws:
         raise HTTPException(404, "Workspace not found")
 
+    deleted_any = False
+
+    # 1. Disconnect user-level WorkspaceShare for this user on ws
     share = (
         db.query(WorkspaceShare)
         .filter(
@@ -1037,10 +1042,55 @@ def disconnect_workspace_share(
         )
         .first()
     )
-    if not share:
-        raise HTTPException(404, "No workspace share found for this workspace")
+    if share:
+        db.delete(share)
+        deleted_any = True
 
-    db.delete(share)
+    # 2. Disconnect workspace-level CatalogAccess grants between ws and user's active/membership workspace(s)
+    effective_curr_ws = current_workspace_id or x_workspace_id
+    curr_ws_uuid = _as_uuid(effective_curr_ws) if effective_curr_ws else None
+
+    user_ws_ids = {m.workspace_id for m in current_user.workspace_memberships}
+    if curr_ws_uuid:
+        target_client_ws_ids = (
+            {curr_ws_uuid}
+            if (current_user.role == "superadmin" or curr_ws_uuid in user_ws_ids)
+            else set()
+        )
+    else:
+        target_client_ws_ids = user_ws_ids if current_user.role != "superadmin" else None
+
+    # Find catalogs owned by ws that were shared with the client workspace
+    cat_ids_owned_by_ws = [
+        c[0] for c in db.query(Catalog.id).filter(Catalog.owner_workspace_id == ws.id).all()
+    ]
+    if cat_ids_owned_by_ws:
+        ca_query = db.query(CatalogAccess).filter(CatalogAccess.catalog_id.in_(cat_ids_owned_by_ws))
+        if target_client_ws_ids is not None:
+            ca_query = ca_query.filter(CatalogAccess.workspace_id.in_(target_client_ws_ids))
+        grants = ca_query.all()
+        for g in grants:
+            db.delete(g)
+            deleted_any = True
+
+    # Also check if client workspace shared any of its own catalogs with ws
+    if target_client_ws_ids is not None:
+        reverse_grants = (
+            db.query(CatalogAccess)
+            .join(Catalog, Catalog.id == CatalogAccess.catalog_id)
+            .filter(
+                CatalogAccess.workspace_id == ws.id,
+                Catalog.owner_workspace_id.in_(target_client_ws_ids),
+            )
+            .all()
+        )
+        for g in reverse_grants:
+            db.delete(g)
+            deleted_any = True
+
+    if not deleted_any:
+        raise HTTPException(404, "No workspace share or shared catalogs found for this workspace")
+
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
