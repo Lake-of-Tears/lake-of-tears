@@ -332,6 +332,90 @@ def test_ui_genie_chat_self_correction_and_chart_inference():
         assert "$15,800" in data["answer"]
 
 
+def test_ui_genie_chat_stream_events_and_result():
+    """Verify /api/v1/ai/chat/stream emits step SSE events and final result payload."""
+    mock_client = _make_mock_genai_client(
+        [
+            # Step 1: Initial SQL synthesis (triggers self-correction)
+            json.dumps(
+                {
+                    "sql": "SELECT * FROM broken_table_for_stream",
+                    "tables_used": ["stripe_charges"],
+                    "reasoning": "Attempt",
+                }
+            ),
+            # Step 2: Fix response
+            json.dumps(
+                {
+                    "fixed_sql": "SELECT '2026-01' AS month, 5000.0 AS rev",
+                    "explanation": "Fixed SQL.",
+                }
+            ),
+            # Step 3: Grounded narrative
+            "January revenue was $5,000.",
+        ]
+    )
+
+    with (
+        patch.object(main, "AUTH_ENABLED", False),
+        patch.object(main, "_get_ai_access", return_value="gateway"),
+        patch.object(main, "_ai_client", return_value=mock_client),
+    ):
+        client = TestClient(main.app)
+        resp = client.post(
+            "/api/v1/ai/chat/stream",
+            json={
+                "question": "What was January revenue?",
+                "mode": "genie",
+                "history": [],
+            },
+        )
+        assert resp.status_code == 200
+        assert "text/event-stream" in resp.headers["content-type"]
+        text = resp.text
+        assert "event: step" in text
+        assert "event: result" in text
+        assert "schema" in text
+        assert "sql_gen" in text
+        assert "sql_exec" in text
+        assert "sql_fix" in text
+        assert "insight" in text
+        assert "January revenue was $5,000." in text
+
+
+def test_ui_genie_chat_stream_rag_mode():
+    """Verify /api/v1/ai/chat/stream emits step events in RAG mode."""
+    with (
+        patch.object(main, "AUTH_ENABLED", False),
+        patch.object(main, "_get_ai_access", return_value="gateway"),
+        patch.object(
+            main,
+            "_ai_query",
+            return_value={
+                "ok": True,
+                "answer": "RAG search answer",
+                "snippets": [{"source": "s3/doc", "score": 0.95, "summary": "Snippet"}],
+            },
+        ),
+    ):
+        client = TestClient(main.app)
+        resp = client.post(
+            "/api/v1/ai/chat/stream",
+            json={
+                "question": "Explain documentation",
+                "mode": "rag",
+                "history": [],
+            },
+        )
+        assert resp.status_code == 200
+        assert "text/event-stream" in resp.headers["content-type"]
+        text = resp.text
+        assert "event: step" in text
+        assert "rag_search" in text
+        assert "event: result" in text
+        assert "RAG search answer" in text
+
+
 def test_ui_asks_the_backend_gateway_whether_an_ai_provider_is_configured():
     """The UI holds no AI credentials: availability and the chat model come from the gateway."""
     info = {"provider": "stub", "chat_model": "stub-chat", "embedding_model": "e", "dimension": 4}

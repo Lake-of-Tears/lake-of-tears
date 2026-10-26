@@ -4488,6 +4488,7 @@ def _ui_genie_chat(
     cancel: Any = None,
     workspace_slug: str | None = None,
     is_superadmin: bool = False,
+    progress_callback: Any = None,
 ) -> dict[str, Any]:
     """Execute Genie conversational data analyst loop in Lake UI."""
 
@@ -4495,16 +4496,33 @@ def _ui_genie_chat(
         if cancel is not None:
             cancel.check()
 
+    def _report(stage: str, label: str, status: str = "running", **extra: Any) -> None:
+        if progress_callback is not None:
+            try:
+                progress_callback({"stage": stage, "label": label, "status": status, **extra})
+            except Exception:
+                pass
+
     active_key = _get_ai_access()
     if not active_key:
         return {"ok": False, "mode": mode, "error": duckdb_ai.GEMINI_KEY_NOT_CONFIGURED_MSG}
 
     _check_cancelled()
     if mode == "rag":
+        t0 = time.time()
+        _report("rag_search", "Retrieving workspace semantic embeddings...", "running")
         rag_res = _ai_query(question)
         _check_cancelled()
         if not rag_res.get("ok"):
+            _report("rag_search", f"Semantic search failed: {rag_res.get('error')}", "error")
             return {"ok": False, "mode": "rag", "error": rag_res.get("error")}
+        rag_ms = int((time.time() - t0) * 1000)
+        _report(
+            "rag_search",
+            f"Retrieved {len(rag_res.get('snippets', []))} semantic snippet(s)",
+            "done",
+            duration_ms=rag_ms,
+        )
         return {
             "ok": True,
             "mode": "rag",
@@ -4537,7 +4555,12 @@ def _ui_genie_chat(
         else ""
     )
 
+    t_schema = time.time()
+    _report("schema", "Inspecting workspace catalog schemas...", "running")
     schema_ctx = duckdb_ai.build_schema_prompt_context(catalogs, bucket=MINIO_BUCKET)
+    schema_ms = int((time.time() - t_schema) * 1000)
+    _report("schema", "Inspected workspace catalog schemas", "done", duration_ms=schema_ms)
+
     synth_prompt = (
         "You are the Lake of Tears Genie Data Analyst, an autonomous conversational SQL agent.\n"
         "Given the workspace catalog schema, conversation history, and the user's question, "
@@ -4556,6 +4579,8 @@ def _ui_genie_chat(
     def _client_factory(api_key: str):
         return _ai_client(api_key)
 
+    t_sql = time.time()
+    _report("sql_gen", "Synthesizing DuckDB SQL query...", "running")
     try:
         raw_plan = duckdb_ai.call_gemini_text(
             synth_prompt,
@@ -4568,10 +4593,21 @@ def _ui_genie_chat(
             str(parsed_plan.get("sql") or raw_plan)
         ).strip()
         tables_used = [str(t) for t in (parsed_plan.get("tables_used") or []) if t]
+        sql_ms = int((time.time() - t_sql) * 1000)
+        _report(
+            "sql_gen",
+            f"Synthesized DuckDB SQL ({len(tables_used)} tables referenced)",
+            "done",
+            duration_ms=sql_ms,
+            sql=generated_sql,
+        )
     except Exception as exc:
+        _report("sql_gen", f"Failed to synthesize SQL: {exc}", "error")
         return {"ok": False, "mode": mode, "error": f"Failed to synthesize SQL: {exc}"}
 
     _check_cancelled()
+    t_exec = time.time()
+    _report("sql_exec", "Executing query against DuckDB...", "running")
     exec_res = _run_query(
         generated_sql,
         catalogs=catalogs,
@@ -4582,10 +4618,14 @@ def _ui_genie_chat(
     )
     self_corrected = False
     initial_error: str | None = None
+    exec_ms = int((time.time() - t_exec) * 1000)
 
     if not exec_res["ok"] and exec_res.get("error"):
         initial_error = exec_res["error"]
+        _report("sql_exec", f"Query returned error: {initial_error}", "error", duration_ms=exec_ms)
         _check_cancelled()
+        t_fix = time.time()
+        _report("sql_fix", "Self-correcting SQL query syntax...", "running")
         fix_res = duckdb_ai.fix_sql_query(
             sql=generated_sql,
             error_message=initial_error or "",
@@ -4606,18 +4646,41 @@ def _ui_genie_chat(
                 workspace_slug=workspace_slug,
                 is_superadmin=is_superadmin,
             )
+            fix_ms = int((time.time() - t_fix) * 1000)
             if retry_res["ok"]:
                 generated_sql = candidate_sql
                 exec_res = retry_res
                 self_corrected = True
+                _report(
+                    "sql_fix",
+                    "Successfully auto-corrected SQL query",
+                    "done",
+                    duration_ms=fix_ms,
+                    sql=candidate_sql,
+                )
+            else:
+                _report("sql_fix", "Self-correction candidate failed to execute", "error", duration_ms=fix_ms)
+        else:
+            _report("sql_fix", "Could not generate fix for SQL error", "error")
+    else:
+        _report(
+            "sql_exec",
+            f"DuckDB query executed ({exec_res.get('row_count', 0)} row{'s' if exec_res.get('row_count', 0) != 1 else ''})",
+            "done",
+            duration_ms=exec_ms,
+        )
 
     snippets: list[dict[str, Any]] = []
     _check_cancelled()
     if mode == "hybrid" or not exec_res["ok"]:
+        t_rag = time.time()
+        _report("rag_context", "Retrieving semantic search context...", "running")
         rag_res = _ai_query(question)
         _check_cancelled()
         if rag_res.get("ok"):
             snippets = rag_res.get("snippets", [])
+        rag_ms = int((time.time() - t_rag) * 1000)
+        _report("rag_context", f"Retrieved {len(snippets)} semantic snippet(s)", "done", duration_ms=rag_ms)
 
     columns = exec_res.get("columns", [])
     raw_rows = exec_res.get("rows", [])
@@ -4672,6 +4735,8 @@ def _ui_genie_chat(
             }
 
     _check_cancelled()
+    t_ins = time.time()
+    _report("insight", "Formulating data insights...", "running")
     try:
         answer = duckdb_ai.call_gemini_text(
             insight_prompt,
@@ -4679,8 +4744,11 @@ def _ui_genie_chat(
             api_key=active_key,
             client_factory=_client_factory,
         )
+        ins_ms = int((time.time() - t_ins) * 1000)
+        _report("insight", "Formulated data insights", "done", duration_ms=ins_ms)
     except Exception as exc:
         answer = f"Query returned {row_count} rows. (Narrative synthesis error: {exc})"
+        _report("insight", f"Narrative synthesis fallback: {exc}", "error")
     _check_cancelled()
 
     return {
@@ -4877,6 +4945,102 @@ async def ui_ai_chat(request: Request):
         if request_id:
             _GENIE_CANCEL_TOKENS.pop(request_id, None)
     return JSONResponse(res)
+
+
+@app.post("/api/ai/chat/stream")
+@app.post("/api/v1/ai/chat/stream")
+async def ui_ai_chat_stream(request: Request):
+    body = await request.json()
+    question = str(body.get("question") or "")
+    mode = str(body.get("mode") or "genie")
+    history = body.get("history") or []
+    model = str(body["model"]) if body.get("model") else None
+    request_id = str(body.get("request_id") or "")
+    catalogs = _resolve_ui_catalogs(request)
+    ws = getattr(request.state, "workspace", None)
+    ws_slug = (ws.get("slug") if isinstance(ws, dict) else getattr(ws, "slug", None)) or "default"
+    user = getattr(request.state, "user", None)
+    is_superadmin = (
+        user.get("role") == "superadmin"
+        if isinstance(user, dict)
+        else getattr(user, "role", None) == "superadmin"
+    )
+
+    cancel = duckdb_ai.CancelToken()
+    if request_id:
+        _GENIE_CANCEL_TOKENS[request_id] = (_request_user_id(request), cancel)
+
+    loop = asyncio.get_running_loop()
+    event_queue: asyncio.Queue[tuple[str, dict[str, Any]] | None] = asyncio.Queue()
+
+    def on_step(evt: dict[str, Any]) -> None:
+        loop.call_soon_threadsafe(event_queue.put_nowait, ("step", evt))
+
+    async def _worker() -> None:
+        try:
+            res = await run_in_threadpool(
+                _ui_genie_chat,
+                question=question,
+                mode=mode,
+                history=history,
+                catalogs=catalogs,
+                model=model,
+                cancel=cancel,
+                workspace_slug=ws_slug,
+                is_superadmin=is_superadmin,
+                progress_callback=on_step,
+            )
+            await event_queue.put(("result", res))
+        except duckdb_ai.GenieCancelled:
+            await event_queue.put(
+                (
+                    "cancelled",
+                    {"ok": False, "mode": mode, "cancelled": True, "error": "Request cancelled"},
+                )
+            )
+        except Exception as exc:
+            await event_queue.put(("error", {"ok": False, "mode": mode, "error": str(exc)}))
+        finally:
+            await event_queue.put(None)
+
+    worker_task = asyncio.create_task(_worker())
+
+    async def _watch_disconnect() -> None:
+        while not worker_task.done():
+            if await request.is_disconnected():
+                cancel.cancel()
+                return
+            await asyncio.sleep(0.5)
+
+    watcher_task = asyncio.create_task(_watch_disconnect())
+
+    async def sse_generator():
+        try:
+            while True:
+                item = await event_queue.get()
+                if item is None:
+                    break
+                event_name, data = item
+                yield f"event: {event_name}\ndata: {json.dumps(data)}\n\n"
+        except asyncio.CancelledError:
+            cancel.cancel()
+            raise
+        finally:
+            watcher_task.cancel()
+            if not worker_task.done():
+                cancel.cancel()
+            if request_id:
+                _GENIE_CANCEL_TOKENS.pop(request_id, None)
+
+    return StreamingResponse(
+        sse_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.post("/api/ai/chat/cancel")

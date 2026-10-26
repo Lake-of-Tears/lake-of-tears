@@ -218,8 +218,30 @@ function renderConversationThread() {
 
     if (turn.cancelled) {
       const cancelDiv = document.createElement("div");
-      cancelDiv.className = "px-4 py-2 text-xs italic text-gray-500";
-      cancelDiv.textContent = "Request cancelled.";
+      cancelDiv.className = "rounded-xl bg-gray-900/40 border border-gray-800/60 p-3.5 space-y-2 text-xs text-gray-400";
+      let stepsHtml = "";
+      if (turn.thinking_steps && turn.thinking_steps.length > 0) {
+        stepsHtml = `
+          <div class="space-y-1.5 pl-5 font-mono text-[11px] text-gray-500 border-t border-gray-800/50 pt-2">
+            ${turn.thinking_steps.map(s => `
+              <div class="flex items-center justify-between gap-2">
+                <span class="truncate">✓ ${escapeHtml(s.label)}</span>
+                ${s.duration_ms != null ? `<span class="text-gray-600 tabular-nums shrink-0">${s.duration_ms}ms</span>` : ''}
+              </div>
+            `).join("")}
+          </div>
+        `;
+      }
+      cancelDiv.innerHTML = `
+        <div class="flex items-center gap-2 text-gray-400 text-[11px]">
+          <svg class="w-3.5 h-3.5 text-gray-500 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/>
+          </svg>
+          <span class="italic font-medium">Request stopped after ${escapeHtml(turn.thinking_seconds || '0.0')}s</span>
+        </div>
+        ${stepsHtml}
+      `;
       container.appendChild(cancelDiv);
       return;
     }
@@ -242,10 +264,46 @@ function renderConversationThread() {
       badgesHtml += `<a href="/sql?q=${encodedSql}" class="ml-auto text-[11px] text-blue-400 hover:text-blue-300 flex items-center gap-1">Open in SQL Editor →</a>`;
     }
 
+    let thinkingHtml = "";
+    if (turn.thinking_steps && turn.thinking_steps.length > 0) {
+      const stepsHtml = turn.thinking_steps.map(s => {
+        const isErr = s.status === "error";
+        const icon = isErr
+          ? `<svg class="w-3.5 h-3.5 text-amber-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>`
+          : `<svg class="w-3.5 h-3.5 text-emerald-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>`;
+        return `
+          <div class="flex items-center justify-between gap-2 text-[11px] ${isErr ? 'text-amber-400' : 'text-gray-400'}">
+            <div class="flex items-center gap-2 min-w-0">
+              ${icon}
+              <span class="truncate ${isErr ? '' : 'text-gray-300'}">${escapeHtml(s.label)}</span>
+            </div>
+            ${s.duration_ms != null ? `<span class="text-[10px] text-gray-500 tabular-nums shrink-0">${s.duration_ms}ms</span>` : ''}
+          </div>
+        `;
+      }).join("");
+
+      thinkingHtml = `
+        <details class="group bg-gray-950/40 rounded-lg border border-gray-800/70 p-2.5 text-xs mb-3">
+          <summary class="flex items-center gap-2 cursor-pointer text-gray-400 hover:text-gray-200 select-none list-none text-[11px]">
+            <svg class="w-3.5 h-3.5 text-blue-400 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2L14.4 9.6L22 12L14.4 14.4L12 22L9.6 14.4L2 12L9.6 9.6L12 2Z"/>
+            </svg>
+            <span class="font-medium text-gray-300">Thought for ${escapeHtml(turn.thinking_seconds || '0.0')}s</span>
+            <span class="text-[10px] text-gray-600">(${turn.thinking_steps.length} step${turn.thinking_steps.length === 1 ? '' : 's'})</span>
+            <svg class="w-3 h-3 text-gray-500 transition-transform group-open:rotate-180 ml-auto" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+          </summary>
+          <div class="mt-2.5 pt-2 border-t border-gray-800/60 space-y-1.5 pl-5 font-mono">
+            ${stepsHtml}
+          </div>
+        </details>
+      `;
+    }
+
     let bodyHtml = `
       <div class="flex items-center flex-wrap gap-2 pb-2 border-b border-gray-800/80">
         ${badgesHtml}
       </div>
+      ${thinkingHtml}
       <div class="text-gray-200 text-sm leading-relaxed whitespace-pre-wrap">${escapeHtml(turn.content)}</div>
     `;
 
@@ -380,9 +438,11 @@ function renderGenieEChart(el, turn) {
 }
 
 let activeGenieRequest = null;
+let activeThinkingState = null;
 
 function setAskButtonRunning(running) {
   const btn = document.getElementById("askBtn");
+  if (!btn) return;
   if (running) {
     btn.dataset.idleHtml = btn.innerHTML;
     btn.innerHTML = "Stop";
@@ -399,7 +459,6 @@ function cancelGenieRequest() {
   if (!activeGenieRequest) return;
   const { controller, requestId } = activeGenieRequest;
   activeGenieRequest.cancelled = true;
-  // Tell the server to stop work (also covered by its client-disconnect detection).
   fetch("/api/v1/ai/chat/cancel", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -407,6 +466,132 @@ function cancelGenieRequest() {
     keepalive: true
   }).catch(() => {});
   controller.abort();
+}
+
+function renderActiveThinkingSteps() {
+  const stepsEl = document.getElementById("activeThinkingSteps");
+  if (!stepsEl || !activeThinkingState) return;
+  if (activeThinkingState.steps.length === 0) {
+    stepsEl.innerHTML = `
+      <div class="flex items-center gap-2 text-blue-300 animate-pulse">
+        <svg class="w-3.5 h-3.5 text-blue-400 animate-spin shrink-0" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+        </svg>
+        <span class="truncate">Initializing agent loop...</span>
+      </div>
+    `;
+    return;
+  }
+  stepsEl.innerHTML = activeThinkingState.steps.map(s => {
+    if (s.status === "running") {
+      return `
+        <div class="flex items-center gap-2 text-blue-300 animate-pulse">
+          <svg class="w-3.5 h-3.5 text-blue-400 animate-spin shrink-0" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+          </svg>
+          <span class="truncate font-medium">${escapeHtml(s.label)}</span>
+        </div>
+      `;
+    } else if (s.status === "error") {
+      return `
+        <div class="flex items-center justify-between gap-2 text-amber-400">
+          <div class="flex items-center gap-2 min-w-0">
+            <svg class="w-3.5 h-3.5 text-amber-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+            </svg>
+            <span class="truncate">${escapeHtml(s.label)}</span>
+          </div>
+          ${s.duration_ms != null ? `<span class="text-[10px] text-gray-500 tabular-nums shrink-0">${s.duration_ms}ms</span>` : ''}
+        </div>
+      `;
+    } else {
+      return `
+        <div class="flex items-center justify-between gap-2 text-gray-400">
+          <div class="flex items-center gap-2 min-w-0">
+            <svg class="w-3.5 h-3.5 text-emerald-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+            </svg>
+            <span class="truncate text-gray-300">${escapeHtml(s.label)}</span>
+          </div>
+          ${s.duration_ms != null ? `<span class="text-[10px] text-gray-500 tabular-nums shrink-0">${s.duration_ms}ms</span>` : ''}
+        </div>
+      `;
+    }
+  }).join("");
+
+  const container = document.getElementById("genieChatThread");
+  if (container) container.scrollTop = container.scrollHeight;
+}
+
+function handleThinkingStep(step) {
+  if (!activeThinkingState) return;
+  const idx = activeThinkingState.steps.findIndex(s => s.stage === step.stage);
+  if (idx >= 0) {
+    activeThinkingState.steps[idx] = step;
+  } else {
+    activeThinkingState.steps.push(step);
+  }
+  renderActiveThinkingSteps();
+}
+
+function stopActiveThinking() {
+  if (activeThinkingState) {
+    if (activeThinkingState.timerInterval) clearInterval(activeThinkingState.timerInterval);
+    const elapsedSec = ((Date.now() - activeThinkingState.startTime) / 1000).toFixed(1);
+    const steps = [...activeThinkingState.steps];
+    if (activeThinkingState.card && activeThinkingState.card.parentNode) {
+      activeThinkingState.card.parentNode.removeChild(activeThinkingState.card);
+    }
+    activeThinkingState = null;
+    return { elapsedSec, steps };
+  }
+  return { elapsedSec: "0.0", steps: [] };
+}
+
+async function consumeGenieStream(resp, onStep, onResult, onCancelled, onError) {
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let lines = buffer.split("\n\n");
+    buffer = lines.pop();
+
+    for (const chunk of lines) {
+      if (!chunk.trim()) continue;
+      let eventType = "message";
+      let dataStr = "";
+      for (const rawLine of chunk.split("\n")) {
+        const line = rawLine.trim();
+        if (line.startsWith("event:")) {
+          eventType = line.slice(6).trim();
+        } else if (line.startsWith("data:")) {
+          dataStr = line.slice(5).trim();
+        }
+      }
+      if (!dataStr) continue;
+      try {
+        const parsed = JSON.parse(dataStr);
+        if (eventType === "step") {
+          onStep(parsed);
+        } else if (eventType === "result") {
+          onResult(parsed);
+        } else if (eventType === "cancelled") {
+          onCancelled(parsed);
+        } else if (eventType === "error") {
+          onError(parsed);
+        }
+      } catch (e) {
+        console.warn("Failed to parse SSE payload", e, dataStr);
+      }
+    }
+  }
 }
 
 async function submitGenieQuestion(questionText) {
@@ -426,14 +611,68 @@ async function submitGenieQuestion(questionText) {
   renderConversationThread();
   input.value = "";
 
+  const container = document.getElementById("genieChatThread");
+  const startTime = Date.now();
+  const thinkingCard = document.createElement("div");
+  thinkingCard.id = "genieActiveThinkingCard";
+  thinkingCard.className = "rounded-xl bg-gray-900/90 border border-blue-500/30 p-4 space-y-3 text-xs shadow-lg shadow-blue-500/5 transition-all";
+  thinkingCard.innerHTML = `
+    <div class="flex items-center justify-between pb-2 border-b border-gray-800">
+      <div class="flex items-center gap-2">
+        <span class="relative flex h-2.5 w-2.5">
+          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+          <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-500"></span>
+        </span>
+        <span class="font-medium text-gray-200 flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5 text-blue-400" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2L14.4 9.6L22 12L14.4 14.4L12 22L9.6 14.4L2 12L9.6 9.6L12 2Z"/>
+          </svg>
+          Thinking...
+        </span>
+        <span id="activeThinkingTimer" class="text-gray-400 tabular-nums font-mono text-[11px]">(0.0s)</span>
+      </div>
+      <span class="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+        ${escapeHtml(currentAiMode)}
+      </span>
+    </div>
+    <div id="activeThinkingSteps" class="space-y-1.5 py-1 font-mono text-[11px]">
+      <div class="flex items-center gap-2 text-blue-300 animate-pulse">
+        <svg class="w-3.5 h-3.5 text-blue-400 animate-spin shrink-0" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+        </svg>
+        <span>Connecting to Genie agent...</span>
+      </div>
+    </div>
+  `;
+  container.appendChild(thinkingCard);
+  container.scrollTop = container.scrollHeight;
+
+  const timerInterval = setInterval(() => {
+    const timerEl = document.getElementById("activeThinkingTimer");
+    if (timerEl) {
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      timerEl.textContent = `(${elapsed}s)`;
+    }
+  }, 100);
+
+  activeThinkingState = {
+    startTime,
+    timerInterval,
+    steps: [],
+    card: thinkingCard
+  };
+
   const requestId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2);
   const controller = new AbortController();
   activeGenieRequest = { controller, requestId, cancelled: false };
   setAskButtonRunning(true);
   hint.classList.remove("hidden");
 
+  let resultData = null;
+
   try {
-    const resp = await fetch("/api/v1/ai/chat", {
+    const streamResp = await fetch("/api/v1/ai/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       signal: controller.signal,
@@ -444,45 +683,84 @@ async function submitGenieQuestion(questionText) {
         request_id: requestId
       })
     });
-    const data = await resp.json();
-    if (data.cancelled) {
+
+    if (streamResp.ok && streamResp.body) {
+      await consumeGenieStream(
+        streamResp,
+        (step) => handleThinkingStep(step),
+        (res) => { resultData = res; },
+        (cancelledPayload) => { throw new DOMException("cancelled", "AbortError"); },
+        (errPayload) => { resultData = errPayload; }
+      );
+    } else {
+      const fallbackResp = await fetch("/api/v1/ai/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          question: q,
+          mode: currentAiMode,
+          history: priorHistory,
+          request_id: requestId
+        })
+      });
+      resultData = await fallbackResp.json();
+    }
+
+    const { elapsedSec, steps } = stopActiveThinking();
+
+    if (resultData && resultData.cancelled) {
       throw new DOMException("cancelled", "AbortError");
     }
-    if (data.ok) {
+
+    if (resultData && resultData.ok) {
       chatHistory.push({
         role: "assistant",
-        mode: data.mode || currentAiMode,
-        content: data.answer || "",
-        sql: data.sql || null,
-        self_corrected: Boolean(data.self_corrected),
-        columns: data.columns || [],
-        rows: data.rows || [],
-        row_count: data.row_count || 0,
-        execution_ms: data.execution_ms || 0,
-        chart_config: data.chart_config || null,
-        snippets: data.snippets || []
+        mode: resultData.mode || currentAiMode,
+        content: resultData.answer || "",
+        sql: resultData.sql || null,
+        self_corrected: Boolean(resultData.self_corrected),
+        columns: resultData.columns || [],
+        rows: resultData.rows || [],
+        row_count: resultData.row_count || 0,
+        execution_ms: resultData.execution_ms || 0,
+        chart_config: resultData.chart_config || null,
+        snippets: resultData.snippets || [],
+        thinking_steps: steps,
+        thinking_seconds: elapsedSec
       });
     } else {
       chatHistory.push({
         role: "assistant",
         mode: currentAiMode,
-        content: "Error: " + (data.error || "Unable to complete request.")
+        content: "Error: " + ((resultData && resultData.error) || "Unable to complete request."),
+        thinking_steps: steps,
+        thinking_seconds: elapsedSec
       });
     }
     saveConversation();
     renderConversationThread();
   } catch (err) {
+    const { elapsedSec, steps } = stopActiveThinking();
     if (err && err.name === "AbortError") {
-      // Mark the question and its reply as cancelled so neither is sent as history context.
       for (let i = chatHistory.length - 1; i >= 0; i--) {
         if (chatHistory[i].role === "user") { chatHistory[i].cancelled = true; break; }
       }
-      chatHistory.push({ role: "assistant", mode: currentAiMode, cancelled: true, content: "" });
+      chatHistory.push({
+        role: "assistant",
+        mode: currentAiMode,
+        cancelled: true,
+        content: "",
+        thinking_steps: steps,
+        thinking_seconds: elapsedSec
+      });
     } else {
       chatHistory.push({
         role: "assistant",
         mode: currentAiMode,
-        content: "Request failed: " + err
+        content: "Request failed: " + err,
+        thinking_steps: steps,
+        thinking_seconds: elapsedSec
       });
     }
     saveConversation();
