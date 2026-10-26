@@ -863,7 +863,14 @@ async def api_catalog_preview(
 
     catalogs = _resolve_ui_catalogs(request)
     ws = getattr(request.state, "workspace", None)
-    ws_slug = (ws.get("slug") if isinstance(ws, dict) else getattr(ws, "slug", None)) or "default"
+    req_ws = str(
+        request.query_params.get("workspace_slug") or request.headers.get("X-Workspace-Slug") or ""
+    ).strip()
+    ws_slug = (
+        (ws.get("slug") if isinstance(ws, dict) else getattr(ws, "slug", None))
+        or req_ws
+        or "default"
+    )
     user = getattr(request.state, "user", None)
     is_superadmin = (
         user.get("role") == "superadmin"
@@ -1195,7 +1202,12 @@ async def sql_get(request: Request):
 async def sql_post(request: Request, sql: str = Form(...)):
     catalogs = _resolve_ui_catalogs(request)
     ws = getattr(request.state, "workspace", None)
-    ws_slug = (ws.get("slug") if isinstance(ws, dict) else getattr(ws, "slug", None)) or "default"
+    header_ws = str(request.headers.get("X-Workspace-Slug") or "").strip()
+    ws_slug = (
+        (ws.get("slug") if isinstance(ws, dict) else getattr(ws, "slug", None))
+        or header_ws
+        or "default"
+    )
     user = getattr(request.state, "user", None)
     is_superadmin = (
         user.get("role") == "superadmin"
@@ -4900,7 +4912,14 @@ async def ui_ai_sql_execute(request: Request):
     max_ai_rows = int(body.get("max_ai_rows", 50))
     catalogs = _resolve_ui_catalogs(request)
     ws = getattr(request.state, "workspace", None)
-    ws_slug = (ws.get("slug") if isinstance(ws, dict) else getattr(ws, "slug", None)) or "default"
+    req_ws = str(
+        request.query_params.get("workspace_slug") or request.headers.get("X-Workspace-Slug") or ""
+    ).strip()
+    ws_slug = (
+        (ws.get("slug") if isinstance(ws, dict) else getattr(ws, "slug", None))
+        or req_ws
+        or "default"
+    )
     user = getattr(request.state, "user", None)
     is_superadmin = (
         user.get("role") == "superadmin"
@@ -5006,7 +5025,17 @@ async def ui_ai_chat(request: Request):
     request_id = str(body.get("request_id") or "")
     catalogs = _resolve_ui_catalogs(request)
     ws = getattr(request.state, "workspace", None)
-    ws_slug = (ws.get("slug") if isinstance(ws, dict) else getattr(ws, "slug", None)) or "default"
+    req_ws = str(
+        body.get("workspace_slug")
+        or request.query_params.get("workspace_slug")
+        or request.headers.get("X-Workspace-Slug")
+        or ""
+    ).strip()
+    ws_slug = (
+        (ws.get("slug") if isinstance(ws, dict) else getattr(ws, "slug", None))
+        or req_ws
+        or "default"
+    )
     user = getattr(request.state, "user", None)
     is_superadmin = (
         user.get("role") == "superadmin"
@@ -5062,7 +5091,17 @@ async def ui_ai_chat_stream(request: Request):
     request_id = str(body.get("request_id") or "")
     catalogs = _resolve_ui_catalogs(request)
     ws = getattr(request.state, "workspace", None)
-    ws_slug = (ws.get("slug") if isinstance(ws, dict) else getattr(ws, "slug", None)) or "default"
+    req_ws = str(
+        body.get("workspace_slug")
+        or request.query_params.get("workspace_slug")
+        or request.headers.get("X-Workspace-Slug")
+        or ""
+    ).strip()
+    ws_slug = (
+        (ws.get("slug") if isinstance(ws, dict) else getattr(ws, "slug", None))
+        or req_ws
+        or "default"
+    )
     user = getattr(request.state, "user", None)
     is_superadmin = (
         user.get("role") == "superadmin"

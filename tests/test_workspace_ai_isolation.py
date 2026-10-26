@@ -342,3 +342,145 @@ def test_detect_workspace_anomalies_endpoint():
         )
     finally:
         backend_main.app.dependency_overrides.clear()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. Backend AI Router Workspace Scoping & Streaming Isolation
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_backend_genie_chat_passes_workspace_slug():
+    """Verify backend POST /api/v1/ai/chat strictly routes query to active workspace."""
+    import ai_router
+    import auth
+    import database
+
+    client = TestClient(backend_main.app)
+    mock_ws = MagicMock()
+    mock_ws.id = "3fe09c2f-f592-4f1d-968b-a662cb2172f1"
+    mock_ws.slug = "prd"
+
+    mock_user = MagicMock()
+    mock_user.role = "member"
+
+    mock_db = MagicMock()
+
+    backend_main.app.dependency_overrides[ai_router._resolve_ai_context] = lambda: (
+        mock_ws,
+        "editor",
+        mock_user,
+    )
+    backend_main.app.dependency_overrides[auth.get_current_user] = lambda: mock_user
+    backend_main.app.dependency_overrides[database.get_db] = lambda: mock_db
+
+    with (
+        patch("ai_service.get_workspace_catalogs_from_db", return_value=[]),
+        patch(
+            "ai_service.run_genie_chat", return_value={"ok": True, "mode": "genie", "answer": "OK"}
+        ) as mock_run,
+    ):
+        resp = client.post(
+            "/api/v1/ai/chat",
+            json={
+                "question": "Tell me about research",
+                "mode": "rag",
+                "history": [],
+            },
+        )
+
+    assert resp.status_code == 200
+    mock_run.assert_called_once()
+    assert mock_run.call_args.kwargs["workspace_slug"] == "prd"
+    assert mock_run.call_args.kwargs["is_superadmin"] is False
+    backend_main.app.dependency_overrides.clear()
+
+
+def test_backend_genie_chat_stream_passes_workspace_slug_and_emits_sse():
+    """Verify backend POST /api/v1/ai/chat/stream emits SSE events and scopes to active workspace."""
+    import ai_router
+    import auth
+    import database
+
+    client = TestClient(backend_main.app)
+    mock_ws = MagicMock()
+    mock_ws.id = "3fe09c2f-f592-4f1d-968b-a662cb2172f1"
+    mock_ws.slug = "prd"
+
+    mock_user = MagicMock()
+    mock_user.role = "member"
+
+    mock_db = MagicMock()
+
+    backend_main.app.dependency_overrides[ai_router._resolve_ai_context] = lambda: (
+        mock_ws,
+        "editor",
+        mock_user,
+    )
+    backend_main.app.dependency_overrides[auth.get_current_user] = lambda: mock_user
+    backend_main.app.dependency_overrides[database.get_db] = lambda: mock_db
+
+    def fake_run_genie(**kwargs):
+        cb = kwargs.get("progress_callback")
+        if cb:
+            cb({"stage": "rag_search", "label": "Retrieving embeddings", "status": "running"})
+        return {"ok": True, "mode": "rag", "answer": "PRD isolated answer", "snippets": []}
+
+    with (
+        patch("ai_service.get_workspace_catalogs_from_db", return_value=[]),
+        patch("ai_service.run_genie_chat", side_effect=fake_run_genie) as mock_run,
+    ):
+        resp = client.post(
+            "/api/v1/ai/chat/stream",
+            json={
+                "question": "Tell me about research",
+                "mode": "rag",
+                "history": [],
+            },
+        )
+
+    assert resp.status_code == 200
+    assert "text/event-stream" in resp.headers["content-type"]
+    assert "event: step" in resp.text
+    assert "event: result" in resp.text
+    assert "PRD isolated answer" in resp.text
+    mock_run.assert_called_once()
+    assert mock_run.call_args.kwargs["workspace_slug"] == "prd"
+    backend_main.app.dependency_overrides.clear()
+
+
+def test_run_rag_search_isolated_from_other_workspaces():
+    """Verify run_rag_search on 'prd' workspace does NOT read 'default' workspace embeddings."""
+    mock_client = MagicMock()
+    embed_obj = MagicMock()
+    embed_obj.values = [0.1] * 768
+    mock_resp = MagicMock()
+    mock_resp.embeddings = [embed_obj]
+    mock_resp.model = "test-model"
+    mock_resp.dimension = 768
+    mock_client.models.embed_content.return_value = mock_resp
+    mock_client.models.generate_content.return_value.text = "No embeddings found for PRD."
+
+    with (
+        patch("ai_service._resolve_api_key", return_value="dummy_key"),
+        patch("ai_service._client_for", return_value=mock_client),
+        patch("ai_service.create_duckdb_connection") as mock_conn_factory,
+    ):
+        mock_con = MagicMock()
+        mock_conn_factory.return_value = mock_con
+        # DuckDB glob fails when no files exist in prd
+        mock_con.execute.side_effect = Exception("No files found that match the pattern")
+
+        result = ai_service.run_rag_search(
+            question="Tell me about t-cell research",
+            workspace_slug="prd",
+            catalogs=[],
+        )
+
+    assert result["ok"] is True
+    assert result["snippets"] == []
+    assert "No embeddings found for PRD." in result["answer"]
+    # Check that DuckDB was queried with the prd prefix, NOT default
+    call_args = mock_con.execute.call_args_list[0]
+    sql_pattern = call_args[0][1][0]
+    assert "workspaces/prd/embeddings/**/*.parquet" in sql_pattern
+    assert "default" not in sql_pattern
