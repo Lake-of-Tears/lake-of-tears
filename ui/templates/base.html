@@ -1157,7 +1157,7 @@
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' }
         });
-        if (!res.ok && res.status !== 404 && res.status !== 204) {
+        if (!res.ok && res.status !== 204) {
           const err = await res.json().catch(() => ({}));
           alert(err.detail || 'Failed to disconnect workspace share');
           if (btn) { btn.disabled = false; btn.textContent = 'Disconnect Share'; }

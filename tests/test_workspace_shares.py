@@ -24,6 +24,8 @@ import auth  # noqa: E402
 import database  # noqa: E402
 from models import (  # noqa: E402
     Base,
+    Catalog,
+    CatalogAccess,
     User,
     Workspace,
     WorkspaceMember,
@@ -411,6 +413,74 @@ def test_self_disconnect_workspace_share(test_ctx):
         headers={"Authorization": f"Bearer {user_token}"},
     )
     assert resp_del2.status_code == 404
+
+
+def test_disconnect_workspace_share_deletes_catalog_access_grants(test_ctx):
+    session = test_ctx["session"]
+    ws1 = test_ctx["ws1"]
+    owner, admin_token = test_ctx["ws_admin"]
+
+    # Create ws2 where owner is an admin
+    ws2 = Workspace(
+        id=uuid.uuid4(),
+        name="Consumer Workspace",
+        slug="consumer-ws",
+        status="active",
+        created_by=owner.id,
+    )
+    session.add(ws2)
+    m2 = WorkspaceMember(
+        id=uuid.uuid4(),
+        workspace_id=ws2.id,
+        user_id=owner.id,
+        role="admin",
+    )
+    session.add(m2)
+
+    # Create catalog owned by ws1
+    cat1 = Catalog(
+        id=uuid.uuid4(),
+        name="WS1 Catalog",
+        slug="ws1-cat",
+        owner_workspace_id=ws1.id,
+    )
+    session.add(cat1)
+
+    # Create CatalogAccess granting cat1 to ws2
+    grant = CatalogAccess(
+        id=uuid.uuid4(),
+        catalog_id=cat1.id,
+        workspace_id=ws2.id,
+        status="approved",
+        suspended=False,
+    )
+    session.add(grant)
+    session.commit()
+
+    grant_id = grant.id
+
+    # Disconnect from ws1 from the perspective of ws2
+    resp = client.delete(
+        f"/api/workspaces/{ws1.id}/shares",
+        headers={
+            "Authorization": f"Bearer {admin_token}",
+            "X-Workspace-Id": str(ws2.id),
+        },
+    )
+    assert resp.status_code == 204
+
+    # Verify CatalogAccess is gone in db
+    assert session.query(CatalogAccess).filter_by(id=uuid.UUID(str(grant_id))).first() is None
+
+    # Disconnecting again returns 404
+    resp2 = client.delete(
+        f"/api/workspaces/{ws1.id}/shares",
+        headers={
+            "Authorization": f"Bearer {admin_token}",
+            "X-Workspace-Id": str(ws2.id),
+        },
+    )
+    assert resp2.status_code == 404
 
 
 def test_admin_delete_workspace_share_by_id(test_ctx):
