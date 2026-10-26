@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import io
-import json
 import os
 import unittest.mock as mock
-from datetime import UTC, date, datetime
+from datetime import date
 
 import duckdb
 import jwt
@@ -12,9 +11,9 @@ import pandas as pd
 import pytest
 from starlette.testclient import TestClient
 
-from ui import ingest_service
-from pipeline.shared.toon import parse_toon, dump_toon
 from pipeline.shared.connector_registry import registry as connector_registry
+from pipeline.shared.toon import dump_toon, parse_toon
+from ui import ingest_service
 from ui.main import _WORKSPACE_COOKIE, AUTH_SECRET_KEY, app
 
 # ── 1. Unit Tests: Ingest Service & TOON Logic ────────────────────────────────
@@ -158,8 +157,14 @@ def test_build_managed_hive_path():
         target_date=fixed_date,
         mode="create_new",
     )
-    assert key == "workspaces/analytics/production/bronze/customer_events/year=2026/month=10/day=25/data.parquet"
-    assert pattern == "s3://datalake/workspaces/analytics/production/bronze/customer_events/**/*.parquet"
+    assert (
+        key
+        == "workspaces/analytics/production/bronze/customer_events/year=2026/month=10/day=25/data.parquet"
+    )
+    assert (
+        pattern
+        == "s3://datalake/workspaces/analytics/production/bronze/customer_events/**/*.parquet"
+    )
 
     # Append mode should append a unique suffix to the data file
     key_append, pattern_append = ingest_service.build_managed_hive_path(
@@ -170,7 +175,9 @@ def test_build_managed_hive_path():
         target_date=fixed_date,
         mode="append",
     )
-    assert key_append.startswith("workspaces/analytics/production/bronze/customer_events/year=2026/month=10/day=25/data_")
+    assert key_append.startswith(
+        "workspaces/analytics/production/bronze/customer_events/year=2026/month=10/day=25/data_"
+    )
     assert key_append.endswith(".parquet")
     assert pattern_append == pattern
 
@@ -286,7 +293,10 @@ def test_api_create_table_from_file_endpoint(test_tokens):
         assert data["table_name"] == "user_actions"
         assert data["schema_slug"] == "bronze"
         assert data["sql_view"] == "bronze.user_actions"
-        assert "s3://datalake/workspaces/default/main/bronze/user_actions/**/*.parquet" in data["s3_path_pattern"]
+        assert (
+            "s3://datalake/workspaces/default/main/bronze/user_actions/**/*.parquet"
+            in data["s3_path_pattern"]
+        )
 
         # Verify S3 upload occurred
         mock_s3.upload_file.assert_called_once()

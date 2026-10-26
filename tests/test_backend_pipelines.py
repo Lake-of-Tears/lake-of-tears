@@ -500,7 +500,9 @@ def test_delete_pipeline_protection_and_rules():
                 "Cannot delete protected or non-workspace pipeline" in res_system.json()["detail"]
             )
 
-            res_ingest = client.delete("/api/v1/pipelines/refresh_catalog_schemas_dag", headers=headers)
+            res_ingest = client.delete(
+                "/api/v1/pipelines/refresh_catalog_schemas_dag", headers=headers
+            )
             assert res_ingest.status_code == 400
             assert (
                 "Cannot delete protected or non-workspace pipeline" in res_ingest.json()["detail"]

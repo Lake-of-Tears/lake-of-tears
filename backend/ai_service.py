@@ -1342,6 +1342,7 @@ def run_genie_chat(
     Question -> Schema Discovery -> SQL Synthesis -> DuckDB Execution (with 1-step self-correction) ->
     Chart Inference + Grounded Narrative Insight.
     """
+
     def _is_cancelled() -> bool:
         if cancel is not None:
             if hasattr(cancel, "is_set") and cancel.is_set():
