@@ -126,7 +126,9 @@
 </div>
 
 <script>
-const WORKSPACE_STORAGE_KEY = "lake_genie_chat_{{ (workspace.id if workspace and workspace.id is defined else 'default') }}";
+const ACTIVE_WORKSPACE_SLUG = "{{ (workspace.slug if workspace and workspace.slug is defined else (workspace['slug'] if workspace and workspace['slug'] is defined else 'default')) }}";
+const ACTIVE_WORKSPACE_ID = "{{ (workspace.id if workspace and workspace.id is defined else (workspace['id'] if workspace and workspace['id'] is defined else '')) }}";
+const WORKSPACE_STORAGE_KEY = "lake_genie_chat_" + (ACTIVE_WORKSPACE_ID || ACTIVE_WORKSPACE_SLUG || "default");
 let currentAiMode = "genie";
 let chatHistory = [];
 let chartCounter = 0;
@@ -461,8 +463,16 @@ function cancelGenieRequest() {
   activeGenieRequest.cancelled = true;
   fetch("/api/v1/ai/chat/cancel", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ request_id: requestId }),
+    headers: {
+      "Content-Type": "application/json",
+      "X-Workspace-Slug": ACTIVE_WORKSPACE_SLUG,
+      "X-Workspace-Id": ACTIVE_WORKSPACE_ID
+    },
+    body: JSON.stringify({
+      request_id: requestId,
+      workspace_slug: ACTIVE_WORKSPACE_SLUG,
+      workspace_id: ACTIVE_WORKSPACE_ID
+    }),
     keepalive: true
   }).catch(() => {});
   controller.abort();
@@ -672,16 +682,25 @@ async function submitGenieQuestion(questionText) {
   let resultData = null;
 
   try {
+    const aiHeaders = {
+      "Content-Type": "application/json",
+      "X-Workspace-Slug": ACTIVE_WORKSPACE_SLUG,
+      "X-Workspace-Id": ACTIVE_WORKSPACE_ID
+    };
+    const aiPayload = {
+      question: q,
+      mode: currentAiMode,
+      history: priorHistory,
+      request_id: requestId,
+      workspace_slug: ACTIVE_WORKSPACE_SLUG,
+      workspace_id: ACTIVE_WORKSPACE_ID
+    };
+
     const streamResp = await fetch("/api/v1/ai/chat/stream", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: aiHeaders,
       signal: controller.signal,
-      body: JSON.stringify({
-        question: q,
-        mode: currentAiMode,
-        history: priorHistory,
-        request_id: requestId
-      })
+      body: JSON.stringify(aiPayload)
     });
 
     if (streamResp.ok && streamResp.body) {
@@ -695,14 +714,9 @@ async function submitGenieQuestion(questionText) {
     } else {
       const fallbackResp = await fetch("/api/v1/ai/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: aiHeaders,
         signal: controller.signal,
-        body: JSON.stringify({
-          question: q,
-          mode: currentAiMode,
-          history: priorHistory,
-          request_id: requestId
-        })
+        body: JSON.stringify(aiPayload)
       });
       resultData = await fallbackResp.json();
     }

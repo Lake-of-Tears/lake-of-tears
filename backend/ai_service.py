@@ -1355,6 +1355,8 @@ def run_genie_chat(
     cancel: Any = None,
     workspace_slug: str = "default",
     allowed_patterns: list[str] | None = None,
+    is_superadmin: bool = False,
+    progress_callback: Any = None,
 ) -> dict[str, Any]:
     """Execute the Databricks Genie-style conversational data analyst loop:
     Question -> Schema Discovery -> SQL Synthesis -> DuckDB Execution (with 1-step self-correction) ->
@@ -1372,6 +1374,13 @@ def run_genie_chat(
     def _cancelled_res() -> dict[str, Any]:
         return {"ok": False, "mode": mode, "cancelled": True, "error": "Request cancelled"}
 
+    def _report(stage: str, label: str, status: str = "running", **extra: Any) -> None:
+        if progress_callback is not None:
+            try:
+                progress_callback({"stage": stage, "label": label, "status": status, **extra})
+            except Exception:
+                pass
+
     if _is_cancelled():
         return _cancelled_res()
 
@@ -1382,6 +1391,8 @@ def run_genie_chat(
     if mode == "rag":
         if _is_cancelled():
             return _cancelled_res()
+        t0 = time.time()
+        _report("rag_search", "Retrieving workspace semantic embeddings...", "running")
         rag_res = run_rag_search(
             question,
             api_key=effective_key,
@@ -1390,7 +1401,15 @@ def run_genie_chat(
             allowed_patterns=allowed_patterns,
         )
         if not rag_res.get("ok"):
+            _report("rag_search", f"Semantic search failed: {rag_res.get('error')}", "error")
             return {"ok": False, "mode": "rag", "error": rag_res.get("error")}
+        rag_ms = int((time.time() - t0) * 1000)
+        _report(
+            "rag_search",
+            f"Retrieved {len(rag_res.get('snippets', []))} semantic snippet(s)",
+            "done",
+            duration_ms=rag_ms,
+        )
         return {
             "ok": True,
             "mode": "rag",
@@ -1425,7 +1444,21 @@ def run_genie_chat(
         else ""
     )
 
+    t_schema = time.time()
+    _report("schema", "Inspecting workspace catalog schemas...", "running")
     schema_ctx = build_schema_prompt_context(catalogs)
+    table_count = sum(
+        len(s.get("tables", [])) for c in (catalogs or []) for s in c.get("schemas", [])
+    )
+    cat_count = len(catalogs or [])
+    schema_ms = int((time.time() - t_schema) * 1000)
+    _report(
+        "schema",
+        f"Discovered {table_count} table(s) across {cat_count} catalog(s)",
+        "done",
+        duration_ms=schema_ms,
+    )
+
     synth_prompt = (
         "You are the Lake of Tears Genie Data Analyst, an autonomous conversational SQL agent.\n"
         "Given the workspace catalog schema, conversation history, and the user's question, "
@@ -1441,25 +1474,40 @@ def run_genie_chat(
         '{"sql": "SELECT ...", "tables_used": ["stripe_charges"], "reasoning": "Brief plan"}'
     )
 
+    t_synth = time.time()
+    _report("sql_gen", "Synthesizing DuckDB SQL query with AI...", "running")
     try:
         raw_plan = _call_gemini_text(synth_prompt, model=model, api_key=effective_key)
         parsed_plan = _parse_json_response(raw_plan)
         generated_sql = _strip_code_fences(str(parsed_plan.get("sql") or raw_plan)).strip()
         tables_used = [str(t) for t in (parsed_plan.get("tables_used") or []) if t]
+        gen_ms = int((time.time() - t_synth) * 1000)
+        _report(
+            "sql_gen",
+            "Generated DuckDB SQL",
+            "done",
+            duration_ms=gen_ms,
+            sql=generated_sql,
+        )
     except Exception as exc:
+        _report("sql_gen", f"SQL synthesis failed: {exc}", "error")
         return {"ok": False, "mode": mode, "error": f"Failed to synthesize SQL: {exc}"}
 
     if _is_cancelled():
         return _cancelled_res()
 
     # Execute generated SQL in DuckDB (read_only=True)
+    t_exec = time.time()
+    _report("sql_exec", "Executing query against DuckDB...", "running", sql=generated_sql)
     exec_res = execute_sql_query(
         generated_sql,
         catalogs=catalogs,
         read_only=True,
         api_key=effective_key,
         workspace_slug=workspace_slug,
+        is_superadmin=is_superadmin,
     )
+    exec_ms = int((time.time() - t_exec) * 1000)
 
     if _is_cancelled():
         return _cancelled_res()
@@ -1470,6 +1518,9 @@ def run_genie_chat(
     # Automatic 1-step self-correction if DuckDB execution failed
     if not exec_res["ok"] and exec_res.get("error"):
         initial_error = exec_res["error"]
+        _report("sql_exec", f"Execution error: {initial_error}", "error", duration_ms=exec_ms)
+        t_fix = time.time()
+        _report("sql_fix", "Self-correcting SQL query...", "running")
         fix_res = fix_sql_query(
             sql=generated_sql,
             error_message=initial_error or "",
@@ -1485,17 +1536,44 @@ def run_genie_chat(
                 read_only=True,
                 api_key=effective_key,
                 workspace_slug=workspace_slug,
+                is_superadmin=is_superadmin,
             )
+            fix_ms = int((time.time() - t_fix) * 1000)
             if retry_res["ok"]:
                 generated_sql = candidate_sql
                 exec_res = retry_res
                 self_corrected = True
+                _report(
+                    "sql_fix",
+                    "Successfully auto-corrected SQL query",
+                    "done",
+                    duration_ms=fix_ms,
+                    sql=candidate_sql,
+                )
+            else:
+                _report(
+                    "sql_fix",
+                    "Self-correction candidate failed to execute",
+                    "error",
+                    duration_ms=fix_ms,
+                )
+        else:
+            _report("sql_fix", "Could not generate fix for SQL error", "error")
+    else:
+        _report(
+            "sql_exec",
+            f"DuckDB query executed ({exec_res.get('row_count', 0)} row{'s' if exec_res.get('row_count', 0) != 1 else ''})",
+            "done",
+            duration_ms=exec_ms,
+        )
 
     if _is_cancelled():
         return _cancelled_res()
 
     snippets: list[dict[str, Any]] = []
     if mode == "hybrid" or not exec_res["ok"]:
+        t_rag = time.time()
+        _report("rag_context", "Retrieving semantic search context...", "running")
         rag_res = run_rag_search(
             question,
             api_key=effective_key,
@@ -1505,6 +1583,15 @@ def run_genie_chat(
         )
         if rag_res.get("ok"):
             snippets = rag_res.get("snippets", [])
+            rag_ms = int((time.time() - t_rag) * 1000)
+            _report(
+                "rag_context",
+                f"Retrieved {len(snippets)} semantic snippet(s)",
+                "done",
+                duration_ms=rag_ms,
+            )
+        else:
+            _report("rag_context", "No semantic search context retrieved", "done")
 
     columns = exec_res.get("columns", [])
     rows = exec_res.get("rows", [])
@@ -1561,10 +1648,15 @@ def run_genie_chat(
     if _is_cancelled():
         return _cancelled_res()
 
+    t_insight = time.time()
+    _report("insight", "Generating executive summary & insights...", "running")
     try:
         answer = _call_gemini_text(insight_prompt, model=model, api_key=effective_key)
+        insight_ms = int((time.time() - t_insight) * 1000)
+        _report("insight", "Generated narrative insights", "done", duration_ms=insight_ms)
     except Exception as exc:
         answer = f"Query returned {row_count} rows. (Narrative synthesis error: {exc})"
+        _report("insight", "Completed query with summary", "done")
 
     return {
         "ok": True,

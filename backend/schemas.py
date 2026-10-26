@@ -630,6 +630,8 @@ class GenieChatRequest(BaseModel):
     history: list[ChatMessageItem] = []
     model: str | None = None
     request_id: str | None = None
+    workspace_slug: str | None = None
+    workspace_id: str | None = None
 
 
 class GenieChartConfig(BaseModel):
