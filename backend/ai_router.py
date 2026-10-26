@@ -62,8 +62,8 @@ def get_ai_context(
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Return active workspace Catalog schemas, default S3 datasets, and SQL AI function metadata."""
-    ws, role, _ = ctx
-    catalogs = ai_service.get_workspace_catalogs_from_db(db, ws.id)
+    ws, role, user = ctx
+    catalogs = ai_service.get_workspace_catalogs_from_db(db, ws.id, user_id=user.id)
     return {
         "ok": True,
         "workspace_id": str(ws.id),
@@ -85,7 +85,7 @@ def execute_sql(
     """Execute a DuckDB SQL query with workspace Catalog views and SQL AI UDFs registered."""
     ws, _, user = ctx
     is_superadmin = getattr(user, "role", None) == "superadmin"
-    catalogs = ai_service.get_workspace_catalogs_from_db(db, ws.id)
+    catalogs = ai_service.get_workspace_catalogs_from_db(db, ws.id, user_id=user.id)
     result = ai_service.execute_sql_query(
         sql=req.sql,
         catalogs=catalogs,
@@ -109,8 +109,8 @@ def generate_sql(
     db: Session = Depends(get_db),
 ) -> SqlGenerateResponse:
     """Generate executable DuckDB SQL from natural language using workspace Catalog schemas."""
-    ws, _, _ = ctx
-    catalogs = ai_service.get_workspace_catalogs_from_db(db, ws.id)
+    ws, _, user = ctx
+    catalogs = ai_service.get_workspace_catalogs_from_db(db, ws.id, user_id=user.id)
     result = ai_service.generate_sql_from_prompt(
         prompt=req.prompt,
         catalogs=catalogs,
@@ -127,8 +127,8 @@ def fix_sql(
     db: Session = Depends(get_db),
 ) -> SqlFixResponse:
     """Fix a broken DuckDB SQL query using the error message and workspace Catalog schemas."""
-    ws, _, _ = ctx
-    catalogs = ai_service.get_workspace_catalogs_from_db(db, ws.id)
+    ws, _, user = ctx
+    catalogs = ai_service.get_workspace_catalogs_from_db(db, ws.id, user_id=user.id)
     result = ai_service.fix_sql_query(
         sql=req.sql,
         error_message=req.error,
@@ -145,8 +145,8 @@ def explain_sql(
     db: Session = Depends(get_db),
 ) -> SqlExplainResponse:
     """Explain a DuckDB SQL query step-by-step."""
-    ws, _, _ = ctx
-    catalogs = ai_service.get_workspace_catalogs_from_db(db, ws.id)
+    ws, _, user = ctx
+    catalogs = ai_service.get_workspace_catalogs_from_db(db, ws.id, user_id=user.id)
     result = ai_service.explain_sql_query(
         sql=req.sql,
         catalogs=catalogs,
@@ -180,7 +180,7 @@ def genie_chat(
         )
 
     is_superadmin = getattr(user, "role", None) == "superadmin"
-    catalogs = ai_service.get_workspace_catalogs_from_db(db, target_ws.id)
+    catalogs = ai_service.get_workspace_catalogs_from_db(db, target_ws.id, user_id=user.id)
     history_dicts = [m.model_dump() for m in req.history]
 
     cancel_event = threading.Event()
@@ -233,7 +233,7 @@ async def genie_chat_stream(
         )
 
     is_superadmin = getattr(user, "role", None) == "superadmin"
-    catalogs = ai_service.get_workspace_catalogs_from_db(db, target_ws.id)
+    catalogs = ai_service.get_workspace_catalogs_from_db(db, target_ws.id, user_id=user.id)
     history_dicts = [m.model_dump() for m in req.history]
 
     cancel_event = threading.Event()

@@ -168,7 +168,7 @@ def test_rag_search_scopes_to_workspace_and_shared_catalogs():
     mock_search.fetchall.return_value = [
         ("analytics_churn", "2026-10-26", "High churn probability", 0.98)
     ]
-    mock_con.execute.side_effect = [mock_probe, mock_search]
+    mock_con.execute.side_effect = [MagicMock(), MagicMock(), mock_probe, mock_search]
 
     shared_catalogs = [
         {
@@ -205,7 +205,7 @@ def test_rag_search_scopes_to_workspace_and_shared_catalogs():
     assert res["snippets"][0]["source"] == "analytics_churn"
 
     # Verify query parameters passed to DuckDB vector search
-    _, search_params = mock_con.execute.call_args_list[1].args
+    _, search_params = mock_con.execute.call_args_list[-1].args
     expected_patterns = [
         "s3://datalake/workspaces/analytics/embeddings/**/*.parquet",
         "s3://datalake/workspaces/finance/embeddings/charges/data.parquet",
@@ -484,3 +484,154 @@ def test_run_rag_search_isolated_from_other_workspaces():
     sql_pattern = call_args[0][1][0]
     assert "workspaces/prd/embeddings/**/*.parquet" in sql_pattern
     assert "default" not in sql_pattern
+
+
+def test_get_workspace_catalogs_from_db_includes_vector_index_and_workspace_shares():
+    """Verify get_workspace_catalogs_from_db includes vector_index and approved WorkspaceShares."""
+    mock_db = MagicMock()
+    mock_table = MagicMock()
+    mock_table.id = "t1"
+    mock_table.slug = "clinical_trials"
+    mock_table.name = "Clinical Trials"
+    mock_table.description = "Medical research data"
+    mock_table.schema_definition = []
+    mock_table.s3_path_pattern = "s3://datalake/workspaces/default/clinical_trials.parquet"
+    mock_table.vector_index = {
+        "s3_vector_path": "s3://datalake/workspaces/default/embeddings/clinical_trials/data.parquet",
+        "source_column": "description",
+    }
+
+    mock_schema = MagicMock()
+    mock_schema.id = "s1"
+    mock_schema.slug = "bronze"
+    mock_schema.name = "Bronze"
+    mock_schema.tables = [mock_table]
+
+    mock_catalog = MagicMock()
+    mock_catalog.id = "c1"
+    mock_catalog.slug = "default"
+    mock_catalog.name = "Default Catalog"
+    mock_catalog.workspace_id = "ws-default"
+    mock_catalog.schemas = [mock_schema]
+
+    def mock_db_query(model):
+        q = MagicMock()
+        q.filter.return_value = q
+        q.order_by.return_value.all.return_value = [mock_catalog]
+        q.all.return_value = [mock_catalog]
+        return q
+
+    mock_db.query.side_effect = mock_db_query
+
+    catalogs = ai_service.get_workspace_catalogs_from_db(
+        db=mock_db,
+        workspace_id="ws-dev",
+        user_id="user-123",
+    )
+
+    assert len(catalogs) == 1
+    assert catalogs[0]["slug"] == "default"
+    tbl_result = catalogs[0]["schemas"][0]["tables"][0]
+    assert tbl_result["slug"] == "clinical_trials"
+    assert "vector_index" in tbl_result
+    assert (
+        tbl_result["vector_index"]["s3_vector_path"]
+        == "s3://datalake/workspaces/default/embeddings/clinical_trials/data.parquet"
+    )
+
+
+def test_run_rag_search_with_shared_catalog_when_active_workspace_empty():
+    """Verify run_rag_search ignores empty active workspace embeddings and queries shared catalog."""
+    mock_client = MagicMock()
+    embed_obj = MagicMock()
+    embed_obj.values = [0.2] * 768
+    mock_resp = MagicMock()
+    mock_resp.embeddings = [embed_obj]
+    mock_resp.model = "text-embedding-004"
+    mock_resp.dimension = 768
+    mock_client.models.embed_content.return_value = mock_resp
+    mock_client.models.generate_content.return_value.text = "Answer from clinical_trials"
+
+    mock_con = MagicMock()
+    # Pattern 1 (dev workspace) throws No files found
+    # Pattern 2 (shared clinical_trials) succeeds
+    # Probe on target_pattern succeeds
+    mock_probe = MagicMock()
+    mock_probe.description = [("source",), ("model",), ("embedding",)]
+    mock_search = MagicMock()
+    mock_search.fetchall.return_value = [
+        ("clinical_trials", "2026-10-26", "T-Cell research active in Phase 3", 0.95)
+    ]
+
+    def mock_execute_side_effect(sql, params=None):
+        if params and "workspaces/dev/embeddings" in str(params):
+            raise Exception(
+                "No files found that match the pattern workspaces/dev/embeddings/**/*.parquet"
+            )
+        if "LIMIT 0" in sql and params and "clinical_trials" in str(params):
+            return MagicMock()
+        if "SELECT * FROM read_parquet" in sql:
+            return mock_probe
+        return mock_search
+
+    mock_con.execute.side_effect = mock_execute_side_effect
+
+    catalogs = [
+        {
+            "slug": "default",
+            "schemas": [
+                {
+                    "slug": "bronze",
+                    "tables": [
+                        {
+                            "slug": "clinical_trials",
+                            "vector_index": {
+                                "s3_vector_path": "s3://datalake/workspaces/default/embeddings/clinical_trials/data.parquet"
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+
+    with (
+        patch.object(ai_service, "_resolve_api_key", return_value="fake_key"),
+        patch.object(ai_service, "_client_for", return_value=mock_client),
+        patch.object(ai_service, "create_duckdb_connection", return_value=mock_con),
+    ):
+        result = ai_service.run_rag_search(
+            question="Tell me about all the t-cell reasearch",
+            workspace_slug="dev",
+            catalogs=catalogs,
+        )
+
+    assert result["ok"] is True
+    assert result["answer"] == "Answer from clinical_trials"
+    assert len(result["snippets"]) == 1
+    assert result["snippets"][0]["source"] == "clinical_trials"
+
+
+def test_resolve_ui_all_catalogs_merges_owned_and_shared():
+    """Verify _resolve_ui_all_catalogs combines owned and shared catalogs without duplicates."""
+    import ui.main as ui_main
+
+    mock_req = MagicMock()
+    owned_cat = {"id": "cat-1", "slug": "dev_cat", "name": "Dev Catalog"}
+    shared_cat_1 = {"id": "cat-1", "slug": "dev_cat", "name": "Dev Catalog Dup"}
+    shared_cat_2 = {"id": "cat-2", "slug": "default", "name": "Default Shared"}
+
+    mock_shared_group = {
+        "workspace_id": "ws-default",
+        "catalogs": [shared_cat_1, shared_cat_2],
+    }
+
+    with (
+        patch.object(ui_main, "_resolve_ui_catalogs", return_value=[owned_cat]),
+        patch.object(ui_main, "_resolve_ui_shared_catalogs", return_value=[mock_shared_group]),
+    ):
+        all_cats = ui_main._resolve_ui_all_catalogs(mock_req)
+
+    assert len(all_cats) == 2
+    ids = [c["id"] for c in all_cats]
+    assert ids == ["cat-1", "cat-2"]

@@ -651,25 +651,40 @@ def _ai_query(
                 if pat and "embeddings" in pat and pat not in patterns:
                     patterns.append(pat)
 
-        target_pattern: Any = patterns if len(patterns) > 1 else patterns[0]
         con = _duckdb_connection()
         try:
-            columns = {
-                d[0]
-                for d in con.execute(
-                    "SELECT * FROM read_parquet(?, union_by_name = true) LIMIT 0", [target_pattern]
-                ).description
-            }
-            has_model = "model" in columns
-            params = [q_vec, target_pattern] + ([embed_resp.model] if has_model else []) + [5]
-            rows = con.execute(
-                ai_gateway_client.vector_search_sql(embed_resp.dimension, has_model), params
-            ).fetchall()
-        except Exception as exc:
-            if "No files found that match the pattern" in str(exc) or "Cannot glob" in str(exc):
+            valid_patterns: list[str] = []
+            for pat in patterns:
+                try:
+                    con.execute(
+                        "SELECT 1 FROM read_parquet(?, union_by_name = true) LIMIT 0", [pat]
+                    )
+                    valid_patterns.append(pat)
+                except Exception as exc:
+                    if "No files found that match the pattern" in str(exc) or "Cannot glob" in str(
+                        exc
+                    ):
+                        continue
+                    pass
+
+            if not valid_patterns:
                 rows = []
             else:
-                raise
+                target_pattern: Any = (
+                    valid_patterns if len(valid_patterns) > 1 else valid_patterns[0]
+                )
+                columns = {
+                    d[0]
+                    for d in con.execute(
+                        "SELECT * FROM read_parquet(?, union_by_name = true) LIMIT 0",
+                        [target_pattern],
+                    ).description
+                }
+                has_model = "model" in columns
+                params = [q_vec, target_pattern] + ([embed_resp.model] if has_model else []) + [5]
+                rows = con.execute(
+                    ai_gateway_client.vector_search_sql(embed_resp.dimension, has_model), params
+                ).fetchall()
         finally:
             con.close()
 
@@ -1175,6 +1190,20 @@ def _resolve_ui_shared_catalogs(request: Request) -> list[dict[str, Any]]:
     return list(groups.values())
 
 
+def _resolve_ui_all_catalogs(request: Request) -> list[dict[str, Any]]:
+    owned = _resolve_ui_catalogs(request)
+    shared_groups = _resolve_ui_shared_catalogs(request)
+    combined = list(owned or [])
+    seen_ids = {str(c.get("id")) for c in combined if c.get("id")}
+    for group in shared_groups or []:
+        for sc in group.get("catalogs") or []:
+            sc_id = str(sc.get("id")) if sc.get("id") else None
+            if sc_id and sc_id not in seen_ids:
+                seen_ids.add(sc_id)
+                combined.append(sc)
+    return combined
+
+
 @app.get("/sql", response_class=HTMLResponse)
 async def sql_get(request: Request):
     query_sql = request.query_params.get("q") or request.query_params.get("sql")
@@ -1201,6 +1230,8 @@ async def sql_get(request: Request):
 @app.post("/sql", response_class=HTMLResponse)
 async def sql_post(request: Request, sql: str = Form(...)):
     catalogs = _resolve_ui_catalogs(request)
+    shared_workspaces_catalogs = _resolve_ui_shared_catalogs(request)
+    all_catalogs = _resolve_ui_all_catalogs(request)
     ws = getattr(request.state, "workspace", None)
     header_ws = str(request.headers.get("X-Workspace-Slug") or "").strip()
     ws_slug = (
@@ -1216,7 +1247,7 @@ async def sql_post(request: Request, sql: str = Form(...)):
     )
     result = _run_query(
         sql,
-        catalogs=catalogs,
+        catalogs=all_catalogs,
         workspace_slug=ws_slug,
         is_superadmin=is_superadmin,
     )
@@ -1230,6 +1261,7 @@ async def sql_post(request: Request, sql: str = Form(...)):
             "sql": sql,
             "example_queries": EXAMPLE_QUERIES,
             "catalogs": catalogs,
+            "shared_workspaces_catalogs": shared_workspaces_catalogs,
             "default_datasets": duckdb_ai.get_default_datasets(MINIO_BUCKET),
             "sql_ai_functions": duckdb_ai.SQL_AI_FUNCTIONS,
         },
@@ -4910,7 +4942,7 @@ async def ui_ai_sql_execute(request: Request):
     sql = str(body.get("sql") or "")
     read_only = bool(body.get("read_only", False))
     max_ai_rows = int(body.get("max_ai_rows", 50))
-    catalogs = _resolve_ui_catalogs(request)
+    catalogs = _resolve_ui_all_catalogs(request)
     ws = getattr(request.state, "workspace", None)
     req_ws = str(
         request.query_params.get("workspace_slug") or request.headers.get("X-Workspace-Slug") or ""
@@ -4948,7 +4980,7 @@ async def ui_ai_sql_generate(request: Request):
     prompt = str(body.get("prompt") or "")
     current_sql = body.get("current_sql")
     model = str(body["model"]) if body.get("model") else None
-    catalogs = _resolve_ui_catalogs(request)
+    catalogs = _resolve_ui_all_catalogs(request)
     res = duckdb_ai.generate_sql_from_prompt(
         prompt=prompt,
         catalogs=catalogs,
@@ -4968,7 +5000,7 @@ async def ui_ai_sql_fix(request: Request):
     sql = str(body.get("sql") or "")
     error_msg = str(body.get("error") or "")
     model = str(body["model"]) if body.get("model") else None
-    catalogs = _resolve_ui_catalogs(request)
+    catalogs = _resolve_ui_all_catalogs(request)
     res = duckdb_ai.fix_sql_query(
         sql=sql,
         error_message=error_msg,
@@ -4987,7 +5019,7 @@ async def ui_ai_sql_explain(request: Request):
     body = await request.json()
     sql = str(body.get("sql") or "")
     model = str(body["model"]) if body.get("model") else None
-    catalogs = _resolve_ui_catalogs(request)
+    catalogs = _resolve_ui_all_catalogs(request)
     res = duckdb_ai.explain_sql_query(
         sql=sql,
         catalogs=catalogs,
@@ -5023,7 +5055,7 @@ async def ui_ai_chat(request: Request):
     history = body.get("history") or []
     model = str(body["model"]) if body.get("model") else None
     request_id = str(body.get("request_id") or "")
-    catalogs = _resolve_ui_catalogs(request)
+    catalogs = _resolve_ui_all_catalogs(request)
     ws = getattr(request.state, "workspace", None)
     req_ws = str(
         body.get("workspace_slug")
@@ -5089,7 +5121,7 @@ async def ui_ai_chat_stream(request: Request):
     history = body.get("history") or []
     model = str(body["model"]) if body.get("model") else None
     request_id = str(body.get("request_id") or "")
-    catalogs = _resolve_ui_catalogs(request)
+    catalogs = _resolve_ui_all_catalogs(request)
     ws = getattr(request.state, "workspace", None)
     req_ws = str(
         body.get("workspace_slug")

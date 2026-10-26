@@ -784,27 +784,48 @@ def register_catalog_views(
     return registered
 
 
-def get_workspace_catalogs_from_db(db: Session, workspace_id: Any) -> list[dict[str, Any]]:
-    """Query active owned and approved shared catalogs with schemas and tables for a workspace."""
-    from models import Catalog, CatalogAccess
+def get_workspace_catalogs_from_db(
+    db: Session,
+    workspace_id: Any,
+    user_id: Any = None,
+) -> list[dict[str, Any]]:
+    """Query active owned and approved shared catalogs with schemas and tables for a workspace and user."""
+    from models import Catalog, CatalogAccess, WorkspaceShare
 
     shared_ids = db.query(CatalogAccess.catalog_id).filter(
         CatalogAccess.workspace_id == workspace_id,
         CatalogAccess.status == "approved",
         CatalogAccess.suspended.is_(False),
     )
+
+    query_filters = [
+        Catalog.owner_workspace_id == workspace_id,
+        Catalog.id.in_(shared_ids),
+    ]
+
+    if user_id:
+        shared_ws_ids = db.query(WorkspaceShare.workspace_id).filter(
+            WorkspaceShare.user_id == user_id,
+            WorkspaceShare.status == "approved",
+        )
+        query_filters.append(Catalog.owner_workspace_id.in_(shared_ws_ids))
+
     catalogs = (
         db.query(Catalog)
         .filter(
-            or_(Catalog.owner_workspace_id == workspace_id, Catalog.id.in_(shared_ids)),
+            or_(*query_filters),
             Catalog.deleted_at.is_(None),
         )
         .order_by(Catalog.created_at)
         .all()
     )
 
+    seen_cat_ids: set[Any] = set()
     result: list[dict[str, Any]] = []
     for c in catalogs:
+        if c.id in seen_cat_ids:
+            continue
+        seen_cat_ids.add(c.id)
         schemas_list: list[dict[str, Any]] = []
         _tier_order = {"bronze": 1, "silver": 2, "gold": 3}
         sorted_schemas = sorted(
@@ -826,6 +847,7 @@ def get_workspace_catalogs_from_db(db: Session, workspace_id: Any) -> list[dict[
                         "s3_path_pattern": t.s3_path_pattern
                         or f"s3://{MINIO_BUCKET}/raw/{t.slug}/**/*.parquet",
                         "column_defs": t.column_defs or [],
+                        "vector_index": t.vector_index or {},
                     }
                 )
             schemas_list.append(
@@ -1288,25 +1310,40 @@ def run_rag_search(
                 if pat and "embeddings" in pat and pat not in patterns:
                     patterns.append(pat)
 
-        target_pattern: Any = patterns if len(patterns) > 1 else patterns[0]
         con = create_duckdb_connection(register_ai=False)
         try:
-            columns = {
-                d[0]
-                for d in con.execute(
-                    "SELECT * FROM read_parquet(?, union_by_name = true) LIMIT 0", [target_pattern]
-                ).description
-            }
-            has_model = "model" in columns
-            params = [q_vec, target_pattern] + ([embed_resp.model] if has_model else []) + [5]
-            rows = con.execute(
-                vector_search_sql(embed_resp.dimension, has_model), params
-            ).fetchall()
-        except Exception as exc:
-            if "No files found that match the pattern" in str(exc) or "Cannot glob" in str(exc):
+            valid_patterns: list[str] = []
+            for pat in patterns:
+                try:
+                    con.execute(
+                        "SELECT 1 FROM read_parquet(?, union_by_name = true) LIMIT 0", [pat]
+                    )
+                    valid_patterns.append(pat)
+                except Exception as exc:
+                    if "No files found that match the pattern" in str(exc) or "Cannot glob" in str(
+                        exc
+                    ):
+                        continue
+                    pass
+
+            if not valid_patterns:
                 rows = []
             else:
-                raise
+                target_pattern: Any = (
+                    valid_patterns if len(valid_patterns) > 1 else valid_patterns[0]
+                )
+                columns = {
+                    d[0]
+                    for d in con.execute(
+                        "SELECT * FROM read_parquet(?, union_by_name = true) LIMIT 0",
+                        [target_pattern],
+                    ).description
+                }
+                has_model = "model" in columns
+                params = [q_vec, target_pattern] + ([embed_resp.model] if has_model else []) + [5]
+                rows = con.execute(
+                    vector_search_sql(embed_resp.dimension, has_model), params
+                ).fetchall()
         finally:
             con.close()
 
