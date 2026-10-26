@@ -152,7 +152,7 @@ def test_ai_query_parameterized_execution():
         ("stripe_charges", "2024-01-01 12:00:00", "Total revenue: $5000", 0.9999)
     ]
     mock_con = MagicMock()
-    mock_con.execute.side_effect = [probe, search]
+    mock_con.execute.side_effect = [MagicMock(), probe, search]
 
     with (
         patch.object(main, "_get_ai_access", return_value="gateway"),
@@ -172,8 +172,8 @@ def test_ai_query_parameterized_execution():
     mock_client.models.embed_content.assert_called_once_with(
         contents="What was total revenue?", config={"task_type": "RETRIEVAL_QUERY"}
     )
-    # second call is the search: dimension 4, filtered to the embedding model, limit 5
-    search_sql, search_params = mock_con.execute.call_args_list[1].args
+    # search call: dimension 4, filtered to the embedding model, limit 5
+    search_sql, search_params = mock_con.execute.call_args_list[-1].args
     assert search_sql == main.ai_gateway_client.vector_search_sql(4, has_model_column=True)
     assert search_params == [test_vec, s3, "stub-embed", 5]
     mock_con.close.assert_called_once()
@@ -199,7 +199,7 @@ def test_ai_query_workspace_scoped_and_shared_catalogs():
         ("custom_source", "2024-01-01 12:00:00", "Custom workspace content", 0.95)
     ]
     mock_con = MagicMock()
-    mock_con.execute.side_effect = [probe, search]
+    mock_con.execute.side_effect = [MagicMock(), MagicMock(), probe, search]
 
     shared_catalogs = [
         {
@@ -233,7 +233,7 @@ def test_ai_query_workspace_scoped_and_shared_catalogs():
         )
 
     assert result["ok"] is True
-    search_sql, search_params = mock_con.execute.call_args_list[1].args
+    search_sql, search_params = mock_con.execute.call_args_list[-1].args
     expected_patterns = [
         "s3://mock-bucket/workspaces/analytics/embeddings/**/*.parquet",
         "s3://mock-bucket/workspaces/finance/embeddings/charges/data.parquet",
