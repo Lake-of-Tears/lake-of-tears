@@ -115,25 +115,25 @@ SQL_AI_FUNCTIONS: list[dict[str, str]] = [
         "name": "ai_query",
         "signature": "ai_query([model,] prompt)",
         "description": "Invoke a Gemini foundation model per row with a custom prompt (supports 1-arg prompt or 2-arg Databricks-style model + prompt).",
-        "example": "SELECT description, ai_query('gemini-3.8-flash', 'Classify sentiment in one word: ' || description) AS sentiment FROM read_parquet('s3://datalake/raw/stripe_charges/**/*.parquet') LIMIT 10",
+        "example": "SELECT description, ai_query('gemini-3.8-flash', 'Classify sentiment in one word: ' || description) AS sentiment FROM read_parquet('s3://datalake/workspaces/default/raw/stripe_charges/**/*.parquet') LIMIT 10",
     },
     {
         "name": "ai_summarize",
         "signature": "ai_summarize(text)",
         "description": "Generate a concise 1–2 sentence summary of unstructured text per row.",
-        "example": "SELECT source, ai_summarize(content) AS brief FROM read_parquet('s3://datalake/embeddings/**/*.parquet') LIMIT 5",
+        "example": "SELECT source, ai_summarize(content) AS brief FROM read_parquet('s3://datalake/workspaces/default/embeddings/**/*.parquet') LIMIT 5",
     },
     {
         "name": "ai_classify",
         "signature": "ai_classify(text, categories[])",
         "description": "Zero-shot categorical classification into one of the provided array labels.",
-        "example": "SELECT stage, ai_classify(stage, ['early_funnel', 'negotiation', 'closed']) AS deal_bucket FROM read_parquet('s3://datalake/raw/hubspot_deals/**/*.parquet') LIMIT 10",
+        "example": "SELECT stage, ai_classify(stage, ['early_funnel', 'negotiation', 'closed']) AS deal_bucket FROM read_parquet('s3://datalake/workspaces/default/raw/hubspot_deals/**/*.parquet') LIMIT 10",
     },
     {
         "name": "ai_extract",
         "signature": "ai_extract(text, fields[])",
         "description": "Extract structured JSON object with the specified keys from unstructured text.",
-        "example": "SELECT ai_extract(content, ['primary_metric', 'status', 'anomaly']) AS extracted_json FROM read_parquet('s3://datalake/embeddings/**/*.parquet') LIMIT 5",
+        "example": "SELECT ai_extract(content, ['primary_metric', 'status', 'anomaly']) AS extracted_json FROM read_parquet('s3://datalake/workspaces/default/embeddings/**/*.parquet') LIMIT 5",
     },
 ]
 
@@ -728,15 +728,7 @@ def build_schema_prompt_context(
                     )
 
     if not has_catalog_tables:
-        lines.append("- (No custom tables registered in catalog yet; use S3 Parquet paths below)")
-
-    lines.append("\n### Default Lakehouse S3 Parquet Datasets")
-    for ds in get_default_datasets(bucket=bucket):
-        col_str = ", ".join(f"{c['name']} ({c['type']})" for c in ds["columns"])
-        lines.append(
-            f"- `{ds['name']}`: `read_parquet('{ds['s3_path']}')` — {ds['description']}\n"
-            f"  Columns: {col_str}"
-        )
+        lines.append("- (No custom tables registered in this workspace catalog yet)")
 
     lines.append("\n### Built-in DuckDB SQL AI Functions")
     for fn in SQL_AI_FUNCTIONS:

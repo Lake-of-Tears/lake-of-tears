@@ -154,10 +154,44 @@ def test_sync_table_vector_index_default_dest_s3_overwrites_static_path(tmp_path
         res = vector_index_service.sync_table_vector_index(mock_table, mock_db)
 
     assert res["ok"] is True
-    assert res["s3_vector_path"] == "s3://datalake/embeddings/movies_test/data.parquet"
+    assert (
+        res["s3_vector_path"]
+        == "s3://datalake/workspaces/default/embeddings/movies_test/data.parquet"
+    )
     assert (
         mock_table.vector_index["s3_vector_path"]
-        == "s3://datalake/embeddings/movies_test/data.parquet"
+        == "s3://datalake/workspaces/default/embeddings/movies_test/data.parquet"
+    )
+
+
+def test_sync_table_vector_index_scoped_to_custom_workspace(tmp_path: Path):
+    mock_table = _movies_table(_movies_parquet(tmp_path))
+    mock_table.slug = "movies_test"
+    mock_db = MagicMock()
+    provider = FakeProvider(dimension=4)
+
+    with (
+        patch("vector_index_service.get_active_provider", return_value=provider),
+        patch("vector_index_service.create_duckdb_connection") as mock_con_factory,
+    ):
+        mock_con = MagicMock()
+        mock_con_factory.return_value = mock_con
+        mock_con.execute.return_value.fetchall.side_effect = [
+            [("overview", "VARCHAR"), ("id", "VARCHAR")],
+            [("Dream thief", "1")],
+        ]
+        res = vector_index_service.sync_table_vector_index(
+            mock_table, mock_db, workspace_slug="analytics"
+        )
+
+    assert res["ok"] is True
+    assert (
+        res["s3_vector_path"]
+        == "s3://datalake/workspaces/analytics/embeddings/movies_test/data.parquet"
+    )
+    assert (
+        mock_table.vector_index["s3_vector_path"]
+        == "s3://datalake/workspaces/analytics/embeddings/movies_test/data.parquet"
     )
 
 

@@ -655,3 +655,10 @@ class GenieChatResponse(BaseModel):
     tables_used: list[str] = []
     cancelled: bool = False
     error: str | None = None
+
+
+class AnomalyDetectRequest(BaseModel):
+    source: str | None = None
+    table_slug: str | None = None
+    contamination: float = 0.05
+

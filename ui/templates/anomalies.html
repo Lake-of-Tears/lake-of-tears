@@ -4,17 +4,46 @@
 
 <div class="max-w-3xl mx-auto space-y-6">
 
-  <div>
-    <h1 class="text-xl font-semibold text-gray-100">Anomaly Detection</h1>
-    <p class="text-sm text-gray-500 mt-1">Statistical outliers detected by Isolation Forest, explained by Gemini.</p>
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-xl font-semibold text-gray-100">Anomaly Detection</h1>
+      <p class="text-sm text-gray-500 mt-1">Statistical outliers in workspace <span class="text-cyan-400 font-mono">{{ workspace.slug if workspace else 'default' }}</span> detected by Isolation Forest, explained by Gemini.</p>
+    </div>
+    <form method="POST" action="/anomalies/scan" class="flex items-center gap-2">
+      <input type="text" name="source" placeholder="Table / Source (optional)" value="{{ source or '' }}" class="input text-xs w-48" />
+      <button type="submit" class="btn-primary text-xs flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/></svg>
+        Run Scan
+      </button>
+    </form>
   </div>
 
+  {% if error %}
+  <div class="card p-4 border border-rose-500/30 bg-rose-500/10 text-rose-300 text-sm">
+    <p class="font-medium">Scan Error</p>
+    <p class="text-xs mt-1 text-rose-400">{{ error }}</p>
+  </div>
+  {% endif %}
+
+  {% if result %}
+  <div class="card p-6 space-y-4">
+    <div class="flex items-center justify-between border-b border-gray-800 pb-3">
+      <span class="text-xs font-medium text-emerald-400 flex items-center gap-1.5">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+        Scan Complete
+      </span>
+      <span class="text-xs text-gray-500 font-mono">Workspace: {{ workspace.slug if workspace else 'default' }}</span>
+    </div>
+    <div class="text-sm text-gray-300 leading-relaxed whitespace-pre-wrap">{{ result }}</div>
+  </div>
+  {% else %}
   <div class="card p-8 text-center">
     <svg class="w-10 h-10 text-gray-700 mx-auto mb-3" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
     <p class="text-gray-500 text-sm">No anomaly data yet.</p>
-    <p class="text-gray-600 text-xs mt-1">Anomaly detection runs daily at 08:00 after embeddings are generated.</p>
+    <p class="text-gray-600 text-xs mt-1">Anomaly detection runs daily at 08:00 or on demand for this workspace.</p>
     <a href="/pipelines" class="btn-ghost text-xs mt-4 inline-flex">View pipeline status →</a>
   </div>
+  {% endif %}
 
 </div>
 {% endblock %}
