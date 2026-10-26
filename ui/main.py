@@ -1373,6 +1373,7 @@ async def ingest(request: Request):
     active_feeds = feeds_data["active_feeds"]
     community_connectors = feeds_data["community_connectors"]
     categories = feeds_data["categories"]
+    category_counts = feeds_data.get("category_counts", {})
 
     all_ws = getattr(request.state, "workspaces", None) or []
     current_ws_id = str(ws.get("id")) if ws and ws.get("id") else None
@@ -1391,6 +1392,7 @@ async def ingest(request: Request):
             "active_feeds": active_feeds,
             "community_connectors": community_connectors,
             "categories": categories,
+            "category_counts": category_counts,
             "connectors": active_feeds if active_feeds else community_connectors,
             "catalogs": catalogs,
             "page": "ingest",
@@ -1769,6 +1771,7 @@ async def api_ingest_connectors(request: Request):
             "active_feeds": feeds_data["active_feeds"],
             "community_connectors": feeds_data["community_connectors"],
             "categories": feeds_data["categories"],
+            "category_counts": feeds_data.get("category_counts", {}),
             "connectors": feeds_data["community_connectors"],
         }
     )

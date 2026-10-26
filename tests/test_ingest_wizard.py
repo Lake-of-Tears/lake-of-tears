@@ -456,6 +456,8 @@ def test_api_connectors_endpoint(test_tokens):
         pg_conn = next(c for c in connectors if c["key"] == "postgres")
         assert pg_conn["dag_id"] == "ingest_postgres"
         assert pg_conn["status"] == "green"
+        assert "category_counts" in data
+        assert isinstance(data["category_counts"], dict)
 
 
 def test_ui_ingest_page_layout_and_navigation(test_tokens):
@@ -486,6 +488,14 @@ def test_ui_ingest_page_layout_and_navigation(test_tokens):
         # Verify Databricks Cards
         assert "Create or Modify Table (File Upload)" in html
         assert "Register Existing S3 Path to Table" in html
+
+        # Verify Community Connector Marketplace Filter & Minimalist Scrollbar
+        assert "Community Connector Marketplace" in html
+        assert "connector-search-input" in html
+        assert "category-pills-track" in html
+        assert "active-category-pill" in html
+        assert "scrollbar-width: thin" in html
+        assert "::-webkit-scrollbar" in html
 
         # Verify Sidebar Link Renamed
         assert ">Add Data</a>" in html or "Add Data\n      </a>" in html
