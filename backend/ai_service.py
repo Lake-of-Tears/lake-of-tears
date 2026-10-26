@@ -213,25 +213,25 @@ SQL_AI_FUNCTIONS: list[dict[str, str]] = [
         "name": "ai_query",
         "signature": "ai_query([model,] prompt)",
         "description": "Invoke a Gemini foundation model per row with a custom prompt (supports 1-arg prompt or 2-arg Databricks-style model + prompt).",
-        "example": "SELECT description, ai_query('gemini-3.8-flash', 'Classify sentiment in one word: ' || description) AS sentiment FROM read_parquet('s3://datalake/raw/stripe_charges/**/*.parquet') LIMIT 10",
+        "example": "SELECT description, ai_query('gemini-3.8-flash', 'Classify sentiment in one word: ' || description) AS sentiment FROM read_parquet('s3://datalake/workspaces/default/raw/stripe_charges/**/*.parquet') LIMIT 10",
     },
     {
         "name": "ai_summarize",
         "signature": "ai_summarize(text)",
         "description": "Generate a concise 1–2 sentence summary of unstructured text per row.",
-        "example": "SELECT source, ai_summarize(content) AS brief FROM read_parquet('s3://datalake/embeddings/**/*.parquet') LIMIT 5",
+        "example": "SELECT source, ai_summarize(content) AS brief FROM read_parquet('s3://datalake/workspaces/default/embeddings/**/*.parquet') LIMIT 5",
     },
     {
         "name": "ai_classify",
         "signature": "ai_classify(text, categories[])",
         "description": "Zero-shot categorical classification into one of the provided array labels.",
-        "example": "SELECT stage, ai_classify(stage, ['early_funnel', 'negotiation', 'closed']) AS deal_bucket FROM read_parquet('s3://datalake/raw/hubspot_deals/**/*.parquet') LIMIT 10",
+        "example": "SELECT stage, ai_classify(stage, ['early_funnel', 'negotiation', 'closed']) AS deal_bucket FROM read_parquet('s3://datalake/workspaces/default/raw/hubspot_deals/**/*.parquet') LIMIT 10",
     },
     {
         "name": "ai_extract",
         "signature": "ai_extract(text, fields[])",
         "description": "Extract structured JSON object with the specified keys from unstructured text.",
-        "example": "SELECT ai_extract(content, ['primary_metric', 'status', 'anomaly']) AS extracted_json FROM read_parquet('s3://datalake/embeddings/**/*.parquet') LIMIT 5",
+        "example": "SELECT ai_extract(content, ['primary_metric', 'status', 'anomaly']) AS extracted_json FROM read_parquet('s3://datalake/workspaces/default/embeddings/**/*.parquet') LIMIT 5",
     },
 ]
 
@@ -888,15 +888,7 @@ def build_schema_prompt_context(catalogs: list[dict[str, Any]] | None = None) ->
                     )
 
     if not has_catalog_tables:
-        lines.append("- (No custom tables registered in catalog yet; use S3 Parquet paths below)")
-
-    lines.append("\n### Default Lakehouse S3 Parquet Datasets")
-    for ds in DEFAULT_LAKEHOUSE_DATASETS:
-        col_str = ", ".join(f"{c['name']} ({c['type']})" for c in ds["columns"])
-        lines.append(
-            f"- `{ds['name']}`: `read_parquet('{ds['s3_path']}')` — {ds['description']}\n"
-            f"  Columns: {col_str}"
-        )
+        lines.append("- (No custom tables registered in this workspace catalog yet)")
 
     lines.append("\n### Built-in DuckDB SQL AI Functions")
     for fn in SQL_AI_FUNCTIONS:
@@ -1258,8 +1250,14 @@ def infer_chart_config(
     }
 
 
-def run_rag_search(question: str, api_key: str | None = None) -> dict[str, Any]:
-    """Execute semantic vector search over embeddings/**/*.parquet and synthesize a grounded answer."""
+def run_rag_search(
+    question: str,
+    api_key: str | None = None,
+    workspace_slug: str = "default",
+    catalogs: list[dict[str, Any]] | None = None,
+    allowed_patterns: list[str] | None = None,
+) -> dict[str, Any]:
+    """Execute semantic vector search over active workspace (and shared catalog) embeddings and synthesize a grounded answer."""
     effective_key = _resolve_api_key(api_key)
     if not effective_key:
         return {"ok": False, "error": GEMINI_KEY_NOT_CONFIGURED_MSG, "snippets": []}
@@ -1272,22 +1270,40 @@ def run_rag_search(question: str, api_key: str | None = None) -> dict[str, Any]:
         )
         q_vec = embed_resp.embeddings[0].values
 
-        s3_pattern = f"s3://{MINIO_BUCKET}/embeddings/**/*.parquet"
+        clean_ws = _safe_identifier(workspace_slug) if workspace_slug else "default"
+        active_pattern = f"s3://{MINIO_BUCKET}/workspaces/{clean_ws}/embeddings/**/*.parquet"
+        patterns: list[str] = [active_pattern]
+
+        if catalogs:
+            for cat in catalogs:
+                for sch in cat.get("schemas") or []:
+                    for tbl in sch.get("tables") or []:
+                        vec_cfg = tbl.get("vector_index") or {}
+                        if isinstance(vec_cfg, dict):
+                            vpath = (vec_cfg.get("s3_vector_path") or "").strip()
+                            if vpath and vpath not in patterns:
+                                patterns.append(vpath)
+        if allowed_patterns:
+            for pat in allowed_patterns:
+                if pat and "embeddings" in pat and pat not in patterns:
+                    patterns.append(pat)
+
+        target_pattern: Any = patterns if len(patterns) > 1 else patterns[0]
         con = create_duckdb_connection(register_ai=False)
         try:
             columns = {
                 d[0]
                 for d in con.execute(
-                    "SELECT * FROM read_parquet(?, union_by_name = true) LIMIT 0", [s3_pattern]
+                    "SELECT * FROM read_parquet(?, union_by_name = true) LIMIT 0", [target_pattern]
                 ).description
             }
             has_model = "model" in columns
-            params = [q_vec, s3_pattern] + ([embed_resp.model] if has_model else []) + [5]
+            params = [q_vec, target_pattern] + ([embed_resp.model] if has_model else []) + [5]
             rows = con.execute(
                 vector_search_sql(embed_resp.dimension, has_model), params
             ).fetchall()
         except Exception as exc:
-            if "No files found that match the pattern" in str(exc):
+            if "No files found that match the pattern" in str(exc) or "Cannot glob" in str(exc):
                 rows = []
             else:
                 raise
@@ -1317,7 +1333,7 @@ def run_rag_search(question: str, api_key: str | None = None) -> dict[str, Any]:
         else:
             prompt = (
                 "You are an analyst for a business datalakehouse called Lake of Tears. "
-                "Note: No semantic vector embeddings were found in s3://datalake/embeddings/**/*.parquet for this query. "
+                f"Note: No semantic vector embeddings were found in s3://datalake/workspaces/{clean_ws}/embeddings/**/*.parquet for this query. "
                 "Answer the user's question clearly and let them know that semantic embeddings have not yet been generated "
                 "for this dataset.\n\n"
                 f"Question: {question}"
@@ -1337,6 +1353,8 @@ def run_genie_chat(
     model: str | None = None,
     api_key: str | None = None,
     cancel: Any = None,
+    workspace_slug: str = "default",
+    allowed_patterns: list[str] | None = None,
 ) -> dict[str, Any]:
     """Execute the Databricks Genie-style conversational data analyst loop:
     Question -> Schema Discovery -> SQL Synthesis -> DuckDB Execution (with 1-step self-correction) ->
@@ -1364,7 +1382,13 @@ def run_genie_chat(
     if mode == "rag":
         if _is_cancelled():
             return _cancelled_res()
-        rag_res = run_rag_search(question, api_key=effective_key)
+        rag_res = run_rag_search(
+            question,
+            api_key=effective_key,
+            workspace_slug=workspace_slug,
+            catalogs=catalogs,
+            allowed_patterns=allowed_patterns,
+        )
         if not rag_res.get("ok"):
             return {"ok": False, "mode": "rag", "error": rag_res.get("error")}
         return {
@@ -1434,6 +1458,7 @@ def run_genie_chat(
         catalogs=catalogs,
         read_only=True,
         api_key=effective_key,
+        workspace_slug=workspace_slug,
     )
 
     if _is_cancelled():
@@ -1459,6 +1484,7 @@ def run_genie_chat(
                 catalogs=catalogs,
                 read_only=True,
                 api_key=effective_key,
+                workspace_slug=workspace_slug,
             )
             if retry_res["ok"]:
                 generated_sql = candidate_sql
@@ -1470,7 +1496,13 @@ def run_genie_chat(
 
     snippets: list[dict[str, Any]] = []
     if mode == "hybrid" or not exec_res["ok"]:
-        rag_res = run_rag_search(question, api_key=effective_key)
+        rag_res = run_rag_search(
+            question,
+            api_key=effective_key,
+            workspace_slug=workspace_slug,
+            catalogs=catalogs,
+            allowed_patterns=allowed_patterns,
+        )
         if rag_res.get("ok"):
             snippets = rag_res.get("snippets", [])
 

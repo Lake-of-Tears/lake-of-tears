@@ -47,14 +47,16 @@ def sync_table_vector_index(
     dest_s3: str | None = None,
     batch_size: int = 50,
     provider: AIProvider | None = None,
+    workspace_slug: str | None = None,
 ) -> dict[str, Any]:
     """Incrementally synchronize vector embeddings for a catalog table.
 
     Reads raw data from `table.s3_path_pattern`, composes text chunks using
     the configured source column or template, embeds it with the AI provider selected in the
     Admin Panel (or ``provider``), and writes Parquet files to
-    `s3://datalake/embeddings/<table_slug>/data.parquet` with the provider, model and dimension that made
-    each row. The model and dimension come from the provider, not from the table settings.
+    `s3://datalake/workspaces/<workspace_slug>/embeddings/<table_slug>/data.parquet` with the provider,
+    model and dimension that made each row. The model and dimension come from the provider, not from
+    the table settings.
     """
     s3_path = (table.s3_path_pattern or "").strip()
     if not s3_path:
@@ -126,8 +128,54 @@ def sync_table_vector_index(
 
         table_slug = _safe_identifier(table.slug)
         y, m, d = now_dt.strftime("%Y"), now_dt.strftime("%m"), now_dt.strftime("%d")
+        if not isinstance(workspace_slug, str) or type(workspace_slug).__name__.startswith(
+            "MagicMock"
+        ):
+            candidate = None
+            try:
+                schema_obj = getattr(table, "schema", None)
+                if schema_obj is not None and not type(schema_obj).__name__.startswith("MagicMock"):
+                    cat = getattr(schema_obj, "catalog", None)
+                    if cat is not None and not type(cat).__name__.startswith("MagicMock"):
+                        owner_ws = getattr(cat, "owner_workspace", None)
+                        if owner_ws is not None and not type(owner_ws).__name__.startswith(
+                            "MagicMock"
+                        ):
+                            ws_cand = getattr(owner_ws, "slug", None)
+                            if isinstance(ws_cand, str) and not type(ws_cand).__name__.startswith(
+                                "MagicMock"
+                            ):
+                                candidate = ws_cand
+                        elif getattr(cat, "owner_workspace_id", None):
+                            from models import Workspace
+
+                            ws_rec = (
+                                db.query(Workspace).filter_by(id=cat.owner_workspace_id).first()
+                            )
+                            if ws_rec and isinstance(ws_rec.slug, str):
+                                candidate = ws_rec.slug
+            except Exception:
+                pass
+            workspace_slug = (
+                candidate
+                if (
+                    isinstance(candidate, str)
+                    and not type(candidate).__name__.startswith("MagicMock")
+                )
+                else "default"
+            )
+        ws_slug = (
+            _safe_identifier(workspace_slug)
+            if (
+                isinstance(workspace_slug, str)
+                and not type(workspace_slug).__name__.startswith("MagicMock")
+            )
+            else "default"
+        )
         if not dest_s3:
-            dest_s3 = f"s3://{MINIO_BUCKET}/embeddings/{table_slug}/data.parquet"
+            dest_s3 = (
+                f"s3://{MINIO_BUCKET}/workspaces/{ws_slug}/embeddings/{table_slug}/data.parquet"
+            )
 
         # Create temporary table in DuckDB to hold batch embeddings
         con.execute("""

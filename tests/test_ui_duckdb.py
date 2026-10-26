@@ -168,7 +168,7 @@ def test_ai_query_parameterized_execution():
     assert result["snippets"][0]["score"] == 0.9999
 
     mock_get_conn.assert_called_once_with()
-    s3 = "s3://mock-bucket/embeddings/**/*.parquet"
+    s3 = "s3://mock-bucket/workspaces/default/embeddings/**/*.parquet"
     mock_client.models.embed_content.assert_called_once_with(
         contents="What was total revenue?", config={"task_type": "RETRIEVAL_QUERY"}
     )
@@ -177,6 +177,68 @@ def test_ai_query_parameterized_execution():
     assert search_sql == main.ai_gateway_client.vector_search_sql(4, has_model_column=True)
     assert search_params == [test_vec, s3, "stub-embed", 5]
     mock_con.close.assert_called_once()
+
+
+def test_ai_query_workspace_scoped_and_shared_catalogs():
+    """Verify _ai_query scopes search to custom workspace and includes shared catalog vectors."""
+    test_vec = [0.2] * 4
+
+    mock_embed_resp = MagicMock()
+    mock_embed_resp.embeddings = [MagicMock(values=test_vec)]
+    mock_embed_resp.model = "stub-embed"
+    mock_embed_resp.dimension = 4
+
+    mock_client = MagicMock()
+    mock_client.models.embed_content.return_value = mock_embed_resp
+    mock_client.models.generate_content.return_value = MagicMock(text="Workspace response")
+
+    probe = MagicMock()
+    probe.description = [("source",), ("model",), ("embedding",)]
+    search = MagicMock()
+    search.fetchall.return_value = [
+        ("custom_source", "2024-01-01 12:00:00", "Custom workspace content", 0.95)
+    ]
+    mock_con = MagicMock()
+    mock_con.execute.side_effect = [probe, search]
+
+    shared_catalogs = [
+        {
+            "slug": "finance_cat",
+            "schemas": [
+                {
+                    "slug": "gold",
+                    "tables": [
+                        {
+                            "slug": "charges",
+                            "vector_index": {
+                                "s3_vector_path": "s3://mock-bucket/workspaces/finance/embeddings/charges/data.parquet"
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+
+    with (
+        patch.object(main, "_get_ai_access", return_value="gateway"),
+        patch.object(main, "_ai_client", return_value=mock_client),
+        patch.object(main, "MINIO_BUCKET", "mock-bucket"),
+        patch.object(main, "_duckdb_connection", return_value=mock_con),
+    ):
+        result = main._ai_query(
+            "What was revenue in analytics?",
+            workspace_slug="analytics",
+            catalogs=shared_catalogs,
+        )
+
+    assert result["ok"] is True
+    search_sql, search_params = mock_con.execute.call_args_list[1].args
+    expected_patterns = [
+        "s3://mock-bucket/workspaces/analytics/embeddings/**/*.parquet",
+        "s3://mock-bucket/workspaces/finance/embeddings/charges/data.parquet",
+    ]
+    assert search_params == [test_vec, expected_patterns, "stub-embed", 5]
 
 
 def test_vector_search_sql_only_interpolates_an_integer_dimension():

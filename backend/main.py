@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import logging
 import os
 import re
 import threading
@@ -63,6 +64,7 @@ from oauth import enabled_providers, get_oauth_redirect, handle_oauth_callback
 from pipelines_router import router as pipelines_router
 from schemas import (
     AddMemberRequest,
+    AnomalyDetectRequest,
     CandidateMemberResponse,
     CatalogAccessResponse,
     CatalogDirectoryItem,
@@ -106,6 +108,8 @@ from schemas import (
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 from storage_router import router as storage_router
+
+logger = logging.getLogger("lakehouse.backend")
 
 _DEFAULT_SOFT_DELETE_DAYS = 30
 _DEFAULT_WORKSPACE_INACTIVE_DAYS = 30
@@ -2023,7 +2027,10 @@ def sync_table_vector_index_endpoint(
 
     import vector_index_service
 
-    res = vector_index_service.sync_table_vector_index(table, db)
+    ws_slug = (ws.slug if ws else None) or (
+        catalog.owner_workspace.slug if getattr(catalog, "owner_workspace", None) else None
+    )
+    res = vector_index_service.sync_table_vector_index(table, db, workspace_slug=ws_slug)
     if not res.get("ok"):
         raise HTTPException(500, res.get("error", "Failed to sync vector index"))
     return CatalogTableResponse.model_validate(table)
@@ -2412,6 +2419,64 @@ def workspace_catalog_manifest(
         .all()
     )
     return _catalog_manifest_projection(catalogs)
+
+
+@app.post("/api/workspaces/{workspace_id}/anomalies/detect")
+def detect_workspace_anomalies(
+    workspace_id: str,
+    req: AnomalyDetectRequest | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    ws_uuid = _as_uuid(workspace_id)
+    ws = (
+        db.query(Workspace).filter(Workspace.id == ws_uuid, Workspace.status == "active").first()
+        if ws_uuid
+        else None
+    )
+    if not ws:
+        raise HTTPException(404, "Workspace not found")
+
+    if current_user.role != "superadmin":
+        is_member = any(
+            str(m.workspace_id) == str(workspace_id) for m in current_user.workspace_memberships
+        )
+        if not is_member:
+            has_share = (
+                db.query(WorkspaceShare)
+                .filter(
+                    WorkspaceShare.workspace_id == ws.id,
+                    WorkspaceShare.user_id == current_user.id,
+                    WorkspaceShare.status == "approved",
+                )
+                .first()
+            )
+            if not has_share:
+                raise HTTPException(403, "Not a member of this workspace")
+
+    import sys
+    from pathlib import Path
+
+    pipeline_dir = Path(__file__).resolve().parent.parent / "pipeline" / "embed"
+    if str(pipeline_dir) not in sys.path:
+        sys.path.insert(0, str(pipeline_dir))
+
+    try:
+        from anomaly_detect import detect_anomalies
+
+        req_src = req.source if req else None
+        req_tbl = req.table_slug if req else None
+        req_contam = req.contamination if req else 0.05
+        res = detect_anomalies(
+            source=req_src or "truenas",
+            contamination=req_contam,
+            workspace_slug=ws.slug,
+            table_slug=req_tbl,
+        )
+        return {"ok": True, "workspace": ws.slug, "summary": res}
+    except Exception as exc:
+        logger.exception("Anomaly detection failed for workspace %s: %s", ws.slug, exc)
+        return {"ok": False, "workspace": ws.slug, "error": str(exc)}
 
 
 @app.get(

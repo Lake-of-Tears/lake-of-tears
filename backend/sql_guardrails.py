@@ -20,7 +20,7 @@ from sqlglot import exp
 logger = logging.getLogger(__name__)
 
 DEFAULT_BUCKET = os.getenv("MINIO_BUCKET", "datalake")
-SYSTEM_ALLOWED_PREFIXES = ("raw/", "embeddings/")
+SYSTEM_ALLOWED_PREFIXES = ("raw/",)
 _GLOB_CHARS = re.compile(r"[*?\[]")
 _S3_URI_RE = re.compile(r"s3://[^\s'\",;)\]]+", re.IGNORECASE)
 
@@ -85,7 +85,7 @@ def s3_prefix_for_pattern(pattern: str, bucket: str = DEFAULT_BUCKET) -> str | N
 
 
 def extract_s3_patterns_from_catalogs(catalogs: list[dict[str, Any]] | None) -> list[str]:
-    """Extract all configured s3_path_pattern strings from workspace catalog metadata."""
+    """Extract all configured s3_path_pattern and s3_vector_path strings from workspace catalog metadata."""
     patterns: list[str] = []
     if not catalogs:
         return patterns
@@ -96,6 +96,11 @@ def extract_s3_patterns_from_catalogs(catalogs: list[dict[str, Any]] | None) -> 
                 pat = (table.get("s3_path_pattern") or "").strip()
                 if pat:
                     patterns.append(pat)
+                vec_cfg = table.get("vector_index") or {}
+                if isinstance(vec_cfg, dict):
+                    vec_path = (vec_cfg.get("s3_vector_path") or "").strip()
+                    if vec_path:
+                        patterns.append(vec_path)
     return patterns
 
 

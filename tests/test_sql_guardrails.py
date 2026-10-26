@@ -169,18 +169,66 @@ class TestPathAuthorization:
         )
         assert allowed_raw is True
 
-        allowed_embed, _ = is_s3_path_allowed(
+        # Global embeddings/ is deprecated from SYSTEM_ALLOWED_PREFIXES
+        allowed_embed, err_embed = is_s3_path_allowed(
             s3_uri="s3://datalake/embeddings/hubspot/data.parquet",
             workspace_slug="analytics",
             bucket="datalake",
         )
-        assert allowed_embed is True
+        assert allowed_embed is False
+        assert "outside permitted prefix" in err_embed
+
+        # Active workspace embeddings are permitted
+        allowed_ws_embed, _ = is_s3_path_allowed(
+            s3_uri="s3://datalake/workspaces/analytics/embeddings/hubspot/data.parquet",
+            workspace_slug="analytics",
+            bucket="datalake",
+        )
+        assert allowed_ws_embed is True
+
+        # Other workspace embeddings are forbidden without shared catalog
+        allowed_other_embed, err_other = is_s3_path_allowed(
+            s3_uri="s3://datalake/workspaces/marketing/embeddings/hubspot/data.parquet",
+            workspace_slug="analytics",
+            bucket="datalake",
+        )
+        assert allowed_other_embed is False
+        assert "outside permitted prefix" in err_other
 
     def test_allowed_shared_catalog_pattern(self):
         allowed, _ = is_s3_path_allowed(
             s3_uri="s3://datalake/workspaces/shared_org/sales/2026/q1.parquet",
             workspace_slug="analytics",
             allowed_patterns=["s3://datalake/workspaces/shared_org/sales/**/*.parquet"],
+            bucket="datalake",
+        )
+        assert allowed is True
+
+    def test_shared_catalog_vector_index_permitted_by_guardrails(self):
+        catalogs = [
+            {
+                "slug": "finance_cat",
+                "schemas": [
+                    {
+                        "slug": "bronze",
+                        "tables": [
+                            {
+                                "slug": "charges",
+                                "s3_path_pattern": "s3://datalake/workspaces/finance/raw/charges/**/*.parquet",
+                                "vector_index": {
+                                    "enabled": True,
+                                    "s3_vector_path": "s3://datalake/workspaces/finance/embeddings/charges/data.parquet",
+                                },
+                            }
+                        ],
+                    }
+                ],
+            }
+        ]
+        allowed, _ = is_s3_path_allowed(
+            s3_uri="s3://datalake/workspaces/finance/embeddings/charges/data.parquet",
+            workspace_slug="analytics",
+            allowed_patterns=extract_s3_patterns_from_catalogs(catalogs),
             bucket="datalake",
         )
         assert allowed is True

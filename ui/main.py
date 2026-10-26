@@ -122,6 +122,13 @@ templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 _SCHEMA_TIER_ORDER = {"bronze": 1, "silver": 2, "gold": 3}
 
 
+def _safe_identifier(name: str | None) -> str:
+    slug = re.sub(r"[^A-Za-z0-9_]", "_", (name or "").strip())
+    if not slug or slug[0].isdigit():
+        slug = f"t_{slug}"
+    return slug
+
+
 def _sort_schemas(schemas: Any) -> list[dict[str, Any]]:
     if not isinstance(schemas, list):
         return []
@@ -608,7 +615,12 @@ def _run_query(
             cancel.detach()
 
 
-def _ai_query(question: str) -> dict[str, Any]:
+def _ai_query(
+    question: str,
+    workspace_slug: str = "default",
+    catalogs: list[dict[str, Any]] | None = None,
+    allowed_patterns: list[str] | None = None,
+) -> dict[str, Any]:
     if not _get_ai_access():
         return {"ok": False, "error": duckdb_ai.GEMINI_KEY_NOT_CONFIGURED_MSG}
     try:
@@ -621,22 +633,40 @@ def _ai_query(question: str) -> dict[str, Any]:
         )
         q_vec = embed_resp.embeddings[0].values
 
-        s3_pattern = f"s3://{MINIO_BUCKET}/embeddings/**/*.parquet"
+        clean_ws = _safe_identifier(workspace_slug) if workspace_slug else "default"
+        active_pattern = f"s3://{MINIO_BUCKET}/workspaces/{clean_ws}/embeddings/**/*.parquet"
+        patterns: list[str] = [active_pattern]
+
+        if catalogs:
+            for cat in catalogs:
+                for sch in cat.get("schemas") or []:
+                    for tbl in sch.get("tables") or []:
+                        vec_cfg = tbl.get("vector_index") or {}
+                        if isinstance(vec_cfg, dict):
+                            vpath = (vec_cfg.get("s3_vector_path") or "").strip()
+                            if vpath and vpath not in patterns:
+                                patterns.append(vpath)
+        if allowed_patterns:
+            for pat in allowed_patterns:
+                if pat and "embeddings" in pat and pat not in patterns:
+                    patterns.append(pat)
+
+        target_pattern: Any = patterns if len(patterns) > 1 else patterns[0]
         con = _duckdb_connection()
         try:
             columns = {
                 d[0]
                 for d in con.execute(
-                    "SELECT * FROM read_parquet(?, union_by_name = true) LIMIT 0", [s3_pattern]
+                    "SELECT * FROM read_parquet(?, union_by_name = true) LIMIT 0", [target_pattern]
                 ).description
             }
             has_model = "model" in columns
-            params = [q_vec, s3_pattern] + ([embed_resp.model] if has_model else []) + [5]
+            params = [q_vec, target_pattern] + ([embed_resp.model] if has_model else []) + [5]
             rows = con.execute(
                 ai_gateway_client.vector_search_sql(embed_resp.dimension, has_model), params
             ).fetchall()
         except Exception as exc:
-            if "No files found that match the pattern" in str(exc):
+            if "No files found that match the pattern" in str(exc) or "Cannot glob" in str(exc):
                 rows = []
             else:
                 raise
@@ -666,7 +696,7 @@ def _ai_query(question: str) -> dict[str, Any]:
         else:
             prompt = (
                 "You are an analyst for a business datalakehouse called Lake of Tears. "
-                "Note: No semantic vector embeddings were found in s3://datalake/embeddings/**/*.parquet for this query. "
+                f"Note: No semantic vector embeddings were found in s3://datalake/workspaces/{clean_ws}/embeddings/**/*.parquet for this query. "
                 "Answer the user's question clearly and let them know that semantic embeddings have not yet been generated "
                 "for this dataset.\n\n"
                 f"Question: {question}"
@@ -698,7 +728,7 @@ EXAMPLE_QUERIES = [
     },
     {
         "label": "Embedding count by source",
-        "sql": "SELECT source, COUNT(*) AS cnt FROM read_parquet('s3://datalake/embeddings/**/*.parquet') GROUP BY source ORDER BY cnt DESC",
+        "sql": "SELECT source, COUNT(*) AS cnt FROM read_parquet('s3://datalake/workspaces/default/embeddings/**/*.parquet') GROUP BY source ORDER BY cnt DESC",
     },
     {
         "label": "✨ AI Sentiment (ai_query)",
@@ -706,7 +736,7 @@ EXAMPLE_QUERIES = [
     },
     {
         "label": "✨ AI Summarize (ai_summarize)",
-        "sql": "SELECT source, ingested_at, ai_summarize(content) AS executive_brief FROM read_parquet('s3://datalake/embeddings/**/*.parquet') LIMIT 5",
+        "sql": "SELECT source, ingested_at, ai_summarize(content) AS executive_brief FROM read_parquet('s3://datalake/workspaces/default/embeddings/**/*.parquet') LIMIT 5",
     },
     {
         "label": "✨ AI Classify (ai_classify)",
@@ -714,7 +744,7 @@ EXAMPLE_QUERIES = [
     },
     {
         "label": "✨ AI Extract JSON (ai_extract)",
-        "sql": "SELECT source, ai_extract(content, ['metric', 'value', 'status']) AS structured_json FROM read_parquet('s3://datalake/embeddings/**/*.parquet') LIMIT 5",
+        "sql": "SELECT source, ai_extract(content, ['metric', 'value', 'status']) AS structured_json FROM read_parquet('s3://datalake/workspaces/default/embeddings/**/*.parquet') LIMIT 5",
     },
 ]
 
@@ -1723,9 +1753,14 @@ async def ai_get(request: Request):
 
 @app.post("/ai", response_class=HTMLResponse)
 async def ai_post(request: Request, question: str = Form(...)):
-    result = _ai_query(question)
-    catalogs = _resolve_ui_catalogs(request)
     ws = getattr(request.state, "workspace", None)
+    ws_slug = (ws.get("slug") if isinstance(ws, dict) else getattr(ws, "slug", None)) or "default"
+    catalogs = _resolve_ui_catalogs(request)
+    shared_workspaces_catalogs = _resolve_ui_shared_catalogs(request)
+    all_catalogs = list(catalogs or [])
+    for group in shared_workspaces_catalogs or []:
+        all_catalogs.extend(group.get("catalogs") or [])
+    result = _ai_query(question, workspace_slug=ws_slug, catalogs=all_catalogs)
     return templates.TemplateResponse(
         request=request,
         name="ai.html",
@@ -1745,10 +1780,41 @@ async def ai_post(request: Request, question: str = Form(...)):
 
 @app.get("/anomalies", response_class=HTMLResponse)
 async def anomalies(request: Request):
+    ws = getattr(request.state, "workspace", None)
     return templates.TemplateResponse(
         request=request,
         name="anomalies.html",
-        context={"request": request, "page": "anomalies"},
+        context={"request": request, "page": "anomalies", "workspace": ws},
+    )
+
+
+@app.post("/anomalies/scan", response_class=HTMLResponse)
+async def anomalies_scan(
+    request: Request, source: str = Form(""), contamination: float = Form(0.05)
+):
+    token = request.cookies.get("lake_token")
+    ws = getattr(request.state, "workspace", None)
+    result = None
+    error = None
+    if ws and token:
+        ws_id = str(ws.get("id"))
+        payload = {"source": source.strip() or None, "contamination": contamination}
+        res = _backend_post(f"/api/workspaces/{ws_id}/anomalies/detect", token, json=payload)
+        if isinstance(res, dict) and res.get("ok"):
+            result = res.get("summary")
+        else:
+            error = res.get("error") if isinstance(res, dict) else "Scan failed"
+    return templates.TemplateResponse(
+        request=request,
+        name="anomalies.html",
+        context={
+            "request": request,
+            "page": "anomalies",
+            "workspace": ws,
+            "result": result,
+            "error": error,
+            "source": source,
+        },
     )
 
 
@@ -4531,7 +4597,11 @@ def _ui_genie_chat(
     if mode == "rag":
         t0 = time.time()
         _report("rag_search", "Retrieving workspace semantic embeddings...", "running")
-        rag_res = _ai_query(question)
+        rag_res = _ai_query(
+            question,
+            workspace_slug=workspace_slug or "default",
+            catalogs=catalogs,
+        )
         _check_cancelled()
         if not rag_res.get("ok"):
             _report("rag_search", f"Semantic search failed: {rag_res.get('error')}", "error")
@@ -4700,7 +4770,11 @@ def _ui_genie_chat(
     if mode == "hybrid" or not exec_res["ok"]:
         t_rag = time.time()
         _report("rag_context", "Retrieving semantic search context...", "running")
-        rag_res = _ai_query(question)
+        rag_res = _ai_query(
+            question,
+            workspace_slug=workspace_slug or "default",
+            catalogs=catalogs,
+        )
         _check_cancelled()
         if rag_res.get("ok"):
             snippets = rag_res.get("snippets", [])
