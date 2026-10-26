@@ -338,11 +338,30 @@ def test_admin_settings_gemini_api_key_lifecycle_and_internal_endpoint():
 def test_backend_ai_chat_and_cancellation():
     """Verify POST /api/v1/ai/chat handles cancellation cleanly and supports /chat/cancel."""
     import inspect
-    from ai_router import cancel_genie_chat, execute_sql, explain_sql, fix_sql, generate_sql, genie_chat, get_ai_context
+
+    from ai_router import (
+        cancel_genie_chat,
+        execute_sql,
+        explain_sql,
+        fix_sql,
+        generate_sql,
+        genie_chat,
+        get_ai_context,
+    )
 
     # Verify all AI endpoints are non-coroutine defs to prevent event loop blocking
-    for fn in (get_ai_context, execute_sql, generate_sql, fix_sql, explain_sql, genie_chat, cancel_genie_chat):
-        assert not inspect.iscoroutinefunction(fn), f"{fn.__name__} must be sync def to run in threadpool"
+    for fn in (
+        get_ai_context,
+        execute_sql,
+        generate_sql,
+        fix_sql,
+        explain_sql,
+        genie_chat,
+        cancel_genie_chat,
+    ):
+        assert not inspect.iscoroutinefunction(
+            fn
+        ), f"{fn.__name__} must be sync def to run in threadpool"
 
     _, workspace, token = _setup_workspace_context(role="admin")
     try:

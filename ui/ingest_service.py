@@ -5,7 +5,7 @@ import os
 import re
 import tempfile
 import uuid
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -58,9 +58,9 @@ def detect_file_format(filename: str) -> str:
 def _safe_val(v: Any) -> Any:
     if v is None:
         return None
-    if isinstance(v, (int, float, bool, str)):
+    if isinstance(v, int | float | bool | str):
         return v
-    if isinstance(v, (datetime, date)):
+    if isinstance(v, datetime | date):
         return v.isoformat()
     return str(v)
 
@@ -235,7 +235,9 @@ def validate_and_jail_s3_path(
 
     if raw.startswith("workspaces/"):
         if not raw.startswith(expected_ws_prefix):
-            raise ValueError(f"Cross-workspace path access denied. Must reside in 'workspaces/{clean_slug}/'.")
+            raise ValueError(
+                f"Cross-workspace path access denied. Must reside in 'workspaces/{clean_slug}/'."
+            )
         jailed = raw
     else:
         # Prepend workspace prefix
@@ -267,7 +269,9 @@ def inspect_s3_parquet_path(
 
     try:
         escaped_uri = s3_uri.replace("'", "''")
-        desc_rows = con.execute(f"DESCRIBE SELECT * FROM read_parquet('{escaped_uri}') LIMIT 0").fetchall()
+        desc_rows = con.execute(
+            f"DESCRIBE SELECT * FROM read_parquet('{escaped_uri}') LIMIT 0"
+        ).fetchall()
         return [{"name": r[0], "type": r[1]} for r in desc_rows]
     finally:
         if close_con:

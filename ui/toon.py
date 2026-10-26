@@ -124,7 +124,7 @@ def parse_toon(text: str) -> dict[str, Any]:
 
             if nested_block:
                 # Deduce common leading indent
-                dedented = "\n".join(l.lstrip() for l in nested_block)
+                dedented = "\n".join(line.lstrip() for line in nested_block)
                 result[key] = parse_toon(dedented)
             else:
                 result[key] = None

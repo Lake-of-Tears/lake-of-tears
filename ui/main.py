@@ -1284,9 +1284,7 @@ async def notebooks(request: Request):
     )
 
 
-def _get_workspace_connectors(
-    workspace_slug: str | None, stats: dict[str, Any]
-) -> dict[str, Any]:
+def _get_workspace_connectors(workspace_slug: str | None, stats: dict[str, Any]) -> dict[str, Any]:
     return connector_registry.resolve_workspace_feeds(workspace_slug, stats)
 
 
@@ -1371,7 +1369,10 @@ async def api_ingest_create_table_from_file(
     my_role = user.get("role") if is_superadmin else (ws.get("my_role") or ws.get("role") or "read")
     if my_role not in ("admin", "write", "superadmin", "owner"):
         return JSONResponse(
-            {"ok": False, "error": "Write or Admin workspace permissions required to create tables"},
+            {
+                "ok": False,
+                "error": "Write or Admin workspace permissions required to create tables",
+            },
             status_code=403,
         )
 
@@ -1384,7 +1385,9 @@ async def api_ingest_create_table_from_file(
         content = await file.read()
         parquet_path, columns, row_count = ingest_service.convert_to_parquet_file(content, filename)
     except Exception as exc:
-        return JSONResponse({"ok": False, "error": f"File conversion failed: {exc}"}, status_code=400)
+        return JSONResponse(
+            {"ok": False, "error": f"File conversion failed: {exc}"}, status_code=400
+        )
 
     try:
         catalogs = _resolve_ui_catalogs(request)
@@ -1422,11 +1425,17 @@ async def api_ingest_create_table_from_file(
             target_schema = created_schema
         else:
             target_schema = next(
-                (s for s in target_catalog.get("schemas", []) if str(s.get("id")) == str(schema_id)),
+                (
+                    s
+                    for s in target_catalog.get("schemas", [])
+                    if str(s.get("id")) == str(schema_id)
+                ),
                 None,
             )
             if not target_schema:
-                return JSONResponse({"ok": False, "error": "Target schema not found"}, status_code=404)
+                return JSONResponse(
+                    {"ok": False, "error": "Target schema not found"}, status_code=404
+                )
 
         sch_slug = target_schema.get("slug") or target_schema.get("name") or "bronze"
 
@@ -1545,7 +1554,10 @@ async def api_ingest_register_s3_path(request: Request):
     my_role = user.get("role") if is_superadmin else (ws.get("my_role") or ws.get("role") or "read")
     if my_role not in ("admin", "write", "superadmin", "owner"):
         return JSONResponse(
-            {"ok": False, "error": "Write or Admin workspace permissions required to register tables"},
+            {
+                "ok": False,
+                "error": "Write or Admin workspace permissions required to register tables",
+            },
             status_code=403,
         )
 
@@ -3012,7 +3024,11 @@ async def api_workspace_manifest(request: Request):
         {"title": "SQL Editor", "subtitle": "DuckDB SQL queries", "url": "/sql"},
         {"title": "Visualizations", "subtitle": "Apache Superset dashboards", "url": "/dashboards"},
         {"title": "Pipelines", "subtitle": "Apache Airflow DAGs", "url": "/pipelines"},
-        {"title": "Add Data", "subtitle": "Data ingestion launchpad & connectors", "url": "/ingest"},
+        {
+            "title": "Add Data",
+            "subtitle": "Data ingestion launchpad & connectors",
+            "url": "/ingest",
+        },
         {"title": "AI Query", "subtitle": "Gemini natural language SQL", "url": "/ai"},
         {
             "title": "Anomaly Detection",
@@ -3304,7 +3320,11 @@ async def api_workspace_search(request: Request, q: str = ""):
         {"title": "SQL Editor", "subtitle": "DuckDB SQL queries", "url": "/sql"},
         {"title": "Visualizations", "subtitle": "Apache Superset dashboards", "url": "/dashboards"},
         {"title": "Pipelines", "subtitle": "Apache Airflow DAGs", "url": "/pipelines"},
-        {"title": "Add Data", "subtitle": "Data ingestion launchpad & connectors", "url": "/ingest"},
+        {
+            "title": "Add Data",
+            "subtitle": "Data ingestion launchpad & connectors",
+            "url": "/ingest",
+        },
         {"title": "AI Query", "subtitle": "Gemini natural language SQL", "url": "/ai"},
         {
             "title": "Anomaly Detection",
@@ -4659,7 +4679,12 @@ def _ui_genie_chat(
                     sql=candidate_sql,
                 )
             else:
-                _report("sql_fix", "Self-correction candidate failed to execute", "error", duration_ms=fix_ms)
+                _report(
+                    "sql_fix",
+                    "Self-correction candidate failed to execute",
+                    "error",
+                    duration_ms=fix_ms,
+                )
         else:
             _report("sql_fix", "Could not generate fix for SQL error", "error")
     else:
@@ -4680,7 +4705,12 @@ def _ui_genie_chat(
         if rag_res.get("ok"):
             snippets = rag_res.get("snippets", [])
         rag_ms = int((time.time() - t_rag) * 1000)
-        _report("rag_context", f"Retrieved {len(snippets)} semantic snippet(s)", "done", duration_ms=rag_ms)
+        _report(
+            "rag_context",
+            f"Retrieved {len(snippets)} semantic snippet(s)",
+            "done",
+            duration_ms=rag_ms,
+        )
 
     columns = exec_res.get("columns", [])
     raw_rows = exec_res.get("rows", [])

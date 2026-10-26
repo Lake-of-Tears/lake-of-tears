@@ -14,6 +14,7 @@ except ImportError:
 
 logger = logging.getLogger("lake.connector_registry")
 
+
 def _find_connectors_dir() -> Path:
     candidates = [
         Path(__file__).resolve().parent.parent / "connectors",
@@ -89,9 +90,7 @@ class ConnectorRegistry:
         """
         clean_slug = (workspace_slug or "default").strip("/")
         sources_by_key = (
-            {s["key"]: s for s in bucket_stats.get("sources", [])}
-            if bucket_stats.get("ok")
-            else {}
+            {s["key"]: s for s in bucket_stats.get("sources", [])} if bucket_stats.get("ok") else {}
         )
 
         active_feeds: list[dict[str, Any]] = []
