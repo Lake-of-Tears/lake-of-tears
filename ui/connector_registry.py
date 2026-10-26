@@ -129,10 +129,16 @@ class ConnectorRegistry:
 
             community_connectors.append(enriched)
 
+        category_counts: dict[str, int] = {}
+        for conn in community_connectors:
+            cat = conn.get("category", "General")
+            category_counts[cat] = category_counts.get(cat, 0) + 1
+
         return {
             "active_feeds": active_feeds,
             "community_connectors": community_connectors,
             "categories": self.get_categories(),
+            "category_counts": category_counts,
             "total_count": len(all_connectors),
         }
 
