@@ -1336,16 +1336,33 @@ def run_genie_chat(
     catalogs: list[dict[str, Any]] | None = None,
     model: str | None = None,
     api_key: str | None = None,
+    cancel: Any = None,
 ) -> dict[str, Any]:
     """Execute the Databricks Genie-style conversational data analyst loop:
     Question -> Schema Discovery -> SQL Synthesis -> DuckDB Execution (with 1-step self-correction) ->
     Chart Inference + Grounded Narrative Insight.
     """
+    def _is_cancelled() -> bool:
+        if cancel is not None:
+            if hasattr(cancel, "is_set") and cancel.is_set():
+                return True
+            if hasattr(cancel, "cancelled") and cancel.cancelled:
+                return True
+        return False
+
+    def _cancelled_res() -> dict[str, Any]:
+        return {"ok": False, "mode": mode, "cancelled": True, "error": "Request cancelled"}
+
+    if _is_cancelled():
+        return _cancelled_res()
+
     effective_key = _resolve_api_key(api_key)
     if not effective_key:
         return {"ok": False, "mode": mode, "error": GEMINI_KEY_NOT_CONFIGURED_MSG}
 
     if mode == "rag":
+        if _is_cancelled():
+            return _cancelled_res()
         rag_res = run_rag_search(question, api_key=effective_key)
         if not rag_res.get("ok"):
             return {"ok": False, "mode": "rag", "error": rag_res.get("error")}
@@ -1363,6 +1380,7 @@ def run_genie_chat(
             "chart_config": None,
             "snippets": rag_res.get("snippets", []),
             "tables_used": [],
+            "cancelled": False,
             "error": None,
         }
 
@@ -1406,6 +1424,9 @@ def run_genie_chat(
     except Exception as exc:
         return {"ok": False, "mode": mode, "error": f"Failed to synthesize SQL: {exc}"}
 
+    if _is_cancelled():
+        return _cancelled_res()
+
     # Execute generated SQL in DuckDB (read_only=True)
     exec_res = execute_sql_query(
         generated_sql,
@@ -1413,6 +1434,9 @@ def run_genie_chat(
         read_only=True,
         api_key=effective_key,
     )
+
+    if _is_cancelled():
+        return _cancelled_res()
 
     self_corrected = False
     initial_error: str | None = None
@@ -1439,6 +1463,9 @@ def run_genie_chat(
                 generated_sql = candidate_sql
                 exec_res = retry_res
                 self_corrected = True
+
+    if _is_cancelled():
+        return _cancelled_res()
 
     snippets: list[dict[str, Any]] = []
     if mode == "hybrid" or not exec_res["ok"]:
@@ -1497,6 +1524,9 @@ def run_genie_chat(
                 "tables_used": tables_used,
                 "error": exec_res.get("error"),
             }
+
+    if _is_cancelled():
+        return _cancelled_res()
 
     try:
         answer = _call_gemini_text(insight_prompt, model=model, api_key=effective_key)

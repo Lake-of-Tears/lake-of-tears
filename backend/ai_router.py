@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any
 
 import ai_service
@@ -26,6 +27,9 @@ logger = logging.getLogger("lake.backend.ai.router")
 
 router = APIRouter()
 
+_CANCEL_LOCK = threading.Lock()
+_GENIE_CANCEL_EVENTS: dict[str, threading.Event] = {}
+
 
 def _resolve_ai_context(
     workspace_slug: str | None = Query(None),
@@ -49,7 +53,7 @@ def _resolve_ai_context(
 
 
 @router.get("/context")
-async def get_ai_context(
+def get_ai_context(
     ctx: tuple[Workspace, str, User] = Depends(_resolve_ai_context),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
@@ -69,7 +73,7 @@ async def get_ai_context(
 
 
 @router.post("/sql/execute", response_model=SqlExecuteResponse)
-async def execute_sql(
+def execute_sql(
     req: SqlExecuteRequest,
     ctx: tuple[Workspace, str, User] = Depends(_resolve_ai_context),
     db: Session = Depends(get_db),
@@ -95,7 +99,7 @@ async def execute_sql(
 
 
 @router.post("/sql/generate", response_model=SqlGenerateResponse)
-async def generate_sql(
+def generate_sql(
     req: SqlGenerateRequest,
     ctx: tuple[Workspace, str, User] = Depends(_resolve_ai_context),
     db: Session = Depends(get_db),
@@ -113,7 +117,7 @@ async def generate_sql(
 
 
 @router.post("/sql/fix", response_model=SqlFixResponse)
-async def fix_sql(
+def fix_sql(
     req: SqlFixRequest,
     ctx: tuple[Workspace, str, User] = Depends(_resolve_ai_context),
     db: Session = Depends(get_db),
@@ -131,7 +135,7 @@ async def fix_sql(
 
 
 @router.post("/sql/explain", response_model=SqlExplainResponse)
-async def explain_sql(
+def explain_sql(
     req: SqlExplainRequest,
     ctx: tuple[Workspace, str, User] = Depends(_resolve_ai_context),
     db: Session = Depends(get_db),
@@ -148,7 +152,7 @@ async def explain_sql(
 
 
 @router.post("/chat", response_model=GenieChatResponse)
-async def genie_chat(
+def genie_chat(
     req: GenieChatRequest,
     ctx: tuple[Workspace, str, User] = Depends(_resolve_ai_context),
     db: Session = Depends(get_db),
@@ -157,11 +161,38 @@ async def genie_chat(
     ws, _, _ = ctx
     catalogs = ai_service.get_workspace_catalogs_from_db(db, ws.id)
     history_dicts = [m.model_dump() for m in req.history]
-    result = ai_service.run_genie_chat(
-        question=req.question,
-        mode=req.mode,
-        history=history_dicts,
-        catalogs=catalogs,
-        model=req.model,
-    )
+
+    cancel_event = threading.Event()
+    if req.request_id:
+        with _CANCEL_LOCK:
+            _GENIE_CANCEL_EVENTS[req.request_id] = cancel_event
+
+    try:
+        result = ai_service.run_genie_chat(
+            question=req.question,
+            mode=req.mode,
+            history=history_dicts,
+            catalogs=catalogs,
+            model=req.model,
+            cancel=cancel_event,
+        )
+    finally:
+        if req.request_id:
+            with _CANCEL_LOCK:
+                _GENIE_CANCEL_EVENTS.pop(req.request_id, None)
+
     return GenieChatResponse(**result)
+
+
+@router.post("/chat/cancel")
+def cancel_genie_chat(
+    body: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Handle cancellation requests for Genie conversational AI queries."""
+    req_id = str((body or {}).get("request_id") or "")
+    if req_id:
+        with _CANCEL_LOCK:
+            event = _GENIE_CANCEL_EVENTS.get(req_id)
+            if event:
+                event.set()
+    return {"ok": True, "cancelled": True}

@@ -177,12 +177,16 @@ spec:
               port: http
             initialDelaySeconds: 15
             periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /api/health
               port: http
             initialDelaySeconds: 10
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
           resources: {{ toYaml .Values.backend.resources | nindent 12 }}
           volumeMounts:
             - name: airflow-home

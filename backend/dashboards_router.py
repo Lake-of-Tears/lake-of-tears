@@ -150,7 +150,7 @@ def _find_dashboard(dashboard_id: str, workspace_id: uuid.UUID, db: Session) -> 
 
 
 @router.get("/stats", response_model=DashboardStatsResponse)
-async def get_dashboard_stats(
+def get_dashboard_stats(
     ctx: tuple[Workspace, str, User] = Depends(_resolve_dashboard_context),
     db: Session = Depends(get_db),
 ) -> DashboardStatsResponse:
@@ -171,7 +171,7 @@ async def get_dashboard_stats(
 
 
 @router.get("/datasets")
-async def list_available_datasets(
+def list_available_datasets(
     ctx: tuple[Workspace, str, User] = Depends(_resolve_dashboard_context),
 ) -> list[dict[str, Any]]:
     """List analytical datasets available for dashboard widget creation."""
@@ -179,7 +179,7 @@ async def list_available_datasets(
 
 
 @router.get("", response_model=list[DashboardResponse])
-async def list_dashboards(
+def list_dashboards(
     ctx: tuple[Workspace, str, User] = Depends(_resolve_dashboard_context),
     db: Session = Depends(get_db),
 ) -> list[DashboardResponse]:
@@ -195,7 +195,7 @@ async def list_dashboards(
 
 
 @router.post("", response_model=DashboardResponse, status_code=status.HTTP_201_CREATED)
-async def create_dashboard(
+def create_dashboard(
     req: CreateDashboardRequest,
     ctx: tuple[Workspace, str, User] = Depends(_dashboard_write_context),
     db: Session = Depends(get_db),
@@ -230,7 +230,7 @@ async def create_dashboard(
 
 
 @router.get("/{dashboard_id}", response_model=DashboardResponse)
-async def get_dashboard(
+def get_dashboard(
     dashboard_id: str,
     ctx: tuple[Workspace, str, User] = Depends(_resolve_dashboard_context),
     db: Session = Depends(get_db),
@@ -242,7 +242,7 @@ async def get_dashboard(
 
 
 @router.patch("/{dashboard_id}", response_model=DashboardResponse)
-async def update_dashboard(
+def update_dashboard(
     dashboard_id: str,
     req: UpdateDashboardRequest,
     ctx: tuple[Workspace, str, User] = Depends(_dashboard_write_context),
@@ -272,7 +272,7 @@ async def update_dashboard(
 @router.post(
     "/{dashboard_id}/widgets", response_model=DashboardResponse, status_code=status.HTTP_201_CREATED
 )
-async def add_widget(
+def add_widget(
     dashboard_id: str,
     widget: WidgetConfig,
     ctx: tuple[Workspace, str, User] = Depends(_dashboard_write_context),
@@ -299,7 +299,7 @@ async def add_widget(
 
 
 @router.patch("/{dashboard_id}/widgets/{widget_id}", response_model=DashboardResponse)
-async def update_widget(
+def update_widget(
     dashboard_id: str,
     widget_id: str,
     widget_update: dict[str, Any],
@@ -329,7 +329,7 @@ async def update_widget(
 
 
 @router.delete("/{dashboard_id}/widgets/{widget_id}", response_model=DashboardResponse)
-async def delete_widget(
+def delete_widget(
     dashboard_id: str,
     widget_id: str,
     ctx: tuple[Workspace, str, User] = Depends(_dashboard_write_context),
@@ -350,7 +350,7 @@ async def delete_widget(
 
 
 @router.get("/{dashboard_id}/widgets/{widget_id}/data", response_model=WidgetDataResponse)
-async def get_widget_data(
+def get_widget_data(
     dashboard_id: str,
     widget_id: str,
     time_range: str | None = Query(None),
@@ -383,7 +383,7 @@ async def get_widget_data(
 
 
 @router.delete("/{dashboard_id}")
-async def delete_dashboard(
+def delete_dashboard(
     dashboard_id: str,
     ctx: tuple[Workspace, str, User] = Depends(_dashboard_write_context),
     db: Session = Depends(get_db),

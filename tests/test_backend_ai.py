@@ -333,3 +333,53 @@ def test_admin_settings_gemini_api_key_lifecycle_and_internal_endpoint():
         assert auth.get_stored_gemini_api_key(mock_db) == ""
     finally:
         backend_main.app.dependency_overrides.clear()
+
+
+def test_backend_ai_chat_and_cancellation():
+    """Verify POST /api/v1/ai/chat handles cancellation cleanly and supports /chat/cancel."""
+    import inspect
+    from ai_router import cancel_genie_chat, execute_sql, explain_sql, fix_sql, generate_sql, genie_chat, get_ai_context
+
+    # Verify all AI endpoints are non-coroutine defs to prevent event loop blocking
+    for fn in (get_ai_context, execute_sql, generate_sql, fix_sql, explain_sql, genie_chat, cancel_genie_chat):
+        assert not inspect.iscoroutinefunction(fn), f"{fn.__name__} must be sync def to run in threadpool"
+
+    _, workspace, token = _setup_workspace_context(role="admin")
+    try:
+        # Test cancel endpoint acknowledges cancellation
+        cancel_resp = client.post(
+            "/api/v1/ai/chat/cancel",
+            headers={"Authorization": f"Bearer {token}", "X-Workspace-Slug": workspace.slug},
+            json={"request_id": "test-req-123"},
+        )
+        assert cancel_resp.status_code == 200
+        assert cancel_resp.json() == {"ok": True, "cancelled": True}
+
+        # Test chat invocation with cancel token passed to service
+        with (
+            patch.object(ai_service, "get_workspace_catalogs_from_db", return_value=[]),
+            patch.object(
+                ai_service,
+                "run_genie_chat",
+                return_value={
+                    "ok": False,
+                    "mode": "genie",
+                    "cancelled": True,
+                    "error": "Request cancelled",
+                },
+            ) as mock_genie,
+        ):
+            chat_resp = client.post(
+                "/api/v1/ai/chat",
+                headers={"Authorization": f"Bearer {token}", "X-Workspace-Slug": workspace.slug},
+                json={"question": "Test query", "request_id": "req-cancelled-1"},
+            )
+            assert chat_resp.status_code == 200
+            data = chat_resp.json()
+            assert data["ok"] is False
+            assert data["cancelled"] is True
+            assert mock_genie.call_count == 1
+            call_kwargs = mock_genie.call_args.kwargs
+            assert call_kwargs["cancel"] is not None
+    finally:
+        backend_main.app.dependency_overrides.clear()

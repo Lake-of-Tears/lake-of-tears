@@ -629,6 +629,7 @@ class GenieChatRequest(BaseModel):
     mode: str = "genie"  # 'genie' | 'hybrid' | 'rag'
     history: list[ChatMessageItem] = []
     model: str | None = None
+    request_id: str | None = None
 
 
 class GenieChartConfig(BaseModel):
@@ -652,4 +653,5 @@ class GenieChatResponse(BaseModel):
     chart_config: GenieChartConfig | None = None
     snippets: list[dict[str, Any]] = []
     tables_used: list[str] = []
+    cancelled: bool = False
     error: str | None = None

@@ -75,7 +75,7 @@ def _storage_write_context(
 
 
 @router.get("/stats")
-async def get_storage_stats(
+def get_storage_stats(
     ctx: tuple[Any, str] = Depends(_resolve_storage_context),
 ) -> dict[str, Any]:
     """Get aggregated bucket storage metrics and top-level prefix breakdown for active workspace."""
@@ -84,7 +84,7 @@ async def get_storage_stats(
 
 
 @router.get("/browse")
-async def browse_storage(
+def browse_storage(
     prefix: str = Query("", description="S3 prefix to browse"),
     limit: int = Query(100, ge=1, le=1000, description="Max items per page"),
     continuation_token: str | None = Query(None, description="S3 pagination continuation token"),
@@ -113,7 +113,7 @@ async def browse_storage(
 
 
 @router.get("/objects/{key:path}/metadata")
-async def get_object_metadata(
+def get_object_metadata(
     key: str,
     ctx: tuple[Any, str] = Depends(_resolve_storage_context),
 ) -> dict[str, Any]:
@@ -137,7 +137,7 @@ async def get_object_metadata(
 
 
 @router.get("/objects/{key:path}/download")
-async def get_download_url(
+def get_download_url(
     key: str,
     expires_in: int = Query(3600, ge=60, le=86400),
     ctx: tuple[Any, str] = Depends(_resolve_storage_context),
@@ -167,7 +167,7 @@ async def get_download_url(
 
 
 @router.get("/objects/{key:path}/stream")
-async def stream_object(
+def stream_object(
     key: str,
     ctx: tuple[Any, str] = Depends(_resolve_storage_context),
 ) -> StreamingResponse:
@@ -190,7 +190,7 @@ async def stream_object(
 
 
 @router.delete("/objects/{key:path}")
-async def delete_object(
+def delete_object(
     key: str,
     ctx: tuple[Any, str] = Depends(_storage_write_context),
 ) -> dict[str, Any]:
@@ -241,7 +241,7 @@ async def upload_file(
 
 
 @router.post("/objects/{key:path}/upload-url")
-async def get_upload_url(
+def get_upload_url(
     key: str,
     content_type: str = Query("application/octet-stream"),
     expires_in: int = Query(3600, ge=60, le=86400),
