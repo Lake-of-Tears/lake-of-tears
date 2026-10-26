@@ -128,7 +128,9 @@ def sync_table_vector_index(
 
         table_slug = _safe_identifier(table.slug)
         y, m, d = now_dt.strftime("%Y"), now_dt.strftime("%m"), now_dt.strftime("%d")
-        if not isinstance(workspace_slug, str) or type(workspace_slug).__name__.startswith("MagicMock"):
+        if not isinstance(workspace_slug, str) or type(workspace_slug).__name__.startswith(
+            "MagicMock"
+        ):
             candidate = None
             try:
                 schema_obj = getattr(table, "schema", None)
@@ -136,22 +138,44 @@ def sync_table_vector_index(
                     cat = getattr(schema_obj, "catalog", None)
                     if cat is not None and not type(cat).__name__.startswith("MagicMock"):
                         owner_ws = getattr(cat, "owner_workspace", None)
-                        if owner_ws is not None and not type(owner_ws).__name__.startswith("MagicMock"):
+                        if owner_ws is not None and not type(owner_ws).__name__.startswith(
+                            "MagicMock"
+                        ):
                             ws_cand = getattr(owner_ws, "slug", None)
-                            if isinstance(ws_cand, str) and not type(ws_cand).__name__.startswith("MagicMock"):
+                            if isinstance(ws_cand, str) and not type(ws_cand).__name__.startswith(
+                                "MagicMock"
+                            ):
                                 candidate = ws_cand
                         elif getattr(cat, "owner_workspace_id", None):
                             from models import Workspace
 
-                            ws_rec = db.query(Workspace).filter_by(id=cat.owner_workspace_id).first()
+                            ws_rec = (
+                                db.query(Workspace).filter_by(id=cat.owner_workspace_id).first()
+                            )
                             if ws_rec and isinstance(ws_rec.slug, str):
                                 candidate = ws_rec.slug
             except Exception:
                 pass
-            workspace_slug = candidate if (isinstance(candidate, str) and not type(candidate).__name__.startswith("MagicMock")) else "default"
-        ws_slug = _safe_identifier(workspace_slug) if (isinstance(workspace_slug, str) and not type(workspace_slug).__name__.startswith("MagicMock")) else "default"
+            workspace_slug = (
+                candidate
+                if (
+                    isinstance(candidate, str)
+                    and not type(candidate).__name__.startswith("MagicMock")
+                )
+                else "default"
+            )
+        ws_slug = (
+            _safe_identifier(workspace_slug)
+            if (
+                isinstance(workspace_slug, str)
+                and not type(workspace_slug).__name__.startswith("MagicMock")
+            )
+            else "default"
+        )
         if not dest_s3:
-            dest_s3 = f"s3://{MINIO_BUCKET}/workspaces/{ws_slug}/embeddings/{table_slug}/data.parquet"
+            dest_s3 = (
+                f"s3://{MINIO_BUCKET}/workspaces/{ws_slug}/embeddings/{table_slug}/data.parquet"
+            )
 
         # Create temporary table in DuckDB to hold batch embeddings
         con.execute("""

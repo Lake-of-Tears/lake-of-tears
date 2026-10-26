@@ -247,7 +247,11 @@ def test_detect_anomalies_scopes_to_workspace_embeddings():
     mock_clf.fit_predict.return_value = [-1, 1]
 
     with (
-        patch.object(ad_mod, "provider_info", return_value={"dimension": 4, "embedding_model": "gemini-embedding-001"}),
+        patch.object(
+            ad_mod,
+            "provider_info",
+            return_value={"dimension": 4, "embedding_model": "gemini-embedding-001"},
+        ),
         patch.object(ad_mod, "IsolationForest", return_value=mock_clf),
         patch("duckdb.connect") as mock_duckdb_con,
         patch.object(ad_mod, "generate", return_value="Summary of anomalies"),
@@ -261,10 +265,21 @@ def test_detect_anomalies_scopes_to_workspace_embeddings():
 
         # DataFrame simulation
         import pandas as pd
-        df = pd.DataFrame([
-            {"content": "Metric normal", "embedding": [0.1, 0.1, 0.1, 0.1], "source_date": "2026-10-26"},
-            {"content": "Metric outlier", "embedding": [0.9, 0.9, 0.9, 0.9], "source_date": "2026-10-26"},
-        ])
+
+        df = pd.DataFrame(
+            [
+                {
+                    "content": "Metric normal",
+                    "embedding": [0.1, 0.1, 0.1, 0.1],
+                    "source_date": "2026-10-26",
+                },
+                {
+                    "content": "Metric outlier",
+                    "embedding": [0.9, 0.9, 0.9, 0.9],
+                    "source_date": "2026-10-26",
+                },
+            ]
+        )
         mock_probe.df.return_value = df
         con_instance.execute.return_value = mock_probe
 

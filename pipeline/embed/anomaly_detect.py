@@ -29,7 +29,9 @@ def detect_anomalies(
     con.execute("INSTALL httpfs; LOAD httpfs; INSTALL vss; LOAD vss;")
     endpoint = os.environ.get("MINIO_ENDPOINT", "minio:9000")
     access_key = os.environ.get("MINIO_ACCESS_KEY", os.environ.get("MINIO_ROOT_USER", "admin"))
-    secret_key = os.environ.get("MINIO_SECRET_KEY", os.environ.get("MINIO_ROOT_PASSWORD", "password123"))
+    secret_key = os.environ.get(
+        "MINIO_SECRET_KEY", os.environ.get("MINIO_ROOT_PASSWORD", "password123")
+    )
     con.execute(f"""
         SET s3_endpoint='{endpoint}';
         SET s3_access_key_id='{access_key}';

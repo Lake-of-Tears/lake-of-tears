@@ -1758,7 +1758,7 @@ async def ai_post(request: Request, question: str = Form(...)):
     catalogs = _resolve_ui_catalogs(request)
     shared_workspaces_catalogs = _resolve_ui_shared_catalogs(request)
     all_catalogs = list(catalogs or [])
-    for group in (shared_workspaces_catalogs or []):
+    for group in shared_workspaces_catalogs or []:
         all_catalogs.extend(group.get("catalogs") or [])
     result = _ai_query(question, workspace_slug=ws_slug, catalogs=all_catalogs)
     return templates.TemplateResponse(
