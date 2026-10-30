@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-DEPLOY_USER="${SUDO_USER:-openclaw}"
+DEPLOY_USER="${SUDO_USER:-$(whoami)}"
 
 echo "==> Installing system prerequisites"
 sudo apt-get update -q
@@ -64,12 +64,109 @@ sudo k3s kubectl create namespace lake-of-tears --dry-run=client -o yaml | sudo 
 echo "==> Installing Helm"
 curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
-# ── Secrets directory ─────────────────────────────────────────────────────────
-echo "==> Creating /etc/lake-of-tears/values-secret.yaml"
+# ── Configuration & Secrets directory ───────────────────────────────────────
+echo "==> Setting up /etc/lake-of-tears directory"
 sudo mkdir -p /etc/lake-of-tears
 sudo chown "${DEPLOY_USER}:${DEPLOY_USER}" /etc/lake-of-tears
 
-cat > /etc/lake-of-tears/values-secret.yaml << 'EOF'
+if [ ! -f /etc/lake-of-tears/values-prod.yaml ]; then
+    echo "==> Creating /etc/lake-of-tears/values-prod.yaml"
+    cat > /etc/lake-of-tears/values-prod.yaml << 'EOF'
+# /etc/lake-of-tears/values-prod.yaml
+# Production overrides for Lake of Tears.
+# Lives on the host VM and is never committed to git.
+
+global:
+  storageClass: local-path
+
+ingress:
+  enabled: true
+  className: nginx
+  host: app.lakeoftears.com
+  minioConsoleHost: minio.lakeoftears.com
+  minioApiHost: s3.lakeoftears.com
+  supersetHost: superset.lakeoftears.com
+
+lakeui:
+  minioConsoleUrl: "https://minio.lakeoftears.com"
+  supersetUrl: "https://superset.lakeoftears.com"
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+minio:
+  persistence:
+    size: 150Gi
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+
+jupyter:
+  persistence:
+    size: 20Gi
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "1Gi"
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+
+superset:
+  persistence:
+    size: 5Gi
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "1Gi"
+    limits:
+      cpu: "1"
+      memory: "2Gi"
+
+airflow:
+  persistence:
+    size: 10Gi
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "2Gi"
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+
+backend:
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "512Mi"
+
+postgres:
+  persistence:
+    size: 20Gi
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+EOF
+fi
+
+if [ ! -f /etc/lake-of-tears/values-secret.yaml ]; then
+    echo "==> Creating /etc/lake-of-tears/values-secret.yaml"
+    cat > /etc/lake-of-tears/values-secret.yaml << 'EOF'
 # /etc/lake-of-tears/values-secret.yaml
 # Secrets for the Lake of Tears Helm deployment.
 # This file lives ONLY on the VM and is never committed to git.
@@ -102,20 +199,21 @@ hubspot:
 postgres:
   dsn: ""
 EOF
+fi
 
 echo ""
 echo "==> Setup complete!"
 echo ""
 echo "NEXT STEPS:"
-echo "  1. Edit /etc/lake-of-tears/values-secret.yaml with your real credentials"
-echo "  2. Add your Jenkins agent public key to authorized_keys:"
-echo "       echo 'PASTE_JENKINS_PUBLIC_KEY_HERE' >> ~/.ssh/authorized_keys"
-echo "  3. In Jenkins: add a 'SSH Username with private key' credential"
-echo "       ID:       vm-deploy-key"
-echo "       Username: openclaw"
-echo "       Key:      (paste the private key that pairs with the public key above)"
+echo "  1. Review /etc/lake-of-tears/values-prod.yaml (hostnames and resources)"
+echo "  2. Edit /etc/lake-of-tears/values-secret.yaml with real credentials"
+echo "  3. Deploy Lake of Tears via Helm:"
+echo "       helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \\"
+echo "         --namespace lake-of-tears \\"
+echo "         --create-namespace \\"
+echo "         -f /etc/lake-of-tears/values-prod.yaml \\"
+echo "         -f /etc/lake-of-tears/values-secret.yaml"
 echo ""
-echo "  Once deployed, reach Lake of Tears at: http://lake.10.0.0.60.nip.io"
 echo "  Verify deployment status:"
 echo "       kubectl get pods -n lake-of-tears"
 echo ""

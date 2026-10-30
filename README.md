@@ -193,7 +193,8 @@ The Helm chart separates **non-secret config** (hostnames, image tags, resource 
 
 | File | Contents | Committed to git? |
 |------|----------|-------------------|
-| `deploy/helm/values-prod.yaml` | Hostnames, storage class, resource overrides | Yes |
+| `deploy/helm/values-prod.example.yaml` | Template for hostnames, storage class, resource overrides | Yes (Example) |
+| `/etc/lake-of-tears/values-prod.yaml` (or local `deploy/helm/values-prod.yaml`) | Production hostnames, storage class, resource overrides | **Never** (Gitignored) |
 | `/etc/lake-of-tears/values-secret.yaml` | All passwords and API keys | **Never** |
 
 ### Step 1 — Create your secrets file
@@ -266,8 +267,16 @@ python3 -c "import secrets; print(secrets.token_urlsafe(24))"
 
 ### Step 2 — Create your production values file
 
+Copy the example template (you can place it in `/etc/lake-of-tears/values-prod.yaml` or in `deploy/helm/values-prod.yaml` which is gitignored):
+
+```bash
+cp deploy/helm/values-prod.example.yaml /etc/lake-of-tears/values-prod.yaml
+```
+
+Customize the values for your domain and environment:
+
 ```yaml
-# deploy/helm/values-prod.yaml
+# /etc/lake-of-tears/values-prod.yaml
 global:
   storageClass: "nfs-client"   # your StorageClass name
 
@@ -298,7 +307,7 @@ lakeui:
 helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
   --namespace lake-of-tears \
   --create-namespace \
-  --values deploy/helm/values-prod.yaml \
+  --values /etc/lake-of-tears/values-prod.yaml \
   --values /etc/lake-of-tears/values-secret.yaml \
   --wait --timeout 10m
 ```
@@ -309,7 +318,7 @@ To upgrade after a code or config change:
 helm upgrade lake-of-tears ./deploy/helm/lake-of-tears \
   --namespace lake-of-tears \
   --create-namespace \
-  --values deploy/helm/values-prod.yaml \
+  --values /etc/lake-of-tears/values-prod.yaml \
   --values /etc/lake-of-tears/values-secret.yaml \
   --wait --timeout 10m
 ```

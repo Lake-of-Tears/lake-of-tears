@@ -1,0 +1,102 @@
+# deploy/helm/values-prod.example.yaml
+# Template for production overrides on Kubernetes (k3s, managed K8s, EKS, etc.).
+#
+# Usage:
+#   cp deploy/helm/values-prod.example.yaml /etc/lake-of-tears/values-prod.yaml
+#   # (values-prod.yaml is gitignored so your domain names and infrastructure stay private)
+#
+# Deploy command:
+#   helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
+#     --namespace lake-of-tears \
+#     --create-namespace \
+#     --values /etc/lake-of-tears/values-prod.yaml \
+#     --values /etc/lake-of-tears/values-secret.yaml \
+#     --wait --timeout 10m
+#
+# Secrets are NOT here — they live in /etc/lake-of-tears/values-secret.yaml on the VM.
+
+global:
+  storageClass: local-path   # k3s built-in local-path provisioner (or cloud CSI storage class)
+
+ingress:
+  enabled: true
+  className: nginx
+  host: app.example.com
+  minioConsoleHost: minio.example.com
+  minioApiHost: s3.example.com
+  supersetHost: superset.example.com
+
+lakeui:
+  minioConsoleUrl: "https://minio.example.com"
+  supersetUrl: "https://superset.example.com"
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+minio:
+  persistence:
+    size: 100Gi
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+
+jupyter:
+  persistence:
+    size: 20Gi
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "1Gi"
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+
+superset:
+  persistence:
+    size: 5Gi
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "1Gi"
+    limits:
+      cpu: "1"
+      memory: "2Gi"
+
+airflow:
+  persistence:
+    size: 10Gi
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "2Gi"
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+
+backend:
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "512Mi"
+
+postgres:
+  persistence:
+    size: 20Gi
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"
