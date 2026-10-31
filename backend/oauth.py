@@ -245,6 +245,8 @@ def get_oauth_redirect(provider: str, request: Request, response: Response) -> R
         "scope": cfg["scope"],
         "state": state,
     }
+    if provider in ("google", "microsoft"):
+        params["prompt"] = "select_account"
     if cfg.get("response_mode"):
         params["response_mode"] = cfg["response_mode"]
 
