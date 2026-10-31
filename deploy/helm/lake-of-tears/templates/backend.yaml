@@ -79,6 +79,8 @@ spec:
                   key: authSecretKey
             - name: AUTH_BASE_URL
               value: {{ .Values.backend.auth.baseUrl | quote }}
+            - name: AUTH_REGISTRATION_ENABLED
+              value: {{ .Values.backend.auth.registrationEnabled | default true | quote }}
             - name: GOOGLE_CLIENT_ID
               value: {{ .Values.backend.google.clientId | quote }}
             - name: GOOGLE_CLIENT_SECRET
@@ -102,6 +104,16 @@ spec:
                   key: microsoftClientSecret
             - name: MICROSOFT_TENANT_ID
               value: {{ .Values.backend.microsoft.tenantId | quote }}
+            - name: OKTA_CLIENT_ID
+              value: {{ .Values.backend.okta.clientId | default "" | quote }}
+            - name: OKTA_DOMAIN
+              value: {{ .Values.backend.okta.domain | default "" | quote }}
+            - name: GITLAB_CLIENT_ID
+              value: {{ .Values.backend.gitlab.clientId | default "" | quote }}
+            - name: GITLAB_URL
+              value: {{ .Values.backend.gitlab.url | default "https://gitlab.com" | quote }}
+            - name: OIDC_ISSUER_URL
+              value: {{ .Values.backend.oidc.issuerUrl | default "" | quote }}
             - name: OIDC_CLIENT_ID
               value: {{ .Values.backend.oidc.clientId | quote }}
             - name: OIDC_CLIENT_SECRET

@@ -282,6 +282,8 @@ backend:
     secretKey: ""
     # Public base URL — used for OAuth callback redirect URIs
     baseUrl: "http://localhost"
+    # Enable or disable public account self-registration and new SSO account creation
+    registrationEnabled: true
 
   google:
     clientId: ""
@@ -296,7 +298,18 @@ backend:
     clientSecret: ""
     tenantId: "common"
 
+  okta:
+    clientId: ""
+    clientSecret: ""
+    domain: ""
+
+  gitlab:
+    clientId: ""
+    clientSecret: ""
+    url: "https://gitlab.com"
+
   oidc:
+    issuerUrl: ""
     clientId: ""
     clientSecret: ""
     authUrl: ""

@@ -82,6 +82,8 @@ spec:
                   key: AIRFLOW_ADMIN_PASSWORD
             - name: AUTH_ENABLED
               value: {{ .Values.backend.enabled | quote }}
+            - name: AUTH_REGISTRATION_ENABLED
+              value: {{ .Values.backend.auth.registrationEnabled | default true | quote }}
           livenessProbe:
             httpGet:
               path: /health

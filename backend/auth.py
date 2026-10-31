@@ -23,6 +23,13 @@ GEMINI_API_KEY_SETTING = "gemini_api_key"
 GEMINI_MODEL_SETTING = "gemini_default_model"
 DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
 
+
+def is_registration_enabled() -> bool:
+    """Return whether user self-registration is enabled in deployment settings."""
+    val = os.getenv("AUTH_REGISTRATION_ENABLED", "true").strip().lower()
+    return val not in ("false", "0", "no", "off")
+
+
 # Fallback TTL used when the DB is unavailable (e.g. during first startup).
 _FALLBACK_TTL = timedelta(hours=24)
 
