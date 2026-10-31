@@ -156,6 +156,19 @@ spec:
               value: {{ dig "oidc" "scope" "openid email profile" .Values.backend | quote }}
             - name: OIDC_DISPLAY_NAME
               value: {{ dig "oidc" "displayName" "SSO" .Values.backend | quote }}
+            - name: SMTP_HOST
+              value: {{ dig "smtp" "host" "" .Values.backend | quote }}
+            - name: SMTP_PORT
+              value: {{ (dig "smtp" "port" 587 .Values.backend) | quote }}
+            - name: SMTP_USER
+              value: {{ dig "smtp" "user" "" .Values.backend | quote }}
+            - name: SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "lake-of-tears.fullname" . }}-credentials
+                  key: smtpPassword
+            - name: SMTP_FROM
+              value: {{ dig "smtp" "fromAddr" "" .Values.backend | quote }}
             - name: JUPYTER_TOKEN
               valueFrom:
                 secretKeyRef:

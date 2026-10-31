@@ -133,6 +133,8 @@ def test_canonical_lake_of_tears_example_compilation():
     assert loaded["backend"]["apple"]["teamId"] == "YOUR_TEAM_ID"
     assert loaded["backend"]["apple"]["keyId"] == "YOUR_KEY_ID"
     assert loaded["backend"]["apple"]["privateKey"] == "YOUR_APPLE_PRIVATE_KEY"
+    assert "smtp" in loaded["backend"]
+    assert loaded["backend"]["smtp"]["port"] == 587
     assert len(loaded["connectors"]) == 11
 
 

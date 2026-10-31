@@ -285,6 +285,14 @@ backend:
     # Enable or disable public account self-registration and new SSO account creation
     registrationEnabled: true
 
+  # Email notifications & user invitations (SMTP)
+  smtp:
+    host: ""
+    port: 587
+    user: ""
+    password: ""
+    fromAddr: ""
+
   google:
     enabled: false
     clientId: ""

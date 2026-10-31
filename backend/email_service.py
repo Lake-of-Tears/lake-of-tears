@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import os
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+
+logger = logging.getLogger("lakehouse.email")
 
 
 def _smtp_cfg() -> dict:
@@ -28,15 +31,22 @@ def _send(to: list[str], subject: str, body_html: str) -> None:
     msg.attach(MIMEText(body_html, "html"))
 
     try:
-        with smtplib.SMTP(cfg["host"], cfg["port"], timeout=10) as s:
-            s.ehlo()
-            if cfg["port"] != 25:
-                s.starttls()
-            if cfg["user"]:
-                s.login(cfg["user"], cfg["password"])
-            s.sendmail(cfg["from_addr"], to, msg.as_string())
-    except Exception:
-        pass  # email is best-effort; never fail a request over it
+        if cfg["port"] == 465:
+            with smtplib.SMTP_SSL(cfg["host"], cfg["port"], timeout=10) as s:
+                s.ehlo()
+                if cfg["user"]:
+                    s.login(cfg["user"], cfg["password"])
+                s.sendmail(cfg["from_addr"], to, msg.as_string())
+        else:
+            with smtplib.SMTP(cfg["host"], cfg["port"], timeout=10) as s:
+                s.ehlo()
+                if cfg["port"] != 25:
+                    s.starttls()
+                if cfg["user"]:
+                    s.login(cfg["user"], cfg["password"])
+                s.sendmail(cfg["from_addr"], to, msg.as_string())
+    except Exception as e:
+        logger.warning(f"Failed to send email to {to}: {e}")
 
 
 def send_access_requested(
