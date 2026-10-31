@@ -1,5 +1,8 @@
 # Credentials and secrets
 .env
+*.local.toon
+lake-of-tears.local.toon
+lake-of-tears.toon
 *.tfvars
 !*.tfvars.example
 deploy/helm/*secret*.yaml
