@@ -1,0 +1,197 @@
+# =============================================================================
+# Lake of Tears — Unified Platform Configuration (TOON)
+# =============================================================================
+# Token-Oriented Object Notation (TOON) specification for local and production
+# deployments. Use `scripts/toon2helm.py` to compile this into Helm values.yaml.
+#
+# Usage:
+#   python scripts/toon2helm.py --input lake-of-tears.example.toon --output values-prod.yaml
+#   # Or stream directly to Helm:
+#   helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
+#     -f <(python scripts/toon2helm.py --input lake-of-tears.example.toon)
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Global Cluster Settings
+# ---------------------------------------------------------------------------
+global:
+  storageClass: "local-path"           # StorageClass for PVCs (e.g. local-path, nfs-client, gp3)
+  allowDefaultNamespace: false         # Guard against accidental deployment into default namespace
+
+# ---------------------------------------------------------------------------
+# Ingress & External Routing
+# ---------------------------------------------------------------------------
+ingress:
+  enabled: true
+  className: "nginx"
+  host: "lake.example.com"             # Primary hostname for Lake UI and Pipelines (/airflow/)
+  minioConsoleHost: "minio.example.com" # Subdomain for MinIO web console
+  minioApiHost: "minio-api.example.com" # Hostname for external S3 API / DBeaver / DuckDB clients
+  supersetHost: "superset.example.com" # Subdomain for Apache Superset BI iframe integration
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  tls[1]{secretName,hosts}:
+    lake-of-tears-tls,"lake.example.com,minio.example.com,minio-api.example.com,superset.example.com"
+
+# ---------------------------------------------------------------------------
+# MinIO Object Storage (S3-compatible Lakehouse storage)
+# ---------------------------------------------------------------------------
+minio:
+  rootUser: "minioadmin"
+  rootPassword: "changeme-minio-root-password" # REQUIRED: Strong root password
+  buckets: [datalake, raw, analytics, workspaces] # Initial buckets provisioned on boot
+  persistence:
+    size: "200Gi"
+    accessMode: "ReadWriteOnce"
+  service:
+    apiPort: 9000
+    consolePort: 9001
+  resources:
+    cpu_request: "500m"
+    mem_request: "1Gi"
+    cpu_limit: "2"
+    mem_limit: "4Gi"
+
+# ---------------------------------------------------------------------------
+# Lake UI (Unified FastAPI + Tailwind Shell)
+# ---------------------------------------------------------------------------
+lakeui:
+  service:
+    port: 3000
+  minioConsoleUrl: "https://minio.example.com"
+  supersetUrl: "https://superset.example.com"
+  resources:
+    cpu_request: "100m"
+    mem_request: "256Mi"
+    cpu_limit: "500m"
+    mem_limit: "512Mi"
+
+# ---------------------------------------------------------------------------
+# JupyterLab (Interactive Exploratory Workspaces)
+# ---------------------------------------------------------------------------
+jupyter:
+  token: "changeme-jupyter-secret-token" # REQUIRED: Authentication token for JupyterLab
+  persistence:
+    size: "20Gi"                        # Survives pod restarts for user notebooks
+  service:
+    port: 8888
+  ingress:
+    enabled: false                      # Disabled by default; Lake UI natively proxies notebooks
+  resources:
+    cpu_request: "250m"
+    mem_request: "1Gi"
+    cpu_limit: "2"
+    mem_limit: "4Gi"
+
+# ---------------------------------------------------------------------------
+# Apache Superset (Data Exploration & BI Dashboards)
+# ---------------------------------------------------------------------------
+superset:
+  secretKey: "changeme-flask-secret-key-superset" # REQUIRED: Flask secret key
+  adminPassword: "changeme-superset-admin-password" # REQUIRED: Initial admin password
+  persistence:
+    size: "5Gi"
+  service:
+    port: 8088
+  resources:
+    cpu_request: "250m"
+    mem_request: "1Gi"
+    cpu_limit: "1"
+    mem_limit: "2Gi"
+
+# ---------------------------------------------------------------------------
+# Apache Airflow (Pipeline Orchestration & Scheduled ETL)
+# ---------------------------------------------------------------------------
+airflow:
+  secretKey: "changeme-airflow-fernet-key-or-secret" # REQUIRED: Secret key / Fernet
+  adminPassword: "changeme-airflow-admin-password" # REQUIRED: Admin UI password
+  persistence:
+    size: "10Gi"
+  service:
+    port: 8080
+  extraPipPackages: [pandas, pyarrow, minio, duckdb]
+  waitForDb:
+    enabled: true
+    timeoutSeconds: 60
+  resources:
+    cpu_request: "500m"
+    mem_request: "2Gi"
+    cpu_limit: "2"
+    mem_limit: "4Gi"
+
+# ---------------------------------------------------------------------------
+# Backend Service & SSO Authentication
+# ---------------------------------------------------------------------------
+backend:
+  enabled: true
+  service:
+    port: 8000
+  auth:
+    secretKey: "changeme-backend-auth-jwt-secret-key-32-bytes" # REQUIRED: JWT signing secret
+    baseUrl: "https://lake.example.com"
+    registrationEnabled: true
+  waitForDb:
+    enabled: true
+    timeoutSeconds: 60
+  resources:
+    cpu_request: "100m"
+    mem_request: "256Mi"
+    cpu_limit: "1"
+    mem_limit: "512Mi"
+  # OAuth / OIDC Identity Providers
+  oauth[5]{provider,clientId,clientSecret,tenantId,domain,url}:
+    google,YOUR_GOOGLE_CLIENT_ID,YOUR_GOOGLE_CLIENT_SECRET,,,,
+    github,YOUR_GITHUB_CLIENT_ID,YOUR_GITHUB_CLIENT_SECRET,,,,
+    microsoft,YOUR_MICROSOFT_CLIENT_ID,YOUR_MICROSOFT_CLIENT_SECRET,common,,
+    okta,YOUR_OKTA_CLIENT_ID,YOUR_OKTA_CLIENT_SECRET,,dev-12345.okta.com,
+    gitlab,YOUR_GITLAB_CLIENT_ID,YOUR_GITLAB_CLIENT_SECRET,,,https://gitlab.com
+
+# ---------------------------------------------------------------------------
+# PostgreSQL Database (Backend Auth & Airflow Metadata)
+# ---------------------------------------------------------------------------
+postgres:
+  enabled: true
+  auth:
+    database: "lake_auth"
+    username: "lake_auth"
+    password: "changeme-postgres-auth-password" # REQUIRED
+  airflow:
+    username: "airflow"
+    password: "changeme-postgres-airflow-password" # REQUIRED
+  persistence:
+    size: "20Gi"
+  resources:
+    cpu_request: "100m"
+    mem_request: "256Mi"
+    cpu_limit: "1"
+    mem_limit: "1Gi"
+  dsn: ""                              # Optional external Postgres DSN for pipeline scripts
+
+# ---------------------------------------------------------------------------
+# Community & Core Connectors Matrix
+# ---------------------------------------------------------------------------
+connectors[11]{id,enabled,schedule,sync_history_days,auth_credential_ref}:
+  stripe,true,0 2 * * *,30,STRIPE_API_KEY
+  shopify,true,0 3 * * *,14,SHOPIFY_ACCESS_TOKEN
+  hubspot,true,0 4 * * *,30,HUBSPOT_ACCESS_TOKEN
+  github,false,0 5 * * *,7,GITHUB_TOKEN
+  google_analytics,false,0 6 * * *,30,GA_CREDENTIALS_JSON
+  kafka,false,stream,,KAFKA_SASL_SECRET
+  mysql,false,0 1 * * *,,MYSQL_PASSWORD
+  postgres,false,0 1 * * *,,POSTGRES_EXTERNAL_PASSWORD
+  s3,false,0 * * * *,,AWS_SECRET_ACCESS_KEY
+  salesforce,false,0 2 * * *,30,SALESFORCE_TOKEN
+  snowflake,false,0 3 * * *,,SNOWFLAKE_PRIVATE_KEY
+
+# ---------------------------------------------------------------------------
+# Direct Connector Credentials (Injected into Helm values)
+# ---------------------------------------------------------------------------
+stripe:
+  secretKey: ""
+
+shopify:
+  storeDomain: ""
+  accessToken: ""
+
+hubspot:
+  accessToken: ""
