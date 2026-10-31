@@ -199,12 +199,7 @@ We ran this on a local stack with real embeddings: three documents of about 1,00
 
 ### Deploying to Airflow
 
-`embed_sources.py` imports the `chunking` folder, so it must sit next to the script. In Docker Compose copy it into the jobs folder with the script (see the ingestion guide for the layout):
-
-```bash
-cp -R pipeline/embed/chunking "$DATALAKE_DATA_DIR/datalake/jobs/pipeline/"
-cp pipeline/embed/embed_sources.py "$DATALAKE_DATA_DIR/datalake/jobs/pipeline/"
-```
+`embed_sources.py` imports the `chunking` folder, so it must sit next to the script in the Airflow container's `/opt/airflow/datalake/jobs/pipeline/` directory (see the ingestion guide for the layout).
 
 ### Adding your own strategy
 

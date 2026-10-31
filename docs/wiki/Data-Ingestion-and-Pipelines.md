@@ -2,7 +2,7 @@
 
 This guide is for developers adding a new ingestion pipeline to Lake of Tears. You will see how data gets from an external source into MinIO as Parquet, then build a small working pipeline step by step and learn the practices that keep it safe to re-run.
 
-The code in this guide was run against a Docker Compose stack: a script written to this pattern was triggered from an Airflow DAG, backfilled, re-run and queried with DuckDB.
+The code in this guide was run against the Lake of Tears Kubernetes deployment: a script written to this pattern was triggered from an Airflow DAG, backfilled, re-run and queried with DuckDB.
 
 ## 1. How data flows
 
@@ -144,13 +144,13 @@ with DAG(
 
 ### Step 5: deploy and run it
 
-The shipped DAGs call `/opt/airflow/datalake/jobs/pipeline/<script>.py`, so scripts are not read from the repository folders directly. In Docker Compose, Airflow sees two folders on the host, under `DATALAKE_DATA_DIR` (set in `.env`):
+The shipped DAGs call `/opt/airflow/datalake/jobs/pipeline/<script>.py`, so scripts are not read from the repository folders directly. In Kubernetes, DAGs and pipeline scripts are mounted into the Airflow container (via PVC or ConfigMap):
 
-| Host folder | Inside Airflow | Put here |
+| Location | Inside Airflow | Put here |
 |---|---|---|
-| `$DATALAKE_DATA_DIR/airflow/dags/` | `/opt/airflow/dags/` | `ingest_example_orders_dag.py` |
-| `$DATALAKE_DATA_DIR/datalake/` | `/opt/airflow/datalake/` | `storage_writer.py` (copy of `pipeline/shared/storage_writer.py`) |
-| `$DATALAKE_DATA_DIR/datalake/jobs/pipeline/` | `/opt/airflow/datalake/jobs/pipeline/` | the script, saved as `ingest_example_orders.py` |
+| PVC / ConfigMap | `/opt/airflow/dags/` | `ingest_example_orders_dag.py` |
+| Volume / image | `/opt/airflow/datalake/` | `storage_writer.py` (copy of `pipeline/shared/storage_writer.py`) |
+| Volume / image | `/opt/airflow/datalake/jobs/pipeline/` | the script, saved as `ingest_example_orders.py` |
 
 The script's `sys.path.insert(..., parents[2])` line works because of that layout: `jobs/pipeline/<script>` is two levels under the folder that holds `storage_writer.py`. Note the script name changes slightly (`example_orders.py` in the repo, `ingest_example_orders.py` once deployed), matching the existing `ingest_*` scripts.
 

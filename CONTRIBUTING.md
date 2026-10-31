@@ -33,9 +33,9 @@ Lake of Tears brings analytical compute, storage, vector search, orchestration, 
    - Turnkey data source connectors (e.g., Stripe, Shopify, HubSpot, PostgreSQL, Open-Meteo, system telemetry) with scheduled DAGs.
 5. 📊 **Dashboards & Notebooks**:
    - Deep integration and iframe embedding for Apache Superset (BI dashboards) and JupyterLab (data science).
-6. ☸️ **Cloud & Infrastructure** (`deploy/helm/`, `deploy/terraform/`, `docker/`):
-   - Production Helm chart (`deploy/helm/lake-of-tears`) with Ingress routing and PVC storage backends (NFS, Longhorn, Ceph, local-path).
-   - Docker Compose optimizations and Terraform infrastructure modules.
+6. ☸️ **Cloud & Infrastructure** (`deploy/helm/`, `deploy/terraform/`):
+   - Helm chart (`deploy/helm/lake-of-tears`) with Ingress routing and PVC storage backends (NFS, Longhorn, Ceph, local-path).
+   - Terraform foundation modules.
 7. 📚 **Documentation & Guides** (`docs/`, `README.md`):
    - Architecture guides, deployment walkthroughs, example SQL analytics, and connector tutorials.
 
@@ -45,9 +45,10 @@ Lake of Tears brings analytical compute, storage, vector search, orchestration, 
 
 ### Prerequisites
 
-- **Docker & Docker Compose** (v26+ recommended)
+- **Docker** (to build container images)
+- **Local Kubernetes Cluster** (OrbStack, Docker Desktop with K8s, minikube, kind, or k3s)
+- **Helm 3.x** and **kubectl**
 - **Python 3.12**
-- **Helm 3.x** (if testing Kubernetes chart changes)
 - **Terraform 1.9+** (if testing infrastructure changes)
 - `git`
 

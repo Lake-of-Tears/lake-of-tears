@@ -175,4 +175,4 @@ The Airflow DAG `refresh_catalog_schemas` runs **nightly at 06:00**. For every c
 
 ## 5. Running locally: use port 80
 
-With Docker Compose, open **http://localhost** (the nginx entry point), not `http://localhost:3000`. Port 3000 is the UI container on its own and does not proxy `/api/`, so the login page loads but signing in fails with "Not Found". The workspace cookie and every `/api/` call only work through port 80.
+In local development with Kubernetes, open **http://localhost** (the Ingress entry point), not the internal pod direct port. Accessing the UI on direct port 3000 does not proxy `/api/`, so the login page loads but signing in fails with "Not Found". The workspace cookie and every `/api/` call only work through port 80.

@@ -13,6 +13,7 @@ Every change made to this repo gets one row, newest first.
 
 | Date | Action | Ticket | Files | Summary |
 |---|---|---|---|---|
+| 20261031 | IMPROVEMENT | #265 | `README.md`, `docs/index.html`, `CONTRIBUTING.md`, `docs/wiki/` | Complete removal of legacy Docker Compose references across landing page and documentation; added image building guide from source |
 | 20261031 | REMOVE | #265 | `docker-compose.yml`, `docker-compose.ollama.yml`, `.env.example`, `deploy/terraform/services/docker_compose.tf`, `deploy/nginx/lake.conf`, `tests/test_compose_jupyter_volumes.py`, `deploy/airflow/Dockerfile`, `docs/`, `tests/` | Standardize 100% on Kubernetes and Helm across all environments; deprecate and remove Docker Compose artifacts, migrate Airflow test assertions to Helm templates, consolidate Airflow Dockerfile under deploy/airflow/, and update documentation |
 | 20261031 | ADD | #314 | `backend/auth.py`, `backend/oauth.py`, `backend/main.py`, `ui/main.py`, `ui/templates/login.html`, `ui/templates/settings/admin.html`, `.env.example`, `docker-compose.yml`, `deploy/helm/`, `README.md`, `tests/` | Registration disable toggle (`AUTH_REGISTRATION_ENABLED`), enterprise SSO identity providers (Microsoft Entra ID, Google, Okta, GitHub, GitLab, OIDC discovery), and Superadmin Authentication & SSO status dashboard in Admin Panel |
 | 20261025 | BUG FIX | #256 | `ui/templates/pipelines.html` | Fix `currentWorkspace is not defined` ReferenceError in pipeline run drawer by referencing `currentWorkspaceSlug` |

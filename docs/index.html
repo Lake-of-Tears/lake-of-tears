@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Lake of Tears — The Open Source Databricks Alternative</title>
-  <meta name="description" content="Lake of Tears is a free, open-source, self-hosted datalakehouse for Kubernetes and Docker. Combines MinIO S3, DuckDB, Apache Airflow, JupyterLab, Apache Superset, and Gemini AI.">
+  <meta name="description" content="Lake of Tears is a free, open-source, self-hosted datalakehouse for Kubernetes (Helm). Combines MinIO S3, DuckDB, Apache Airflow, JupyterLab, Apache Superset, and Gemini AI.">
   <link rel="icon" type="image/png" href="assets/logo.png">
 
   <!-- Tailwind CSS CDN -->
@@ -162,7 +162,7 @@
 
       <!-- Subheadline -->
       <p class="mt-6 text-lg sm:text-xl text-slate-300 max-w-3xl mx-auto font-light leading-relaxed">
-        <strong>Lake of Tears</strong> is an open-source, self-hosted datalakehouse engineered for Kubernetes and Docker.
+        <strong>Lake of Tears</strong> is an open-source, self-hosted datalakehouse engineered natively for Kubernetes with Helm.
         Combines S3-compatible storage, DuckDB SQL execution, automated Airflow pipelines, JupyterLab notebooks, Superset BI, and Gemini AI search behind a single entry point.
       </p>
 
@@ -170,7 +170,7 @@
       <div class="mt-10 flex flex-wrap items-center justify-center gap-4">
         <a href="#quickstart" class="px-6 py-3.5 rounded-xl font-semibold text-slate-950 bg-gradient-to-r from-brand-400 to-cyan-300 hover:from-brand-300 hover:to-cyan-200 transition transform hover:-translate-y-0.5 shadow-lg shadow-brand-500/25 flex items-center gap-2">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-          Quick Start (Helm / Docker)
+          Quick Start (Helm)
         </a>
         <a href="#architecture" class="px-6 py-3.5 rounded-xl font-semibold text-white bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 transition flex items-center gap-2">
           <svg class="w-5 h-5 text-brand-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
@@ -334,7 +334,7 @@
             <tr>
               <td class="py-4 px-6 font-medium text-white">Deployment Target</td>
               <td class="py-4 px-6 text-slate-400">Vendor cloud only (AWS, Azure, GCP)</td>
-              <td class="py-4 px-6 text-emerald-400 font-semibold">Any Kubernetes cluster, bare metal, or Docker Compose</td>
+              <td class="py-4 px-6 text-emerald-400 font-semibold">Any Kubernetes cluster (OrbStack, minikube, kind, k3s, EKS, GKE, bare metal)</td>
             </tr>
             <tr>
               <td class="py-4 px-6 font-medium text-white">SQL Query Engine</td>
@@ -547,7 +547,7 @@
           </h2>
           
           <p class="mt-4 text-base sm:text-lg text-slate-300 leading-relaxed font-light">
-            Want all the analytical speed of DuckDB, S3, Airflow, and Gemini without running Kubernetes or Docker yourself? 
+            Want all the analytical speed of DuckDB, S3, Airflow, and Gemini without managing Kubernetes clusters yourself? 
             <strong>Lake of Tears Cloud</strong> delivers instant, zero-DevOps data lakehouses with automated backups, scalable object storage, and unified multi-LLM AI search.
           </p>
 
@@ -622,7 +622,7 @@
           <button id="tab-btn-helm" onclick="switchTab('helm')" class="py-3 px-6 text-sm font-semibold text-brand-400 border-b-2 border-brand-400 transition">
             💻 Local Development (Helm)
           </button>
-          <button id="tab-btn-docker" onclick="switchTab('docker')" class="py-3 px-6 text-sm font-semibold text-slate-400 border-b-2 border-transparent hover:text-slate-200 transition">
+          <button id="tab-btn-prod" onclick="switchTab('prod')" class="py-3 px-6 text-sm font-semibold text-slate-400 border-b-2 border-transparent hover:text-slate-200 transition">
             🚀 Production (Helm)
           </button>
         </div>
@@ -655,7 +655,7 @@ docker build -t lake-of-tears-airflow:latest ./deploy/airflow</code></pre>
         </div>
 
         <!-- Production Content -->
-        <div id="tab-content-docker" class="hidden space-y-6">
+        <div id="tab-content-prod" class="hidden space-y-6">
           <div class="glass-card rounded-2xl p-6 border border-slate-800">
             <h3 class="text-lg font-bold text-white mb-2">1. Prepare Secrets &amp; Configuration</h3>
             <p class="text-xs text-slate-400 mb-2">Create your <code class="text-brand-300">values-secret.yaml</code> outside Git with passwords and API keys:</p>
@@ -717,19 +717,19 @@ backend:
   <script>
     function switchTab(tab) {
       const helmBtn = document.getElementById('tab-btn-helm');
-      const dockerBtn = document.getElementById('tab-btn-docker');
+      const prodBtn = document.getElementById('tab-btn-prod');
       const helmContent = document.getElementById('tab-content-helm');
-      const dockerContent = document.getElementById('tab-content-docker');
+      const prodContent = document.getElementById('tab-content-prod');
 
       if (tab === 'helm') {
         helmBtn.className = "py-3 px-6 text-sm font-semibold text-brand-400 border-b-2 border-brand-400 transition";
-        dockerBtn.className = "py-3 px-6 text-sm font-semibold text-slate-400 border-b-2 border-transparent hover:text-slate-200 transition";
+        prodBtn.className = "py-3 px-6 text-sm font-semibold text-slate-400 border-b-2 border-transparent hover:text-slate-200 transition";
         helmContent.classList.remove('hidden');
-        dockerContent.classList.add('hidden');
+        prodContent.classList.add('hidden');
       } else {
-        dockerBtn.className = "py-3 px-6 text-sm font-semibold text-brand-400 border-b-2 border-brand-400 transition";
+        prodBtn.className = "py-3 px-6 text-sm font-semibold text-brand-400 border-b-2 border-brand-400 transition";
         helmBtn.className = "py-3 px-6 text-sm font-semibold text-slate-400 border-b-2 border-transparent hover:text-slate-200 transition";
-        dockerContent.classList.remove('hidden');
+        prodContent.classList.remove('hidden');
         helmContent.classList.add('hidden');
       }
     }

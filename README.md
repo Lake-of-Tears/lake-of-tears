@@ -3,8 +3,8 @@
 **The open source, self-hosted Databricks alternative — datalakehouse with AI-powered search, unified web shell, and one-command deployment**
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
-![Docker Compose: ready](https://img.shields.io/badge/Docker%20Compose-ready-2496ED?logo=docker&logoColor=white)
 ![Helm: ready](https://img.shields.io/badge/Helm-ready-0F1689?logo=helm&logoColor=white)
+![Kubernetes: 1.28+](https://img.shields.io/badge/Kubernetes-1.28%2B-326CE5?logo=kubernetes&logoColor=white)
 ![Python: 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 [![Discord](https://img.shields.io/badge/Discord-community-5865F2?logo=discord&logoColor=white)](https://thelakeoftears.com)
 [![Website](https://img.shields.io/badge/Website-thelakeoftears.com-00B4D8)](https://thelakeoftears.com)
@@ -17,14 +17,14 @@
 
 Lake of Tears is a self-hosted data platform inspired by Databricks — one URL, one sidebar, all your data tools in one place. It combines S3-compatible storage, a DuckDB SQL engine, AI-powered natural language search, automated pipelines, and business BI — without the enterprise price tag.
 
-**Everything runs behind a single nginx entry point.** Apache Superset and Apache Airflow are embedded as iframes within the Lake UI shell, and notebooks run in a native interface built into it (powered by the Jupyter Server API), so your team works from one consistent interface.
+**Everything runs behind a unified Kubernetes Ingress entry point.** Apache Superset and Apache Airflow are embedded as iframes within the Lake UI shell, and notebooks run in a native interface built into it (powered by the Jupyter Server API), so your team works from one consistent interface.
 
 ---
 
 ## Features
 
 - **Unified UI shell** — Databricks-inspired sidebar with Notebooks, SQL Editor, Dashboards, Pipelines, AI Query, and Data Catalog in one interface
-- **Single entry point** — nginx proxy at port 80; no juggling separate ports or tabs
+- **Single entry point** — Kubernetes Ingress at port 80; no juggling separate ports or tabs
 - **Authentication** — email/password login, self-registration toggle (`AUTH_REGISTRATION_ENABLED`), and SSO via Google, Microsoft Entra ID, Okta, GitHub, GitLab, or any generic OpenID Connect (OIDC) provider with auto-discovery
 - **Multi-user with roles** — `admin` and `viewer` roles; first registered user becomes admin automatically
 - **Theme toggle** — Light / Dark / Auto (follows OS preference, falls back to time-of-day)
@@ -37,7 +37,7 @@ Lake of Tears is a self-hosted data platform inspired by Databricks — one URL,
 - Built-in pipeline orchestration via Apache Airflow (embedded)
 - Interactive notebooks: a native Lake UI interface backed by a JupyterLab server
 - BI dashboards via Apache Superset (embedded)
-- Deploy anywhere: Docker Compose (single node) or Kubernetes (Helm)
+- Deploy anywhere: Standardized 100% on Kubernetes (Helm) for local development and production
 
 ---
 
@@ -47,7 +47,7 @@ Lake of Tears is a self-hosted data platform inspired by Databricks — one URL,
                     http://localhost (port 80)
                            │
                     ┌──────▼──────┐
-                    │    nginx    │  ← single entry point
+                    │   Ingress   │  ← single entry point
                     └──────┬──────┘
        ┌────────┬──────────┴───────┬──────────┐
        ▼        ▼                  ▼          ▼
@@ -112,6 +112,41 @@ All services are accessible through the unified Ingress routes:
 | MinIO Console | http://minio.localhost |
 | MinIO S3 API | http://s3.localhost |
 | JupyterLab | no public route; used through the Lake UI notebooks |
+
+---
+
+## Building the Project from Source
+
+Lake of Tears comprises three container images that you build and run within Kubernetes:
+
+| Image | Dockerfile | Purpose |
+|---|---|---|
+| `lake-of-tears-backend:latest` | `backend/Dockerfile` | FastAPI authentication, workspace isolation, catalog management, and admin APIs |
+| `lake-of-tears-ui:latest` | `ui/Dockerfile` | FastAPI Lake UI shell, DuckDB connection pool, and notebook proxy |
+| `lake-of-tears-airflow:latest` | `deploy/airflow/Dockerfile` | Apache Airflow with DuckDB, PyArrow, Papermill, and Scikit-Learn |
+
+To build all three images locally:
+```bash
+docker build -t lake-of-tears-backend:latest ./backend
+docker build -t lake-of-tears-ui:latest ./ui
+docker build -t lake-of-tears-airflow:latest ./deploy/airflow
+```
+
+When deploying to a remote Kubernetes cluster (EKS, GKE, AKS, or remote k3s), tag and push the images to your container registry (Docker Hub, ECR, GCR, Harbor) and configure the image repositories and tags in your Helm values:
+```yaml
+backend:
+  image:
+    repository: myregistry.io/lake-of-tears-backend
+    tag: v1.0.0
+lakeui:
+  image:
+    repository: myregistry.io/lake-of-tears-ui
+    tag: v1.0.0
+airflow:
+  image:
+    repository: myregistry.io/lake-of-tears-airflow
+    tag: v1.0.0
+```
 
 ---
 
@@ -337,7 +372,7 @@ All services are routed through the nginx Ingress controller:
 | `https://minio.example.com/` | MinIO Console |
 | `https://minio-api.example.com/` | MinIO S3 API |
 
-> **Note:** Superset runs on its own subdomain in the Helm deployment because its static assets are always served at `/static/…` with no prefix, which conflicts with the root Lake UI ingress. In Docker Compose, Superset is still accessible at `http://localhost/superset/` and directly at `http://localhost:8088`.
+> **Note:** Superset runs on its own subdomain in the Helm deployment (`ingress.supersetHost`) because its static assets are always served at `/static/…` with no prefix, which conflicts with the root Lake UI ingress.
 
 ### Required values reference
 
@@ -819,7 +854,7 @@ Given a natural-language question, embeds the query with `gemini-embedding-001`,
 
 ## Architecture Notes
 
-- **Single entry point.** nginx sits in front of everything at port 80. Airflow (`/airflow/`) is proxied at a path prefix, and JupyterLab has no public route: the Lake UI reaches it over the internal network and serves notebooks through `/api/notebooks`. (A legacy `/jupyter/` Ingress exists in the Helm chart but is disabled unless `jupyter.ingress.enabled=true`.) Superset runs on its own subdomain (`superset.*`) in the Helm deployment — its static assets are always served at `/static/…` with no prefix, which conflicts with the root Lake UI ingress. In Docker Compose, Superset is still proxied at `/superset/` via `APPLICATION_PREFIX_PATH`. MinIO Console is exposed separately at port 9001 (Docker Compose) or its own Ingress host (Kubernetes) due to SPA routing limitations.
+- **Single entry point.** Kubernetes Ingress sits in front of everything at port 80. Airflow (`/airflow/`) is proxied at a path prefix, and JupyterLab has no public route: the Lake UI reaches it over the internal network and serves notebooks through `/api/notebooks`. (A legacy `/jupyter/` Ingress exists in the Helm chart but is disabled unless `jupyter.ingress.enabled=true`.) Superset runs on its own subdomain (`superset.*`) in the Helm deployment — its static assets are always served at `/static/…` with no prefix, which conflicts with the root Lake UI ingress. MinIO Console is exposed separately at its own Ingress host due to SPA routing limitations.
 
 - **Visualizations page (Superset) requires no login.** `PUBLIC_ROLE_LIKE = "Gamma"` is set in `deploy/superset/superset_config.py`, granting anonymous users full read access to dashboards and charts. This is appropriate for a trusted internal network. Remove that setting if you need login enforcement.
 
@@ -831,7 +866,7 @@ Given a natural-language question, embeds the query with `gemini-embedding-001`,
 
 - **MinIO CE only.** The bucket layout uses a single `datalake` bucket with logical prefixes (`raw/`, `embeddings/`). Do not create additional top-level buckets — DuckDB S3 glob patterns depend on this layout.
 
-- **Single-node first.** The Docker Compose deployment is the primary supported path. The Helm chart targets a standard Kubernetes cluster with an NFS-backed StorageClass for the MinIO PVC, but the data model is identical.
+- **Kubernetes & Helm standardization.** Helm is the single standard deployment model across all environments (OrbStack, minikube, kind, k3s, EKS, GKE, bare metal), avoiding configuration drift between local development and production.
 
 ---
 

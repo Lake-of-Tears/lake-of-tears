@@ -22,9 +22,9 @@ The queries in this guide were run against a local stack with three days of samp
 
 DuckDB reads `s3://` paths through its `httpfs` extension. MinIO is S3-compatible, so you point DuckDB at the MinIO endpoint and use **path-style** URLs.
 
-| Setting | Value for the Docker Compose stack |
+| Setting | Value for the Kubernetes stack |
 |---|---|
-| `s3_endpoint` | `minio:9000` from inside the stack, `localhost:9000` from your machine. Host and port only, with no `http://` |
+| `s3_endpoint` | `minio:9000` from inside the cluster, `localhost:9000` or `s3.localhost` through Ingress. Host and port only, with no `http://` |
 | `s3_access_key_id` / `s3_secret_access_key` | `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` (the MinIO root user by default) |
 | `s3_use_ssl` | `false` for the local stack; `true` if MinIO is behind TLS |
 | `s3_url_style` | `path` (required for MinIO) |
