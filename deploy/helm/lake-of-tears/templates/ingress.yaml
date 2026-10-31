@@ -11,7 +11,7 @@
 # /airflow/   → Airflow     (BASE_URL has /airflow/ prefix; nginx strips it)
 # (JupyterLab has no public route; legacy /jupyter/ ingress is opt-in below)
 
-{{- if .Values.backend.enabled }}
+{{- if and .Values.backend (dig "enabled" true .Values.backend) }}
 ---
 # Auth backend — /api/ path (must be listed before /)
 apiVersion: networking.k8s.io/v1

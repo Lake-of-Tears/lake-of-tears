@@ -1,4 +1,4 @@
-{{- if .Values.backend.enabled }}
+{{- if and .Values.backend (dig "enabled" true .Values.backend) }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -78,59 +78,59 @@ spec:
                   name: {{ include "lake-of-tears.fullname" . }}-credentials
                   key: authSecretKey
             - name: AUTH_BASE_URL
-              value: {{ .Values.backend.auth.baseUrl | quote }}
+              value: {{ dig "auth" "baseUrl" "http://localhost" .Values.backend | quote }}
             - name: AUTH_REGISTRATION_ENABLED
-              value: {{ if hasKey .Values.backend.auth "registrationEnabled" }}{{ .Values.backend.auth.registrationEnabled | quote }}{{ else }}"true"{{ end }}
+              value: {{ if hasKey (dig "auth" dict .Values.backend) "registrationEnabled" }}{{ (dig "auth" "registrationEnabled" true .Values.backend) | quote }}{{ else }}"true"{{ end }}
             - name: GOOGLE_CLIENT_ID
-              value: {{ .Values.backend.google.clientId | quote }}
+              value: {{ dig "google" "clientId" "" .Values.backend | quote }}
             - name: GOOGLE_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: {{ include "lake-of-tears.fullname" . }}-credentials
                   key: googleClientSecret
             - name: GITHUB_CLIENT_ID
-              value: {{ .Values.backend.github.clientId | quote }}
+              value: {{ dig "github" "clientId" "" .Values.backend | quote }}
             - name: GITHUB_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: {{ include "lake-of-tears.fullname" . }}-credentials
                   key: githubClientSecret
             - name: MICROSOFT_CLIENT_ID
-              value: {{ .Values.backend.microsoft.clientId | quote }}
+              value: {{ dig "microsoft" "clientId" "" .Values.backend | quote }}
             - name: MICROSOFT_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: {{ include "lake-of-tears.fullname" . }}-credentials
                   key: microsoftClientSecret
             - name: MICROSOFT_TENANT_ID
-              value: {{ .Values.backend.microsoft.tenantId | quote }}
+              value: {{ dig "microsoft" "tenantId" "common" .Values.backend | quote }}
             - name: OKTA_CLIENT_ID
-              value: {{ .Values.backend.okta.clientId | default "" | quote }}
+              value: {{ dig "okta" "clientId" "" .Values.backend | quote }}
             - name: OKTA_DOMAIN
-              value: {{ .Values.backend.okta.domain | default "" | quote }}
+              value: {{ dig "okta" "domain" "" .Values.backend | quote }}
             - name: GITLAB_CLIENT_ID
-              value: {{ .Values.backend.gitlab.clientId | default "" | quote }}
+              value: {{ dig "gitlab" "clientId" "" .Values.backend | quote }}
             - name: GITLAB_URL
-              value: {{ .Values.backend.gitlab.url | default "https://gitlab.com" | quote }}
+              value: {{ dig "gitlab" "url" "https://gitlab.com" .Values.backend | quote }}
             - name: OIDC_ISSUER_URL
-              value: {{ .Values.backend.oidc.issuerUrl | default "" | quote }}
+              value: {{ dig "oidc" "issuerUrl" "" .Values.backend | quote }}
             - name: OIDC_CLIENT_ID
-              value: {{ .Values.backend.oidc.clientId | quote }}
+              value: {{ dig "oidc" "clientId" "" .Values.backend | quote }}
             - name: OIDC_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: {{ include "lake-of-tears.fullname" . }}-credentials
                   key: oidcClientSecret
             - name: OIDC_AUTH_URL
-              value: {{ .Values.backend.oidc.authUrl | quote }}
+              value: {{ dig "oidc" "authUrl" "" .Values.backend | quote }}
             - name: OIDC_TOKEN_URL
-              value: {{ .Values.backend.oidc.tokenUrl | quote }}
+              value: {{ dig "oidc" "tokenUrl" "" .Values.backend | quote }}
             - name: OIDC_USERINFO_URL
-              value: {{ .Values.backend.oidc.userinfoUrl | quote }}
+              value: {{ dig "oidc" "userinfoUrl" "" .Values.backend | quote }}
             - name: OIDC_SCOPE
-              value: {{ .Values.backend.oidc.scope | quote }}
+              value: {{ dig "oidc" "scope" "openid email profile" .Values.backend | quote }}
             - name: OIDC_DISPLAY_NAME
-              value: {{ .Values.backend.oidc.displayName | quote }}
+              value: {{ dig "oidc" "displayName" "SSO" .Values.backend | quote }}
             - name: JUPYTER_TOKEN
               valueFrom:
                 secretKeyRef:

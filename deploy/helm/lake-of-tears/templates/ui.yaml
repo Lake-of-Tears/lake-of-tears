@@ -81,9 +81,9 @@ spec:
                   name: {{ include "lake-of-tears.fullname" . }}-credentials
                   key: AIRFLOW_ADMIN_PASSWORD
             - name: AUTH_ENABLED
-              value: {{ .Values.backend.enabled | quote }}
+              value: {{ dig "enabled" true .Values.backend | quote }}
             - name: AUTH_REGISTRATION_ENABLED
-              value: {{ if hasKey .Values.backend.auth "registrationEnabled" }}{{ .Values.backend.auth.registrationEnabled | quote }}{{ else }}"true"{{ end }}
+              value: {{ if hasKey (dig "auth" dict .Values.backend) "registrationEnabled" }}{{ (dig "auth" "registrationEnabled" true .Values.backend) | quote }}{{ else }}"true"{{ end }}
           livenessProbe:
             httpGet:
               path: /health
