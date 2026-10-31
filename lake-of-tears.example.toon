@@ -139,12 +139,11 @@ backend:
     cpu_limit: "1"
     mem_limit: "512Mi"
   # OAuth / OIDC Identity Providers
-  oauth[5]{provider,clientId,clientSecret,tenantId,domain,url}:
-    google,YOUR_GOOGLE_CLIENT_ID,YOUR_GOOGLE_CLIENT_SECRET,,,,
-    github,YOUR_GITHUB_CLIENT_ID,YOUR_GITHUB_CLIENT_SECRET,,,,
-    microsoft,YOUR_MICROSOFT_CLIENT_ID,YOUR_MICROSOFT_CLIENT_SECRET,common,,
-    okta,YOUR_OKTA_CLIENT_ID,YOUR_OKTA_CLIENT_SECRET,,dev-12345.okta.com,
-    gitlab,YOUR_GITLAB_CLIENT_ID,YOUR_GITLAB_CLIENT_SECRET,,,https://gitlab.com
+  oauth[4]{provider,enabled,clientId,clientSecret,tenantId,teamId,keyId}:
+    google,true,YOUR_GOOGLE_CLIENT_ID,YOUR_GOOGLE_CLIENT_SECRET,,,
+    github,true,YOUR_GITHUB_CLIENT_ID,YOUR_GITHUB_CLIENT_SECRET,,,
+    microsoft,true,YOUR_MICROSOFT_CLIENT_ID,YOUR_MICROSOFT_CLIENT_SECRET,common,,
+    apple,false,YOUR_APPLE_SERVICES_ID,YOUR_APPLE_PRIVATE_KEY,,YOUR_TEAM_ID,YOUR_KEY_ID
 
 # ---------------------------------------------------------------------------
 # PostgreSQL Database (Backend Auth & Airflow Metadata)

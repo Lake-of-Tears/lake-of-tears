@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import jwt
 from starlette.testclient import TestClient
 
 repo_root = Path(__file__).parents[1]
@@ -418,3 +419,243 @@ def test_ui_settings_admin_renders_auth_overview():
             assert "OAuth 2.0 / OIDC Redirect (Callback) URI" in resp.text
             assert "Okta" in resp.text
             assert "okta...5678" in resp.text
+
+
+# ── 8. Provider On/Off Toggles & Apple Sign In ─────────────────────────────────
+
+
+def test_provider_enabled_toggles():
+    # Unset toggle falls back to clientId presence
+    with patch.dict(os.environ, {"GOOGLE_CLIENT_ID": "gid"}, clear=True):
+        assert oauth.is_provider_enabled("google") is True
+
+    # Truthy toggles
+    for val in ["true", "True", "1", "yes", "YES"]:
+        with patch.dict(os.environ, {"GOOGLE_CLIENT_ID": "gid", "GOOGLE_ENABLED": val}):
+            assert oauth.is_provider_enabled("google") is True
+
+    # Falsy toggles
+    for val in ["false", "False", "0", "no", "off"]:
+        with patch.dict(os.environ, {"GOOGLE_CLIENT_ID": "gid", "GOOGLE_ENABLED": val}):
+            assert oauth.is_provider_enabled("google") is False
+
+    # Apple requires all 4 credentials
+    with patch.dict(
+        os.environ,
+        {
+            "APPLE_CLIENT_ID": "com.lake.service",
+            "APPLE_TEAM_ID": "TEAM123",
+            "APPLE_KEY_ID": "KEY123",
+            "APPLE_PRIVATE_KEY": "fake-key",
+            "APPLE_ENABLED": "true",
+        },
+    ):
+        assert oauth.is_provider_enabled("apple") is True
+
+    # Apple missing team_id is disabled even if enabled=true
+    with patch.dict(
+        os.environ,
+        {
+            "APPLE_CLIENT_ID": "com.lake.service",
+            "APPLE_KEY_ID": "KEY123",
+            "APPLE_PRIVATE_KEY": "fake-key",
+            "APPLE_ENABLED": "true",
+        },
+        clear=True,
+    ):
+        assert oauth.is_provider_enabled("apple") is False
+
+
+def test_enabled_providers_list():
+    env = {
+        "GOOGLE_CLIENT_ID": "gid",
+        "GOOGLE_ENABLED": "true",
+        "GITHUB_CLIENT_ID": "ghid",
+        "GITHUB_ENABLED": "false",
+        "APPLE_CLIENT_ID": "com.lake.service",
+        "APPLE_TEAM_ID": "TEAM123",
+        "APPLE_KEY_ID": "KEY123",
+        "APPLE_PRIVATE_KEY": "fake-key",
+        "APPLE_ENABLED": "true",
+    }
+    with patch.dict(os.environ, env, clear=True):
+        providers = oauth.enabled_providers()
+        keys = [p["key"] for p in providers]
+        assert "google" in keys
+        assert "apple" in keys
+        assert "github" not in keys
+        apple_item = next(p for p in providers if p["key"] == "apple")
+        assert apple_item["label"] == "Apple"
+
+
+def test_apple_key_normalization_and_secret_generation():
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    pk = ec.generate_private_key(ec.SECP256R1())
+    raw_pem = pk.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode("utf-8")
+
+    # Test key normalization with literal escaped \n
+    escaped_pem = raw_pem.replace("\n", "\\n")
+    norm1 = oauth._normalize_private_key(escaped_pem)
+    assert "-----BEGIN PRIVATE KEY-----" in norm1
+    assert "\n" in norm1
+
+    # Test key normalization with base64
+    import base64
+
+    b64_pem = base64.b64encode(raw_pem.encode("utf-8")).decode("utf-8")
+    norm2 = oauth._normalize_private_key(b64_pem)
+    assert "-----BEGIN PRIVATE KEY-----" in norm2
+
+    # Test ES256 client secret JWT generation
+    secret_jwt = oauth._generate_apple_client_secret(
+        client_id="com.lake.service",
+        team_id="TEAM123456",
+        key_id="KEY1234567",
+        private_key=raw_pem,
+    )
+    assert isinstance(secret_jwt, str)
+    unverified_headers = jwt.get_unverified_header(secret_jwt)
+    assert unverified_headers["alg"] == "ES256"
+    assert unverified_headers["kid"] == "KEY1234567"
+
+    unverified_claims = jwt.decode(secret_jwt, options={"verify_signature": False})
+    assert unverified_claims["iss"] == "TEAM123456"
+    assert unverified_claims["sub"] == "com.lake.service"
+    assert unverified_claims["aud"] == "https://appleid.apple.com"
+    assert unverified_claims["exp"] > unverified_claims["iat"]
+
+
+def test_apple_oauth_callback_flow():
+    import json
+
+    mock_db = MagicMock()
+    mock_db.query.return_value.filter.return_value.first.return_value = None
+    mock_db.query.return_value.count.return_value = 1
+
+    # Fake Apple id_token
+    dummy_apple_id_token = jwt.encode(
+        {"email": "appleuser@privaterelay.appleid.com", "sub": "apple-sub-123456"},
+        "dummy-secret",
+        algorithm="HS256",
+    )
+
+    mock_request = MagicMock()
+    mock_request.cookies.get.return_value = "dummy-state-token"
+    mock_request.query_params.get.side_effect = lambda k, default="": {
+        "state": "test-state",
+    }.get(k, default)
+
+    mock_response = MagicMock()
+
+    form_payload = {
+        "code": "apple-auth-code-789",
+        "state": "test-state",
+        "user": json.dumps({"name": {"firstName": "Johnny", "lastName": "Appleseed"}}),
+    }
+
+    env_settings = {
+        "APPLE_CLIENT_ID": "com.lake.service",
+        "APPLE_TEAM_ID": "TEAM123456",
+        "APPLE_KEY_ID": "KEY1234567",
+        "APPLE_PRIVATE_KEY": "dummy_pk",
+        "APPLE_ENABLED": "true",
+    }
+
+    with patch(
+        "jwt.decode",
+        side_effect=lambda token, *args, **kwargs: (
+            {"state": "test-state", "next": "/catalog"}
+            if token == "dummy-state-token"
+            else {"email": "appleuser@privaterelay.appleid.com", "sub": "apple-sub-123456"}
+        ),
+    ):
+        with patch.dict(os.environ, env_settings):
+            with patch.object(
+                oauth, "_generate_apple_client_secret", return_value="apple_jwt_secret"
+            ):
+                with patch("httpx.Client.post") as mock_post:
+                    mock_post.return_value.status_code = 200
+                    mock_post.return_value.json.return_value = {
+                        "access_token": "apple-access-token",
+                        "id_token": dummy_apple_id_token,
+                    }
+
+                    resp = oauth.handle_oauth_callback(
+                        "apple",
+                        mock_request,
+                        mock_response,
+                        mock_db,
+                        form_data=form_payload,
+                    )
+                    assert resp.status_code == 307 or resp.status_code == 302
+                    assert resp.headers["location"] == "/catalog"
+                    # User added with name Johnny Appleseed
+                    assert mock_db.add.called
+                    added_objects = [call[0][0] for call in mock_db.add.call_args_list]
+                    user_created = next(
+                        (obj for obj in added_objects if isinstance(obj, oauth.User)), None
+                    )
+                    assert user_created is not None
+                    assert user_created.email == "appleuser@privaterelay.appleid.com"
+                    assert user_created.display_name == "Johnny Appleseed"
+
+
+def test_apple_callback_post_http_route():
+    mock_db = MagicMock()
+    mock_db.query.return_value.filter.return_value.first.return_value = None
+    mock_db.query.return_value.count.return_value = 1
+
+    dummy_state = "client-post-state"
+    state_cookie = jwt.encode(
+        {"state": dummy_state, "next": "/home"}, oauth.SECRET_KEY, algorithm="HS256"
+    )
+    dummy_apple_id_token = jwt.encode(
+        {"email": "postuser@apple.com", "sub": "apple-post-sub"},
+        "dummy-secret",
+        algorithm="HS256",
+    )
+
+    env_settings = {
+        "APPLE_CLIENT_ID": "com.lake.service",
+        "APPLE_TEAM_ID": "TEAM123456",
+        "APPLE_KEY_ID": "KEY1234567",
+        "APPLE_PRIVATE_KEY": "dummy_pk",
+        "APPLE_ENABLED": "true",
+    }
+
+    backend_main.app.dependency_overrides[database.get_db] = lambda: mock_db
+    try:
+        with patch.dict(os.environ, env_settings):
+            with patch.object(
+                oauth, "_generate_apple_client_secret", return_value="apple_jwt_secret"
+            ):
+                with patch("oauth.httpx.Client") as mock_httpx_cls:
+                    mock_client_instance = MagicMock()
+                    mock_client_instance.__enter__.return_value = mock_client_instance
+                    mock_resp = MagicMock()
+                    mock_resp.status_code = 200
+                    mock_resp.json.return_value = {
+                        "access_token": "apple-access-token",
+                        "id_token": dummy_apple_id_token,
+                    }
+                    mock_client_instance.post.return_value = mock_resp
+                    mock_httpx_cls.return_value = mock_client_instance
+
+                    backend_client.cookies.set("oauth_state", state_cookie)
+                    resp = backend_client.post(
+                        "/api/auth/oauth/apple/callback",
+                        data={"code": "auth-code-apple", "state": dummy_state},
+                        follow_redirects=False,
+                    )
+                    assert resp.status_code in (302, 307)
+                    assert resp.headers["location"] == "/home"
+                    assert "lake_token" in resp.headers.get("set-cookie", "")
+    finally:
+        backend_main.app.dependency_overrides.clear()
+        backend_client.cookies.clear()

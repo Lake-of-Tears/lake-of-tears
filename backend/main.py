@@ -535,11 +535,18 @@ def oauth_start(provider: str, request: Request, response: Response):
     return get_oauth_redirect(provider, request, response)
 
 
-@app.get("/api/auth/oauth/{provider}/callback")
-def oauth_callback(
+@app.api_route("/api/auth/oauth/{provider}/callback", methods=["GET", "POST"])
+async def oauth_callback(
     provider: str, request: Request, response: Response, db: Session = Depends(get_db)
 ):
-    return handle_oauth_callback(provider, request, response, db)
+    form_data = None
+    if request.method == "POST":
+        try:
+            form = await request.form()
+            form_data = dict(form)
+        except Exception:
+            form_data = {}
+    return handle_oauth_callback(provider, request, response, db, form_data=form_data)
 
 
 # ── Users (superadmin) ────────────────────────────────────────────────────────

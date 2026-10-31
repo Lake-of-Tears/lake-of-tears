@@ -286,29 +286,42 @@ backend:
     registrationEnabled: true
 
   google:
+    enabled: false
     clientId: ""
     clientSecret: ""
 
   github:
+    enabled: false
     clientId: ""
     clientSecret: ""
 
   microsoft:
+    enabled: false
     clientId: ""
     clientSecret: ""
     tenantId: "common"
 
+  apple:
+    enabled: false
+    clientId: ""
+    teamId: ""
+    keyId: ""
+    privateKey: ""
+
   okta:
+    enabled: false
     clientId: ""
     clientSecret: ""
     domain: ""
 
   gitlab:
+    enabled: false
     clientId: ""
     clientSecret: ""
     url: "https://gitlab.com"
 
   oidc:
+    enabled: false
     issuerUrl: ""
     clientId: ""
     clientSecret: ""
