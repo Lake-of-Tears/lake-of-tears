@@ -2254,6 +2254,7 @@ async def settings_admin_get(request: Request):
     token = request.cookies.get("lake_token")
     users_list = _backend_get("/api/users", token) or []
     all_ws = _backend_get("/api/admin/workspaces", token) or []
+    invitations_list = _backend_get("/api/admin/invitations", token) or []
     admin_settings = _backend_get("/api/admin/settings", token) or {
         "catalog_soft_delete_days": 30,
         "workspace_inactive_grace_period_days": 30,
@@ -2271,6 +2272,8 @@ async def settings_admin_get(request: Request):
             "page": "settings_admin",
             "users": users_list,
             "workspaces": all_ws,
+            "invitations": invitations_list,
+            "invite_error": request.query_params.get("invite_error"),
             "admin_settings": admin_settings,
             "auth_overview": _backend_get("/api/admin/auth-overview", token),
             "ai_provider": _backend_get("/api/admin/ai-provider", token),
@@ -2502,6 +2505,50 @@ async def settings_admin_workspace_delete(
             headers={"Authorization": f"Bearer {token}"},
         )
     return RedirectResponse(url="/settings/admin?saved=1", status_code=302)
+
+
+@app.post("/settings/admin/invitations")
+async def settings_admin_create_invitation(
+    request: Request,
+    email: str = Form(...),
+    role: str = Form("user"),
+    default_role: str = Form("read"),
+):
+    user = request.state.user
+    if not user or user.get("role") != "superadmin":
+        return RedirectResponse(url="/", status_code=302)
+    token = request.cookies.get("lake_token")
+
+    workspace_access = {"default": default_role}
+    form_data = await request.form()
+    for key, val in form_data.items():
+        if key.startswith("ws_role_"):
+            ws_slug = key[len("ws_role_") :]
+            if val and str(val) != "none":
+                workspace_access[ws_slug] = str(val)
+
+    payload = {
+        "email": email.strip(),
+        "role": role.strip(),
+        "workspace_access": workspace_access,
+    }
+    data, err = _backend_post_with_error("/api/admin/invitations", token or "", payload)
+    if err:
+        err_quoted = urllib.parse.quote(str(err))
+        return RedirectResponse(
+            url=f"/settings/admin?invite_error={err_quoted}#invitations", status_code=302
+        )
+    return RedirectResponse(url="/settings/admin?saved=1#invitations", status_code=302)
+
+
+@app.post("/settings/admin/invitations/{invitation_id}/revoke")
+async def settings_admin_revoke_invitation(request: Request, invitation_id: str):
+    user = request.state.user
+    if not user or user.get("role") != "superadmin":
+        return RedirectResponse(url="/", status_code=302)
+    token = request.cookies.get("lake_token")
+    _backend_delete(f"/api/admin/invitations/{invitation_id}", token or "")
+    return RedirectResponse(url="/settings/admin?saved=1#invitations", status_code=302)
 
 
 # ── Settings: Workspace catalog management ────────────────────────────────

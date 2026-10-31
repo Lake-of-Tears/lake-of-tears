@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, EmailStr, field_validator, model_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 # bcrypt only reads the first 72 bytes of a password, so a longer one would be silently cut and a
 # change made past that point would not change anything. Passwords that long are refused instead.
@@ -82,6 +82,33 @@ class UpdateUserRequest(BaseModel):
 
 class UpdateMeRequest(BaseModel):
     display_name: str | None = None
+
+
+class CreateInvitationRequest(BaseModel):
+    email: EmailStr
+    role: str = "user"
+    workspace_access: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v: str) -> str:
+        v = v.strip().lower()
+        if v not in ("user", "superadmin"):
+            raise ValueError("Role must be 'user' or 'superadmin'")
+        return v
+
+
+class InvitationResponse(BaseModel):
+    id: uuid.UUID
+    email: str
+    role: str
+    workspace_access: dict | None = None
+    status: str
+    created_at: datetime
+    accepted_at: datetime | None = None
+    invited_by_email: str | None = None
+
+    model_config = {"from_attributes": True}
 
 
 # ── Workspaces ────────────────────────────────────────────────────────────────

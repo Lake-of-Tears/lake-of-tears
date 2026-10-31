@@ -5,10 +5,12 @@ import json
 import os
 import secrets
 import time
+from datetime import UTC, datetime
 from urllib.parse import urlencode
 
 import httpx
 import jwt
+import sqlalchemy as sa
 from auth import (
     COOKIE_NAME,
     SECRET_KEY,
@@ -18,7 +20,8 @@ from auth import (
 )
 from fastapi import HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
-from models import OAuthAccount, User, Workspace, WorkspaceMember
+from models import OAuthAccount, User, UserInvitation, Workspace, WorkspaceMember
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 _STATE_COOKIE = "oauth_state"
@@ -418,15 +421,26 @@ def handle_oauth_callback(
     user = db.query(User).filter(User.email == email).first()
     is_first = db.query(User).count() == 0
     if not user:
-        if not is_registration_enabled() and not is_first:
+        invite = (
+            db.query(UserInvitation)
+            .filter(
+                func.lower(UserInvitation.email) == func.lower(email.strip()),
+                UserInvitation.status == "pending",
+            )
+            .first()
+        )
+
+        if not is_registration_enabled() and not is_first and not invite:
             resp = RedirectResponse(url="/login?error=registration_disabled")
             resp.delete_cookie(_STATE_COOKIE)
             return resp
 
+        assigned_role = "superadmin" if is_first else (invite.role if invite else "user")
+
         user = User(
             email=email,
             display_name=display_name or email.split("@")[0],
-            role="superadmin" if is_first else "user",
+            role=assigned_role,
             is_active=True,
         )
         db.add(user)
@@ -438,9 +452,33 @@ def handle_oauth_callback(
 
             _create_default_workspace(db, user)
         else:
+            ws_access = invite.workspace_access if (invite and invite.workspace_access) else {}
             default_ws = db.query(Workspace).filter(Workspace.slug == "default").first()
             if default_ws:
-                db.add(WorkspaceMember(workspace_id=default_ws.id, user_id=user.id, role="read"))
+                default_role = ws_access.get("default") or (
+                    "write" if assigned_role == "superadmin" else "read"
+                )
+                db.add(
+                    WorkspaceMember(workspace_id=default_ws.id, user_id=user.id, role=default_role)
+                )
+
+            for ws_slug_or_id, ws_role in ws_access.items():
+                if ws_slug_or_id == "default":
+                    continue
+                other_ws = (
+                    db.query(Workspace)
+                    .filter(
+                        (Workspace.slug == ws_slug_or_id)
+                        | (Workspace.id.cast(sa.String) == str(ws_slug_or_id))
+                    )
+                    .first()
+                )
+                if other_ws and other_ws.id != (default_ws.id if default_ws else None):
+                    db.add(WorkspaceMember(workspace_id=other_ws.id, user_id=user.id, role=ws_role))
+
+        if invite:
+            invite.status = "accepted"
+            invite.accepted_at = datetime.now(UTC)
 
     # Link OAuth account
     if (

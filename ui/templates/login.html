@@ -36,7 +36,36 @@
       </div>
 
       <!-- Error / success banner -->
+      {% set qp = request.query_params if (request is defined and request and request.scope is defined and 'query_string' in request.scope) else {} %}
+      {% set err_code = qp.get('error') if qp else None %}
+      {% set reason_code = qp.get('reason') if qp else None %}
+      {% if err_code %}
+      <div id="banner" class="mb-4 px-3 py-2 rounded-md text-sm bg-red-900/40 text-red-400 border border-red-800/50">
+        {% if err_code == 'registration_disabled' %}
+          You don't have an account yet. Access is by invite only — please contact your administrator to be added.
+        {% elif err_code == 'disabled' %}
+          Your account has been disabled.
+        {% elif err_code == 'expired' %}
+          Session expired — please sign in again.
+        {% elif err_code == 'invalid' %}
+          Invalid session.
+        {% else %}
+          Authentication error.
+        {% endif %}
+      </div>
+      {% elif reason_code %}
+      <div id="banner" class="mb-4 px-3 py-2 rounded-md text-sm bg-red-900/40 text-red-400 border border-red-800/50">
+        {% if reason_code == 'inactivity' %}
+          You were signed out due to inactivity.
+        {% elif reason_code == 'session_expired' %}
+          Your session has expired — please sign in again.
+        {% else %}
+          You have been signed out.
+        {% endif %}
+      </div>
+      {% else %}
       <div id="banner" class="hidden mb-4 px-3 py-2 rounded-md text-sm"></div>
+      {% endif %}
 
       <!-- Login form -->
       <form id="form-login" onsubmit="submitLogin(event)" class="space-y-3">
@@ -233,7 +262,6 @@
           if (cfg.registration_enabled === false) {
             const tabs = document.getElementById('auth-tabs');
             if (tabs) tabs.classList.add('hidden');
-            setTab('login', false);
           } else if (cfg.registration_enabled === true) {
             const tabs = document.getElementById('auth-tabs');
             if (tabs) tabs.classList.remove('hidden');

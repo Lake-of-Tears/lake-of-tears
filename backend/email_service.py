@@ -79,3 +79,21 @@ def send_access_removed(
     to catalog <strong>{catalog_name}</strong>.</p>
     """
     _send(owner_emails, subject, body)
+
+
+def send_invitation(
+    to_email: str,
+    role: str,
+    inviter_name_or_email: str,
+    base_url: str,
+) -> None:
+    subject = "[Lake of Tears] You've been invited to join Lake of Tears"
+    login_url = f"{base_url.rstrip('/')}/login"
+    body = f"""
+    <p>Hello,</p>
+    <p><strong>{inviter_name_or_email}</strong> has invited you to join <strong>Lake of Tears</strong> with <strong>{role.title()}</strong> access.</p>
+    <p>To sign in, visit the login page and sign in with your Google, Apple, or SSO account:</p>
+    <p><a href="{login_url}" style="display:inline-block;padding:10px 18px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px;font-weight:bold;">Sign in to Lake of Tears</a></p>
+    <p>Or visit: <a href="{login_url}">{login_url}</a></p>
+    """
+    _send([to_email], subject, body)

@@ -748,5 +748,225 @@ def test_oauth_user_trying_to_register_or_login_with_password():
         assert "This account was created via Google" in login_resp.json()["detail"]
     finally:
         backend_main.app.dependency_overrides.clear()
-
         backend_client.cookies.clear()
+
+
+# ── 12. User Invitation Tests ─────────────────────────────────────────────────
+
+
+def test_admin_create_invitation_success_and_duplicates():
+    from models import UserInvitation
+
+    admin = _make_user("admin@example.com", role="superadmin")
+
+    mock_db = MagicMock()
+    mock_db.query.return_value.filter.return_value.first.return_value = None
+
+    backend_main.app.dependency_overrides[database.get_db] = lambda: mock_db
+    backend_main.app.dependency_overrides[backend_main.require_superadmin] = lambda: admin
+    try:
+        with patch("backend_main_auth_test.send_invitation") as mock_email:
+            resp = backend_client.post(
+                "/api/admin/invitations",
+                json={
+                    "email": "invitee@example.com",
+                    "role": "user",
+                    "workspace_access": {"default": "write"},
+                },
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["email"] == "invitee@example.com"
+            assert data["role"] == "user"
+            assert data["status"] == "pending"
+            assert data["workspace_access"] == {"default": "write"}
+            mock_email.assert_called_once()
+
+        # 2. Reject if user already exists
+        existing_invitee = _make_user("invitee@example.com")
+        mock_db.query.return_value.filter.return_value.first.return_value = existing_invitee
+        resp_dup_user = backend_client.post(
+            "/api/admin/invitations",
+            json={"email": "invitee@example.com", "role": "user"},
+        )
+        assert resp_dup_user.status_code == 400
+        assert "A user with this email already exists" in resp_dup_user.json()["detail"]
+
+        # 3. Reject if pending invitation already exists
+        pending_inv = UserInvitation(email="invitee@example.com", role="user", status="pending")
+        mock_db.query.return_value.filter.return_value.first.side_effect = [
+            None,  # user check
+            pending_inv,  # pending invite check
+        ]
+        resp_dup_inv = backend_client.post(
+            "/api/admin/invitations",
+            json={"email": "invitee@example.com", "role": "user"},
+        )
+        assert resp_dup_inv.status_code == 400
+        assert "An invitation is already pending for this email" in resp_dup_inv.json()["detail"]
+    finally:
+        backend_main.app.dependency_overrides.clear()
+
+
+def test_admin_list_and_revoke_invitation():
+    from models import UserInvitation
+
+    admin = _make_user("admin@example.com", role="superadmin")
+
+    inv_id = uuid.uuid4()
+    inv = UserInvitation(
+        id=inv_id,
+        email="pending@example.com",
+        role="user",
+        status="pending",
+        created_at=datetime.now(UTC),
+    )
+
+    mock_db = MagicMock()
+    mock_db.query.return_value.order_by.return_value.all.return_value = [inv]
+    mock_db.query.return_value.filter.return_value.first.return_value = inv
+
+    backend_main.app.dependency_overrides[database.get_db] = lambda: mock_db
+    backend_main.app.dependency_overrides[backend_main.require_superadmin] = lambda: admin
+    try:
+        # List
+        list_resp = backend_client.get("/api/admin/invitations")
+        assert list_resp.status_code == 200
+        items = list_resp.json()
+        assert len(items) == 1
+        assert items[0]["email"] == "pending@example.com"
+
+        # Revoke
+        del_resp = backend_client.delete(f"/api/admin/invitations/{inv_id}")
+        assert del_resp.status_code == 204
+        assert inv.status == "revoked"
+    finally:
+        backend_main.app.dependency_overrides.clear()
+
+
+def test_register_bypasses_disabled_flag_with_valid_invite():
+    from models import UserInvitation, Workspace
+
+    mock_db = MagicMock()
+    # 1st query: User check -> None
+    # 2nd query: count -> 2 users exist
+    # 3rd query: UserInvitation check -> invite exists!
+    # 4th query: Workspace check for default -> Workspace
+    invite = UserInvitation(
+        email="invited@example.com",
+        role="user",
+        workspace_access={"default": "write"},
+        status="pending",
+    )
+    mock_ws = Workspace(id=uuid.uuid4(), name="Default", slug="default")
+
+    def query_mock(model):
+        m = MagicMock()
+        if model == UserInvitation:
+            m.filter.return_value.first.return_value = invite
+        elif model == Workspace:
+            m.filter.return_value.first.return_value = mock_ws
+        else:
+            m.filter.return_value.first.return_value = None
+            m.count.return_value = 2
+        return m
+
+    mock_db.query.side_effect = query_mock
+
+    backend_main.app.dependency_overrides[database.get_db] = lambda: mock_db
+    try:
+        with patch.dict(os.environ, {"AUTH_REGISTRATION_ENABLED": "false"}):
+            resp = backend_client.post(
+                "/api/auth/register",
+                json={"email": "invited@example.com", "password": "Password123!"},
+            )
+            assert resp.status_code == 200
+            assert resp.json()["role"] == "user"
+            assert invite.status == "accepted"
+            assert invite.accepted_at is not None
+    finally:
+        backend_main.app.dependency_overrides.clear()
+        backend_client.cookies.clear()
+
+
+def test_oauth_bypasses_disabled_flag_with_valid_invite():
+    from models import OAuthAccount, User, UserInvitation, Workspace
+    from starlette.requests import Request
+    from starlette.responses import Response
+
+    state_raw = "test-oauth-state-token"
+    state_token = jwt.encode({"state": state_raw}, auth.SECRET_KEY, algorithm="HS256")
+
+    req = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "headers": [(b"cookie", f"{oauth._STATE_COOKIE}={state_token}".encode())],
+            "query_string": f"state={state_raw}&code=valid-auth-code".encode(),
+        }
+    )
+    resp = Response()
+
+    invite = UserInvitation(
+        email="invited-oauth@example.com",
+        role="superadmin",
+        workspace_access={"default": "write"},
+        status="pending",
+    )
+    mock_ws = Workspace(id=uuid.uuid4(), name="Default", slug="default")
+
+    mock_db = MagicMock()
+
+    def query_mock(model):
+        m = MagicMock()
+        if model == User:
+            m.filter.return_value.first.return_value = None  # User doesn't exist yet
+            m.count.return_value = 2  # Existing users exist
+        elif model == UserInvitation:
+            m.filter.return_value.first.return_value = invite
+        elif model == Workspace:
+            m.filter.return_value.first.return_value = mock_ws
+        elif model == OAuthAccount:
+            m.filter_by.return_value.first.return_value = None
+        else:
+            m.filter.return_value.first.return_value = None
+        return m
+
+    mock_db.query.side_effect = query_mock
+
+    with (
+        patch.dict(
+            os.environ, {"AUTH_REGISTRATION_ENABLED": "false", "AUTH_GOOGLE_ENABLED": "true"}
+        ),
+        patch.object(oauth, "is_provider_enabled", return_value=True),
+        patch.object(
+            oauth,
+            "_provider_config",
+            return_value={
+                "client_id": "google-client",
+                "client_secret": "secret",
+                "token_url": "https://oauth2.googleapis.com/token",
+                "userinfo_url": "https://www.googleapis.com/oauth2/v3/userinfo",
+            },
+        ),
+        patch.object(oauth.httpx, "Client") as mock_client_cls,
+    ):
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__.return_value = mock_client
+        mock_client.post.return_value = MagicMock(
+            status_code=200, json=lambda: {"access_token": "google-at"}
+        )
+        mock_client.get.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {
+                "email": "invited-oauth@example.com",
+                "name": "Invited OAuth User",
+                "sub": "google-sub-789",
+            },
+        )
+
+        res = oauth.handle_oauth_callback("google", req, resp, mock_db)
+        assert res.status_code in (302, 307)
+        assert res.headers["location"] == "/"
+        assert invite.status == "accepted"
+        assert invite.accepted_at is not None
