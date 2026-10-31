@@ -2,54 +2,39 @@
 
 Apache Airflow runs everything that happens on a schedule in Lake of Tears: ingestion, embeddings, AI summaries, catalog upkeep and notebook runs. This guide explains how Airflow is set up in the stack, the standards the shipped DAGs follow (with a template you can copy), and how to run, inspect and troubleshoot DAGs.
 
-Commands in this guide were run against a Docker Compose stack on Airflow 2.10.3. Use `docker compose exec airflow airflow ...` for the CLI examples.
+Commands in this guide are run against Kubernetes using Helm. Use `kubectl exec -it deployment/lake-of-tears-airflow -n lake-of-tears -- airflow ...` for the CLI examples.
 
 ## 1. How Airflow is set up
 
-| | Docker Compose | Kubernetes / Helm |
-|---|---|---|
-| Image | `apache/airflow:2.10.3-python3.11`, with `duckdb`, `requests`, `boto3`, `google-genai` and `scikit-learn` installed at start | Image built from `docker/airflow/Dockerfile`: the same base plus `duckdb`, `boto3`, `pyarrow`, `google-genai`, `scikit-learn`, `papermill` and `ipykernel` |
-| Run mode | `airflow standalone`: web server, scheduler and triggerer in one container | One deployment, with `AIRFLOW__CORE__EXECUTOR=LocalExecutor` |
-| Executor | `SequentialExecutor`: **one task at a time** | `LocalExecutor`: tasks run in parallel on the pod |
-| Metadata database | SQLite file `airflow.db` | PostgreSQL |
-| Web UI | `http://localhost/airflow/` (through nginx) | `https://<ingress.host>/airflow` (Ingress) |
+| Aspect | Kubernetes / Helm |
+|---|---|
+| Image | Built from `deploy/airflow/Dockerfile`: `apache/airflow:2.10.3-python3.11` plus `duckdb`, `boto3`, `pyarrow`, `google-genai`, `scikit-learn`, `papermill` and `ipykernel` |
+| Run mode | Deployment running webserver and scheduler with `LocalExecutor` |
+| Executor | `LocalExecutor`: tasks run concurrently within the pod |
+| Metadata database | PostgreSQL (`lake_auth` cluster, `airflow` database) |
+| Web UI | `http://localhost/airflow` or `https://<ingress.host>/airflow` (Ingress) |
 
 ### Folders and container paths
 
-In Docker Compose two host folders under `DATALAKE_DATA_DIR` (set in `.env`) are mounted into the container:
+In Kubernetes, DAGs and pipeline scripts are mounted into the Airflow container via ConfigMaps or PVCs:
 
-| Host folder | Inside the container | What lives there |
+| Location | Inside the container | What lives there |
 |---|---|---|
-| `$DATALAKE_DATA_DIR/airflow/` | `/opt/airflow/` | `dags/` (DAG files), `logs/`, `airflow.db`, `airflow.cfg` |
-| `$DATALAKE_DATA_DIR/datalake/` | `/opt/airflow/datalake/` | pipeline code: `storage_writer.py` and `jobs/pipeline/*.py` |
+| PVC / ConfigMap | `/opt/airflow/dags/` | DAG files (shipped DAGs and generated workspace DAGs) |
+| Volume / image | `/opt/airflow/datalake/` | Pipeline code: `storage_writer.py` and `jobs/pipeline/*.py` |
 
-The backend container mounts the same `dags/` folder (`AIRFLOW_DAGS_DIR=/opt/airflow/dags`), which is how it writes DAG files for notebooks scheduled from the Lake UI.
-
-```
-$DATALAKE_DATA_DIR/
-├── airflow/
-│   ├── dags/                    <- DAG files (shipped DAGs and generated workspace DAGs)
-│   ├── logs/dag_id=.../run_id=.../task_id=.../attempt=N.log
-│   └── airflow.db
-└── datalake/
-    ├── storage_writer.py
-    └── jobs/pipeline/           <- scripts run by BashOperator DAGs
-```
-
-The repository does not copy DAGs or scripts into these folders for you. Copy a DAG file into `dags/` yourself; see [Data Ingestion and Pipelines](Data-Ingestion-and-Pipelines.md) for the script layout.
+The backend container mounts the same DAG directory (`AIRFLOW_DAGS_DIR=/opt/airflow/dags`), allowing it to write DAG files for notebooks scheduled from the Lake UI.
 
 ### Web UI and routing
 
-nginx proxies `/airflow/` to Airflow. Airflow is configured with a base URL that includes the `/airflow` path (`AIRFLOW__WEBSERVER__BASE_URL`), and nginx must pass the prefix through unchanged. Two details matter:
+The Kubernetes Ingress proxies `/airflow` to Airflow. Airflow is configured with a base URL that includes the `/airflow` path (`AIRFLOW__WEBSERVER__BASE_URL`), and Ingress routes traffic to the Airflow service port 8080.
 
 - The base URL **must not end with a slash**, or the web server refuses to start with `webserver.base_url conf cannot have a trailing slash`.
-- Open `/airflow/` (with the prefix), not Airflow's direct port.
-
-If `http://localhost/airflow/` returns 502, check `docker compose logs airflow` for that message. See [#163](https://github.com/Lake-of-Tears/lake-of-tears/issues/163).
+- Open `/airflow` (with the prefix), not Airflow's direct port.
 
 ### Credentials
 
-The Lake UI's pipeline pages call Airflow's REST API with HTTP basic auth (`AIRFLOW_URL`, `AIRFLOW_ADMIN_USER`, `AIRFLOW_ADMIN_PASSWORD`). In Docker Compose, `airflow standalone` creates its own `admin` user and writes the generated password to `$DATALAKE_DATA_DIR/airflow/standalone_admin_password.txt`; it ignores the `AIRFLOW_PASSWORD` value in `.env`. Use that file's contents to sign in to the web UI, and see [#165](https://github.com/Lake-of-Tears/lake-of-tears/issues/165) for the REST-API mismatch.
+The Lake UI's pipeline pages call Airflow's REST API with HTTP basic auth (`AIRFLOW_URL`, `AIRFLOW_ADMIN_USER`, `AIRFLOW_ADMIN_PASSWORD`), which are configured via Helm values (`airflow.adminUser` and `airflow.adminPassword`).
 
 ## 2. The DAGs that ship today
 
@@ -153,8 +138,8 @@ New files are noticed within a few minutes (the scanner interval is 300 seconds)
 ### Find your DAGs
 
 ```bash
-docker compose exec airflow airflow dags list
-docker compose exec airflow airflow dags list-import-errors
+kubectl exec -it deployment/lake-of-tears-airflow -n lake-of-tears -- airflow dags list
+kubectl exec -it deployment/lake-of-tears-airflow -n lake-of-tears -- airflow dags list-import-errors
 ```
 
 `list-import-errors` prints the Python traceback for any DAG file that failed to load. A DAG with an import error simply does not appear in `dags list`, so check here first when a DAG is missing.
@@ -162,10 +147,10 @@ docker compose exec airflow airflow dags list-import-errors
 ### Trigger a run
 
 ```bash
-docker compose exec airflow airflow dags unpause my_dag
-docker compose exec airflow airflow dags trigger my_dag
-docker compose exec airflow airflow dags trigger my_dag -c '{"note": "manual"}'   # with run config
-docker compose exec airflow airflow dags list-runs -d my_dag
+kubectl exec -it deployment/lake-of-tears-airflow -n lake-of-tears -- airflow dags unpause my_dag
+kubectl exec -it deployment/lake-of-tears-airflow -n lake-of-tears -- airflow dags trigger my_dag
+kubectl exec -it deployment/lake-of-tears-airflow -n lake-of-tears -- airflow dags trigger my_dag -c '{"note": "manual"}'   # with run config
+kubectl exec -it deployment/lake-of-tears-airflow -n lake-of-tears -- airflow dags list-runs -d my_dag
 ```
 
 You can also use the **Trigger DAG** button in the web UI. A manual run uses the current time as its logical date, so `{{ ds }}` is today.
@@ -173,8 +158,8 @@ You can also use the **Trigger DAG** button in the web UI. A manual run uses the
 ### Test without the scheduler
 
 ```bash
-docker compose exec airflow airflow dags test my_dag 2026-10-10          # runs the whole DAG in-process
-docker compose exec airflow airflow tasks test my_dag extract 2026-10-10 # runs one task
+kubectl exec -it deployment/lake-of-tears-airflow -n lake-of-tears -- airflow dags test my_dag 2026-10-10          # runs the whole DAG in-process
+kubectl exec -it deployment/lake-of-tears-airflow -n lake-of-tears -- airflow tasks test my_dag extract 2026-10-10 # runs one task
 ```
 
 Both print the task output straight to your terminal and do not need the DAG to be unpaused. This is the fastest way to debug a new DAG.
@@ -182,14 +167,14 @@ Both print the task output straight to your terminal and do not need the DAG to 
 ### Backfill
 
 ```bash
-docker compose exec airflow airflow dags backfill -s 2026-10-10 -e 2026-10-12 my_dag
+kubectl exec -it deployment/lake-of-tears-airflow -n lake-of-tears -- airflow dags backfill -s 2026-10-10 -e 2026-10-12 my_dag
 ```
 
 Each run gets its own logical date. This relies on your script taking the date as an argument; see [Data Ingestion and Pipelines](Data-Ingestion-and-Pipelines.md).
 
 ### Inspect task logs
 
-Logs are files under `$DATALAKE_DATA_DIR/airflow/logs/`, one per attempt:
+Logs are files under `/opt/airflow/logs/`, one per attempt:
 
 ```
 logs/dag_id=<dag>/run_id=<run>/task_id=<task>/attempt=1.log
@@ -204,7 +189,7 @@ Script output (`print`) appears in the task log, prefixed by Airflow's timestamp
 In the UI, select the failed task and choose **Clear**. From the CLI:
 
 ```bash
-docker compose exec airflow airflow tasks clear my_dag -s 2026-10-10 -e 2026-10-10 -t extract -y
+kubectl exec -it deployment/lake-of-tears-airflow -n lake-of-tears -- airflow tasks clear my_dag -s 2026-10-10 -e 2026-10-10 -t extract -y
 ```
 
 Clearing resets the task so the scheduler runs it again. Because ingestion writes are idempotent, re-running a day is safe.
@@ -212,17 +197,17 @@ Clearing resets the task so the scheduler runs it again. Because ingestion write
 ### Pause and unpause
 
 ```bash
-docker compose exec airflow airflow dags pause my_dag
-docker compose exec airflow airflow dags unpause my_dag
+kubectl exec -it deployment/lake-of-tears-airflow -n lake-of-tears -- airflow dags pause my_dag
+kubectl exec -it deployment/lake-of-tears-airflow -n lake-of-tears -- airflow dags unpause my_dag
 ```
 
 ### Remove a DAG
 
-Delete the file from `dags/`, then run `airflow dags delete -y <dag_id>` to remove the DAG's metadata and run history from the database.
+Delete the file from the DAGs directory, then run `kubectl exec -it deployment/lake-of-tears-airflow -n lake-of-tears -- airflow dags delete -y <dag_id>` to remove the DAG's metadata and run history from the database.
 
 ## 5. Credentials, Variables and Connections
 
-The shipped DAGs do **not** use Airflow Variables or Connections. They read configuration from **environment variables** set on the `airflow` service in `docker-compose.yml` (and the Helm values), such as:
+The shipped DAGs do **not** use Airflow Variables or Connections. They read configuration from **environment variables** set in the Helm chart values (via `airflow.env` or ConfigMaps/Secrets), such as:
 
 | Variable | Used for |
 |---|---|
@@ -231,35 +216,33 @@ The shipped DAGs do **not** use Airflow Variables or Connections. They read conf
 | `JUPYTER_SERVER_URL`, `JUPYTER_BASE_URL`, `JUPYTER_TOKEN` | Running notebooks through the Jupyter Server API |
 | Source-specific keys (`TRUENAS_*`, `JELLYFIN_*`, `STRIPE_SECRET_KEY` and others) | Ingestion scripts |
 
-To add a setting: put it in `.env` (and `.env.example`), pass it to the `airflow` service under `environment:`, then restart the service. The task reads it with `os.environ`.
+To add a setting: configure it in your Helm values file under `airflow.env`, run `helm upgrade`, and restart the deployment. The task reads it with `os.environ`.
 
 Airflow's own **Variables** and **Connections** are supported if you prefer them:
 
 ```bash
-docker compose exec airflow airflow variables set my_threshold 10
-docker compose exec airflow airflow variables get my_threshold
-docker compose exec airflow airflow connections add my_api --conn-type http \
+kubectl exec -it deployment/lake-of-tears-airflow -n lake-of-tears -- airflow variables set my_threshold 10
+kubectl exec -it deployment/lake-of-tears-airflow -n lake-of-tears -- airflow variables get my_threshold
+kubectl exec -it deployment/lake-of-tears-airflow -n lake-of-tears -- airflow connections add my_api --conn-type http \
   --conn-host api.example.com --conn-login user --conn-password '<secret>'
-docker compose exec airflow airflow connections list
+kubectl exec -it deployment/lake-of-tears-airflow -n lake-of-tears -- airflow connections list
 ```
 
-In a DAG you would read them with `Variable.get("my_threshold")` and `BaseHook.get_connection("my_api")`. Two cautions:
+In a DAG you would read them with `Variable.get("my_threshold")` and `BaseHook.get_connection("my_api")`.
 
-- The Compose stack sets **no Fernet key** (`AIRFLOW__CORE__FERNET_KEY` is empty), so Variables and connection passwords are not encrypted in the SQLite database. Set a key before storing real secrets this way, or keep using environment variables.
-- Do not put secrets in `bash_command` or DAG file text, because those are shown in the web UI and logs.
+Do not put secrets in `bash_command` or DAG file text, because those are shown in the web UI and logs.
 
 ## 6. Troubleshooting checklist
 
 | Symptom | Check |
 |---|---|
-| `http://localhost/airflow/` returns 502 or 404 | `docker compose logs airflow`. A `trailing slash` error means the base URL ends in `/` (#163). A 404 on every page means nginx is stripping the `/airflow` prefix: the `proxy_pass` in the `/airflow/` location must have no URI after the port. |
-| Cannot sign in, or the Lake UI cannot list DAGs | Compose generates the admin password; read `standalone_admin_password.txt` (#165). |
-| A DAG file is not in the list | `airflow dags list-import-errors`. Then `airflow dags reserialize`. Confirm the file is in `$DATALAKE_DATA_DIR/airflow/dags/`. |
+| `http://localhost/airflow` returns 502 or 404 | `kubectl logs deploy/lake-of-tears-airflow -n lake-of-tears`. A `trailing slash` error means the base URL ends in `/` (#163). |
+| Cannot sign in, or the Lake UI cannot list DAGs | Ensure `AIRFLOW_ADMIN_USER` and `AIRFLOW_ADMIN_PASSWORD` in the Helm values match the configured credentials. |
+| A DAG file is not in the list | `kubectl exec -it deployment/lake-of-tears-airflow -n lake-of-tears -- airflow dags list-import-errors`. |
 | DAG is listed but never runs | It may be **paused** (new DAGs are). `airflow dags unpause <dag_id>`. Also check the `schedule` and `start_date`. |
-| Task fails immediately with `No such file or directory` | The script path. Scripts must be at `/opt/airflow/datalake/jobs/pipeline/`; check `$DATALAKE_DATA_DIR/datalake/jobs/pipeline/`. |
-| `ModuleNotFoundError: storage_writer` | `storage_writer.py` must sit in `$DATALAKE_DATA_DIR/datalake/`, two folders above the script. |
-| Task fails with a missing environment variable | The variable is not on the `airflow` service. Add it under `environment:` and restart Airflow. |
-| A task waits a long time to start (Compose) | `SequentialExecutor` runs one task at a time; a long task delays the others. |
+| Task fails immediately with `No such file or directory` | Check the script path inside `/opt/airflow/datalake/jobs/pipeline/`. |
+| `ModuleNotFoundError: storage_writer` | `storage_writer.py` must sit in `/opt/airflow/datalake/`, two folders above the script. |
+| Task fails with a missing environment variable | The variable is not defined in the Airflow deployment. Add it in the Helm values and upgrade. |
 | Need to see why a run failed | Open the failed task's log (`attempt=N.log`), or reproduce with `airflow tasks test`. |
 | Data is wrong for one day | Clear that day's task, or backfill that date, then check the partition in MinIO. |
 

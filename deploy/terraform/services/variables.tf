@@ -42,7 +42,7 @@ variable "truenas_script_host" {
   default = "172.16.100.1"
 }
 
-# ZFS pool name — used to build the NFS mount path for docker_compose.tf
+# ZFS pool name — used to build the NFS mount path for the datalake volume
 variable "zfs_pool" {
   type    = string
   default = "WB-RAID-Z-18TB"

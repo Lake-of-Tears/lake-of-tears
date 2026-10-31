@@ -44,8 +44,8 @@ body:
     attributes:
       label: Steps to reproduce
       placeholder: |
-        1. Start the stack with `docker compose up -d`
-        2. Open http://localhost:3000/query
+        1. Deploy with `helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears ...`
+        2. Open http://localhost/
         3. Run query: ...
         4. See error
     validations:
@@ -56,9 +56,9 @@ body:
     attributes:
       label: Environment
       placeholder: |
-        OS: macOS 14 / Ubuntu 22.04
-        Docker version: 26.x
-        Deployment: Docker Compose / Helm
+        OS: macOS 15 / Ubuntu 24.04
+        Kubernetes version / provider: OrbStack / k3s / EKS
+        Helm version: 3.x
     validations:
       required: true
 
@@ -66,5 +66,5 @@ body:
     id: logs
     attributes:
       label: Relevant logs
-      description: Paste relevant output from `docker compose logs`
+      description: Paste relevant output from `kubectl logs`
       render: shell

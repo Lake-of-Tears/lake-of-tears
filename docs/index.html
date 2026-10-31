@@ -194,12 +194,10 @@
           <span class="text-xs font-mono text-brand-400">Single URL: http://lake.local</span>
         </div>
         <div class="p-6 font-mono text-xs sm:text-sm text-slate-300 overflow-x-auto space-y-2">
-          <div class="text-slate-500"># Deploy production datalakehouse on Kubernetes with Helm:</div>
-          <div class="text-emerald-400"><span class="text-brand-400">$</span> helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears --namespace lake-of-tears --create-namespace -f values-prod.yaml -f values-secret.yaml</div>
-          <div class="text-slate-500 mt-3"># Or deploy on Docker Compose with one command:</div>
-          <div class="text-emerald-400"><span class="text-brand-400">$</span> cp .env.example .env &amp;&amp; docker compose up -d</div>
+          <div class="text-slate-500"># Deploy datalakehouse on Kubernetes with Helm:</div>
+          <div class="text-emerald-400"><span class="text-brand-400">$</span> helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears --namespace lake-of-tears --create-namespace -f deploy/helm/values-local.example.yaml</div>
           <div class="text-cyan-200/80 pt-2 font-sans text-xs">
-            ✨ Instant access: Lake UI shell, DuckDB SQL Editor, JupyterLab, Apache Superset, Airflow DAGs, and MinIO S3 storage.
+            ✨ Instant access: Lake UI shell, DuckDB SQL Editor, Jupyter notebooks, Apache Superset, Airflow DAGs, and MinIO S3 storage.
           </div>
         </div>
       </div>
@@ -614,31 +612,52 @@
       
       <div id="quickstart" class="text-center max-w-3xl mx-auto mb-16">
         <h2 class="text-xs font-bold text-brand-400 uppercase tracking-widest">Get Started in Minutes</h2>
-        <p class="mt-2 text-3xl sm:text-4xl font-extrabold text-white tracking-tight">Deploy to Kubernetes or Docker</p>
-        <p class="mt-4 text-slate-400">Choose between production Kubernetes Helm deployment or single-node Docker Compose.</p>
+        <p class="mt-2 text-3xl sm:text-4xl font-extrabold text-white tracking-tight">Deploy with Helm</p>
+        <p class="mt-4 text-slate-400">Standardized 100% on Kubernetes and native Helm across local development and production environments.</p>
       </div>
 
       <!-- Tab Switcher -->
       <div class="max-w-4xl mx-auto">
         <div class="flex border-b border-slate-800 mb-6 gap-4 justify-center">
           <button id="tab-btn-helm" onclick="switchTab('helm')" class="py-3 px-6 text-sm font-semibold text-brand-400 border-b-2 border-brand-400 transition">
-            ☸️ Kubernetes (Helm Chart)
+            💻 Local Development (Helm)
           </button>
           <button id="tab-btn-docker" onclick="switchTab('docker')" class="py-3 px-6 text-sm font-semibold text-slate-400 border-b-2 border-transparent hover:text-slate-200 transition">
-            🐳 Docker Compose (Single Node)
+            🚀 Production (Helm)
           </button>
         </div>
 
-        <!-- Helm Content -->
+        <!-- Local Development Content -->
         <div id="tab-content-helm" class="space-y-6">
           <div class="glass-card rounded-2xl p-6 border border-slate-800">
-            <h3 class="text-lg font-bold text-white mb-2">1. Clone the repository</h3>
+            <h3 class="text-lg font-bold text-white mb-2">1. Clone &amp; Build Images</h3>
             <div class="bg-dark-950 rounded-xl p-4 font-mono text-xs sm:text-sm text-slate-300 border border-slate-800 relative group">
-              <code>git clone https://github.com/Lake-of-Tears/lake-of-tears.git<br>cd lake-of-tears</code>
-              <button onclick="navigator.clipboard.writeText('git clone https://github.com/Lake-of-Tears/lake-of-tears.git\ncd lake-of-tears')" class="absolute right-3 top-3 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded transition">Copy</button>
+              <pre class="overflow-x-auto"><code>git clone https://github.com/Lake-of-Tears/lake-of-tears.git
+cd lake-of-tears
+docker build -t lake-of-tears-backend:latest ./backend
+docker build -t lake-of-tears-ui:latest ./ui
+docker build -t lake-of-tears-airflow:latest ./deploy/airflow</code></pre>
+              <button onclick="navigator.clipboard.writeText('git clone https://github.com/Lake-of-Tears/lake-of-tears.git\ncd lake-of-tears\ndocker build -t lake-of-tears-backend:latest ./backend\ndocker build -t lake-of-tears-ui:latest ./ui\ndocker build -t lake-of-tears-airflow:latest ./deploy/airflow')" class="absolute right-3 top-3 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded transition">Copy</button>
             </div>
 
-            <h3 class="text-lg font-bold text-white mt-6 mb-2">2. Prepare your secret and production values</h3>
+            <h3 class="text-lg font-bold text-white mt-6 mb-2">2. Install with Helm</h3>
+            <div class="bg-dark-950 rounded-xl p-4 font-mono text-xs sm:text-sm text-slate-300 border border-slate-800 relative group">
+              <pre class="overflow-x-auto"><code>helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
+  --namespace lake-of-tears \
+  --create-namespace \
+  -f deploy/helm/values-local.example.yaml</code></pre>
+              <button onclick="navigator.clipboard.writeText('helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears --namespace lake-of-tears --create-namespace -f deploy/helm/values-local.example.yaml')" class="absolute right-3 top-3 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded transition">Copy</button>
+            </div>
+
+            <h3 class="text-lg font-bold text-white mt-6 mb-2">3. Open Lake of Tears</h3>
+            <p class="text-xs text-slate-400">Navigate to <code class="text-brand-300">http://localhost</code>. The first registered account automatically becomes the administrator.</p>
+          </div>
+        </div>
+
+        <!-- Production Content -->
+        <div id="tab-content-docker" class="hidden space-y-6">
+          <div class="glass-card rounded-2xl p-6 border border-slate-800">
+            <h3 class="text-lg font-bold text-white mb-2">1. Prepare Secrets &amp; Configuration</h3>
             <p class="text-xs text-slate-400 mb-2">Create your <code class="text-brand-300">values-secret.yaml</code> outside Git with passwords and API keys:</p>
             <div class="bg-dark-950 rounded-xl p-4 font-mono text-xs sm:text-sm text-slate-300 border border-slate-800">
               <pre class="overflow-x-auto"><code>minio:
@@ -646,12 +665,10 @@
   rootPassword: "YOUR_MINIO_ROOT_PASSWORD"
 backend:
   auth:
-    secretKey: "YOUR_RANDOM_JWT_SECRET"
-gemini:
-  apiKey: "YOUR_GOOGLE_AI_STUDIO_API_KEY"</code></pre>
+    secretKey: "YOUR_RANDOM_JWT_SECRET"</code></pre>
             </div>
 
-            <h3 class="text-lg font-bold text-white mt-6 mb-2">3. Install with Helm</h3>
+            <h3 class="text-lg font-bold text-white mt-6 mb-2">2. Deploy with Production Values</h3>
             <div class="bg-dark-950 rounded-xl p-4 font-mono text-xs sm:text-sm text-slate-300 border border-slate-800 relative group">
               <pre class="overflow-x-auto"><code>helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
   --namespace lake-of-tears \
@@ -661,29 +678,6 @@ gemini:
   --wait --timeout 10m</code></pre>
               <button onclick="navigator.clipboard.writeText('helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears --namespace lake-of-tears --create-namespace --values deploy/helm/values-prod.yaml --values /path/to/values-secret.yaml --wait --timeout 10m')" class="absolute right-3 top-3 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded transition">Copy</button>
             </div>
-          </div>
-        </div>
-
-        <!-- Docker Compose Content -->
-        <div id="tab-content-docker" class="hidden space-y-6">
-          <div class="glass-card rounded-2xl p-6 border border-slate-800">
-            <h3 class="text-lg font-bold text-white mb-2">1. Clone &amp; Configure</h3>
-            <div class="bg-dark-950 rounded-xl p-4 font-mono text-xs sm:text-sm text-slate-300 border border-slate-800 relative group">
-              <pre class="overflow-x-auto"><code>git clone https://github.com/Lake-of-Tears/lake-of-tears.git
-cd lake-of-tears
-cp .env.example .env
-# Edit .env with your credentials</code></pre>
-              <button onclick="navigator.clipboard.writeText('git clone https://github.com/Lake-of-Tears/lake-of-tears.git\ncd lake-of-tears\ncp .env.example .env')" class="absolute right-3 top-3 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded transition">Copy</button>
-            </div>
-
-            <h3 class="text-lg font-bold text-white mt-6 mb-2">2. Launch with Docker Compose</h3>
-            <div class="bg-dark-950 rounded-xl p-4 font-mono text-xs sm:text-sm text-slate-300 border border-slate-800 relative group">
-              <code>docker compose up -d</code>
-              <button onclick="navigator.clipboard.writeText('docker compose up -d')" class="absolute right-3 top-3 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded transition">Copy</button>
-            </div>
-
-            <h3 class="text-lg font-bold text-white mt-6 mb-2">3. Open Lake of Tears</h3>
-            <p class="text-xs text-slate-400">Navigate to <code class="text-brand-300">http://localhost</code>. The first registered account automatically becomes the administrator.</p>
           </div>
         </div>
 

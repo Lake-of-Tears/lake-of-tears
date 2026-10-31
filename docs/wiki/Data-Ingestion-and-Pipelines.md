@@ -157,13 +157,13 @@ The script's `sys.path.insert(..., parents[2])` line works because of that layou
 Then register, unpause and trigger the DAG. New DAGs start paused.
 
 ```bash
-docker compose exec airflow airflow dags reserialize
-docker compose exec airflow airflow dags unpause ingest_example_orders
-docker compose exec airflow airflow dags trigger ingest_example_orders
-docker compose exec airflow airflow dags list-runs -d ingest_example_orders
+kubectl exec -it deployment/lake-of-tears-airflow -n lake-of-tears -- airflow dags reserialize
+kubectl exec -it deployment/lake-of-tears-airflow -n lake-of-tears -- airflow dags unpause ingest_example_orders
+kubectl exec -it deployment/lake-of-tears-airflow -n lake-of-tears -- airflow dags trigger ingest_example_orders
+kubectl exec -it deployment/lake-of-tears-airflow -n lake-of-tears -- airflow dags list-runs -d ingest_example_orders
 ```
 
-The run should end in `success`, and the log shows `[ingest_example_orders] wrote 2 rows for <date>`. You can also watch it in the Airflow UI at `http://localhost/airflow/`.
+The run should end in `success`, and the log shows `[ingest_example_orders] wrote 2 rows for <date>`. You can also watch it in the Airflow UI at `http://localhost/airflow`.
 
 ### Step 6: check the data
 
@@ -191,7 +191,7 @@ MINIO_ENDPOINT=localhost:9000 PYTHONPATH=pipeline/shared \
 
 ### Make it searchable (optional)
 
-To have the new data embedded for AI search, add the source to `SOURCES` in `pipeline/embed/embed_sources.py` (for example `"example_orders": "raw/example_orders/**/*.parquet"`) and add a `_text_example_orders(row)` function to `TEXT_FN` that turns one row into a sentence. Add any new environment variables to `.env.example`, the `environment:` block of the `airflow` service in `docker-compose.yml`, and the README configuration table.
+To have the new data embedded for AI search, add the source to `SOURCES` in `pipeline/embed/embed_sources.py` (for example `"example_orders": "raw/example_orders/**/*.parquet"`) and add a `_text_example_orders(row)` function to `TEXT_FN` that turns one row into a sentence. Add any new environment variables to the Helm values (`airflow.env`), `deploy/helm/values-local.example.yaml`, and the README configuration table.
 
 ## 3. Best practices
 
@@ -210,7 +210,7 @@ Build on that:
 Because the script takes a date and the DAG passes `{{ ds }}`, Airflow can fill past days:
 
 ```bash
-docker compose exec airflow airflow dags backfill \
+kubectl exec -it deployment/lake-of-tears-airflow -n lake-of-tears -- airflow dags backfill \
   -s 2026-10-10 -e 2026-10-12 ingest_example_orders
 ```
 
@@ -245,7 +245,7 @@ Recommendations:
 
 ### Secrets and configuration
 
-Read tokens and hostnames from environment variables, add them to `.env.example`, and pass them to the `airflow` service in `docker-compose.yml` (or the Helm values) so the task can see them. Never commit a real key, and do not print secrets in logs.
+Read tokens and hostnames from environment variables, document them in `deploy/helm/values-local.example.yaml`, and pass them to the `airflow` deployment in the Helm values so the task can see them. Never commit a real key, and do not print secrets in logs.
 
 ## 4. Checklist for a new source
 
@@ -253,7 +253,7 @@ Read tokens and hostnames from environment variables, add them to `.env.example`
 2. `pipeline/dags/ingest_<source>_dag.py`: schedule, `catchup=False`, retries, `{{ ds }}` passed to the script.
 3. Deploy the script, `storage_writer.py` and DAG to the Airflow folders and test with `airflow dags trigger`.
 4. Optional: register a catalog table, and add the source to `SOURCES` and `TEXT_FN` in `embed_sources.py` for embeddings.
-5. Add environment variables to `.env.example`, `docker-compose.yml` and the README table.
+5. Add environment variables to `deploy/helm/values-local.example.yaml`, the Helm values and the README table.
 6. Open the pull request with the ticket number (`feat/<issue#>-...`), as described in the [contributing guide](https://github.com/Lake-of-Tears/lake-of-tears/blob/main/CONTRIBUTING.md).
 
 ## Related pages

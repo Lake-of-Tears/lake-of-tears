@@ -28,30 +28,27 @@ The `raw/` and `embeddings/` prefixes are the original, catalog-free layout. The
 
 ## 3. Single-entry-point routing
 
-Everything a user touches is served from one address. In Docker Compose, an nginx container listens on **port 80** and routes by path:
+Everything a user touches is served from one address. In Kubernetes, an Ingress controller listens on **port 80** (and 443 with TLS) and routes by path:
 
 | Path | Goes to | Notes |
 |---|---|---|
 | `/` | Lake UI (port 3000) | The shell, sidebar and pages |
 | `/api/notebooks` | Lake UI | Notebook endpoints: the UI talks to JupyterLab for you through its notebook proxy |
 | `/api/` | Backend (port 8000) | Auth, workspaces, catalogs, admin settings |
-| `/superset/` | Apache Superset (port 8088) | Served under the `/superset/` prefix |
 | `/airflow/` | Apache Airflow (port 8080) | Pipeline UI |
 
-JupyterLab has no public route of its own in Docker Compose. The Lake UI reaches it over the internal network (its base URL is `/jupyter`) and exposes notebooks through `/api/notebooks`. Having one origin keeps cookies, sign-in and the browser's same-origin rules simple. MinIO's S3 API (9000) and console (9001), and each service's direct port, are also published for administration, but day-to-day use goes through port 80. Note that a service's direct port does not include the proxy rules, so the Lake UI on port 3000 cannot reach `/api/`.
-
-On Kubernetes the same split is done by an Ingress: one host serves the UI, the API and `/airflow`, and Superset and the MinIO console get their own hosts. As in Compose, JupyterLab has no public route by default; a legacy `/jupyter/` Ingress exists but is off unless you set `jupyter.ingress.enabled: true`.
+Superset and the MinIO console can also be reached via Ingress hosts or dedicated paths. JupyterLab has no public route of its own by default. The Lake UI reaches it over the internal network (its base URL is `/jupyter`) and exposes notebooks through `/api/notebooks`. Having one origin keeps cookies, sign-in and the browser's same-origin rules simple.
 
 ## 4. Component map
 
 ```mermaid
 flowchart TB
-    user([Browser]) --> nginx[nginx :80]
+    user([Browser]) --> ingress[Kubernetes Ingress :80]
 
-    nginx -->|/| ui[Lake UI<br/>FastAPI :3000]
-    nginx -->|/api/| backend[Backend API<br/>FastAPI :8000]
-    nginx -->|/superset/| superset[Apache Superset :8088]
-    nginx -->|/airflow/| airflow[Apache Airflow :8080]
+    ingress -->|/| ui[Lake UI<br/>FastAPI :3000]
+    ingress -->|/api/| backend[Backend API<br/>FastAPI :8000]
+    ingress -->|/superset/| superset[Apache Superset :8088]
+    ingress -->|/airflow/| airflow[Apache Airflow :8080]
 
     ui -->|DuckDB + httpfs + vss| minio[(MinIO S3<br/>bucket: datalake)]
     ui -->|REST, JWT cookie| backend
@@ -67,7 +64,7 @@ flowchart TB
 
 | Component | Role |
 |---|---|
-| **nginx** | The single entry point and path router (Docker Compose). Kubernetes uses an Ingress instead. |
+| **Ingress** | The single entry point and path router (Kubernetes Ingress). |
 | **Lake UI** | A FastAPI app that serves the shell and pages, runs SQL through its DuckDB pool, proxies notebook traffic and calls the backend with the user's session. |
 | **Backend API** | A FastAPI service for sign-in (password and SSO), workspaces, catalogs, sharing and admin settings. It stores its data in PostgreSQL and manages the schema with Alembic migrations. |
 | **PostgreSQL** | The `lake_auth` database: users, workspaces, catalogs, grants and system settings. |
@@ -78,17 +75,19 @@ flowchart TB
 | **Apache Superset** | Business-intelligence dashboards, reachable at `/superset/`. |
 | **AI provider** | A hosted model service used for embeddings and natural-language answers. Google Gemini is the default (see [AI Providers](AI-Providers.md) for the others); its key and models are configured in the Admin Panel. |
 
-## 5. Deployment models
+## 5. Deployment model
 
-| | Docker Compose | Kubernetes / Helm |
-|---|---|---|
-| **Best for** | Evaluation, development, a single machine | Production and multi-user installs |
-| **Entry point** | nginx container on port 80 | Ingress controller (ingress-nginx) with your hostnames |
-| **Storage** | Docker volumes | PersistentVolumeClaims on your StorageClass (NFS, Longhorn, local-path and others) |
-| **Configuration** | `.env` file | Helm values files, with secrets kept in a separate values file |
-| **Start it with** | `docker compose up -d` | `helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears` |
+Lake of Tears standardizes on **Kubernetes with Helm** across both local development and production:
 
-The repository also ships Terraform modules under `deploy/terraform/` for provisioning around the stack, such as MinIO buckets and Docker-based setups. See the [README](https://github.com/Lake-of-Tears/lake-of-tears#readme) for the full Helm walkthrough, local-cluster values (`values-local.yaml`) and production secrets handling.
+| Aspect | Kubernetes / Helm |
+|---|---|
+| **Best for** | Local development (OrbStack, minikube, kind, k3s) and production clusters |
+| **Entry point** | Ingress controller (ingress-nginx) with path and host routing |
+| **Storage** | PersistentVolumeClaims on your StorageClass (NFS, Longhorn, local-path and others) |
+| **Configuration** | Helm values files (`values-local.yaml`, `values-prod.yaml`), with secrets kept in values or sealed secrets |
+| **Start it with** | `helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears` |
+
+The repository also ships Terraform modules under `deploy/terraform/foundation` for provisioning infrastructure such as MinIO buckets. See the [README](https://github.com/Lake-of-Tears/lake-of-tears#readme) for the full Helm walkthrough, local-cluster values (`values-local.example.yaml`) and production secrets handling.
 
 ## Related pages
 
