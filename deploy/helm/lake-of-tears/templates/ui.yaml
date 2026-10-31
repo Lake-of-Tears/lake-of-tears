@@ -82,6 +82,8 @@ spec:
                   key: AIRFLOW_ADMIN_PASSWORD
             - name: AUTH_ENABLED
               value: {{ .Values.backend.enabled | quote }}
+            - name: AUTH_REGISTRATION_ENABLED
+              value: {{ if hasKey .Values.backend.auth "registrationEnabled" }}{{ .Values.backend.auth.registrationEnabled | quote }}{{ else }}"true"{{ end }}
           livenessProbe:
             httpGet:
               path: /health

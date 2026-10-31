@@ -26,6 +26,7 @@ from auth import (
     get_stored_gemini_api_key,
     get_stored_gemini_model,
     hash_password,
+    is_registration_enabled,
     mask_secret,
     require_superadmin,
     set_stored_gemini_api_key,
@@ -60,7 +61,7 @@ from models import (
     WorkspaceShare,
 )
 from notebooks_router import router as notebooks_router
-from oauth import enabled_providers, get_oauth_redirect, handle_oauth_callback
+from oauth import enabled_providers, get_auth_overview, get_oauth_redirect, handle_oauth_callback
 from pipelines_router import router as pipelines_router
 from schemas import (
     AddMemberRequest,
@@ -383,6 +384,9 @@ def register(req: RegisterRequest, response: Response, db: Session = Depends(get
         raise HTTPException(400, "Email already registered")
 
     is_first = db.query(User).count() == 0
+    if not is_registration_enabled() and not is_first:
+        raise HTTPException(403, "Account registration is disabled")
+
     user = User(
         email=req.email,
         display_name=req.display_name or req.email.split("@")[0],
@@ -512,6 +516,15 @@ def change_password(
 @app.get("/api/auth/providers")
 def providers():
     return enabled_providers()
+
+
+@app.get("/api/auth/config")
+def auth_config(db: Session = Depends(get_db)):
+    user_count = db.query(User).count()
+    return {
+        "registration_enabled": is_registration_enabled() or (user_count == 0),
+        "providers": enabled_providers(),
+    }
 
 
 # ── OAuth ─────────────────────────────────────────────────────────────────────
@@ -2826,6 +2839,14 @@ def get_admin_settings(
     _: User = Depends(require_superadmin),
 ):
     return _system_setting_response(db)
+
+
+@app.get("/api/admin/auth-overview")
+def admin_auth_overview(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    return get_auth_overview(db)
 
 
 def _upsert_setting(db: Session, key: str, value: int, user_id) -> None:

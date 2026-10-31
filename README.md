@@ -25,7 +25,7 @@ Lake of Tears is a self-hosted data platform inspired by Databricks — one URL,
 
 - **Unified UI shell** — Databricks-inspired sidebar with Notebooks, SQL Editor, Dashboards, Pipelines, AI Query, and Data Catalog in one interface
 - **Single entry point** — nginx proxy at port 80; no juggling separate ports or tabs
-- **Authentication** — email/password login, account self-registration, and SSO via Google, GitHub, Microsoft, or any generic OIDC provider (Okta, Keycloak, Auth0, etc.)
+- **Authentication** — email/password login, self-registration toggle (`AUTH_REGISTRATION_ENABLED`), and SSO via Google, Microsoft Entra ID, Okta, GitHub, GitLab, or any generic OpenID Connect (OIDC) provider with auto-discovery
 - **Multi-user with roles** — `admin` and `viewer` roles; first registered user becomes admin automatically
 - **Theme toggle** — Light / Dark / Auto (follows OS preference, falls back to time-of-day)
 - S3-compatible object storage via MinIO CE
@@ -412,21 +412,27 @@ All configuration is driven by environment variables. Copy `.env.example` to `.e
 | `AUTH_SECRET_KEY` | yes | — | JWT signing secret shared between backend and UI. Generate: `python3 -c "import secrets; print(secrets.token_hex(32))"` |
 | `AUTH_BASE_URL` | no | `http://localhost` | Public URL of the stack — used to build OAuth callback URIs |
 | `AUTH_ENABLED` | no | `true` | Set to `false` to disable login entirely (dev/trusted-network use) |
+| `AUTH_REGISTRATION_ENABLED` | no | `true` | Set to `false` to disable open public registration and new user SSO auto-creation |
 | `POSTGRES_AUTH_USER` | no | `lake_auth` | PostgreSQL username for the auth database |
 | `POSTGRES_AUTH_PASSWORD` | yes | — | PostgreSQL password for the auth database |
 
 **SSO Providers** (all optional — configure only what you use)
 
-Register your application at each provider's developer console. The redirect URI for every provider is `{AUTH_BASE_URL}/api/auth/oauth/{provider}/callback`.
+Register your application at each provider's developer console. The redirect URI for every provider is `{AUTH_BASE_URL}/api/auth/oauth/{provider}/callback`. Superadmins can view the exact callback URL and configured status directly in the Lake UI Admin Panel (`/settings/admin`).
 
 | Variable | Provider | Where to get it |
 |---|---|---|
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google | [console.cloud.google.com/apis/credentials](https://console.cloud.google.com/apis/credentials) |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | GitHub | [github.com/settings/developers](https://github.com/settings/developers) |
-| `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` | Microsoft | [portal.azure.com — App registrations](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps) |
-| `MICROSOFT_TENANT_ID` | Microsoft | Your Azure tenant ID, or `common` for any account |
-| `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | Generic OIDC | Your identity provider (Okta, Keycloak, Auth0, etc.) |
-| `OIDC_AUTH_URL` / `OIDC_TOKEN_URL` / `OIDC_USERINFO_URL` | Generic OIDC | From your provider's well-known configuration |
+| `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` | Microsoft Entra ID | [portal.azure.com — App registrations](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps) |
+| `MICROSOFT_TENANT_ID` | Microsoft Entra ID | Your Azure tenant ID, or `common` for multi-tenant |
+| `OKTA_CLIENT_ID` / `OKTA_CLIENT_SECRET` | Okta | [developer.okta.com/](https://developer.okta.com/) |
+| `OKTA_DOMAIN` | Okta | Your Okta domain, e.g. `dev-12345.okta.com` |
+| `GITLAB_CLIENT_ID` / `GITLAB_CLIENT_SECRET` | GitLab | [gitlab.com/-/profile/applications](https://gitlab.com/-/profile/applications) |
+| `GITLAB_URL` | GitLab | Optional: override for self-hosted GitLab CE/EE (defaults to `https://gitlab.com`) |
+| `OIDC_ISSUER_URL` | Generic OIDC | OpenID Connect issuer URL for auto-discovery (`/.well-known/openid-configuration`) |
+| `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | Generic OIDC | Your identity provider (Keycloak, Auth0, Ping, etc.) |
+| `OIDC_AUTH_URL` / `OIDC_TOKEN_URL` / `OIDC_USERINFO_URL` | Generic OIDC | Explicit endpoint overrides if not using discovery |
 | `OIDC_DISPLAY_NAME` | Generic OIDC | Label shown on the "Continue with …" button (default: `SSO`) |
 
 **Data source credentials** (all optional)

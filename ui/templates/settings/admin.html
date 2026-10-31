@@ -223,6 +223,106 @@
       </form>
     </div>
 
+    <!-- Authentication & Identity Providers -->
+    <div class="border-t border-white/[0.06] pt-6" id="auth-settings">
+      <div class="flex items-center justify-between gap-3 mb-1">
+        <h2 class="text-sm font-semibold text-gray-300">Authentication & SSO</h2>
+        {% if auth_overview %}
+          {% if auth_overview.registration_enabled %}
+          <span class="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-900/40 border border-emerald-700/50 text-emerald-400">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+            Self-Registration Enabled
+          </span>
+          {% else %}
+          <span class="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-900/40 border border-amber-700/50 text-amber-400">
+            <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+            Self-Registration Disabled
+          </span>
+          {% endif %}
+        {% endif %}
+      </div>
+      <p class="text-xs text-gray-500 mb-5">
+        Overview of instance authentication status and connected Single Sign-On (SSO) identity providers configured via deployment settings (<code class="text-gray-400">AUTH_REGISTRATION_ENABLED</code> and provider environment variables).
+      </p>
+
+      {% if not auth_overview %}
+      <div class="text-xs px-3 py-2 rounded-md border border-amber-800/50 bg-amber-900/20 text-amber-300">
+        Authentication configuration could not be loaded from the backend.
+      </div>
+      {% else %}
+      <!-- Registration status explanation -->
+      <div class="mb-5 p-3 rounded-md bg-white/[0.02] border border-white/[0.06] text-xs">
+        <div class="flex items-center justify-between">
+          <span class="text-gray-400">Public User Self-Registration:</span>
+          <span class="font-medium {% if auth_overview.registration_enabled %}text-emerald-400{% else %}text-amber-400{% endif %}">
+            {{ 'Enabled (Open)' if auth_overview.registration_enabled else 'Disabled (Restricted)' }}
+          </span>
+        </div>
+        <p class="text-[11px] text-gray-500 mt-1">
+          {% if auth_overview.registration_enabled %}
+          Anyone can sign up with an email and password or authenticate through configured SSO providers. To restrict access, set <code class="text-gray-400">AUTH_REGISTRATION_ENABLED=false</code> in your deployment environment.
+          {% else %}
+          Open self-registration and new SSO account creation are disabled. Only existing accounts can sign in.
+          {% if auth_overview.user_count == 0 %}
+          <span class="text-amber-400">(First superadmin bootstrap is active because 0 users currently exist).</span>
+          {% endif %}
+          {% endif %}
+        </p>
+      </div>
+
+      <!-- Redirect / Callback URI info box -->
+      <div class="mb-5 p-3.5 rounded-lg bg-black/40 border border-white/[0.08] flex items-center justify-between gap-3">
+        <div class="min-w-0">
+          <div class="text-[11px] font-medium text-gray-400 mb-0.5">OAuth 2.0 / OIDC Redirect (Callback) URI</div>
+          <code id="auth-callback-url" class="text-xs text-blue-400 font-mono select-all truncate block">{{ auth_overview.base_url | default('http://localhost') }}/api/auth/oauth/{provider}/callback</code>
+        </div>
+        <button type="button" onclick="navigator.clipboard.writeText('{{ auth_overview.base_url | default('http://localhost') }}/api/auth/oauth/{provider}/callback'); this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy', 1500);"
+          class="shrink-0 text-xs px-2.5 py-1 rounded bg-white/[0.08] hover:bg-white/[0.14] border border-white/10 text-gray-300 transition-colors">
+          Copy
+        </button>
+      </div>
+
+      <!-- Providers Grid -->
+      <h3 class="text-xs font-semibold text-gray-400 mb-3">Identity Providers</h3>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-2">
+        {% for p in auth_overview.providers | default([]) %}
+        <div class="p-3.5 rounded-lg bg-black/20 border border-white/[0.06] flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between gap-2 mb-2">
+              <span class="text-xs font-semibold text-gray-200">{{ p.name }}</span>
+              {% if p.configured %}
+              <span class="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-900/40 border border-emerald-700/50 text-emerald-400">
+                <span class="w-1 h-1 rounded-full bg-emerald-400"></span>
+                Configured
+              </span>
+              {% else %}
+              <span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-gray-800 text-gray-500 border border-gray-700/50">
+                Not configured
+              </span>
+              {% endif %}
+            </div>
+
+            {% if p.configured %}
+            <div class="text-[11px] text-gray-400 space-y-0.5 mb-2 font-mono">
+              {% if p.client_id_masked %}
+              <div>Client ID: <span class="text-gray-300">{{ p.client_id_masked }}</span></div>
+              {% endif %}
+              {% for k, v in p.details.items() %}
+              <div>{{ k | capitalize }}: <span class="text-gray-300">{{ v }}</span></div>
+              {% endfor %}
+            </div>
+            {% endif %}
+          </div>
+
+          <div class="text-[10px] text-gray-500 border-t border-white/[0.04] pt-2 mt-1">
+            Env: <code class="text-gray-400">{{ p.env_vars | join(', ') }}</code>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+
     <div class="border-t border-white/[0.06] pt-6" id="ai-settings">
       <div class="flex items-center justify-between gap-3 mb-1">
         <h2 class="text-sm font-semibold text-gray-300">AI Provider</h2>

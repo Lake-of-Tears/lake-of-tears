@@ -78,6 +78,12 @@ load_dotenv(_env_path)
 
 AUTH_SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "dev-secret-please-change-in-production")
 AUTH_ENABLED = os.getenv("AUTH_ENABLED", "true").lower() == "true"
+AUTH_REGISTRATION_ENABLED = os.getenv("AUTH_REGISTRATION_ENABLED", "true").lower() not in (
+    "false",
+    "0",
+    "no",
+    "off",
+)
 BACKEND_URL = os.getenv("BACKEND_URL", "http://backend:8000")
 
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
@@ -782,7 +788,9 @@ async def login_page(request: Request):
             except jwt.InvalidTokenError:
                 pass
     return templates.TemplateResponse(
-        request=request, name="login.html", context={"request": request}
+        request=request,
+        name="login.html",
+        context={"request": request, "registration_enabled": AUTH_REGISTRATION_ENABLED},
     )
 
 
@@ -2264,6 +2272,7 @@ async def settings_admin_get(request: Request):
             "users": users_list,
             "workspaces": all_ws,
             "admin_settings": admin_settings,
+            "auth_overview": _backend_get("/api/admin/auth-overview", token),
             "ai_provider": _backend_get("/api/admin/ai-provider", token),
             "ai_error": request.query_params.get("ai_error"),
             "saved": request.query_params.get("saved"),
