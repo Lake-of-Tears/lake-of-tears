@@ -59,24 +59,29 @@ Lake of Tears brings analytical compute, storage, vector search, orchestration, 
    cd lake-of-tears
    ```
 
-2. **Configure environment variables:**
+2. **Build local container images:**
    ```bash
-   cp .env.example .env
+   docker build -t lake-of-tears-backend:latest ./backend
+   docker build -t lake-of-tears-ui:latest ./ui
+   docker build -t lake-of-tears-airflow:latest ./deploy/airflow
    ```
-   Edit `.env` to configure your credentials (at minimum: `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, and `AUTH_SECRET_KEY`). The Gemini API key is configured in Settings → Admin Panel after first login.
 
-3. **Start the stack:**
+3. **Deploy with Helm into local Kubernetes:**
    ```bash
-   docker compose up -d
+   helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
+     --namespace lake-of-tears \
+     --create-namespace \
+     -f deploy/helm/values-local.example.yaml
    ```
 
 4. **Access the services:**
-   - **Unified Lake UI Shell:** [http://localhost](http://localhost) (or direct port at `http://localhost:3000`)
-   - **Auth Backend:** `http://localhost/api/` (or direct port at `http://localhost:8000`)
-   - **Apache Airflow:** `http://localhost/airflow/` (or direct port at `http://localhost:8080`)
-   - **MinIO Console:** `http://localhost:9001`
-   - **JupyterLab:** no public route; accessed through the Lake UI notebooks (not published)
-   - **Apache Superset:** `http://localhost/superset/` (or direct port at `http://localhost:8088`)
+   - **Unified Lake UI Shell:** [http://localhost](http://localhost)
+   - **Auth Backend:** `http://localhost/api/`
+   - **Apache Airflow:** `http://localhost/airflow/`
+   - **Apache Superset:** `http://superset.localhost`
+   - **MinIO Console:** `http://minio.localhost`
+   - **MinIO S3 API:** `http://s3.localhost`
+   - **JupyterLab:** no public route; accessed through the Lake UI notebooks
 
 ### Install Development & Linting Tools
 
@@ -129,7 +134,7 @@ To contribute a new data source connector:
 2. **Airflow DAG:** Create `pipeline/dags/ingest_my_source_dag.py` with an appropriate schedule and error handling.
 3. **Embeddings:** Add the source identifier to `SOURCES` in `pipeline/embed/embed_sources.py`.
 4. **Text Representation:** Implement `_text_my_source(row)` in `embed_sources.py` to format records for Gemini vector embeddings.
-5. **Configuration:** Add required environment variables to `.env.example` and document them in `README.md`.
+5. **Configuration:** Add required environment variables to `deploy/helm/values-local.example.yaml` and document them in `README.md`.
 
 ---
 

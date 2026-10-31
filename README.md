@@ -79,30 +79,39 @@ Lake of Tears is a self-hosted data platform inspired by Databricks — one URL,
 
 ---
 
-## Quick Start (Docker Compose)
+## Quick Start (Kubernetes & Helm)
+
+Lake of Tears is standardized 100% on Kubernetes and Helm across all environments (local development, staging, and production).
 
 ```bash
 git clone https://github.com/Lake-of-Tears/lake-of-tears.git
 cd lake-of-tears
-cp .env.example .env
-# Edit .env — at minimum set MINIO_ROOT_PASSWORD, AUTH_SECRET_KEY,
-# and POSTGRES_AUTH_PASSWORD. The Gemini API key is set later in Settings → Admin Panel.
-docker compose up -d
+
+# 1. Build local images
+docker build -t lake-of-tears-backend:latest ./backend
+docker build -t lake-of-tears-ui:latest ./ui
+docker build -t lake-of-tears-airflow:latest ./deploy/airflow
+
+# 2. Deploy locally via Helm into the lake-of-tears namespace
+helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
+  --namespace lake-of-tears \
+  --create-namespace \
+  -f deploy/helm/values-local.example.yaml
 ```
 
-Open **http://localhost** — you'll be redirected to the login page. **Register the first account and you become the admin.** All subsequent registrations are viewers by default; promote them in the admin panel.
+Open **http://localhost** — you'll be redirected to the login page. **Register the first account and you become the superadmin.** All subsequent registrations are viewers by default; manage them in the admin panel.
 
-All services are accessible from the left sidebar. Direct ports are also available if needed:
+All services are accessible through the unified Ingress routes:
 
-| Service | Unified URL | Direct port |
-|---------|-------------|-------------|
-| Lake UI shell | http://localhost | http://localhost:3000 |
-| Auth backend | http://localhost/api/ | http://localhost:8000 |
-| JupyterLab | no public route; used through the Lake UI notebooks | not published |
-| Apache Superset | http://localhost/superset/ | http://localhost:8088 |
-| Apache Airflow | http://localhost/airflow/ | http://localhost:8080 |
-| MinIO Console | http://localhost:9001 | — |
-| MinIO S3 API | — | http://localhost:9000 |
+| Service | Unified URL |
+|---------|-------------|
+| Lake UI shell | http://localhost |
+| Auth backend | http://localhost/api/ |
+| Apache Airflow | http://localhost/airflow/ |
+| Apache Superset | http://superset.localhost |
+| MinIO Console | http://minio.localhost |
+| MinIO S3 API | http://s3.localhost |
+| JupyterLab | no public route; used through the Lake UI notebooks |
 
 ---
 
@@ -110,15 +119,7 @@ All services are accessible from the left sidebar. Direct ports are also availab
 
 The AI features (AI Query, the SQL assistant, Genie, `ai_*` SQL functions and the embedding pipelines) use whichever provider a superadmin selects in **Settings → Admin Panel → AI Provider**: Google Gemini, **OpenAI**, **Azure AI Foundry** (your own Azure tenant), **Amazon Bedrock**, **Ollama** (local models) or any **OpenAI-compatible server** (vLLM, LocalAI, LM Studio, Groq, DeepSeek, ...). Changes apply immediately and secrets are stored encrypted.
 
-To run fully offline, start Ollama next to Lake of Tears and pull a chat and an embedding model:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d ollama
-docker compose -f docker-compose.yml -f docker-compose.ollama.yml exec ollama ollama pull llama3.2
-docker compose -f docker-compose.yml -f docker-compose.ollama.yml exec ollama ollama pull nomic-embed-text
-```
-
-Then choose **Ollama** in the Admin Panel, set the base URL to `http://ollama:11434`, enter the two model names and click **Test Connection**. See the header of [`docker-compose.ollama.yml`](docker-compose.ollama.yml) for the details. Each embedding file records which model made it, so you can switch providers without breaking search.
+To run Ollama, point the base URL in the Admin Panel to your running Ollama instance (e.g. `http://host.docker.internal:11434` or an in-cluster service). Choose **Ollama** in the Admin Panel, enter the model names (e.g. `llama3.2` and `nomic-embed-text`), and click **Test Connection**. Each embedding file records which model made it, so you can switch providers without breaking search.
 
 For **OpenAI** enter an API key (defaults: `gpt-4o-mini`, `text-embedding-3-small`, 1536 dimensions). For **Azure AI Foundry** enter your resource endpoint, key, and the *deployment names* of your chat and embedding models. As an alternative to the Admin Panel you can set `LLM_PROVIDER=openai` with `OPENAI_API_KEY`, or `LLM_PROVIDER=azure` with `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_API_VERSION`, `LLM_MODEL` (chat deployment) and `LLM_EMBEDDING_MODEL` (embedding deployment). Azure authenticates with the API key; Entra ID / managed identity is not supported yet.
 
@@ -380,7 +381,7 @@ helm uninstall lake-of-tears -n lake-of-tears
 
 ## Configuration
 
-All configuration is driven by environment variables. Copy `.env.example` to `.env` and fill in the required values before starting the stack.
+All configuration is managed through Helm values (e.g. `deploy/helm/values-local.example.yaml` or `values-prod.yaml`). Copy `deploy/helm/values-local.example.yaml` to `values-local.yaml` and configure required values before starting the stack.
 
 **Core**
 
@@ -392,18 +393,15 @@ All configuration is driven by environment variables. Copy `.env.example` to `.e
 | `JUPYTER_TOKEN` | yes | — | JupyterLab access token |
 | `SUPERSET_ADMIN_PASSWORD` | yes | — | Superset admin password |
 | `SUPERSET_SECRET_KEY` | no | auto | Superset Flask secret key |
-| `AIRFLOW_PASSWORD` | yes | — | Airflow admin password (web UI and REST API); applied on every start of the Compose `airflow` service |
+| `AIRFLOW_PASSWORD` | yes | — | Airflow admin password (web UI and REST API); applied on start |
 | `AIRFLOW_SECRET_KEY` | no | auto | Airflow Flask secret key |
-| `MINIO_CONSOLE_URL` | no | `http://localhost:9001` | URL for the "Open MinIO Console" link in the Storage page |
-| `DATALAKE_DATA_DIR` | yes | `~` | Host path for Docker volume mounts |
+| `MINIO_CONSOLE_URL` | no | `http://minio.localhost` | URL for the "Open MinIO Console" link in the Storage page |
 
-> **Upgrading an older install: keep your notebooks.** Notebooks created in the Lake UI are saved in `$DATALAKE_DATA_DIR/workspaces` (earlier versions kept them only inside the Jupyter container, so recreating the container lost them). Before you recreate Jupyter with this version, copy any existing notebooks out of the old container, then restart:
->
-> ```bash
-> mkdir -p "$DATALAKE_DATA_DIR/workspaces"
-> docker compose cp jupyter:/home/jovyan/workspaces/. "$DATALAKE_DATA_DIR/workspaces/"
-> docker compose up -d jupyter
-> ```
+**Configuration & Helm Values**
+
+All platform settings and secrets are configured via the Helm values files:
+- Local development: `deploy/helm/values-local.example.yaml` (copy to `values-local.yaml`)
+- Production: `deploy/helm/values-prod.example.yaml` (copy to `values-prod.yaml`)
 
 **Authentication**
 

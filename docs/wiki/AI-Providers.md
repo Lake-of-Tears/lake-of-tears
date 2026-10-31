@@ -12,7 +12,7 @@ Lake of Tears uses a language model and an embedding model for AI Query, the SQL
 | OpenAI | OpenAI | API key | Defaults `gpt-4o-mini`, `text-embedding-3-small`, 1536 dimensions. |
 | Azure AI Foundry | Your Azure tenant | API key | Models are addressed by *deployment name*. Entra ID is not supported yet. |
 | Amazon Bedrock | Your AWS account | IAM role, or access key and secret | Chat through the Converse API; Titan or Cohere embeddings. |
-| Ollama | Your own machine or network | None, or a bearer token | Fully offline. Optional `docker-compose.ollama.yml`. |
+| Ollama | Your own machine or network | None, or a bearer token | Fully offline. Run locally or as a Kubernetes service. |
 | OpenAI-compatible server | Wherever it runs | Optional bearer token | vLLM, LocalAI, LM Studio, Groq, DeepSeek and others. `/v1` is added if missing. |
 
 ## 2. How it works
@@ -60,11 +60,11 @@ Region, chat model id, embedding model id and an optional dimension (Titan v2 al
 
 ### Ollama (offline)
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d ollama
-docker compose -f docker-compose.yml -f docker-compose.ollama.yml exec ollama ollama pull llama3.2
-docker compose -f docker-compose.yml -f docker-compose.ollama.yml exec ollama ollama pull nomic-embed-text
+# If running Ollama locally or in your Kubernetes cluster
+ollama run llama3.2
+ollama pull nomic-embed-text
 ```
-Choose **Ollama**, set the base URL to `http://ollama:11434` and enter the two model names. The dimension is detected on first use. Some embedding models expect a prefix; for `nomic-embed-text` set the query prefix to `search_query: ` and the document prefix to `search_document: `.
+Choose **Ollama**, set the base URL to your Ollama endpoint (e.g., `http://host.docker.internal:11434` or your in-cluster service `http://ollama.lake-of-tears.svc.cluster.local:11434`) and enter the two model names. The dimension is detected on first use. Some embedding models expect a prefix; for `nomic-embed-text` set the query prefix to `search_query: ` and the document prefix to `search_document: `.
 
 ### OpenAI-compatible server
 Base URL, optional token, chat model, embedding model, optional dimension and prefixes, as for Ollama.

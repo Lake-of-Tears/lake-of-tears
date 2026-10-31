@@ -1,5 +1,5 @@
-# The datalake bucket is created by the minio-init container in docker-compose.yml
-# on first deploy.  This Terraform resource tracks the bucket's existence and
+# The datalake bucket is created by the minio-init hook job in the Helm chart
+# on first deploy. This Terraform resource tracks the bucket's existence and
 # prevents accidental destruction.
 #
 # Requires: terraform/services docker_compose_deploy applied first (MinIO CE running on VM).

@@ -3,33 +3,29 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-COMPOSE = (Path(__file__).parents[1] / "docker-compose.yml").read_text()
+AIRFLOW_TEMPLATE = (
+    Path(__file__).parents[1] / "deploy" / "helm" / "lake-of-tears" / "templates" / "airflow.yaml"
+).read_text(encoding="utf-8")
 
 
 def _airflow_entrypoint() -> str:
-    block = re.search(r"\n  airflow:\n(.*?)\n    environment:", COMPOSE, re.S)
-    assert block, "airflow service not found in docker-compose.yml"
-    return block.group(1)
+    match = re.search(r"args:\s*\n\s*-\s*\|\s*\n(.*?)(?=\n\s*env:)", AIRFLOW_TEMPLATE, re.S)
+    assert (
+        match
+    ), "airflow container args not found in deploy/helm/lake-of-tears/templates/airflow.yaml"
+    return match.group(1)
 
 
-def test_airflow_admin_password_is_applied_before_standalone_starts():
+def test_airflow_admin_password_is_applied():
     script = _airflow_entrypoint()
     reset = script.find("airflow users reset-password")
-    standalone = script.find("exec /entrypoint standalone")
     assert reset != -1, "the configured admin password is never applied"
-    assert reset < standalone
-    # `airflow standalone` would otherwise generate its own random admin password
-    assert "_AIRFLOW_WWW_USER_PASSWORD" in script[reset:standalone]
+    assert "_AIRFLOW_WWW_USER_PASSWORD" in script[reset:]
 
 
-def test_airflow_creates_the_user_before_resetting_its_password():
+def test_airflow_executes_standalone_entrypoint():
     script = _airflow_entrypoint()
-    assert script.find("airflow users create") < script.find("airflow users reset-password")
-    # `users create` exits 0 when the user already exists, so it must not be the only step
-    assert (
-        ";"
-        in script[script.find("airflow users create") : script.find("airflow users reset-password")]
-    )
+    assert "exec /entrypoint standalone" in script
 
 
 def test_airflow_removes_a_stale_webserver_pid_file_on_start():

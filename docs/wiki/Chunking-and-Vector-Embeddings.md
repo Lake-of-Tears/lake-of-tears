@@ -123,7 +123,7 @@ The pipeline selects only rows where `source_date` equals **yesterday's date** (
 The `embed_sources` DAG covers every registered source. To run it by hand after ingestion has produced yesterday's data:
 
 ```bash
-docker compose exec airflow airflow dags trigger embed_sources
+kubectl exec -it deployment/lake-of-tears-airflow -n lake-of-tears -- airflow dags trigger embed_sources
 ```
 
 The log ends with a line such as `[company_wiki] Embedded 42 chunks from 5 records for <date> (recursive chunking)`. See [Airflow Orchestration](Airflow-Orchestration.md) for how to find the log. The Gemini key must be configured in the Admin Panel first.
