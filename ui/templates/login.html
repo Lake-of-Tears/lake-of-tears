@@ -123,13 +123,15 @@
       el.classList.remove('hidden');
     }
 
-    function setTab(tab) {
+    function setTab(tab, clearBanner = true) {
       const isLogin = tab === 'login';
       document.getElementById('form-login').classList.toggle('hidden', !isLogin);
       document.getElementById('form-register').classList.toggle('hidden', isLogin);
       document.getElementById('tab-login').className = `flex-1 text-sm py-1.5 rounded-md font-medium transition-colors ${isLogin ? 'text-white bg-white/10' : 'text-gray-500 hover:text-gray-300'}`;
       document.getElementById('tab-register').className = `flex-1 text-sm py-1.5 rounded-md font-medium transition-colors ${!isLogin ? 'text-white bg-white/10' : 'text-gray-500 hover:text-gray-300'}`;
-      document.getElementById('banner').classList.add('hidden');
+      if (clearBanner) {
+        document.getElementById('banner').classList.add('hidden');
+      }
     }
 
     function formatError(detail, fallback) {
@@ -231,7 +233,7 @@
           if (cfg.registration_enabled === false) {
             const tabs = document.getElementById('auth-tabs');
             if (tabs) tabs.classList.add('hidden');
-            setTab('login');
+            setTab('login', false);
           } else if (cfg.registration_enabled === true) {
             const tabs = document.getElementById('auth-tabs');
             if (tabs) tabs.classList.remove('hidden');
