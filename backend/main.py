@@ -380,7 +380,15 @@ def _workspace_admin_response(ws: Workspace, db: Session) -> WorkspaceAdminRespo
 
 @app.post("/api/auth/register")
 def register(req: RegisterRequest, response: Response, db: Session = Depends(get_db)):
-    if db.query(User).filter(User.email == req.email).first():
+    existing = db.query(User).filter(User.email == req.email).first()
+    if existing:
+        if not existing.hashed_password and existing.oauth_accounts:
+            providers = [acc.provider.title() for acc in existing.oauth_accounts]
+            prov_str = ", ".join(providers)
+            raise HTTPException(
+                400,
+                f"An account with this email already exists via {prov_str}. Please sign in using {prov_str}.",
+            )
         raise HTTPException(400, "Email already registered")
 
     is_first = db.query(User).count() == 0
@@ -413,6 +421,13 @@ def register(req: RegisterRequest, response: Response, db: Session = Depends(get
 @app.post("/api/auth/login")
 def login(req: LoginRequest, response: Response, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == req.email).first()
+    if user and not user.hashed_password and user.oauth_accounts:
+        providers = [acc.provider.title() for acc in user.oauth_accounts]
+        prov_str = ", ".join(providers)
+        raise HTTPException(
+            400,
+            f"This account was created via {prov_str}. Please sign in using {prov_str}.",
+        )
     if (
         not user
         or not user.hashed_password

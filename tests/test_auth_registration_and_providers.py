@@ -659,3 +659,94 @@ def test_apple_callback_post_http_route():
     finally:
         backend_main.app.dependency_overrides.clear()
         backend_client.cookies.clear()
+
+
+def test_auth_providers_property_and_schema():
+    from models import OAuthAccount, User
+    from schemas import UserResponse
+
+    # User with password only
+    u_pwd = User(
+        id=uuid.uuid4(),
+        email="pwd@example.com",
+        display_name="Pwd User",
+        role="user",
+        is_active=True,
+        hashed_password="hashedpassword123",
+        created_at=datetime.now(UTC),
+    )
+    assert u_pwd.auth_providers == ["password"]
+    resp_pwd = UserResponse.model_validate(u_pwd)
+    assert resp_pwd.auth_providers == ["password"]
+
+    # User with Google OAuth only
+    u_sso = User(
+        id=uuid.uuid4(),
+        email="sso@example.com",
+        display_name="SSO User",
+        role="user",
+        is_active=True,
+        hashed_password=None,
+        created_at=datetime.now(UTC),
+    )
+    u_sso.oauth_accounts = [OAuthAccount(provider="google", provider_user_id="sub-1")]
+    assert u_sso.auth_providers == ["google"]
+    resp_sso = UserResponse.model_validate(u_sso)
+    assert resp_sso.auth_providers == ["google"]
+
+    # User with both Password and Apple OAuth
+    u_both = User(
+        id=uuid.uuid4(),
+        email="both@example.com",
+        display_name="Both User",
+        role="user",
+        is_active=True,
+        hashed_password="hashedpassword123",
+        created_at=datetime.now(UTC),
+    )
+    u_both.oauth_accounts = [OAuthAccount(provider="apple", provider_user_id="apple-sub-2")]
+    assert u_both.auth_providers == ["password", "apple"]
+    resp_both = UserResponse.model_validate(u_both)
+    assert resp_both.auth_providers == ["password", "apple"]
+
+
+def test_oauth_user_trying_to_register_or_login_with_password():
+    from models import OAuthAccount, User
+
+    sso_user = User(
+        id=uuid.uuid4(),
+        email="googler@example.com",
+        display_name="Googler",
+        role="user",
+        is_active=True,
+        hashed_password=None,
+        created_at=datetime.now(UTC),
+    )
+    sso_user.oauth_accounts = [OAuthAccount(provider="google", provider_user_id="g-123")]
+
+    mock_db = MagicMock()
+    mock_db.query.return_value.filter.return_value.first.return_value = sso_user
+
+    backend_main.app.dependency_overrides[database.get_db] = lambda: mock_db
+    try:
+        # Trying to register again with same email
+        reg_resp = backend_client.post(
+            "/api/auth/register",
+            json={"email": "googler@example.com", "password": "NewPassword123!"},
+        )
+        assert reg_resp.status_code == 400
+        assert "Google" in reg_resp.json()["detail"]
+        assert "Please sign in using Google" in reg_resp.json()["detail"]
+
+        # Trying to login with password
+        login_resp = backend_client.post(
+            "/api/auth/login",
+            json={"email": "googler@example.com", "password": "AnyPassword123!"},
+        )
+        assert login_resp.status_code == 400
+        assert "Google" in login_resp.json()["detail"]
+        assert "This account was created via Google" in login_resp.json()["detail"]
+    finally:
+        backend_main.app.dependency_overrides.clear()
+
+        backend_client.cookies.clear()

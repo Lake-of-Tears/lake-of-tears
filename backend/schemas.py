@@ -69,6 +69,7 @@ class UserResponse(BaseModel):
     is_active: bool
     created_at: datetime
     has_password: bool = True
+    auth_providers: list[str] = []
 
     model_config = {"from_attributes": True}
 

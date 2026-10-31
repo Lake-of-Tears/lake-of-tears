@@ -38,6 +38,18 @@ class User(Base):
     def has_password(self) -> bool:
         return self.hashed_password is not None
 
+    @property
+    def auth_providers(self) -> list[str]:
+        providers = []
+        if self.hashed_password is not None:
+            providers.append("password")
+        if self.oauth_accounts:
+            for acc in self.oauth_accounts:
+                p = acc.provider.lower()
+                if p not in providers:
+                    providers.append(p)
+        return providers or ["password"]
+
 
 class OAuthAccount(Base):
     __tablename__ = "oauth_accounts"
