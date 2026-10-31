@@ -83,7 +83,7 @@ spec:
             - name: AUTH_ENABLED
               value: {{ .Values.backend.enabled | quote }}
             - name: AUTH_REGISTRATION_ENABLED
-              value: {{ .Values.backend.auth.registrationEnabled | default true | quote }}
+              value: {{ if hasKey .Values.backend.auth "registrationEnabled" }}{{ .Values.backend.auth.registrationEnabled | quote }}{{ else }}"true"{{ end }}
           livenessProbe:
             httpGet:
               path: /health

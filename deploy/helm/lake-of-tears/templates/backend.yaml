@@ -80,7 +80,7 @@ spec:
             - name: AUTH_BASE_URL
               value: {{ .Values.backend.auth.baseUrl | quote }}
             - name: AUTH_REGISTRATION_ENABLED
-              value: {{ .Values.backend.auth.registrationEnabled | default true | quote }}
+              value: {{ if hasKey .Values.backend.auth "registrationEnabled" }}{{ .Values.backend.auth.registrationEnabled | quote }}{{ else }}"true"{{ end }}
             - name: GOOGLE_CLIENT_ID
               value: {{ .Values.backend.google.clientId | quote }}
             - name: GOOGLE_CLIENT_SECRET
