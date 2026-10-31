@@ -7,3 +7,5 @@ RUN pip install --no-cache-dir \
     scikit-learn \
     papermill \
     ipykernel
+
+USER airflow
