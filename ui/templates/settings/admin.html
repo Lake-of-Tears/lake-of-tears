@@ -108,30 +108,62 @@
         </div>
 
         <!-- Workspace permissions (relevant when role is User) -->
-        <div id="invite-workspace-section" class="space-y-2 pt-1 border-t border-white/[0.04]">
-          <div class="text-xs font-medium text-gray-400">Workspace Access</div>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div id="invite-workspace-section" class="space-y-3 pt-2 border-t border-white/[0.04]">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-semibold text-gray-300">Workspace Access</span>
+            <span class="text-[11px] text-gray-500">Configure access for the new user</span>
+          </div>
+
+          <!-- Default Workspace row -->
+          <div class="p-3 rounded-lg bg-white/[0.02] border border-white/[0.06] flex items-center justify-between gap-3">
             <div>
-              <label class="block text-[11px] text-gray-500 mb-1">Default Workspace</label>
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-medium text-gray-200">Default</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/40 border border-blue-700/40 text-blue-400 font-medium">Required</span>
+              </div>
+              <div class="text-[11px] text-gray-500">Instance default workspace</div>
+            </div>
+            <div class="flex items-center gap-2">
+              <label class="text-[11px] text-gray-400">Role:</label>
               <select name="default_role"
-                class="w-full bg-gray-900 border border-gray-700 text-gray-300 text-xs rounded px-2.5 py-1.5 focus:outline-none focus:border-blue-500">
+                class="bg-gray-900 border border-gray-700 text-gray-200 text-xs rounded px-2.5 py-1 focus:outline-none focus:border-blue-500">
                 <option value="read" selected>Read</option>
                 <option value="write">Write</option>
               </select>
             </div>
-            {% for ws in workspaces %}
-              {% if ws.slug != 'default' and ws.status == 'active' %}
-              <div>
-                <label class="block text-[11px] text-gray-500 mb-1">{{ ws.name }}</label>
-                <select name="ws_role_{{ ws.slug }}"
-                  class="w-full bg-gray-900 border border-gray-700 text-gray-300 text-xs rounded px-2.5 py-1.5 focus:outline-none focus:border-blue-500">
-                  <option value="none" selected>No Access</option>
-                  <option value="read">Read</option>
-                  <option value="write">Write</option>
-                </select>
-              </div>
-              {% endif %}
-            {% endfor %}
+          </div>
+
+          <!-- Additional Workspaces Dynamic List -->
+          <div>
+            <div class="text-xs font-medium text-gray-400 mb-2">Additional Workspaces</div>
+
+            <!-- Added Workspaces Container -->
+            <div id="additional-workspaces-list" class="space-y-2 mb-3">
+              <p id="additional-workspaces-empty" class="text-xs text-gray-600 italic py-1">
+                No additional workspaces added. User will only have access to Default.
+              </p>
+            </div>
+
+            <!-- Workspace Picker / Add Row -->
+            <div id="additional-workspaces-picker" class="flex items-center gap-2">
+              <select id="extra-ws-select"
+                class="flex-1 bg-gray-900 border border-gray-700 text-gray-300 text-xs rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
+                <option value="" disabled selected>Select a workspace to add…</option>
+              </select>
+              <select id="extra-ws-role"
+                class="bg-gray-900 border border-gray-700 text-gray-300 text-xs rounded px-2.5 py-1.5 focus:outline-none focus:border-blue-500">
+                <option value="read" selected>Read</option>
+                <option value="write">Write</option>
+              </select>
+              <button type="button" onclick="addWorkspaceAccess()"
+                id="extra-ws-add-btn"
+                class="text-xs px-3 py-1.5 rounded border border-gray-700 bg-white/[0.04] text-gray-300 hover:text-white hover:bg-white/[0.08] hover:border-gray-500 transition-colors">
+                + Add
+              </button>
+            </div>
+            <p id="no-more-workspaces" class="text-xs text-gray-600 hidden py-1">
+              All available workspaces have been added.
+            </p>
           </div>
         </div>
 
@@ -669,12 +701,130 @@
 <script>
 let _wsDeleteExpected = '';
 
+const ALL_ADDITIONAL_WORKSPACES = [
+  {% for ws in workspaces %}
+    {% if ws.slug != 'default' and ws.status == 'active' %}
+      { slug: {{ ws.slug | tojson }}, name: {{ ws.name | tojson }} },
+    {% endif %}
+  {% endfor %}
+];
+
+const selectedWorkspaces = new Map(); // slug -> { name, role }
+
+function renderWorkspacePicker() {
+  const select = document.getElementById('extra-ws-select');
+  const picker = document.getElementById('additional-workspaces-picker');
+  const noMore = document.getElementById('no-more-workspaces');
+  if (!select) return;
+
+  const available = ALL_ADDITIONAL_WORKSPACES.filter(w => !selectedWorkspaces.has(w.slug));
+  select.innerHTML = '<option value="" disabled selected>Select a workspace to add…</option>';
+
+  available.forEach(w => {
+    const opt = document.createElement('option');
+    opt.value = w.slug;
+    opt.textContent = `${w.name} (${w.slug})`;
+    select.appendChild(opt);
+  });
+
+  if (ALL_ADDITIONAL_WORKSPACES.length === 0) {
+    if (picker) picker.classList.add('hidden');
+    if (noMore) {
+      noMore.textContent = 'No other active workspaces exist.';
+      noMore.classList.remove('hidden');
+    }
+  } else if (available.length === 0) {
+    if (picker) picker.classList.add('hidden');
+    if (noMore) {
+      noMore.textContent = 'All available workspaces have been added.';
+      noMore.classList.remove('hidden');
+    }
+  } else {
+    if (picker) picker.classList.remove('hidden');
+    if (noMore) noMore.classList.add('hidden');
+  }
+}
+
+function renderSelectedWorkspaces() {
+  const container = document.getElementById('additional-workspaces-list');
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (selectedWorkspaces.size === 0) {
+    container.innerHTML = `
+      <p id="additional-workspaces-empty" class="text-xs text-gray-600 italic py-1">
+        No additional workspaces added. User will only have access to Default.
+      </p>
+    `;
+    return;
+  }
+
+  selectedWorkspaces.forEach((info, slug) => {
+    const row = document.createElement('div');
+    row.className = 'flex items-center justify-between gap-3 p-2.5 rounded-lg bg-white/[0.02] border border-white/[0.04] text-xs';
+    row.innerHTML = `
+      <div class="min-w-0 flex-1 flex items-center gap-2">
+        <span class="font-medium text-gray-200 truncate">${info.name}</span>
+        <span class="text-[11px] text-gray-500 font-mono">(${slug})</span>
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        <select onchange="updateWorkspaceRole('${slug}', this.value)"
+          class="bg-gray-900 border border-gray-700 text-gray-300 text-xs rounded px-2 py-1 focus:outline-none focus:border-blue-500">
+          <option value="read" ${info.role === 'read' ? 'selected' : ''}>Read</option>
+          <option value="write" ${info.role === 'write' ? 'selected' : ''}>Write</option>
+        </select>
+        <button type="button" onclick="removeWorkspaceAccess('${slug}')"
+          class="text-xs px-2 py-1 rounded text-red-400 hover:text-red-300 hover:bg-red-950/30 transition-colors">
+          &times; Remove
+        </button>
+        <input type="hidden" name="ws_role_${slug}" id="input_ws_role_${slug}" value="${info.role}" />
+      </div>
+    `;
+    container.appendChild(row);
+  });
+}
+
+function addWorkspaceAccess() {
+  const select = document.getElementById('extra-ws-select');
+  const roleSelect = document.getElementById('extra-ws-role');
+  const slug = select ? select.value : '';
+  const role = roleSelect ? roleSelect.value : 'read';
+
+  if (!slug) return;
+  const ws = ALL_ADDITIONAL_WORKSPACES.find(w => w.slug === slug);
+  if (!ws) return;
+
+  selectedWorkspaces.set(slug, { name: ws.name, role: role });
+  renderSelectedWorkspaces();
+  renderWorkspacePicker();
+}
+
+function removeWorkspaceAccess(slug) {
+  selectedWorkspaces.delete(slug);
+  renderSelectedWorkspaces();
+  renderWorkspacePicker();
+}
+
+function updateWorkspaceRole(slug, newRole) {
+  const info = selectedWorkspaces.get(slug);
+  if (info) {
+    info.role = newRole;
+    const input = document.getElementById(`input_ws_role_${slug}`);
+    if (input) input.value = newRole;
+  }
+}
+
 function toggleInviteRole(role) {
   const wsSec = document.getElementById('invite-workspace-section');
   if (wsSec) {
     wsSec.style.display = (role === 'superadmin') ? 'none' : 'block';
   }
 }
+
+document.addEventListener('DOMContentLoaded', function() {
+  renderWorkspacePicker();
+});
+renderWorkspacePicker();
 
 function openDeleteModal(wsId, wsName) {
   _wsDeleteExpected = wsName;
