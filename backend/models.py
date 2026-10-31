@@ -38,6 +38,18 @@ class User(Base):
     def has_password(self) -> bool:
         return self.hashed_password is not None
 
+    @property
+    def auth_providers(self) -> list[str]:
+        providers = []
+        if self.hashed_password is not None:
+            providers.append("password")
+        if self.oauth_accounts:
+            for acc in self.oauth_accounts:
+                p = acc.provider.lower()
+                if p not in providers:
+                    providers.append(p)
+        return providers or ["password"]
+
 
 class OAuthAccount(Base):
     __tablename__ = "oauth_accounts"
@@ -53,6 +65,31 @@ class OAuthAccount(Base):
     provider_user_id: Mapped[str] = mapped_column(String(255), nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="oauth_accounts")
+
+
+class UserInvitation(Base):
+    __tablename__ = "user_invitations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="user")
+    workspace_access: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending"
+    )  # pending, accepted, revoked
+    invited_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    invited_by: Mapped["User"] = relationship("User", foreign_keys=[invited_by_id])
+
+    @property
+    def invited_by_email(self) -> str | None:
+        return self.invited_by.email if self.invited_by else None
 
 
 class Workspace(Base):

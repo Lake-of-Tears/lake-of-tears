@@ -81,6 +81,8 @@ spec:
               value: {{ dig "auth" "baseUrl" "http://localhost" .Values.backend | quote }}
             - name: AUTH_REGISTRATION_ENABLED
               value: {{ if hasKey (dig "auth" dict .Values.backend) "registrationEnabled" }}{{ (dig "auth" "registrationEnabled" true .Values.backend) | quote }}{{ else }}"true"{{ end }}
+            - name: GOOGLE_ENABLED
+              value: {{ if hasKey (dig "google" dict .Values.backend) "enabled" }}{{ (dig "google" "enabled" false .Values.backend) | quote }}{{ else }}"false"{{ end }}
             - name: GOOGLE_CLIENT_ID
               value: {{ dig "google" "clientId" "" .Values.backend | quote }}
             - name: GOOGLE_CLIENT_SECRET
@@ -88,6 +90,8 @@ spec:
                 secretKeyRef:
                   name: {{ include "lake-of-tears.fullname" . }}-credentials
                   key: googleClientSecret
+            - name: GITHUB_ENABLED
+              value: {{ if hasKey (dig "github" dict .Values.backend) "enabled" }}{{ (dig "github" "enabled" false .Values.backend) | quote }}{{ else }}"false"{{ end }}
             - name: GITHUB_CLIENT_ID
               value: {{ dig "github" "clientId" "" .Values.backend | quote }}
             - name: GITHUB_CLIENT_SECRET
@@ -95,6 +99,8 @@ spec:
                 secretKeyRef:
                   name: {{ include "lake-of-tears.fullname" . }}-credentials
                   key: githubClientSecret
+            - name: MICROSOFT_ENABLED
+              value: {{ if hasKey (dig "microsoft" dict .Values.backend) "enabled" }}{{ (dig "microsoft" "enabled" false .Values.backend) | quote }}{{ else }}"false"{{ end }}
             - name: MICROSOFT_CLIENT_ID
               value: {{ dig "microsoft" "clientId" "" .Values.backend | quote }}
             - name: MICROSOFT_CLIENT_SECRET
@@ -104,14 +110,33 @@ spec:
                   key: microsoftClientSecret
             - name: MICROSOFT_TENANT_ID
               value: {{ dig "microsoft" "tenantId" "common" .Values.backend | quote }}
+            - name: APPLE_ENABLED
+              value: {{ if hasKey (dig "apple" dict .Values.backend) "enabled" }}{{ (dig "apple" "enabled" false .Values.backend) | quote }}{{ else }}"false"{{ end }}
+            - name: APPLE_CLIENT_ID
+              value: {{ dig "apple" "clientId" "" .Values.backend | quote }}
+            - name: APPLE_TEAM_ID
+              value: {{ dig "apple" "teamId" "" .Values.backend | quote }}
+            - name: APPLE_KEY_ID
+              value: {{ dig "apple" "keyId" "" .Values.backend | quote }}
+            - name: APPLE_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "lake-of-tears.fullname" . }}-credentials
+                  key: applePrivateKey
+            - name: OKTA_ENABLED
+              value: {{ if hasKey (dig "okta" dict .Values.backend) "enabled" }}{{ (dig "okta" "enabled" false .Values.backend) | quote }}{{ else }}"false"{{ end }}
             - name: OKTA_CLIENT_ID
               value: {{ dig "okta" "clientId" "" .Values.backend | quote }}
             - name: OKTA_DOMAIN
               value: {{ dig "okta" "domain" "" .Values.backend | quote }}
+            - name: GITLAB_ENABLED
+              value: {{ if hasKey (dig "gitlab" dict .Values.backend) "enabled" }}{{ (dig "gitlab" "enabled" false .Values.backend) | quote }}{{ else }}"false"{{ end }}
             - name: GITLAB_CLIENT_ID
               value: {{ dig "gitlab" "clientId" "" .Values.backend | quote }}
             - name: GITLAB_URL
               value: {{ dig "gitlab" "url" "https://gitlab.com" .Values.backend | quote }}
+            - name: OIDC_ENABLED
+              value: {{ if hasKey (dig "oidc" dict .Values.backend) "enabled" }}{{ (dig "oidc" "enabled" false .Values.backend) | quote }}{{ else }}"false"{{ end }}
             - name: OIDC_ISSUER_URL
               value: {{ dig "oidc" "issuerUrl" "" .Values.backend | quote }}
             - name: OIDC_CLIENT_ID
@@ -131,6 +156,19 @@ spec:
               value: {{ dig "oidc" "scope" "openid email profile" .Values.backend | quote }}
             - name: OIDC_DISPLAY_NAME
               value: {{ dig "oidc" "displayName" "SSO" .Values.backend | quote }}
+            - name: SMTP_HOST
+              value: {{ dig "smtp" "host" "" .Values.backend | quote }}
+            - name: SMTP_PORT
+              value: {{ (dig "smtp" "port" 587 .Values.backend) | quote }}
+            - name: SMTP_USER
+              value: {{ dig "smtp" "user" "" .Values.backend | quote }}
+            - name: SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "lake-of-tears.fullname" . }}-credentials
+                  key: smtpPassword
+            - name: SMTP_FROM
+              value: {{ dig "smtp" "fromAddr" "" .Values.backend | quote }}
             - name: JUPYTER_TOKEN
               valueFrom:
                 secretKeyRef:

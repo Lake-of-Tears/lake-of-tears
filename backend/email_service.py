@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import os
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+
+logger = logging.getLogger("lakehouse.email")
 
 
 def _smtp_cfg() -> dict:
@@ -28,15 +31,22 @@ def _send(to: list[str], subject: str, body_html: str) -> None:
     msg.attach(MIMEText(body_html, "html"))
 
     try:
-        with smtplib.SMTP(cfg["host"], cfg["port"], timeout=10) as s:
-            s.ehlo()
-            if cfg["port"] != 25:
-                s.starttls()
-            if cfg["user"]:
-                s.login(cfg["user"], cfg["password"])
-            s.sendmail(cfg["from_addr"], to, msg.as_string())
-    except Exception:
-        pass  # email is best-effort; never fail a request over it
+        if cfg["port"] == 465:
+            with smtplib.SMTP_SSL(cfg["host"], cfg["port"], timeout=10) as s:
+                s.ehlo()
+                if cfg["user"]:
+                    s.login(cfg["user"], cfg["password"])
+                s.sendmail(cfg["from_addr"], to, msg.as_string())
+        else:
+            with smtplib.SMTP(cfg["host"], cfg["port"], timeout=10) as s:
+                s.ehlo()
+                if cfg["port"] != 25:
+                    s.starttls()
+                if cfg["user"]:
+                    s.login(cfg["user"], cfg["password"])
+                s.sendmail(cfg["from_addr"], to, msg.as_string())
+    except Exception as e:
+        logger.warning(f"Failed to send email to {to}: {e}")
 
 
 def send_access_requested(
@@ -79,3 +89,21 @@ def send_access_removed(
     to catalog <strong>{catalog_name}</strong>.</p>
     """
     _send(owner_emails, subject, body)
+
+
+def send_invitation(
+    to_email: str,
+    role: str,
+    inviter_name_or_email: str,
+    base_url: str,
+) -> None:
+    subject = "[Lake of Tears] You've been invited to join Lake of Tears"
+    login_url = f"{base_url.rstrip('/')}/login"
+    body = f"""
+    <p>Hello,</p>
+    <p><strong>{inviter_name_or_email}</strong> has invited you to join <strong>Lake of Tears</strong> with <strong>{role.title()}</strong> access.</p>
+    <p>To sign in, visit the login page and sign in with your Google, Apple, or SSO account:</p>
+    <p><a href="{login_url}" style="display:inline-block;padding:10px 18px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px;font-weight:bold;">Sign in to Lake of Tears</a></p>
+    <p>Or visit: <a href="{login_url}">{login_url}</a></p>
+    """
+    _send([to_email], subject, body)

@@ -88,16 +88,30 @@ def toon_to_helm_dict(toon_data: dict[str, Any]) -> dict[str, Any]:
                 if isinstance(row, dict) and "provider" in row:
                     provider = str(row["provider"]).strip().lower()
                     provider_conf: dict[str, Any] = {}
+                    if "enabled" in row and row["enabled"] is not None:
+                        val = row["enabled"]
+                        if isinstance(val, bool):
+                            provider_conf["enabled"] = val
+                        elif isinstance(val, str):
+                            provider_conf["enabled"] = val.strip().lower() in ("true", "1", "yes")
+                        else:
+                            provider_conf["enabled"] = bool(val)
                     if "clientId" in row and row["clientId"] is not None:
                         provider_conf["clientId"] = str(row["clientId"])
                     if "clientSecret" in row and row["clientSecret"] is not None:
                         provider_conf["clientSecret"] = str(row["clientSecret"])
                     if "tenantId" in row and row["tenantId"]:
                         provider_conf["tenantId"] = str(row["tenantId"])
+                    if "teamId" in row and row["teamId"]:
+                        provider_conf["teamId"] = str(row["teamId"])
+                    if "keyId" in row and row["keyId"]:
+                        provider_conf["keyId"] = str(row["keyId"])
                     if "domain" in row and row["domain"]:
                         provider_conf["domain"] = str(row["domain"])
                     if "url" in row and row["url"]:
                         provider_conf["url"] = str(row["url"])
+                    if provider == "apple" and "clientSecret" in provider_conf:
+                        provider_conf["privateKey"] = provider_conf["clientSecret"]
                     backend[provider] = provider_conf
 
     return helm

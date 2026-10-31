@@ -12,6 +12,7 @@ from typing import Any
 
 import ai_service
 import jwt as _jwt
+import sqlalchemy as sa
 from ai_admin_router import router as ai_admin_router
 from ai_gateway_router import router as ai_gateway_router
 from ai_router import router as ai_router
@@ -36,7 +37,12 @@ from auth import (
 from catalog_storage import delete_prefix, prefixes_to_delete
 from dashboards_router import router as dashboards_router
 from database import get_db
-from email_service import send_access_removed, send_access_requested, send_access_reviewed
+from email_service import (
+    send_access_removed,
+    send_access_requested,
+    send_access_reviewed,
+    send_invitation,
+)
 from fastapi import (
     Cookie,
     Depends,
@@ -56,6 +62,7 @@ from models import (
     CatalogTable,
     SystemSetting,
     User,
+    UserInvitation,
     Workspace,
     WorkspaceMember,
     WorkspaceShare,
@@ -74,11 +81,13 @@ from schemas import (
     CatalogTableResponse,
     ChangePasswordRequest,
     CreateCatalogRequest,
+    CreateInvitationRequest,
     CreateSchemaRequest,
     CreateTableRequest,
     CreateWorkspaceRequest,
     DeleteWorkspaceRequest,
     InboundAccessRequest,
+    InvitationResponse,
     LoginRequest,
     OutboundCatalogAccessItem,
     PurgeCatalogRequest,
@@ -380,18 +389,37 @@ def _workspace_admin_response(ws: Workspace, db: Session) -> WorkspaceAdminRespo
 
 @app.post("/api/auth/register")
 def register(req: RegisterRequest, response: Response, db: Session = Depends(get_db)):
-    if db.query(User).filter(User.email == req.email).first():
+    existing = db.query(User).filter(User.email == req.email).first()
+    if existing:
+        if not existing.hashed_password and existing.oauth_accounts:
+            providers = [acc.provider.title() for acc in existing.oauth_accounts]
+            prov_str = ", ".join(providers)
+            raise HTTPException(
+                400,
+                f"An account with this email already exists via {prov_str}. Please sign in using {prov_str}.",
+            )
         raise HTTPException(400, "Email already registered")
 
     is_first = db.query(User).count() == 0
-    if not is_registration_enabled() and not is_first:
+    invite = (
+        db.query(UserInvitation)
+        .filter(
+            func.lower(UserInvitation.email) == func.lower(req.email.strip()),
+            UserInvitation.status == "pending",
+        )
+        .first()
+    )
+    if not is_registration_enabled() and not is_first and not invite:
         raise HTTPException(403, "Account registration is disabled")
+
+    assigned_role = "superadmin" if is_first else (invite.role if invite else "user")
 
     user = User(
         email=req.email,
         display_name=req.display_name or req.email.split("@")[0],
         hashed_password=hash_password(req.password),
-        role="superadmin" if is_first else "user",
+        role=assigned_role,
+        is_active=True,
     )
     db.add(user)
     db.flush()
@@ -399,10 +427,31 @@ def register(req: RegisterRequest, response: Response, db: Session = Depends(get
     if is_first:
         _create_default_workspace(db, user)
     else:
-        # Add to Default workspace automatically
+        ws_access = invite.workspace_access if (invite and invite.workspace_access) else {}
         default_ws = db.query(Workspace).filter(Workspace.slug == "default").first()
         if default_ws:
-            db.add(WorkspaceMember(workspace_id=default_ws.id, user_id=user.id, role="read"))
+            default_role = ws_access.get("default") or (
+                "write" if assigned_role == "superadmin" else "read"
+            )
+            db.add(WorkspaceMember(workspace_id=default_ws.id, user_id=user.id, role=default_role))
+
+        for ws_slug_or_id, ws_role in ws_access.items():
+            if ws_slug_or_id == "default":
+                continue
+            other_ws = (
+                db.query(Workspace)
+                .filter(
+                    (Workspace.slug == ws_slug_or_id)
+                    | (Workspace.id.cast(sa.String) == str(ws_slug_or_id))
+                )
+                .first()
+            )
+            if other_ws and other_ws.id != (default_ws.id if default_ws else None):
+                db.add(WorkspaceMember(workspace_id=other_ws.id, user_id=user.id, role=ws_role))
+
+    if invite:
+        invite.status = "accepted"
+        invite.accepted_at = datetime.now(UTC)
 
     db.commit()
     db.refresh(user)
@@ -413,6 +462,13 @@ def register(req: RegisterRequest, response: Response, db: Session = Depends(get
 @app.post("/api/auth/login")
 def login(req: LoginRequest, response: Response, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == req.email).first()
+    if user and not user.hashed_password and user.oauth_accounts:
+        providers = [acc.provider.title() for acc in user.oauth_accounts]
+        prov_str = ", ".join(providers)
+        raise HTTPException(
+            400,
+            f"This account was created via {prov_str}. Please sign in using {prov_str}.",
+        )
     if (
         not user
         or not user.hashed_password
@@ -535,11 +591,18 @@ def oauth_start(provider: str, request: Request, response: Response):
     return get_oauth_redirect(provider, request, response)
 
 
-@app.get("/api/auth/oauth/{provider}/callback")
-def oauth_callback(
+@app.api_route("/api/auth/oauth/{provider}/callback", methods=["GET", "POST"])
+async def oauth_callback(
     provider: str, request: Request, response: Response, db: Session = Depends(get_db)
 ):
-    return handle_oauth_callback(provider, request, response, db)
+    form_data = None
+    if request.method == "POST":
+        try:
+            form = await request.form()
+            form_data = dict(form)
+        except Exception:
+            form_data = {}
+    return handle_oauth_callback(provider, request, response, db, form_data=form_data)
 
 
 # ── Users (superadmin) ────────────────────────────────────────────────────────
@@ -572,6 +635,78 @@ def update_user(
         user.display_name = req.display_name
     db.commit()
     return UserResponse.model_validate(user)
+
+
+# ── Invitations (superadmin) ──────────────────────────────────────────────────
+
+
+@app.get("/api/admin/invitations", response_model=list[InvitationResponse])
+def list_invitations(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    invites = db.query(UserInvitation).order_by(UserInvitation.created_at.desc()).all()
+    return [InvitationResponse.model_validate(inv) for inv in invites]
+
+
+@app.post("/api/admin/invitations", response_model=InvitationResponse)
+def create_invitation(
+    req: CreateInvitationRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(require_superadmin),
+):
+    email_clean = req.email.strip().lower()
+    existing_user = db.query(User).filter(func.lower(User.email) == email_clean).first()
+    if existing_user:
+        raise HTTPException(400, "A user with this email already exists")
+
+    pending_invite = (
+        db.query(UserInvitation)
+        .filter(func.lower(UserInvitation.email) == email_clean, UserInvitation.status == "pending")
+        .first()
+    )
+    if pending_invite:
+        raise HTTPException(400, "An invitation is already pending for this email")
+
+    invitation = UserInvitation(
+        id=uuid.uuid4(),
+        email=email_clean,
+        role=req.role,
+        workspace_access=req.workspace_access,
+        status="pending",
+        invited_by_id=current_admin.id,
+        created_at=datetime.now(UTC),
+    )
+    db.add(invitation)
+    db.commit()
+    db.refresh(invitation)
+
+    base_url = os.getenv("AUTH_BASE_URL", str(request.base_url).rstrip("/"))
+    try:
+        send_invitation(
+            to_email=invitation.email,
+            role=invitation.role,
+            inviter_name_or_email=current_admin.display_name or current_admin.email,
+            base_url=base_url,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to send invitation email: {e}")
+
+    return InvitationResponse.model_validate(invitation)
+
+
+@app.delete("/api/admin/invitations/{invitation_id}", status_code=204)
+def revoke_invitation(
+    invitation_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    invite = db.query(UserInvitation).filter(UserInvitation.id == invitation_id).first()
+    if not invite:
+        raise HTTPException(404, "Invitation not found")
+    invite.status = "revoked"
+    db.commit()
 
 
 # ── Workspaces ────────────────────────────────────────────────────────────────
