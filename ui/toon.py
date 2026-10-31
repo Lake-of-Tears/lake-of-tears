@@ -1,14 +1,34 @@
 from __future__ import annotations
 
+import csv
+import io
 import re
+import textwrap
 from typing import Any
 
 # Regex to match TOON tabular array headers: key[N]{col1,col2,...}:
 TABLE_HEADER_REGEX = re.compile(r"^([\w-]+)\[(\d*)\]\{([^}]+)\}:\s*$")
 
 
+def _strip_inline_comment(val: str) -> str:
+    """Strip comment following a value if outside quotes and preceded by whitespace."""
+    in_quotes = False
+    quote_char = ""
+    for idx, ch in enumerate(val):
+        if ch in ('"', "'"):
+            if not in_quotes:
+                in_quotes = True
+                quote_char = ch
+            elif quote_char == ch:
+                in_quotes = False
+        elif ch == "#" and not in_quotes:
+            if idx == 0 or val[idx - 1].isspace():
+                return val[:idx].rstrip()
+    return val
+
+
 def _parse_scalar(val: str) -> Any:
-    val = val.strip()
+    val = _strip_inline_comment(val).strip()
     if val.lower() == "true":
         return True
     if val.lower() == "false":
@@ -38,11 +58,12 @@ def parse_toon(text: str) -> dict[str, Any]:
 
     Supports:
     - Standard key: value mappings
-    - Indented nested object sections
+    - Indented nested object sections (arbitrary nesting depths via common dedent)
     - TOON array tables: name[count]{field1,field2,...}:
         val1,val2,...
         val3,val4,...
     - Inline comma-separated lists: tags: [a, b, c]
+    - Inline and full-line comments (#)
     """
     lines = text.splitlines()
     result: dict[str, Any] = {}
@@ -53,7 +74,7 @@ def parse_toon(text: str) -> dict[str, Any]:
         raw_line = lines[i]
         line = raw_line.strip()
 
-        # Skip empty lines and comments
+        # Skip empty lines and full-line comments
         if not line or line.startswith("#"):
             i += 1
             continue
@@ -76,8 +97,16 @@ def parse_toon(text: str) -> dict[str, Any]:
                 if not curr.startswith(" ") and not curr.startswith("\t"):
                     break
 
-                # Parse CSV-style values for columns
-                row_vals = [c.strip() for c in curr_stripped.split(",")]
+                curr_clean = _strip_inline_comment(curr_stripped)
+                # Parse CSV-style values for columns supporting quoted entries
+                try:
+                    row_vals = [
+                        c.strip()
+                        for c in next(csv.reader(io.StringIO(curr_clean), skipinitialspace=True))
+                    ]
+                except Exception:
+                    row_vals = [c.strip() for c in curr_clean.split(",")]
+
                 row_dict = {}
                 for idx, col in enumerate(columns):
                     val = row_vals[idx] if idx < len(row_vals) else None
@@ -92,7 +121,7 @@ def parse_toon(text: str) -> dict[str, Any]:
         if ":" in line:
             key, _, val_part = line.partition(":")
             key = key.strip()
-            val_part = val_part.strip()
+            val_part = _strip_inline_comment(val_part).strip()
 
             # Inline list: [a, b, c]
             if val_part.startswith("[") and val_part.endswith("]"):
@@ -114,17 +143,24 @@ def parse_toon(text: str) -> dict[str, Any]:
             while i < total_lines:
                 curr = lines[i]
                 curr_stripped = curr.strip()
-                if not curr_stripped or curr_stripped.startswith("#"):
+                if not curr_stripped:
+                    nested_block.append(curr)
                     i += 1
                     continue
+                if curr_stripped.startswith("#"):
+                    if curr.startswith(" ") or curr.startswith("\t"):
+                        nested_block.append(curr)
+                        i += 1
+                        continue
+                    else:
+                        break
                 if not curr.startswith(" ") and not curr.startswith("\t"):
                     break
                 nested_block.append(curr)
                 i += 1
 
             if nested_block:
-                # Deduce common leading indent
-                dedented = "\n".join(line.lstrip() for line in nested_block)
+                dedented = textwrap.dedent("\n".join(nested_block))
                 result[key] = parse_toon(dedented)
             else:
                 result[key] = None
@@ -135,25 +171,43 @@ def parse_toon(text: str) -> dict[str, Any]:
     return result
 
 
-def dump_toon(data: dict[str, Any]) -> str:
-    """Serialize a Python dictionary into TOON format."""
+def dump_toon(data: dict[str, Any], indent: int = 0) -> str:
+    """Serialize a Python dictionary into TOON format with indentation support."""
     lines: list[str] = []
+    pad = " " * indent
     for k, v in data.items():
         if isinstance(v, list):
             if v and isinstance(v[0], dict):
                 # Format as TOON table: key[count]{cols...}:
                 cols = list(v[0].keys())
-                lines.append(f"{k}[{len(v)}]{{{','.join(cols)}}}:")
+                lines.append(f"{pad}{k}[{len(v)}]{{{','.join(cols)}}}:")
                 for row in v:
-                    row_vals = [str(row.get(c, "")) for c in cols]
-                    lines.append(f"  {','.join(row_vals)}")
+                    row_vals: list[str] = []
+                    for c in cols:
+                        val = row.get(c)
+                        if val is None:
+                            val_str = ""
+                        elif isinstance(val, bool):
+                            val_str = str(val).lower()
+                        else:
+                            val_str = str(val)
+                        if "," in val_str or '"' in val_str or "\n" in val_str:
+                            val_str = f'"{val_str}"'
+                        row_vals.append(val_str)
+                    lines.append(f"{pad}  {','.join(row_vals)}")
             else:
-                inner = ", ".join(str(item) for item in v)
-                lines.append(f"{k}: [{inner}]")
+                inner = ", ".join(
+                    str(item).lower() if isinstance(item, bool) else str(item) for item in v
+                )
+                lines.append(f"{pad}{k}: [{inner}]")
         elif isinstance(v, dict):
-            lines.append(f"{k}:")
-            for sub_k, sub_v in v.items():
-                lines.append(f"  {sub_k}: {sub_v}")
+            lines.append(f"{pad}{k}:")
+            sub_dump = dump_toon(v, indent=indent + 2)
+            lines.append(sub_dump.rstrip("\n"))
+        elif v is None:
+            lines.append(f"{pad}{k}: null")
+        elif isinstance(v, bool):
+            lines.append(f"{pad}{k}: {str(v).lower()}")
         else:
-            lines.append(f"{k}: {v}")
+            lines.append(f"{pad}{k}: {v}")
     return "\n".join(lines) + "\n"
