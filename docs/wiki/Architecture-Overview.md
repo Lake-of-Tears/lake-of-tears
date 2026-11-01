@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Lake of Tears is a handful of well-known open-source services behind one entry point, built around a simple idea: keep data as Parquet files in object storage and query them in place with an embedded engine. This page explains the model, where data lives, how requests are routed, what each component does and how the stack is deployed.
+Lake of Tears is a handful of well-known open-source services behind one entry point, built around a simple idea: keep data as Parquet files in object storage and query them in place with an embedded engine. Workspaces act as the primary tenant boundary across the entire platform, isolating storage prefixes, SQL queries, pipelines, notebooks, and catalogs. This page explains the model, where data lives, how requests are routed, what each component does and how the stack is deployed.
 
 ## 1. The DuckDB-first lakehouse model
 
@@ -8,25 +8,42 @@ There is no separate query cluster. SQL runs **in process** with [DuckDB](https:
 
 - The Lake UI keeps a pool of warm DuckDB connections. Each one loads the `httpfs` extension to read `s3://` paths directly from MinIO, and the `vss` extension for vector similarity search.
 - Airflow pipeline tasks use DuckDB the same way, to write Parquet to MinIO (`COPY ... TO 's3://...' (FORMAT PARQUET)`) and to read it back for embeddings and anomaly detection.
-- A SQL query is just a read over Parquet files, for example `SELECT * FROM read_parquet('s3://datalake/raw/weather/**/*.parquet')`.
+- A SQL query is just a read over Parquet files, for example `SELECT * FROM read_parquet('s3://datalake/workspaces/default/raw/weather/**/*.parquet')`.
+- **SQL Guardrails & Query Boundaries:** Because DuckDB runs in process with access to storage credentials, queries are evaluated before execution by an AST guardrail engine (`sqlglot`). User queries cannot execute raw reads outside their active workspace prefix (`workspaces/<workspace_slug>/`) or authorized catalog boundaries. Directory traversal attempts are rejected, and unparseable queries referencing S3 fail closed.
+- **View Encapsulation:** Catalog tables are encapsulated as views inside the DuckDB session. Users query clean catalog namespaces (e.g. `SELECT * FROM default.analytics.users`) while the system translates and validates the underlying Parquet locations transparently.
 
 Because storage and compute are separate, the data is plain Parquet in an S3 bucket. It can be inspected with any other Parquet-aware tool, and scaling the compute side means running more UI replicas rather than resizing a cluster.
 
 Catalogs add a naming layer on top. A catalog holds schemas, a schema holds tables, and each table records an `s3_path_pattern` pointing at its Parquet files. See [Workspaces and Catalog Management](Workspaces-and-Catalog-Management.md) for how catalogs are owned, shared and deleted.
 
-## 2. Object storage layout
+## 2. Object storage layout & workspace prefix jailing
 
-All data lives in one MinIO bucket named `datalake`, written as Hive-partitioned Parquet (`year=/month=/day=`).
+All data lives in one MinIO bucket named `datalake`, strictly partitioned by workspace slug under the `workspaces/` prefix and written as Hive-partitioned Parquet (`year=/month=/day=`).
 
 | Prefix | What is stored | Written by |
 |---|---|---|
-| `s3://datalake/raw/<source>/year=YYYY/month=MM/day=DD/data.parquet` | Raw records from each ingest pipeline (for example `weather`, `truenas`, `jellyfin`) | Airflow ingest DAGs |
-| `s3://datalake/embeddings/<source>/year=YYYY/month=MM/day=DD/data.parquet` | The raw records plus an `embedding` vector column | The embedding DAG |
-| `s3://datalake/<catalog>/<schema>/<table>/year=YYYY/month=MM/day=DD/data.parquet` | Catalog-organized tables | Pipelines or notebooks that write to a catalog |
+| `s3://datalake/workspaces/<workspace_slug>/raw/<source>/year=YYYY/month=MM/day=DD/data.parquet` | Workspace raw records from ingest pipelines (e.g. `weather`, `truenas`, `jellyfin`) | Airflow ingest DAGs |
+| `s3://datalake/workspaces/<workspace_slug>/embeddings/<table_slug>/data.parquet` | Catalog table vector embeddings for semantic search and anomaly detection | The embedding DAG / vector service |
+| `s3://datalake/workspaces/<workspace_slug>/<catalog>/<schema>/<table>/year=YYYY/month=MM/day=DD/data.parquet` | Workspace catalog-managed tables | Pipelines or notebooks writing to catalog tables |
+| `s3://datalake/raw/<source>/...` *(legacy)* | System legacy ingest prefix (read-only fallback) | Legacy DAGs |
+| `s3://datalake/embeddings/<source>/...` *(legacy)* | System legacy embeddings prefix (read-only fallback) | Legacy DAGs |
 
-The `raw/` and `embeddings/` prefixes are the original, catalog-free layout. The catalog layout is a convention: each catalog table stores its own `s3_path_pattern`, so a table can point at any prefix, including another source's `raw/` data. Deleting a catalog removes the objects under its tables' prefixes, except prefixes that other catalogs also use.
+### Storage jailing principles
+1. **Isolated landing zones:** Ingestion jobs executed in a development workspace (`workspaces/dev/`) land exclusively in that workspace's prefix and cannot touch or overwrite production data (`workspaces/prod/`).
+2. **Catalog storage encapsulation:** Each table records its own `s3_path_pattern`. In managed catalogs, paths default to `workspaces/<workspace_slug>/<catalog>/<schema>/<table>/`.
+3. **Federated sharing without duplication:** When a catalog is shared from Workspace A to Workspace B, Workspace B is granted read access to Workspace A's prefix in the SQL guardrail validator. Data is queried in place without duplicating Parquet files.
+4. **Lifecycle and Purging:** Deleting a workspace soft-deletes its catalog definitions. When the grace period expires, an automated Airflow purge DAG cleans up all objects under `s3://datalake/workspaces/<workspace_slug>/` before purging database metadata.
 
-## 3. Single-entry-point routing
+## 3. Workspace tenant boundary & isolation model
+
+A **Workspace** is the primary tenant and isolation boundary in Lake of Tears:
+- **Environment & department silos:** Workspaces cleanly isolate environments (e.g. `Dev`, `Staging`, `Prod`) and departments (e.g. `Finance`, `Engineering`, `SecOps`).
+- **Role-Based Access Control (RBAC):** Users possess a global platform role (`superadmin` or `user`) and workspace-scoped roles (`admin`, `write`, `read`).
+- **Pipeline and DAG isolation:** Airflow DAGs and task executions are scoped to workspaces using `ws_{workspace_slug}_` prefixes and `workspace:{workspace_slug}` tags, preventing cross-tenant pipeline execution leaks.
+- **AI & RAG isolation:** AI Genie SQL schema context, RAG semantic search, and anomaly detection are strictly bounded to the active workspace's catalogs and approved shared indexes.
+- **System Isolation Specs & Decisions:** For complete details on the architecture decisions, trade-offs, and design rationales, see [ADR 0002: Workspace Isolation Architecture](https://github.com/Lake-of-Tears/lake-of-tears/blob/main/docs/decisions/0002-workspace-isolation-architecture.md).
+
+## 4. Single-entry-point routing
 
 Everything a user touches is served from one address. In Kubernetes, an Ingress controller listens on **port 80** (and 443 with TLS) and routes by path:
 
@@ -39,7 +56,7 @@ Everything a user touches is served from one address. In Kubernetes, an Ingress 
 
 Superset and the MinIO console can also be reached via Ingress hosts or dedicated paths. JupyterLab has no public route of its own by default. The Lake UI reaches it over the internal network (its base URL is `/jupyter`) and exposes notebooks through `/api/notebooks`. Having one origin keeps cookies, sign-in and the browser's same-origin rules simple.
 
-## 4. Component map
+## 5. Component map
 
 ```mermaid
 flowchart TB
@@ -75,7 +92,7 @@ flowchart TB
 | **Apache Superset** | Business-intelligence dashboards, reachable at `/superset/`. |
 | **AI provider** | A hosted model service used for embeddings and natural-language answers. Google Gemini is the default (see [AI Providers](AI-Providers.md) for the others); its key and models are configured in the Admin Panel. |
 
-## 5. Deployment model
+## 6. Deployment model
 
 Lake of Tears standardizes on **Kubernetes with Helm** across both local development and production:
 
@@ -93,3 +110,4 @@ The repository also ships Terraform modules under `deploy/terraform/foundation` 
 
 - [Home](Home.md)
 - [Workspaces and Catalog Management](Workspaces-and-Catalog-Management.md)
+- [ADR 0002: Workspace Isolation Architecture](../decisions/0002-workspace-isolation-architecture.md)
