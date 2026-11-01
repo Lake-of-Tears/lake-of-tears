@@ -8,7 +8,7 @@ python-dotenv==1.2.4
 httpx==0.28.1
 PyJWT==2.15.1
 aiofiles==25.1.0
-websockets==16.1.1
+websockets==17.4
 numpy>=2.5.4
 pyarrow>=26.0.0
 sqlglot>=30.24.0
