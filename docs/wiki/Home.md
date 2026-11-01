@@ -16,7 +16,7 @@
 | Guide | What you will find |
 |---|---|
 | [Architecture Overview](Architecture-Overview.md) | How the pieces fit together: the DuckDB-first model, the storage layout, request routing, the component map and Kubernetes deployment |
-| [Deployment and Operations](Deployment-and-Operations.md) | Local and production deployment with Helm, health checks, backups and restores, storage maintenance, secret rotation and a troubleshooting table |
+| [Deployment and Operations](Deployment-and-Operations.md) | Unified TOON platform configuration, local and production deployment with Helm, zero-disk CI/CD streaming, health checks, backups, storage maintenance, and secret rotation |
 | [Data Ingestion and Pipelines](Data-Ingestion-and-Pipelines.md) | How data flows from a source into MinIO as Parquet, a tested step-by-step tutorial for writing a new ingest script and Airflow DAG, and best practices for idempotency, backfills, schema changes and error handling |
 | [Airflow Orchestration](Airflow-Orchestration.md) | How Airflow is set up in Helm, the DAGs that ship, the DAG standard with a copy-and-paste template, and operations: triggering, testing, backfilling, logs, credentials and a troubleshooting checklist |
 | [Chunking and Vector Embeddings](Chunking-and-Vector-Embeddings.md) | How text becomes vectors stored in Parquet, how to register a source for embedding, how long text is split into chunks (`recursive`, `document`, `agentic`), and query examples |
@@ -30,11 +30,18 @@ More guides will appear in this list as they are published.
 ```bash
 git clone https://github.com/Lake-of-Tears/lake-of-tears.git
 cd lake-of-tears
-cp deploy/helm/values-local.example.yaml values-local.yaml
-# Edit values-local.yaml: set passwords and keys
+
+# Option A: Unified TOON workflow (Recommended)
+cp lake-of-tears.example.toon lake-of-tears.local.toon
 helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
   --namespace lake-of-tears --create-namespace \
-  -f values-local.yaml
+  -f <(python scripts/toon2helm.py -i lake-of-tears.local.toon)
+
+# Option B: Standard Helm values override
+# cp deploy/helm/values-local.example.yaml values-local.yaml
+# helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
+#   --namespace lake-of-tears --create-namespace \
+#   -f values-local.yaml
 ```
 
 Open **http://localhost** and register the first account, which becomes the administrator. Access the deployment via the Ingress entrypoint on port 80.
