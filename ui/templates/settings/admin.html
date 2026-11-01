@@ -8,7 +8,11 @@
     <p class="text-sm text-gray-500">Manage users and workspaces across the entire instance.</p>
   </div>
 
-  {% if saved %}
+  {% if saved == 'session_revoked' %}
+  <div class="px-4 py-3 rounded-md bg-emerald-900/30 border border-emerald-800/50 text-emerald-400 text-sm">
+    Session terminated successfully.
+  </div>
+  {% elif saved %}
   <div class="px-4 py-3 rounded-md bg-emerald-900/30 border border-emerald-800/50 text-emerald-400 text-sm">
     Changes saved.
   </div>
@@ -381,6 +385,69 @@
           <button type="submit" class="btn-primary">Save session settings</button>
         </div>
       </form>
+    </div>
+
+    <!-- Active User Sessions -->
+    <div class="border-t border-white/[0.06] pt-6" id="active-sessions">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h2 class="text-sm font-semibold text-gray-300">Active Sessions ({{ active_sessions | length }})</h2>
+          <p class="text-xs text-gray-500 mt-0.5">Active user sessions currently tracked across the system.</p>
+        </div>
+      </div>
+
+      {% if active_sessions %}
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs">
+          <thead>
+            <tr class="border-b border-gray-800 text-gray-400">
+              <th class="pb-2 font-medium">User</th>
+              <th class="pb-2 font-medium">Device / IP</th>
+              <th class="pb-2 font-medium">Started</th>
+              <th class="pb-2 font-medium">Last Active</th>
+              <th class="pb-2 font-medium text-right">Action</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-800/50">
+            {% for s in active_sessions %}
+            <tr class="hover:bg-white/[0.02]">
+              <td class="py-2.5 pr-3">
+                <div class="font-medium text-gray-200">{{ s.display_name or s.email }}</div>
+                <div class="text-[11px] text-gray-500">{{ s.email }}</div>
+              </td>
+              <td class="py-2.5 pr-3">
+                <div class="text-gray-300 truncate max-w-[200px]" title="{{ s.user_agent | default('', true) }}">
+                  {{ s.user_agent | default('Unknown Device', true) }}
+                </div>
+                <div class="text-[11px] text-gray-500">{{ s.ip_address | default('Unknown IP', true) }}</div>
+              </td>
+              <td class="py-2.5 pr-3 text-gray-400 whitespace-nowrap">
+                {{ s.created_at }}
+              </td>
+              <td class="py-2.5 pr-3 text-gray-400 whitespace-nowrap">
+                {{ s.last_active_at }}
+              </td>
+              <td class="py-2.5 text-right whitespace-nowrap">
+                {% if s.is_current %}
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-900/40 text-emerald-400 border border-emerald-800/50">
+                  Your Session
+                </span>
+                {% else %}
+                <form action="/settings/admin/sessions/{{ s.id }}/revoke" method="post" onsubmit="return confirm('Terminate this session immediately?');" class="inline">
+                  <button type="submit" class="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded hover:bg-red-950/30 transition-colors">
+                    Terminate
+                  </button>
+                </form>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-xs text-gray-500 py-3">No active sessions found.</p>
+      {% endif %}
     </div>
 
     <!-- Authentication & Identity Providers -->

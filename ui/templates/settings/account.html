@@ -6,7 +6,15 @@
   <h1 class="text-xl font-semibold text-gray-100 mb-1">Account Settings</h1>
   <p class="text-sm text-gray-500 mb-6">Manage your personal profile.</p>
 
-  {% if saved %}
+  {% if saved == 'revoked' %}
+  <div class="mb-4 px-4 py-3 rounded-md bg-emerald-900/30 border border-emerald-800/50 text-emerald-400 text-sm">
+    Session revoked successfully.
+  </div>
+  {% elif saved == 'revoked_others' %}
+  <div class="mb-4 px-4 py-3 rounded-md bg-emerald-900/30 border border-emerald-800/50 text-emerald-400 text-sm">
+    All other active sessions have been signed out.
+  </div>
+  {% elif saved %}
   <div class="mb-4 px-4 py-3 rounded-md bg-emerald-900/30 border border-emerald-800/50 text-emerald-400 text-sm">
     Changes saved.
   </div>
@@ -124,10 +132,69 @@
     {% endif %}
   </div>
 
+  <!-- Active Sessions -->
+  <div class="card p-6 mb-6">
+    <div class="flex items-center justify-between mb-3">
+      <div>
+        <h2 class="text-sm font-semibold text-gray-300">Active Sessions</h2>
+        <p class="text-xs text-gray-500 mt-0.5">Manage devices currently authenticated into your account.</p>
+      </div>
+      {% if sessions and sessions | length > 1 %}
+      <form action="/settings/account/sessions/revoke-others" method="post" onsubmit="return confirm('Sign out of all other devices?');">
+        <button type="submit" class="text-xs px-2.5 py-1.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white border border-gray-700 transition-colors">
+          Log out other devices
+        </button>
+      </form>
+      {% endif %}
+    </div>
+
+    <div class="divide-y divide-gray-800">
+      {% for sess in sessions %}
+      <div class="py-3 flex items-center justify-between gap-4">
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-medium text-gray-200 truncate">
+              {{ sess.user_agent | default('Unknown Device', true) }}
+            </span>
+            {% if sess.is_current %}
+            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-900/40 text-emerald-400 border border-emerald-800/50">
+              Current Device
+            </span>
+            {% endif %}
+          </div>
+          <div class="text-[11px] text-gray-500 mt-0.5 flex items-center gap-3">
+            <span>IP: {{ sess.ip_address | default('Unknown', true) }}</span>
+            <span>•</span>
+            <span>Last active: {{ sess.last_active_at | default(sess.created_at) }}</span>
+          </div>
+        </div>
+
+        <div>
+          {% if sess.is_current %}
+          <form action="/logout" method="post">
+            <button type="submit" class="text-xs text-gray-400 hover:text-red-400 px-2 py-1 rounded hover:bg-gray-800 transition-colors">
+              Sign out
+            </button>
+          </form>
+          {% else %}
+          <form action="/settings/account/sessions/{{ sess.id }}/revoke" method="post">
+            <button type="submit" class="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded hover:bg-red-950/30 transition-colors">
+              Revoke
+            </button>
+          </form>
+          {% endif %}
+        </div>
+      </div>
+      {% else %}
+      <p class="text-xs text-gray-500 py-3">No other active sessions recorded.</p>
+      {% endfor %}
+    </div>
+  </div>
+
   <!-- Sign out -->
   <div class="card p-6">
-    <h2 class="text-sm font-semibold text-gray-300 mb-3">Session</h2>
-    <p class="text-sm text-gray-500 mb-4">Sign out of your Lake of Tears session on this device.</p>
+    <h2 class="text-sm font-semibold text-gray-300 mb-1">Sign Out</h2>
+    <p class="text-xs text-gray-500 mb-4">Sign out of your session on this device.</p>
     <form action="/logout" method="post">
       <button type="submit" class="inline-flex items-center gap-2 px-4 py-2 bg-red-600/20 hover:bg-red-600/30 border border-red-600/40 text-red-400 text-sm font-medium rounded-md transition-colors">
         Sign out

@@ -20,8 +20,10 @@ from auth import (
     COOKIE_NAME,
     SECRET_KEY,
     create_token,
+    create_user_session,
     decode_token,
     get_catalog_workspace_and_role,
+    get_current_session_id,
     get_current_user,
     get_session_expires_delta,
     get_stored_gemini_api_key,
@@ -29,7 +31,10 @@ from auth import (
     hash_password,
     is_registration_enabled,
     mask_secret,
+    prune_expired_sessions,
     require_superadmin,
+    revoke_all_other_sessions,
+    revoke_user_session,
     set_stored_gemini_api_key,
     set_stored_gemini_model,
     verify_password,
@@ -63,6 +68,7 @@ from models import (
     SystemSetting,
     User,
     UserInvitation,
+    UserSession,
     Workspace,
     WorkspaceMember,
     WorkspaceShare,
@@ -107,6 +113,7 @@ from schemas import (
     UpdateUserRequest,
     UpdateWorkspaceRequest,
     UserResponse,
+    UserSessionResponse,
     WorkspaceAdminResponse,
     WorkspaceCatalogSettingsResponse,
     WorkspaceMemberResponse,
@@ -123,7 +130,7 @@ logger = logging.getLogger("lakehouse.backend")
 
 _DEFAULT_SOFT_DELETE_DAYS = 30
 _DEFAULT_WORKSPACE_INACTIVE_DAYS = 30
-_DEFAULT_SESSION_INACTIVITY_TIMEOUT_MINUTES = 0
+_DEFAULT_SESSION_INACTIVITY_TIMEOUT_MINUTES = 60
 _DEFAULT_SESSION_MAX_HOURS = 24
 
 
@@ -262,8 +269,39 @@ def _set_auth_cookie(
     user: User,
     db: Session,
     session_start_ts: float | None = None,
+    request: Request | None = None,
+    existing_session_id: str | None = None,
 ) -> str:
     expires_delta = get_session_expires_delta(db)
+    ip_addr = request.client.host if (request and request.client) else None
+    ua = request.headers.get("user-agent") if request else None
+    now = datetime.now(UTC)
+
+    session_id_str: str | None = None
+    if existing_session_id:
+        try:
+            sess_uuid = uuid.UUID(str(existing_session_id))
+            sess = (
+                db.query(UserSession)
+                .filter(UserSession.id == sess_uuid, UserSession.user_id == user.id)
+                .first()
+            )
+            if sess and not sess.is_revoked:
+                sess.expires_at = now + expires_delta
+                sess.last_active_at = now
+                if ip_addr:
+                    sess.ip_address = ip_addr
+                if ua:
+                    sess.user_agent = ua
+                db.commit()
+                session_id_str = str(sess.id)
+        except Exception:
+            session_id_str = None
+
+    if not session_id_str:
+        user_sess = create_user_session(db, user, expires_delta, ip_address=ip_addr, user_agent=ua)
+        session_id_str = str(user_sess.id)
+
     token = create_token(
         {
             "sub": str(user.id),
@@ -273,6 +311,7 @@ def _set_auth_cookie(
         },
         expires_delta=expires_delta,
         session_start_ts=session_start_ts,
+        session_id=session_id_str,
     )
     max_age = int(expires_delta.total_seconds())
     response.set_cookie(COOKIE_NAME, token, max_age=max_age, httponly=True, samesite="lax")
@@ -388,7 +427,12 @@ def _workspace_admin_response(ws: Workspace, db: Session) -> WorkspaceAdminRespo
 
 
 @app.post("/api/auth/register")
-def register(req: RegisterRequest, response: Response, db: Session = Depends(get_db)):
+def register(
+    req: RegisterRequest,
+    response: Response,
+    request: Request,
+    db: Session = Depends(get_db),
+):
     existing = db.query(User).filter(User.email == req.email).first()
     if existing:
         if not existing.hashed_password and existing.oauth_accounts:
@@ -455,12 +499,17 @@ def register(req: RegisterRequest, response: Response, db: Session = Depends(get
 
     db.commit()
     db.refresh(user)
-    _set_auth_cookie(response, user, db)
+    _set_auth_cookie(response, user, db, request=request)
     return {"ok": True, "role": user.role}
 
 
 @app.post("/api/auth/login")
-def login(req: LoginRequest, response: Response, db: Session = Depends(get_db)):
+def login(
+    req: LoginRequest,
+    response: Response,
+    request: Request,
+    db: Session = Depends(get_db),
+):
     user = db.query(User).filter(User.email == req.email).first()
     if user and not user.hashed_password and user.oauth_accounts:
         providers = [acc.provider.title() for acc in user.oauth_accounts]
@@ -477,12 +526,34 @@ def login(req: LoginRequest, response: Response, db: Session = Depends(get_db)):
         raise HTTPException(401, "Invalid email or password")
     if not user.is_active:
         raise HTTPException(403, "Account disabled — contact your superadmin")
-    _set_auth_cookie(response, user, db)
+    _set_auth_cookie(response, user, db, request=request)
     return {"ok": True, "role": user.role}
 
 
 @app.post("/api/auth/logout")
-def logout(response: Response):
+def logout(
+    response: Response,
+    request: Request,
+    db: Session = Depends(get_db),
+    lake_token: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
+):
+    token = lake_token
+    if not token and authorization and authorization.startswith("Bearer "):
+        token = authorization[7:]
+    if token:
+        try:
+            payload = decode_token(token)
+            jti = payload.get("jti")
+            if jti:
+                sess_uuid = uuid.UUID(str(jti))
+                sess = db.query(UserSession).filter(UserSession.id == sess_uuid).first()
+                if sess:
+                    sess.is_revoked = True
+                    sess.revoked_at = datetime.now(UTC)
+                    db.commit()
+        except Exception:
+            pass
     response.delete_cookie(COOKIE_NAME)
     response.delete_cookie("lake_workspace_id")
     return {"ok": True}
@@ -491,6 +562,7 @@ def logout(response: Response):
 @app.post("/api/auth/refresh")
 def refresh_token(
     response: Response,
+    request: Request,
     db: Session = Depends(get_db),
     lake_token: str | None = Cookie(default=None),
 ):
@@ -521,7 +593,14 @@ def refresh_token(
         if datetime.now(UTC) - session_start >= timedelta(hours=max_hours):
             raise HTTPException(401, "Maximum session length reached — please sign in again")
 
-    _set_auth_cookie(response, user, db, session_start_ts=payload.get("ss"))
+    _set_auth_cookie(
+        response,
+        user,
+        db,
+        session_start_ts=payload.get("ss"),
+        request=request,
+        existing_session_id=payload.get("jti"),
+    )
     return {"ok": True}
 
 
@@ -534,6 +613,7 @@ def me(current_user: User = Depends(get_current_user)):
 def update_me(
     req: UpdateMeRequest,
     response: Response,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -543,7 +623,13 @@ def update_me(
             current_user.display_name = name
     db.commit()
     db.refresh(current_user)
-    _set_auth_cookie(response, current_user, db)
+    _set_auth_cookie(
+        response,
+        current_user,
+        db,
+        request=request,
+        existing_session_id=str(getattr(current_user, "_current_session_id", "") or ""),
+    )
     return UserResponse.model_validate(current_user)
 
 
@@ -551,6 +637,7 @@ def update_me(
 def change_password(
     req: ChangePasswordRequest,
     response: Response,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -565,8 +652,109 @@ def change_password(
     current_user.hashed_password = hash_password(req.new_password)
     db.commit()
     db.refresh(current_user)
-    token = _set_auth_cookie(response, current_user, db)
+    token = _set_auth_cookie(
+        response,
+        current_user,
+        db,
+        request=request,
+        existing_session_id=str(getattr(current_user, "_current_session_id", "") or ""),
+    )
     return {"ok": True, "token": token}
+
+
+@app.get("/api/auth/sessions", response_model=list[UserSessionResponse])
+def get_user_sessions(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    current_session_id: uuid.UUID = Depends(get_current_session_id),
+):
+    prune_expired_sessions(db)
+    sessions = (
+        db.query(UserSession)
+        .filter(
+            UserSession.user_id == current_user.id,
+            UserSession.is_revoked == False,  # noqa: E712
+            UserSession.expires_at > datetime.now(UTC),
+        )
+        .order_by(UserSession.last_active_at.desc())
+        .all()
+    )
+    result = []
+    for s in sessions:
+        resp_item = UserSessionResponse.model_validate(s)
+        resp_item.email = current_user.email
+        resp_item.display_name = current_user.display_name
+        resp_item.is_current = s.id == current_session_id
+        result.append(resp_item)
+    return result
+
+
+@app.delete("/api/auth/sessions/{session_id}")
+def revoke_session(
+    session_id: uuid.UUID,
+    response: Response,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    current_session_id: uuid.UUID = Depends(get_current_session_id),
+):
+    revoked = revoke_user_session(db, session_id, user_id=current_user.id)
+    if not revoked:
+        raise HTTPException(404, "Session not found or already revoked")
+    if session_id == current_session_id:
+        response.delete_cookie(COOKIE_NAME)
+        response.delete_cookie("lake_workspace_id")
+    return {"ok": True, "revoked_id": str(session_id)}
+
+
+@app.post("/api/auth/sessions/revoke-others")
+def revoke_other_user_sessions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    current_session_id: uuid.UUID = Depends(get_current_session_id),
+):
+    count = revoke_all_other_sessions(db, current_user.id, current_session_id)
+    return {"ok": True, "revoked_count": count}
+
+
+@app.get("/api/admin/sessions", response_model=list[UserSessionResponse])
+def get_all_admin_sessions(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+    current_session_id: uuid.UUID = Depends(get_current_session_id),
+):
+    prune_expired_sessions(db)
+    sessions = (
+        db.query(UserSession)
+        .join(User, User.id == UserSession.user_id)
+        .filter(
+            UserSession.is_revoked == False,  # noqa: E712
+            UserSession.expires_at > datetime.now(UTC),
+        )
+        .order_by(UserSession.last_active_at.desc())
+        .all()
+    )
+    result = []
+    for s in sessions:
+        resp_item = UserSessionResponse.model_validate(s)
+        if s.user:
+            resp_item.email = s.user.email
+            resp_item.display_name = s.user.display_name
+        resp_item.is_current = s.id == current_session_id
+        result.append(resp_item)
+    return result
+
+
+@app.delete("/api/admin/sessions/{session_id}")
+def admin_revoke_session(
+    session_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    revoked = revoke_user_session(db, session_id)
+    if not revoked:
+        raise HTTPException(404, "Session not found or already revoked")
+    return {"ok": True, "revoked_id": str(session_id)}
 
 
 @app.get("/api/auth/providers")

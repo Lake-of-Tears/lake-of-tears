@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -381,19 +381,40 @@ def test_ui_post_password_success_redirects_and_updates_cookie():
 def test_get_current_user_supports_role_and_email_sub():
     user = _make_user("OldPass123!", email="superadmin@example.com")
     user.role = "superadmin"
+    sess_id = uuid.uuid4()
+    mock_session = MagicMock()
+    mock_session.id = sess_id
+    mock_session.user_id = user.id
+    mock_session.is_revoked = False
+    mock_session.expires_at = datetime.now(UTC) + timedelta(hours=1)
+    mock_session.last_active_at = datetime.now(UTC)
+
     mock_db = MagicMock()
-    mock_db.query.return_value.filter.return_value.first.return_value = user
+
+    def mock_query(model):
+        q = MagicMock()
+        if model is auth.UserSession:
+            q.filter.return_value.first.return_value = mock_session
+        else:
+            q.filter.return_value.first.return_value = user
+        return q
+
+    mock_db.query.side_effect = mock_query
 
     import jwt
 
     # 1. Test with sub="superadmin"
-    token_role = jwt.encode({"sub": "superadmin"}, auth.SECRET_KEY, algorithm=auth.ALGORITHM)
+    token_role = jwt.encode(
+        {"sub": "superadmin", "jti": str(sess_id)}, auth.SECRET_KEY, algorithm=auth.ALGORITHM
+    )
     u1 = auth.get_current_user(lake_token=token_role, db=mock_db)
     assert u1.email == "superadmin@example.com"
 
     # 2. Test with sub="superadmin@example.com"
     token_email = jwt.encode(
-        {"sub": "superadmin@example.com"}, auth.SECRET_KEY, algorithm=auth.ALGORITHM
+        {"sub": "superadmin@example.com", "jti": str(sess_id)},
+        auth.SECRET_KEY,
+        algorithm=auth.ALGORITHM,
     )
     u2 = auth.get_current_user(lake_token=token_email, db=mock_db)
     assert u2.email == "superadmin@example.com"
