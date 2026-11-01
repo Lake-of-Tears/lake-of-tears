@@ -260,7 +260,16 @@
           <div class="flex items-center gap-2 flex-wrap">
             <span class="text-xs font-semibold text-gray-200">{{ tok.name }}</span>
             <code class="text-[11px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-400 font-mono">{{ tok.token_prefix }}…</code>
-            {% if tok.workspace_names %}
+            {% if tok.workspace_details %}
+              {% for wd in tok.workspace_details %}
+              <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-900/30 text-blue-300 border border-blue-800/40">
+                <span>{{ wd.name }}</span>
+                <span class="text-[9px] px-1 rounded font-mono uppercase font-semibold {% if wd.role == 'admin' %}bg-purple-900/60 text-purple-200 border border-purple-700/60{% elif wd.role == 'write' %}bg-cyan-900/60 text-cyan-200 border border-cyan-700/60{% else %}bg-gray-800 text-gray-300 border border-gray-700{% endif %}">
+                  {{ wd.role }}
+                </span>
+              </span>
+              {% endfor %}
+            {% elif tok.workspace_names %}
               {% for wn in tok.workspace_names %}
               <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-900/30 text-blue-400 border border-blue-800/40">
                 {{ wn }}
@@ -386,7 +395,7 @@
         <div class="flex items-center gap-2 mb-2">
           <select id="pat-ws-select" class="input-dark flex-1 text-xs" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);">
             {% for w in workspaces %}
-            <option value="{{ w.id }}" data-name="{{ w.name }}" data-slug="{{ w.slug }}">{{ w.name }} ({{ w.slug }})</option>
+            <option value="{{ w.id }}" data-name="{{ w.name }}" data-slug="{{ w.slug }}" data-my-role="{{ w.my_role or 'read' }}">{{ w.name }} ({{ w.slug }}) — Your role: {{ (w.my_role or 'read')|upper }}</option>
             {% endfor %}
           </select>
           <button type="button" onclick="addPatWorkspace()" class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 text-xs rounded font-medium transition-colors">
@@ -395,11 +404,12 @@
         </div>
 
         <!-- Selected Workspaces Container -->
-        <div id="pat-selected-workspaces-container" class="space-y-1.5 max-h-36 overflow-y-auto p-2 rounded-lg bg-black/30 border border-gray-800">
+        <div id="pat-selected-workspaces-container" class="space-y-1.5 max-h-48 overflow-y-auto p-2 rounded-lg bg-black/30 border border-gray-800">
           <div id="pat-no-ws-notice" class="p-2 text-center text-[11px] text-amber-300/80 bg-amber-950/20 border border-amber-800/30 rounded">
             No workspaces added. The token will have zero access. You must add at least one workspace.
           </div>
         </div>
+        <input type="hidden" name="workspace_access_json" id="pat-workspace-access-json" value="" />
       </div>
 
       <!-- Scopes & Permissions (Default: No Access) -->
@@ -452,15 +462,41 @@ function addPatWorkspace() {
   const opt = sel.options[sel.selectedIndex];
   const wsName = opt.getAttribute('data-name') || opt.text;
   const wsSlug = opt.getAttribute('data-slug') || '';
+  const myRole = (opt.getAttribute('data-my-role') || 'read').toLowerCase();
 
   if (selectedWorkspaces.has(wsId)) return;
-  selectedWorkspaces.set(wsId, { name: wsName, slug: wsSlug });
+  selectedWorkspaces.set(wsId, { name: wsName, slug: wsSlug, maxRole: myRole, role: 'read' });
   renderSelectedWorkspaces();
+  syncScopesFromWorkspaces();
 }
 
 function removePatWorkspace(wsId) {
   selectedWorkspaces.delete(wsId);
   renderSelectedWorkspaces();
+  syncScopesFromWorkspaces();
+}
+
+function updatePatWorkspaceRole(wsId, newRole) {
+  if (selectedWorkspaces.has(wsId)) {
+    const info = selectedWorkspaces.get(wsId);
+    info.role = newRole;
+    selectedWorkspaces.set(wsId, info);
+    syncScopesFromWorkspaces();
+  }
+}
+
+function syncScopesFromWorkspaces() {
+  const hasAdmin = Array.from(selectedWorkspaces.values()).some(w => w.role === 'admin');
+  const hasWrite = hasAdmin || Array.from(selectedWorkspaces.values()).some(w => w.role === 'write');
+  const hasRead = selectedWorkspaces.size > 0;
+
+  const readCheckbox = document.querySelector('#pat-modal input[name="scopes"][value="read"]');
+  const writeCheckbox = document.querySelector('#pat-modal input[name="scopes"][value="write"]');
+  const adminCheckbox = document.querySelector('#pat-modal input[name="scopes"][value="admin"]');
+
+  if (readCheckbox && !readCheckbox.checked && hasRead) readCheckbox.checked = true;
+  if (writeCheckbox && !writeCheckbox.checked && hasWrite) writeCheckbox.checked = true;
+  if (adminCheckbox && !adminCheckbox.checked && hasAdmin) adminCheckbox.checked = true;
 }
 
 function renderSelectedWorkspaces() {
@@ -478,15 +514,32 @@ function renderSelectedWorkspaces() {
   }
 
   selectedWorkspaces.forEach((info, wsId) => {
+    const maxRole = (info.maxRole || 'read').toLowerCase();
+    let roleOptions = ['read'];
+    if (maxRole === 'write') {
+      roleOptions = ['read', 'write'];
+    } else if (maxRole === 'admin' || maxRole === 'superadmin') {
+      roleOptions = ['read', 'write', 'admin'];
+    }
+
+    const currentRole = info.role || 'read';
+
     const row = document.createElement('div');
-    row.className = 'flex items-center justify-between px-2.5 py-1.5 rounded bg-gray-900 border border-gray-800 text-xs';
+    row.className = 'flex items-center justify-between p-2 rounded bg-gray-900 border border-gray-800 text-xs gap-2';
     row.innerHTML = `
-      <div class="flex items-center gap-2 truncate">
+      <div class="flex items-center gap-2 truncate min-w-0">
         <span class="font-medium text-gray-200 truncate">${info.name}</span>
         <span class="text-[10px] text-gray-500 font-mono">(${info.slug})</span>
+        <span class="text-[9px] px-1.5 py-0.2 rounded bg-gray-800 text-gray-400 border border-gray-700 font-mono">Your limit: ${maxRole}</span>
         <input type="hidden" name="workspace_ids" value="${wsId}" />
       </div>
-      <button type="button" onclick="removePatWorkspace('${wsId}')" class="text-gray-400 hover:text-red-400 ml-2 text-base leading-none" title="Remove">&times;</button>
+      <div class="flex items-center gap-2 flex-shrink-0">
+        <label class="text-[10px] text-gray-400 font-medium">Token Access:</label>
+        <select onchange="updatePatWorkspaceRole('${wsId}', this.value)" class="bg-gray-800 border border-gray-700 text-gray-200 text-xs rounded px-2 py-1 font-mono focus:ring-1 focus:ring-blue-500">
+          ${roleOptions.map(r => `<option value="${r}" ${r === currentRole ? 'selected' : ''}>${r.toUpperCase()}</option>`).join('')}
+        </select>
+        <button type="button" onclick="removePatWorkspace('${wsId}')" class="text-gray-400 hover:text-red-400 p-1 text-base leading-none" title="Remove">&times;</button>
+      </div>
     `;
     container.appendChild(row);
   });
@@ -498,6 +551,18 @@ function validatePatForm(event) {
     event.preventDefault();
     return false;
   }
+
+  const accessObj = {};
+  selectedWorkspaces.forEach((info, wsId) => {
+    accessObj[wsId] = info.role || 'read';
+  });
+  const hiddenAccess = document.getElementById('pat-workspace-access-json');
+  if (hiddenAccess) {
+    hiddenAccess.value = JSON.stringify(accessObj);
+  }
+
+  syncScopesFromWorkspaces();
+
   const scopes = document.querySelectorAll('#pat-modal input[name="scopes"]:checked');
   if (scopes.length === 0) {
     alert('You must explicitly select at least one permission scope (read, write, or admin).');

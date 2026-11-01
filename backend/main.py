@@ -743,6 +743,7 @@ def create_token_endpoint(
         lifetime_days=body.lifetime_days,
         workspace_id=body.workspace_id,
         workspace_ids=body.workspace_ids,
+        workspace_access=body.workspace_access,
         scopes=body.scopes,
     )
     w_ids = [str(wid) for wid in (pat.workspace_ids or [])]
@@ -755,6 +756,7 @@ def create_token_endpoint(
         token_prefix=pat.token_prefix,
         workspace_id=pat.workspace_id,
         workspace_ids=w_ids,
+        workspace_access=pat.workspace_access or {},
         scopes=pat.scopes,
         created_at=pat.created_at,
         expires_at=pat.expires_at,
@@ -784,8 +786,17 @@ def get_user_tokens(
         w_ids = [str(wid) for wid in (pat.workspace_ids or [])]
         if pat.workspace_id and str(pat.workspace_id) not in w_ids:
             w_ids.append(str(pat.workspace_id))
+        w_access = pat.workspace_access or {}
         w_names = [all_workspaces.get(wid, "Unknown Workspace") for wid in w_ids]
         primary_ws_name = w_names[0] if w_names else None
+        workspace_details = [
+            {
+                "id": wid,
+                "name": all_workspaces.get(wid, "Unknown Workspace"),
+                "role": w_access.get(wid, "read"),
+            }
+            for wid in w_ids
+        ]
         item = PersonalAccessTokenResponse(
             id=pat.id,
             name=pat.name,
@@ -794,6 +805,8 @@ def get_user_tokens(
             workspace_name=primary_ws_name,
             workspace_ids=w_ids,
             workspace_names=w_names,
+            workspace_access=w_access,
+            workspace_details=workspace_details,
             scopes=pat.scopes or [],
             created_at=pat.created_at,
             expires_at=pat.expires_at,
@@ -1390,6 +1403,9 @@ def list_workspace_shares(
     if hasattr(current_user, "_pat_workspace_ids"):
         if str(workspace_id) not in current_user._pat_workspace_ids:
             raise HTTPException(403, "Personal access token does not have access to this workspace")
+    if hasattr(current_user, "_pat_workspace_access"):
+        if current_user._pat_workspace_access.get(str(workspace_id), "read") != "admin":
+            raise HTTPException(403, "Personal access token does not have admin access to this workspace")
 
     if current_user.role != "superadmin":
         admin_check = next(
@@ -1428,6 +1444,9 @@ def review_workspace_share(
     if hasattr(current_user, "_pat_workspace_ids"):
         if str(workspace_id) not in current_user._pat_workspace_ids:
             raise HTTPException(403, "Personal access token does not have access to this workspace")
+    if hasattr(current_user, "_pat_workspace_access"):
+        if current_user._pat_workspace_access.get(str(workspace_id), "read") != "admin":
+            raise HTTPException(403, "Personal access token does not have admin access to this workspace")
 
     if current_user.role != "superadmin":
         admin_check = next(
@@ -2003,6 +2022,9 @@ def _resolve_workspace(workspace_id: str | None, user: User, db: Session) -> Wor
     if hasattr(user, "_pat_scopes"):
         if "write" not in user._pat_scopes and "admin" not in user._pat_scopes:
             raise HTTPException(403, "Personal access token does not have write scope")
+    if hasattr(user, "_pat_workspace_access"):
+        if user._pat_workspace_access.get(str(ws.id), "read") != "admin":
+            raise HTTPException(403, "Personal access token does not have admin access to this workspace")
     if user.role != "superadmin":
         member = next(
             (

@@ -2146,6 +2146,7 @@ async def settings_account_tokens_post(
     lifetime_days: str = Form("30"),
     workspace_ids: list[str] = Form(default=[]),
     workspace_id: str = Form(""),
+    workspace_access_json: str = Form(""),
     scopes: list[str] = Form(default=[]),
 ):
     token = request.cookies.get("lake_token")
@@ -2157,9 +2158,23 @@ async def settings_account_tokens_post(
     except ValueError:
         days = 30
 
+    import json
+    ws_access = {}
+    if workspace_access_json and workspace_access_json.strip():
+        try:
+            ws_access = json.loads(workspace_access_json)
+        except Exception:
+            ws_access = {}
+
     selected_wids = [w.strip() for w in workspace_ids if w and w.strip()]
     if not selected_wids and workspace_id and workspace_id.strip():
         selected_wids = [workspace_id.strip()]
+
+    if not selected_wids and ws_access:
+        selected_wids = list(ws_access.keys())
+
+    if not ws_access and selected_wids:
+        ws_access = {wid: "read" for wid in selected_wids}
 
     if not selected_wids:
         return RedirectResponse(
@@ -2168,6 +2183,17 @@ async def settings_account_tokens_post(
             + "#tokens",
             status_code=302,
         )
+
+    if not scopes and ws_access:
+        derived_scopes = set()
+        for r in ws_access.values():
+            if r == "read":
+                derived_scopes.add("read")
+            elif r == "write":
+                derived_scopes.update(["read", "write"])
+            elif r == "admin":
+                derived_scopes.update(["read", "write", "admin"])
+        scopes = sorted(derived_scopes)
 
     if not scopes:
         return RedirectResponse(
@@ -2181,6 +2207,7 @@ async def settings_account_tokens_post(
         "name": name,
         "lifetime_days": days,
         "workspace_ids": selected_wids,
+        "workspace_access": ws_access,
         "scopes": scopes,
     }
     data, err = _backend_post_with_error("/api/auth/tokens", token, payload)

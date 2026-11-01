@@ -571,3 +571,180 @@ def test_ui_settings_account_create_and_revoke_token():
         assert resp.status_code == 302
         assert resp.headers["location"] == "/settings/account?saved=token_revoked#tokens"
         mock_del.assert_called_once_with(f"/api/auth/tokens/{tok_id}", token)
+
+
+def test_pat_workspace_permission_ceiling_enforcement(client, db_session):
+    user = _create_user(db_session, "ceiling@example.com")
+    jwt_token = _login_token(client, "ceiling@example.com")
+    ws_read = _create_workspace(db_session, "Read Only WS", "ws-read")
+    ws_write = _create_workspace(db_session, "Write WS", "ws-write")
+    ws_admin = _create_workspace(db_session, "Admin WS", "ws-admin")
+    ws_other = _create_workspace(db_session, "Other WS", "ws-other")
+
+    db_session.add(WorkspaceMember(workspace_id=ws_read.id, user_id=user.id, role="read"))
+    db_session.add(WorkspaceMember(workspace_id=ws_write.id, user_id=user.id, role="write"))
+    db_session.add(WorkspaceMember(workspace_id=ws_admin.id, user_id=user.id, role="admin"))
+    db_session.commit()
+
+    # 1. Read member attempting to grant write to PAT -> Rejected with 400
+    resp = client.post(
+        "/api/auth/tokens",
+        headers={"Authorization": f"Bearer {jwt_token}"},
+        json={
+            "name": "Invalid Write Token",
+            "workspace_access": {str(ws_read.id): "write"},
+            "scopes": ["write"],
+        },
+    )
+    assert resp.status_code == 400
+    assert "your permission level in this workspace is only 'read'" in resp.json()["detail"]
+
+    # 2. Read member attempting to grant admin to PAT -> Rejected with 400
+    resp = client.post(
+        "/api/auth/tokens",
+        headers={"Authorization": f"Bearer {jwt_token}"},
+        json={
+            "name": "Invalid Admin Token",
+            "workspace_access": {str(ws_read.id): "admin"},
+            "scopes": ["admin"],
+        },
+    )
+    assert resp.status_code == 400
+    assert "your permission level in this workspace is only 'read'" in resp.json()["detail"]
+
+    # 3. Write member attempting to grant admin to PAT -> Rejected with 400
+    resp = client.post(
+        "/api/auth/tokens",
+        headers={"Authorization": f"Bearer {jwt_token}"},
+        json={
+            "name": "Invalid Write-to-Admin Token",
+            "workspace_access": {str(ws_write.id): "admin"},
+            "scopes": ["admin"],
+        },
+    )
+    assert resp.status_code == 400
+    assert "your permission level in this workspace is only 'write'" in resp.json()["detail"]
+
+    # 4. User attempting to grant access to workspace they are not a member of -> Rejected with 403
+    resp = client.post(
+        "/api/auth/tokens",
+        headers={"Authorization": f"Bearer {jwt_token}"},
+        json={
+            "name": "Non-member Token",
+            "workspace_access": {str(ws_other.id): "read"},
+            "scopes": ["read"],
+        },
+    )
+    assert resp.status_code == 403
+    assert "not a member" in resp.json()["detail"].lower()
+
+    # 5. Permitted assignments within user's own ceiling -> Succeeds
+    resp = client.post(
+        "/api/auth/tokens",
+        headers={"Authorization": f"Bearer {jwt_token}"},
+        json={
+            "name": "Valid Multi-Level Token",
+            "workspace_access": {
+                str(ws_read.id): "read",
+                str(ws_write.id): "write",
+                str(ws_admin.id): "admin",
+            },
+            "scopes": ["read", "write", "admin"],
+        },
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["workspace_access"] == {
+        str(ws_read.id): "read",
+        str(ws_write.id): "write",
+        str(ws_admin.id): "admin",
+    }
+
+
+def test_pat_multi_workspace_access_level_runtime_enforcement(client, db_session):
+    user = _create_user(db_session, "runtime_access@example.com")
+    ws_high = _create_workspace(db_session, "High Privilege WS", "ws-high")
+    ws_low = _create_workspace(db_session, "Low Privilege WS", "ws-low")
+
+    # User is admin on ws_high and write on ws_low
+    db_session.add(WorkspaceMember(workspace_id=ws_high.id, user_id=user.id, role="admin"))
+    db_session.add(WorkspaceMember(workspace_id=ws_low.id, user_id=user.id, role="write"))
+    db_session.commit()
+
+    # Token granted admin on ws_high, but ONLY read on ws_low
+    pat, raw_token = auth.create_personal_access_token(
+        db_session,
+        user_id=user.id,
+        name="Mixed Access Token",
+        workspace_access={
+            str(ws_high.id): "admin",
+            str(ws_low.id): "read",
+        },
+        scopes=["read", "write", "admin"],
+    )
+
+    headers = {"Authorization": f"Bearer {raw_token}"}
+
+    # 1. On ws_high: Token has admin access, can access share requests
+    resp = client.get(f"/api/workspaces/{ws_high.id}/shares", headers=headers)
+    assert resp.status_code == 200
+
+    # 2. On ws_low: Token only has read access, share management (admin) is rejected with 403
+    resp_admin_on_low = client.get(f"/api/workspaces/{ws_low.id}/shares", headers=headers)
+    assert resp_admin_on_low.status_code == 403
+    assert "admin access" in resp_admin_on_low.json()["detail"].lower()
+
+    # 3. On ws_low: Storage upload / write via context requiring write is rejected because token is read on ws_low
+    with pytest.raises(Exception) as exc_info:
+        auth.get_workspace_context(
+            workspace_id=str(ws_low.id),
+            current_user=auth.get_current_user(authorization=f"Bearer {raw_token}", db=db_session),
+            db=db_session,
+            require_write=True,
+        )
+    assert "read" in str(exc_info.value).lower()
+
+    # 4. On ws_high: Write is permitted because token has admin on ws_high
+    ws_ctx, eff_role = auth.get_workspace_context(
+        workspace_id=str(ws_high.id),
+        current_user=auth.get_current_user(authorization=f"Bearer {raw_token}", db=db_session),
+        db=db_session,
+        require_write=True,
+    )
+    assert eff_role == "admin"
+
+
+def test_ui_settings_account_submits_workspace_access_json():
+    client = TestClient(ui_main.app, follow_redirects=False)
+    token = jwt.encode(
+        {"sub": str(uuid.uuid4()), "email": "ui_json@example.com", "role": "user", "jti": str(uuid.uuid4())},
+        ui_main.AUTH_SECRET_KEY,
+        algorithm="HS256",
+    )
+
+    from unittest.mock import patch
+    import json
+
+    ws_id = str(uuid.uuid4())
+    with patch.object(ui_main, "_backend_post_with_error") as mock_post:
+        mock_post.return_value = (
+            {"id": str(uuid.uuid4()), "name": "Key With Access", "token": "lot_pat_xyz"},
+            None,
+        )
+        resp = client.post(
+            "/settings/account/tokens",
+            data={
+                "name": "Key With Access",
+                "lifetime_days": "30",
+                "workspace_ids": [ws_id],
+                "workspace_access_json": json.dumps({ws_id: "write"}),
+                "scopes": ["write"],
+            },
+            cookies={"lake_token": token},
+        )
+        assert resp.status_code == 302
+        mock_post.assert_called_once()
+        sent_payload = mock_post.call_args[0][2]
+        assert sent_payload["workspace_access"] == {ws_id: "write"}
+        assert sent_payload["workspace_ids"] == [ws_id]
+
