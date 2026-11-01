@@ -794,17 +794,13 @@ async def login_page(request: Request):
     )
 
 
+@app.get("/logout")
 @app.post("/logout")
 async def logout(request: Request):
     token = request.cookies.get("lake_token")
     if token:
         try:
-            with httpx.Client(timeout=3) as client:
-                client.post(
-                    f"{BACKEND_URL}/api/auth/logout",
-                    headers={"Authorization": f"Bearer {token}"},
-                    cookies={"lake_token": token},
-                )
+            _backend_post("/api/auth/logout", token, {})
         except Exception:
             pass
     resp = RedirectResponse(url="/login", status_code=302)

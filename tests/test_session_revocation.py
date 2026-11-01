@@ -317,6 +317,31 @@ def test_prune_expired_sessions(db_session):
     assert id_old_expired not in remaining_ids
 
 
+def test_delete_user_session_endpoint(client, db_session):
+    user1 = _create_user(db_session, "user1_delete@example.com")
+    user2 = _create_user(db_session, "user2_delete@example.com")
+
+    sess1_1 = auth.create_user_session(db_session, user1, timedelta(hours=1))
+    sess1_2 = auth.create_user_session(db_session, user1, timedelta(hours=1))
+    sess2_1 = auth.create_user_session(db_session, user2, timedelta(hours=1))
+
+    token1 = auth.create_token({"sub": str(user1.id)}, session_id=str(sess1_1.id))
+
+    # User 1 can delete their own other session
+    resp = client.delete(f"/api/auth/sessions/{sess1_2.id}", cookies={auth.COOKIE_NAME: token1})
+    assert resp.status_code == 200
+    db_session.refresh(sess1_2)
+    assert sess1_2.is_revoked is True
+
+    # User 1 cannot delete User 2's session (returns 404 or not found)
+    resp_other = client.delete(
+        f"/api/auth/sessions/{sess2_1.id}", cookies={auth.COOKIE_NAME: token1}
+    )
+    assert resp_other.status_code == 404
+    db_session.refresh(sess2_1)
+    assert sess2_1.is_revoked is False
+
+
 def test_ui_settings_account_renders_sessions():
     client = TestClient(ui_main.app)
     user_id = str(uuid.uuid4())
@@ -351,3 +376,110 @@ def test_ui_settings_account_renders_sessions():
         assert "Active Sessions" in resp.text
         assert "Current Device" in resp.text
         assert "192.168.1.50" in resp.text
+
+
+def test_ui_settings_account_session_actions():
+    client = TestClient(ui_main.app, follow_redirects=False)
+    token = jwt.encode(
+        {
+            "sub": str(uuid.uuid4()),
+            "email": "bob@example.com",
+            "role": "user",
+            "jti": str(uuid.uuid4()),
+        },
+        ui_main.AUTH_SECRET_KEY,
+        algorithm="HS256",
+    )
+    target_id = str(uuid.uuid4())
+
+    with patch.object(ui_main, "_backend_delete") as mock_del:
+        resp = client.post(
+            f"/settings/account/sessions/{target_id}/revoke",
+            cookies={"lake_token": token},
+        )
+        assert resp.status_code == 302
+        assert resp.headers["location"] == "/settings/account?saved=revoked"
+        mock_del.assert_called_once_with(f"/api/auth/sessions/{target_id}", token)
+
+    with patch.object(ui_main, "_backend_post") as mock_post:
+        resp = client.post(
+            "/settings/account/sessions/revoke-others",
+            cookies={"lake_token": token},
+        )
+        assert resp.status_code == 302
+        assert resp.headers["location"] == "/settings/account?saved=revoked_others"
+        mock_post.assert_called_once_with("/api/auth/sessions/revoke-others", token, {})
+
+
+def test_ui_settings_admin_renders_and_revokes_sessions():
+    client = TestClient(ui_main.app, follow_redirects=False)
+    admin_id = str(uuid.uuid4())
+    token = jwt.encode(
+        {
+            "sub": admin_id,
+            "email": "admin@example.com",
+            "role": "superadmin",
+            "jti": str(uuid.uuid4()),
+        },
+        ui_main.AUTH_SECRET_KEY,
+        algorithm="HS256",
+    )
+    target_id = str(uuid.uuid4())
+    fake_sessions = [
+        {
+            "id": target_id,
+            "user_id": str(uuid.uuid4()),
+            "email": "user@example.com",
+            "display_name": "User",
+            "ip_address": "10.0.0.99",
+            "user_agent": "Safari/17.0",
+            "created_at": "2026-11-01 12:00:00",
+            "last_active_at": "2026-11-01 12:30:00",
+            "expires_at": "2026-11-01 13:30:00",
+            "is_revoked": False,
+            "is_current": False,
+        }
+    ]
+
+    with patch.object(ui_main, "_backend_get") as mock_get:
+        mock_get.side_effect = (
+            lambda path, tok: fake_sessions
+            if path == "/api/admin/sessions"
+            else []
+            if "workspaces" in path or "invitations" in path or "users" in path
+            else {}
+        )
+        resp = client.get("/settings/admin", cookies={"lake_token": token})
+        assert resp.status_code == 200
+        assert "Active Sessions" in resp.text
+        assert "user@example.com" in resp.text
+        assert "10.0.0.99" in resp.text
+
+    with patch.object(ui_main, "_backend_delete") as mock_del:
+        resp = client.post(
+            f"/settings/admin/sessions/{target_id}/revoke",
+            cookies={"lake_token": token},
+        )
+        assert resp.status_code == 302
+        assert resp.headers["location"] == "/settings/admin?saved=session_revoked"
+        mock_del.assert_called_once_with(f"/api/admin/sessions/{target_id}", token)
+
+
+def test_ui_logout_invalidates_session_on_backend():
+    client = TestClient(ui_main.app, follow_redirects=False)
+    token = jwt.encode(
+        {
+            "sub": str(uuid.uuid4()),
+            "email": "user@example.com",
+            "role": "user",
+            "jti": str(uuid.uuid4()),
+        },
+        ui_main.AUTH_SECRET_KEY,
+        algorithm="HS256",
+    )
+
+    with patch.object(ui_main, "_backend_post") as mock_post:
+        resp = client.get("/logout", cookies={"lake_token": token})
+        assert resp.status_code == 302
+        assert resp.headers["location"] == "/login"
+        mock_post.assert_called_once_with("/api/auth/logout", token, {})
