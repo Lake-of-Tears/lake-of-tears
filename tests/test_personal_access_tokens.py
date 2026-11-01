@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 import jwt
 import pytest
@@ -34,9 +36,7 @@ sys.modules["backend_main_pat_test"] = backend_main
 backend_spec.loader.exec_module(backend_main)
 
 # Explicitly load ui_main
-ui_spec = importlib.util.spec_from_file_location(
-    "ui_main_pat_test", repo_root / "ui" / "main.py"
-)
+ui_spec = importlib.util.spec_from_file_location("ui_main_pat_test", repo_root / "ui" / "main.py")
 ui_main = importlib.util.module_from_spec(ui_spec)
 sys.modules["ui_main_pat_test"] = ui_main
 ui_spec.loader.exec_module(ui_main)
@@ -196,7 +196,7 @@ def test_create_pat_success(client, db_session):
 
 
 def test_create_pat_fails_without_workspaces(client, db_session):
-    user = _create_user(db_session, "no_ws@example.com")
+    _create_user(db_session, "no_ws@example.com")
     jwt_token = _login_token(client, "no_ws@example.com")
 
     # Creating without workspace_ids or workspace_id fails (Default: No Access)
@@ -237,7 +237,12 @@ def test_authenticate_with_pat(client, db_session):
     create_resp = client.post(
         "/api/auth/tokens",
         headers={"Authorization": f"Bearer {jwt_token}"},
-        json={"name": "Test Key", "lifetime_days": 7, "workspace_ids": [str(ws.id)], "scopes": ["read"]},
+        json={
+            "name": "Test Key",
+            "lifetime_days": 7,
+            "workspace_ids": [str(ws.id)],
+            "scopes": ["read"],
+        },
     )
     assert create_resp.status_code == 201
     pat_secret = create_resp.json()["token"]
@@ -341,7 +346,9 @@ def test_list_tokens_filtering(client, db_session):
     assert active_items[0]["id"] == t2_id
 
     # GET tokens with include_revoked=true
-    list_all = client.get("/api/auth/tokens?include_revoked=true", headers={"Authorization": f"Bearer {jwt_token}"})
+    list_all = client.get(
+        "/api/auth/tokens?include_revoked=true", headers={"Authorization": f"Bearer {jwt_token}"}
+    )
     assert list_all.status_code == 200
     all_items = list_all.json()
     assert len(all_items) == 2
@@ -533,7 +540,12 @@ def test_ui_settings_account_renders_tokens():
 def test_ui_settings_account_create_and_revoke_token():
     client = TestClient(ui_main.app, follow_redirects=False)
     token = jwt.encode(
-        {"sub": str(uuid.uuid4()), "email": "ui_pat@example.com", "role": "user", "jti": str(uuid.uuid4())},
+        {
+            "sub": str(uuid.uuid4()),
+            "email": "ui_pat@example.com",
+            "role": "user",
+            "jti": str(uuid.uuid4()),
+        },
         ui_main.AUTH_SECRET_KEY,
         algorithm="HS256",
     )
@@ -748,13 +760,15 @@ def test_create_pat_with_workspace_access_auto_derives_scopes(client, db_session
 def test_ui_settings_account_submits_workspace_access_without_scopes():
     client = TestClient(ui_main.app, follow_redirects=False)
     token = jwt.encode(
-        {"sub": str(uuid.uuid4()), "email": "ui_no_scopes@example.com", "role": "user", "jti": str(uuid.uuid4())},
+        {
+            "sub": str(uuid.uuid4()),
+            "email": "ui_no_scopes@example.com",
+            "role": "user",
+            "jti": str(uuid.uuid4()),
+        },
         ui_main.AUTH_SECRET_KEY,
         algorithm="HS256",
     )
-
-    from unittest.mock import patch
-    import json
 
     ws_id = str(uuid.uuid4())
     with patch.object(ui_main, "_backend_post_with_error") as mock_post:
@@ -778,6 +792,3 @@ def test_ui_settings_account_submits_workspace_access_without_scopes():
         assert sent_payload["workspace_access"] == {ws_id: "write"}
         assert sent_payload["workspace_ids"] == [ws_id]
         assert sent_payload["scopes"] == ["read", "write"]
-
-
-

@@ -21,6 +21,7 @@ from fastapi import (
     FastAPI,
     File,
     Form,
+    HTTPException,
     Query,
     Request,
     UploadFile,
@@ -2159,6 +2160,7 @@ async def settings_account_tokens_post(
         days = 30
 
     import json
+
     ws_access = {}
     if workspace_access_json and workspace_access_json.strip():
         try:
@@ -2251,7 +2253,8 @@ async def ui_api_auth_tokens_list(request: Request, include_revoked: bool = Fals
     if not token:
         raise HTTPException(401, "Not authenticated")
     return (
-        _backend_get(f"/api/auth/tokens?include_revoked={str(include_revoked).lower()}", token) or []
+        _backend_get(f"/api/auth/tokens?include_revoked={str(include_revoked).lower()}", token)
+        or []
     )
 
 
