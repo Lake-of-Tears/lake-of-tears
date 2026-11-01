@@ -714,10 +714,41 @@ def test_pat_multi_workspace_access_level_runtime_enforcement(client, db_session
     assert eff_role == "admin"
 
 
-def test_ui_settings_account_submits_workspace_access_json():
+def test_create_pat_with_workspace_access_auto_derives_scopes(client, db_session):
+    user = _create_user(db_session, "auto_scopes@example.com")
+    jwt_token = _login_token(client, "auto_scopes@example.com")
+    ws_1 = _create_workspace(db_session, "Auto WS 1", "auto-ws-1")
+    ws_2 = _create_workspace(db_session, "Auto WS 2", "auto-ws-2")
+
+    db_session.add(WorkspaceMember(workspace_id=ws_1.id, user_id=user.id, role="read"))
+    db_session.add(WorkspaceMember(workspace_id=ws_2.id, user_id=user.id, role="admin"))
+    db_session.commit()
+
+    # Omit scopes completely from payload; scopes should be auto-derived from workspace access levels
+    resp = client.post(
+        "/api/auth/tokens",
+        headers={"Authorization": f"Bearer {jwt_token}"},
+        json={
+            "name": "Auto Derived Scopes Token",
+            "workspace_access": {
+                str(ws_1.id): "read",
+                str(ws_2.id): "admin",
+            },
+        },
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert set(data["scopes"]) == {"read", "write", "admin"}
+    assert data["workspace_access"] == {
+        str(ws_1.id): "read",
+        str(ws_2.id): "admin",
+    }
+
+
+def test_ui_settings_account_submits_workspace_access_without_scopes():
     client = TestClient(ui_main.app, follow_redirects=False)
     token = jwt.encode(
-        {"sub": str(uuid.uuid4()), "email": "ui_json@example.com", "role": "user", "jti": str(uuid.uuid4())},
+        {"sub": str(uuid.uuid4()), "email": "ui_no_scopes@example.com", "role": "user", "jti": str(uuid.uuid4())},
         ui_main.AUTH_SECRET_KEY,
         algorithm="HS256",
     )
@@ -738,7 +769,6 @@ def test_ui_settings_account_submits_workspace_access_json():
                 "lifetime_days": "30",
                 "workspace_ids": [ws_id],
                 "workspace_access_json": json.dumps({ws_id: "write"}),
-                "scopes": ["write"],
             },
             cookies={"lake_token": token},
         )
@@ -747,4 +777,7 @@ def test_ui_settings_account_submits_workspace_access_json():
         sent_payload = mock_post.call_args[0][2]
         assert sent_payload["workspace_access"] == {ws_id: "write"}
         assert sent_payload["workspace_ids"] == [ws_id]
+        assert sent_payload["scopes"] == ["read", "write"]
+
+
 

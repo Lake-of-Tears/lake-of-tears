@@ -412,38 +412,6 @@
         <input type="hidden" name="workspace_access_json" id="pat-workspace-access-json" value="" />
       </div>
 
-      <!-- Scopes & Permissions (Default: No Access) -->
-      <div>
-        <div class="flex items-center justify-between mb-1">
-          <label class="block text-xs font-medium text-gray-400">Scopes & Permissions</label>
-          <span class="text-[10px] text-amber-400/90 font-medium">Default: None</span>
-        </div>
-        <p class="text-[11px] text-gray-500 mb-2">Explicitly select the operations this token can perform.</p>
-        <div class="space-y-2 text-xs">
-          <label class="flex items-start gap-2.5 cursor-pointer">
-            <input type="checkbox" name="scopes" value="read" class="mt-0.5 rounded border-gray-700 text-blue-600 focus:ring-0" />
-            <div>
-              <span class="font-medium text-gray-300">read</span>
-              <p class="text-[11px] text-gray-500">Read catalog tables, pipelines, dashboards, and storage</p>
-            </div>
-          </label>
-          <label class="flex items-start gap-2.5 cursor-pointer">
-            <input type="checkbox" name="scopes" value="write" class="mt-0.5 rounded border-gray-700 text-blue-600 focus:ring-0" />
-            <div>
-              <span class="font-medium text-gray-300">write</span>
-              <p class="text-[11px] text-gray-500">Execute pipelines, upload storage, and modify datasets</p>
-            </div>
-          </label>
-          <label class="flex items-start gap-2.5 cursor-pointer">
-            <input type="checkbox" name="scopes" value="admin" class="mt-0.5 rounded border-gray-700 text-blue-600 focus:ring-0" />
-            <div>
-              <span class="font-medium text-gray-300">admin</span>
-              <p class="text-[11px] text-gray-500">Manage workspace settings, members, and catalog access rules</p>
-            </div>
-          </label>
-        </div>
-      </div>
-
       <div class="flex gap-2 justify-end pt-2 border-t border-gray-800">
         <button type="button" onclick="closePatModal()" class="btn-ghost text-xs">Cancel</button>
         <button type="submit" class="btn-primary text-xs">Generate Token</button>
@@ -467,13 +435,11 @@ function addPatWorkspace() {
   if (selectedWorkspaces.has(wsId)) return;
   selectedWorkspaces.set(wsId, { name: wsName, slug: wsSlug, maxRole: myRole, role: 'read' });
   renderSelectedWorkspaces();
-  syncScopesFromWorkspaces();
 }
 
 function removePatWorkspace(wsId) {
   selectedWorkspaces.delete(wsId);
   renderSelectedWorkspaces();
-  syncScopesFromWorkspaces();
 }
 
 function updatePatWorkspaceRole(wsId, newRole) {
@@ -481,22 +447,7 @@ function updatePatWorkspaceRole(wsId, newRole) {
     const info = selectedWorkspaces.get(wsId);
     info.role = newRole;
     selectedWorkspaces.set(wsId, info);
-    syncScopesFromWorkspaces();
   }
-}
-
-function syncScopesFromWorkspaces() {
-  const hasAdmin = Array.from(selectedWorkspaces.values()).some(w => w.role === 'admin');
-  const hasWrite = hasAdmin || Array.from(selectedWorkspaces.values()).some(w => w.role === 'write');
-  const hasRead = selectedWorkspaces.size > 0;
-
-  const readCheckbox = document.querySelector('#pat-modal input[name="scopes"][value="read"]');
-  const writeCheckbox = document.querySelector('#pat-modal input[name="scopes"][value="write"]');
-  const adminCheckbox = document.querySelector('#pat-modal input[name="scopes"][value="admin"]');
-
-  if (readCheckbox && !readCheckbox.checked && hasRead) readCheckbox.checked = true;
-  if (writeCheckbox && !writeCheckbox.checked && hasWrite) writeCheckbox.checked = true;
-  if (adminCheckbox && !adminCheckbox.checked && hasAdmin) adminCheckbox.checked = true;
 }
 
 function renderSelectedWorkspaces() {
@@ -560,21 +511,15 @@ function validatePatForm(event) {
   if (hiddenAccess) {
     hiddenAccess.value = JSON.stringify(accessObj);
   }
-
-  syncScopesFromWorkspaces();
-
-  const scopes = document.querySelectorAll('#pat-modal input[name="scopes"]:checked');
-  if (scopes.length === 0) {
-    alert('You must explicitly select at least one permission scope (read, write, or admin).');
-    event.preventDefault();
-    return false;
-  }
   return true;
 }
 
 function openPatModal() {
+  selectedWorkspaces.clear();
+  renderSelectedWorkspaces();
   document.getElementById('pat-modal').classList.remove('hidden');
   setTimeout(() => document.getElementById('pat-name-input').focus(), 50);
+}
 }
 function closePatModal() {
   document.getElementById('pat-modal').classList.add('hidden');
