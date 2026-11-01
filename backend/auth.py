@@ -13,7 +13,15 @@ import bcrypt
 import jwt
 from database import SessionLocal, get_db
 from fastapi import Cookie, Depends, Header, HTTPException, Query
-from models import SystemSetting, User, UserSession, Workspace, WorkspaceMember, WorkspaceShare
+from models import (
+    PersonalAccessToken,
+    SystemSetting,
+    User,
+    UserSession,
+    Workspace,
+    WorkspaceMember,
+    WorkspaceShare,
+)
 from sqlalchemy.orm import Session
 
 SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "dev-secret-please-change-in-production")
@@ -36,6 +44,9 @@ _FALLBACK_TTL = timedelta(hours=24)
 # bcrypt only reads the first 72 bytes of a password and bcrypt >= 5 refuses longer ones. Longer
 # passwords are rejected when they are set (see schemas.check_password_length), never truncated.
 _BCRYPT_ROUNDS = 12
+
+PAT_PREFIX = "lot_pat_"
+MAX_ACTIVE_PATS_PER_USER = 50
 
 
 def _keystream(enc_key: bytes, nonce: bytes, length: int) -> bytes:
@@ -357,16 +368,152 @@ def prune_expired_sessions(db: Session, retention_days: int = 30) -> int:
     return deleted
 
 
+def create_personal_access_token(
+    db: Session,
+    user_id: uuid.UUID,
+    name: str,
+    lifetime_days: int | None = 30,
+    workspace_id: uuid.UUID | None = None,
+    scopes: list[str] | None = None,
+) -> tuple[PersonalAccessToken, str]:
+    """Generate and store a new Personal Access Token for a user."""
+    active_count = (
+        db.query(PersonalAccessToken)
+        .filter(
+            PersonalAccessToken.user_id == user_id,
+            PersonalAccessToken.is_revoked == False,  # noqa: E712
+            (PersonalAccessToken.expires_at == None)  # noqa: E711
+            | (PersonalAccessToken.expires_at > datetime.now(UTC)),
+        )
+        .count()
+    )
+    if active_count >= MAX_ACTIVE_PATS_PER_USER:
+        raise HTTPException(
+            400,
+            f"Active personal access token limit ({MAX_ACTIVE_PATS_PER_USER}) reached. Please revoke unused tokens.",
+        )
+
+    if workspace_id is not None:
+        ws = (
+            db.query(Workspace)
+            .filter(Workspace.id == workspace_id, Workspace.status == "active")
+            .first()
+        )
+        if not ws:
+            raise HTTPException(404, "Workspace not found")
+        user = db.query(User).filter(User.id == user_id).first()
+        if user and user.role != "superadmin":
+            member = (
+                db.query(WorkspaceMember)
+                .filter(
+                    WorkspaceMember.workspace_id == workspace_id,
+                    WorkspaceMember.user_id == user_id,
+                )
+                .first()
+            )
+            if not member:
+                raise HTTPException(
+                    403, "Cannot restrict token to a workspace you are not a member of"
+                )
+
+    random_hex = secrets.token_hex(32)
+    raw_token = f"{PAT_PREFIX}{random_hex}"
+    token_prefix = raw_token[:16]
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+    now = datetime.now(UTC)
+    expires_at = now + timedelta(days=lifetime_days) if lifetime_days is not None else None
+    assigned_scopes = scopes if scopes is not None else ["read", "write"]
+
+    pat = PersonalAccessToken(
+        user_id=user_id,
+        name=name.strip(),
+        token_prefix=token_prefix,
+        token_hash=token_hash,
+        workspace_id=workspace_id,
+        scopes=assigned_scopes,
+        created_at=now,
+        expires_at=expires_at,
+        is_revoked=False,
+    )
+    db.add(pat)
+    db.commit()
+    db.refresh(pat)
+    return pat, raw_token
+
+
+def revoke_personal_access_token(
+    db: Session,
+    token_id: uuid.UUID,
+    user_id: uuid.UUID | None = None,
+) -> bool:
+    """Revoke a Personal Access Token."""
+    query = db.query(PersonalAccessToken).filter(PersonalAccessToken.id == token_id)
+    if user_id is not None:
+        query = query.filter(PersonalAccessToken.user_id == user_id)
+    pat = query.first()
+    if not pat or pat.is_revoked:
+        return False
+    pat.is_revoked = True
+    pat.revoked_at = datetime.now(UTC)
+    db.commit()
+    return True
+
+
 def get_current_user(
     lake_token: str | None = Cookie(default=None),
     authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ) -> User:
-    token = lake_token
-    if not token and authorization and authorization.startswith("Bearer "):
-        token = authorization[7:]
+    token = None
+    if isinstance(authorization, str) and authorization.startswith("Bearer "):
+        token = authorization[7:].strip()
+    if not token and isinstance(lake_token, str):
+        token = lake_token
     if not token:
         raise HTTPException(401, "Not authenticated")
+
+    if token.startswith(PAT_PREFIX):
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        pat = (
+            db.query(PersonalAccessToken)
+            .filter(
+                PersonalAccessToken.token_hash == token_hash,
+                PersonalAccessToken.is_revoked == False,  # noqa: E712
+            )
+            .first()
+        )
+        if not pat:
+            raise HTTPException(401, "Invalid or revoked personal access token")
+
+        now = datetime.now(UTC)
+        if pat.expires_at is not None:
+            expires_at = pat.expires_at
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=UTC)
+            if expires_at <= now:
+                raise HTTPException(401, "Personal access token expired")
+
+        last_used = pat.last_used_at
+        if last_used is not None and last_used.tzinfo is None:
+            last_used = last_used.replace(tzinfo=UTC)
+        if last_used is None or (now - last_used).total_seconds() >= 60:
+            pat.last_used_at = now
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
+
+        user = db.query(User).filter(User.id == pat.user_id).first()
+        if not user or not user.is_active:
+            raise HTTPException(401, "User inactive or not found")
+
+        user._current_session_id = None
+        user._pat = pat
+        user._pat_scopes = pat.scopes or ["read", "write"]
+        user._pat_workspace_id = pat.workspace_id
+        return user
+
     try:
         payload = decode_token(token)
     except jwt.ExpiredSignatureError:
@@ -434,6 +581,8 @@ def get_current_user(
 def require_superadmin(current_user: User = Depends(get_current_user)) -> User:
     if current_user.role != "superadmin":
         raise HTTPException(403, "Superadmin access required")
+    if hasattr(current_user, "_pat_scopes") and "admin" not in current_user._pat_scopes:
+        raise HTTPException(403, "Personal access token does not have admin scope")
     return current_user
 
 
@@ -442,6 +591,18 @@ def get_workspace_member(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> WorkspaceMember:
+    if getattr(current_user, "_pat_workspace_id", None) is not None:
+        try:
+            ws_uuid = uuid.UUID(str(workspace_id))
+            if ws_uuid != current_user._pat_workspace_id:
+                raise HTTPException(
+                    403, "Personal access token is restricted to a different workspace"
+                )
+        except (ValueError, TypeError):
+            raise HTTPException(
+                403, "Personal access token is restricted to a different workspace"
+            )
+
     member = (
         db.query(WorkspaceMember)
         .filter(
@@ -460,6 +621,20 @@ def require_workspace_admin(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> WorkspaceMember:
+    if hasattr(current_user, "_pat_scopes") and "admin" not in current_user._pat_scopes:
+        raise HTTPException(403, "Personal access token does not have admin scope")
+    if getattr(current_user, "_pat_workspace_id", None) is not None:
+        try:
+            ws_uuid = uuid.UUID(str(workspace_id))
+            if ws_uuid != current_user._pat_workspace_id:
+                raise HTTPException(
+                    403, "Personal access token is restricted to a different workspace"
+                )
+        except (ValueError, TypeError):
+            raise HTTPException(
+                403, "Personal access token is restricted to a different workspace"
+            )
+
     if current_user.role == "superadmin":
         member = (
             db.query(WorkspaceMember)
@@ -575,10 +750,25 @@ def get_workspace_context(
         member.role if member else ("superadmin" if current_user.role == "superadmin" else "read")
     )
 
+    if getattr(current_user, "_pat_workspace_id", None) is not None:
+        if ws.id != current_user._pat_workspace_id:
+            raise HTTPException(
+                403, "Personal access token is restricted to a different workspace"
+            )
+
     if (
         require_write
-        and current_user.role != "superadmin"
-        and (role in ("read", "viewer") or role not in ("write", "admin", "superadmin"))
+        and (
+            (
+                current_user.role != "superadmin"
+                and (role in ("read", "viewer") or role not in ("write", "admin", "superadmin"))
+            )
+            or (
+                hasattr(current_user, "_pat_scopes")
+                and "write" not in current_user._pat_scopes
+                and "admin" not in current_user._pat_scopes
+            )
+        )
     ):
         raise HTTPException(403, write_error_msg)
 

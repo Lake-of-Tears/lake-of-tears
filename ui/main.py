@@ -2040,9 +2040,14 @@ async def settings_account_get(request: Request):
     token = request.cookies.get("lake_token")
     profile = _backend_get("/api/auth/me", token) if token else None
     sessions = _backend_get("/api/auth/sessions", token) if token else []
+    tokens = _backend_get("/api/auth/tokens?include_revoked=true", token) if token else []
+    workspaces = _backend_get("/api/workspaces", token) if token else []
     saved = request.query_params.get("saved")
     password_saved = request.query_params.get("password_saved")
     password_error = request.query_params.get("password_error")
+    token_error = request.query_params.get("token_error")
+    new_token_secret = request.query_params.get("new_token")
+    new_token_name = request.query_params.get("token_name")
     return templates.TemplateResponse(
         request=request,
         name="settings/account.html",
@@ -2052,8 +2057,13 @@ async def settings_account_get(request: Request):
             "saved": saved,
             "password_saved": password_saved,
             "password_error": password_error,
+            "token_error": token_error,
+            "new_token_secret": new_token_secret,
+            "new_token_name": new_token_name,
             "profile": profile,
             "sessions": sessions or [],
+            "tokens": tokens or [],
+            "workspaces": workspaces or [],
         },
     )
 
@@ -2124,6 +2134,90 @@ async def settings_account_session_revoke_others_post(request: Request):
     if token:
         _backend_post("/api/auth/sessions/revoke-others", token, {})
     return RedirectResponse(url="/settings/account?saved=revoked_others", status_code=302)
+
+
+# ── Settings: Personal Access Tokens ──────────────────────────────────────
+
+
+@app.post("/settings/account/tokens")
+async def settings_account_tokens_post(
+    request: Request,
+    name: str = Form(...),
+    lifetime_days: str = Form("30"),
+    workspace_id: str = Form(""),
+    scopes: list[str] = Form(default=["read", "write"]),
+):
+    token = request.cookies.get("lake_token")
+    if not token:
+        return RedirectResponse(url="/login", status_code=302)
+
+    try:
+        days = int(lifetime_days) if lifetime_days and lifetime_days != "never" else None
+    except ValueError:
+        days = 30
+
+    ws_id = workspace_id.strip() if workspace_id and workspace_id.strip() else None
+
+    payload = {
+        "name": name,
+        "lifetime_days": days,
+        "workspace_id": ws_id,
+        "scopes": scopes if scopes else ["read", "write"],
+    }
+    data, err = _backend_post_with_error("/api/auth/tokens", token, payload)
+    if err:
+        return RedirectResponse(
+            url=f"/settings/account?token_error={urllib.parse.quote_plus(err)}#tokens",
+            status_code=302,
+        )
+    return RedirectResponse(
+        url=f"/settings/account?saved=token_created&new_token={urllib.parse.quote_plus(data['token'])}&token_name={urllib.parse.quote_plus(data['name'])}#tokens",
+        status_code=302,
+    )
+
+
+@app.post("/settings/account/tokens/{token_id}/revoke")
+async def settings_account_token_revoke_post(request: Request, token_id: str):
+    token = request.cookies.get("lake_token")
+    if token:
+        _backend_delete(f"/api/auth/tokens/{token_id}", token)
+    return RedirectResponse(url="/settings/account?saved=token_revoked#tokens", status_code=302)
+
+
+@app.post("/api/auth/tokens")
+async def ui_api_auth_tokens_create(request: Request):
+    token = request.cookies.get("lake_token")
+    if not token:
+        raise HTTPException(401, "Not authenticated")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "Invalid JSON")
+    data, err = _backend_post_with_error("/api/auth/tokens", token, body)
+    if err:
+        raise HTTPException(400, err)
+    return data
+
+
+@app.get("/api/auth/tokens")
+async def ui_api_auth_tokens_list(request: Request, include_revoked: bool = False):
+    token = request.cookies.get("lake_token")
+    if not token:
+        raise HTTPException(401, "Not authenticated")
+    return (
+        _backend_get(f"/api/auth/tokens?include_revoked={str(include_revoked).lower()}", token) or []
+    )
+
+
+@app.delete("/api/auth/tokens/{token_id}")
+async def ui_api_auth_tokens_delete(request: Request, token_id: str):
+    token = request.cookies.get("lake_token")
+    if not token:
+        raise HTTPException(401, "Not authenticated")
+    ok = _backend_delete(f"/api/auth/tokens/{token_id}", token)
+    if not ok:
+        raise HTTPException(404, "Token not found or already revoked")
+    return {"ok": True, "revoked_id": token_id}
 
 
 # ── Settings: Workspace ───────────────────────────────────────────────────
