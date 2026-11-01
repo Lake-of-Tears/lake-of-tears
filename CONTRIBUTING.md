@@ -33,9 +33,8 @@ Lake of Tears brings analytical compute, storage, vector search, orchestration, 
    - Turnkey data source connectors (e.g., Stripe, Shopify, HubSpot, PostgreSQL, Open-Meteo, system telemetry) with scheduled DAGs.
 5. 📊 **Dashboards & Notebooks**:
    - Deep integration and iframe embedding for Apache Superset (BI dashboards) and JupyterLab (data science).
-6. ☸️ **Cloud & Infrastructure** (`deploy/helm/`, `deploy/terraform/`):
+6. ☸️ **Cloud & Infrastructure** (`deploy/helm/`):
    - Helm chart (`deploy/helm/lake-of-tears`) with Ingress routing and PVC storage backends (NFS, Longhorn, Ceph, local-path).
-   - Terraform foundation modules.
 7. 📚 **Documentation & Guides** (`docs/`, `README.md`):
    - Architecture guides, deployment walkthroughs, example SQL analytics, and connector tutorials.
 
@@ -49,7 +48,6 @@ Lake of Tears brings analytical compute, storage, vector search, orchestration, 
 - **Local Kubernetes Cluster** (OrbStack, Docker Desktop with K8s, minikube, kind, or k3s)
 - **Helm 3.x** and **kubectl**
 - **Python 3.12**
-- **Terraform 1.9+** (if testing infrastructure changes)
 - `git`
 
 ### Local Development Setup
@@ -123,7 +121,6 @@ All CI checks must pass before a Pull Request is approved and merged. Validate t
 | **Security Scan** | Pipeline & UI | `bandit -r pipeline/ ui/ -ll -c pyproject.toml` |
 | **UI Container** | UI Docker build | `docker build ui/` |
 | **Helm Chart** | Kubernetes chart | `helm lint deploy/helm/lake-of-tears --namespace lake-of-tears` |
-| **Terraform** | IaC validation | `terraform -chdir=deploy/terraform/foundation validate` |
 
 ---
 
@@ -157,7 +154,7 @@ For our complete branching model, release lifecycle, and commit guidelines, plea
    - `feat/<issue#>-<description>` — new features or connectors
    - `fix/<issue#>-<description>` — bug fixes
    - `sec/<issue#>-<description>` — security fixes & CVE updates
-   - `infra/<issue#>-<description>` — Docker, Helm, CI/CD, or Terraform changes
+   - `infra/<issue#>-<description>` — Docker, Helm, or CI/CD changes
    - `docs/<description>` — documentation improvements
    - `refactor/<description>` — code cleanups and refactoring
 4. **Follow Conventional Commits:** Use standard commit prefixes (`feat:`, `fix:`, `sec:`, `docs:`, `infra:`, `refactor:`).

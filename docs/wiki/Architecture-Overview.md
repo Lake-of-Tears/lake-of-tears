@@ -104,7 +104,7 @@ Lake of Tears standardizes on **Kubernetes with Helm** across both local develop
 | **Configuration** | Unified TOON specification (`lake-of-tears.example.toon`) mapped dynamically via `toon2helm.py`, or static Helm values files |
 | **Start it with** | `helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears` |
 
-The repository also ships Terraform modules under `deploy/terraform/foundation` for provisioning infrastructure such as MinIO buckets. See the [Deployment and Operations Guide](Deployment-and-Operations.md) and the [README](https://github.com/Lake-of-Tears/lake-of-tears#readme) for the full TOON and Helm walkthrough, local-cluster workflows, and production zero-disk secrets streaming.
+See the [Deployment and Operations Guide](Deployment-and-Operations.md) and the [README](https://github.com/Lake-of-Tears/lake-of-tears#readme) for the full TOON and Helm walkthrough, local-cluster workflows, and production zero-disk secrets streaming.
 
 ## Related pages
 

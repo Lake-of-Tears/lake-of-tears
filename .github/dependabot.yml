@@ -30,14 +30,3 @@ updates:
       interval: weekly
     labels: [dependencies]
 
-  - package-ecosystem: terraform
-    directory: /deploy/terraform/foundation
-    schedule:
-      interval: monthly
-    labels: [dependencies]
-
-  - package-ecosystem: terraform
-    directory: /deploy/terraform/services
-    schedule:
-      interval: monthly
-    labels: [dependencies]
