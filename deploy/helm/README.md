@@ -34,6 +34,17 @@ helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
   --wait --timeout 10m
 ```
 
+### CI/CD Zero-Disk Streaming via SSH stdin
+
+For production deployments automated via GitHub Actions (such as [lake-of-tears-infra](https://github.com/Lake-of-Tears/lake-of-tears-infra)), the runner reads `PROD_CONFIG_TOON` from GitHub Secrets, compiles the specification in memory, and pipes the YAML stream directly into `helm upgrade ... -f -` over SSH:
+
+```bash
+python scripts/toon2helm.py -i <(printf '%s\n' "$PROD_CONFIG_TOON") | \
+  ssh "$SSH_USER@$SSH_HOST" "helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears --namespace lake-of-tears -f -"
+```
+
+This ensures zero plaintext credential files are ever persisted to the runner filesystem or the production cluster host. For the full architecture sequence diagram and step-by-step walkthrough, see the [Deployment and Operations Wiki](../../docs/wiki/Deployment-and-Operations.md#3-zero-disk-streaming--github-actions-cicd).
+
 ---
 
 ## Configuration Mapping Reference

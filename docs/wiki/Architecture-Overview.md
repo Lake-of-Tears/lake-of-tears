@@ -84,10 +84,10 @@ Lake of Tears standardizes on **Kubernetes with Helm** across both local develop
 | **Best for** | Local development (OrbStack, minikube, kind, k3s) and production clusters |
 | **Entry point** | Ingress controller (ingress-nginx) with path and host routing |
 | **Storage** | PersistentVolumeClaims on your StorageClass (NFS, Longhorn, local-path and others) |
-| **Configuration** | Helm values files (`values-local.yaml`, `values-prod.yaml`), with secrets kept in values or sealed secrets |
+| **Configuration** | Unified TOON specification (`lake-of-tears.example.toon`) mapped dynamically via `toon2helm.py`, or static Helm values files |
 | **Start it with** | `helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears` |
 
-The repository also ships Terraform modules under `deploy/terraform/foundation` for provisioning infrastructure such as MinIO buckets. See the [README](https://github.com/Lake-of-Tears/lake-of-tears#readme) for the full Helm walkthrough, local-cluster values (`values-local.example.yaml`) and production secrets handling.
+The repository also ships Terraform modules under `deploy/terraform/foundation` for provisioning infrastructure such as MinIO buckets. See the [Deployment and Operations Guide](Deployment-and-Operations.md) and the [README](https://github.com/Lake-of-Tears/lake-of-tears#readme) for the full TOON and Helm walkthrough, local-cluster workflows, and production zero-disk secrets streaming.
 
 ## Related pages
 

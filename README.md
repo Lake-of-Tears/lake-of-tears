@@ -93,10 +93,18 @@ docker build -t lake-of-tears-ui:latest ./ui
 docker build -t lake-of-tears-airflow:latest ./deploy/airflow
 
 # 2. Deploy locally via Helm into the lake-of-tears namespace
+# Option A: Direct unified TOON deployment (Recommended)
+cp lake-of-tears.example.toon lake-of-tears.local.toon
 helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
   --namespace lake-of-tears \
   --create-namespace \
-  -f deploy/helm/values-local.example.yaml
+  -f <(python scripts/toon2helm.py -i lake-of-tears.local.toon)
+
+# Option B: Standard Helm values override
+# helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
+#   --namespace lake-of-tears \
+#   --create-namespace \
+#   -f deploy/helm/values-local.example.yaml
 ```
 
 Open **http://localhost** — you'll be redirected to the login page. **Register the first account and you become the superadmin.** All subsequent registrations are viewers by default; manage them in the admin panel.
@@ -223,9 +231,30 @@ To customize credentials or settings locally, you can modify `deploy/helm/values
 
 ### Production Deployment
 
-#### How configuration works
+#### Unified TOON Deployment (Recommended)
 
-The Helm chart separates **non-secret config** (hostnames, image tags, resource limits) from **secrets** (passwords, API keys, tokens). The recommended approach is two files:
+Lake of Tears provides a unified, token-dense configuration template in **Token-Oriented Object Notation (TOON)**: [`lake-of-tears.example.toon`](lake-of-tears.example.toon). TOON condenses your entire platform configuration—ingress, storage, compute resources, database passwords, OAuth providers, and connector credentials—into a single declarative file with 40–60% fewer tokens than verbose YAML.
+
+```bash
+# 1. Copy the example configuration to a secure location outside git
+cp lake-of-tears.example.toon /etc/lake-of-tears/lake-of-tears.prod.toon
+chmod 600 /etc/lake-of-tears/lake-of-tears.prod.toon
+
+# 2. Deploy directly via in-memory streaming (zero unencrypted secrets written to Helm disk cache)
+helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
+  --namespace lake-of-tears \
+  --create-namespace \
+  -f <(python scripts/toon2helm.py -i /etc/lake-of-tears/lake-of-tears.prod.toon) \
+  --wait --timeout 10m
+```
+
+In automated CI/CD environments (such as [lake-of-tears-infra](https://github.com/Lake-of-Tears/lake-of-tears-infra)), the TOON specification is stored securely in GitHub Secrets as `PROD_CONFIG_TOON` and streamed over SSH stdin directly to `helm upgrade -f -`, ensuring zero plaintext secrets are ever persisted to runner or host disk. See the [Deployment and Operations Wiki](docs/wiki/Deployment-and-Operations.md#3-zero-disk-streaming--github-actions-cicd) for the complete architecture diagram and workflow walkthrough.
+
+---
+
+#### Alternative: Multi-File Helm Values
+
+If you prefer static YAML overrides without the TOON compiler, the Helm chart supports separating **non-secret config** from **secrets** across two files:
 
 | File | Contents | Committed to git? |
 |------|----------|-------------------|
@@ -416,7 +445,37 @@ helm uninstall lake-of-tears -n lake-of-tears
 
 ## Configuration
 
-All configuration is managed through Helm values (e.g. `deploy/helm/values-local.example.yaml` or `values-prod.yaml`). Copy `deploy/helm/values-local.example.yaml` to `values-local.yaml` and configure required values before starting the stack.
+Lake of Tears supports two configuration workflows:
+1. **Unified TOON Configuration (Recommended):** A single, token-dense [`lake-of-tears.example.toon`](lake-of-tears.example.toon) file containing all configurations, credentials, resource allocations, and connector matrices. Compiled to Helm values dynamically via [`scripts/toon2helm.py`](scripts/toon2helm.py).
+2. **Traditional Helm Values:** Static YAML override files (`values-local.yaml` / `values-prod.yaml` + `values-secret.yaml`).
+
+### Unified TOON Specification
+
+The root-level [`lake-of-tears.example.toon`](lake-of-tears.example.toon) organizes configuration across 8 core platform domains:
+
+| Domain Section | Configured Components | Helm Mapping Path |
+|---|---|---|
+| `global` | Cluster storage class, default namespace guard | `global.storageClass`, `global.allowDefaultNamespace` |
+| `ingress` | Hostnames for UI, MinIO, Superset, TLS certificates | `ingress.host`, `ingress.tls`, `ingress.annotations` |
+| `minio` | Root user/password, buckets to create, disk size, CPU/RAM | `minio.rootUser`, `minio.buckets`, `minio.resources` |
+| `lakeui` | UI port, MinIO & Superset external URLs, resource limits | `lakeui.service`, `lakeui.resources`, auto-derived URLs |
+| `jupyter` | JupyterLab auth token, persistent notebook volume size | `jupyter.token`, `jupyter.persistence.size`, `jupyter.resources` |
+| `superset` | Flask secret key, admin password, persistent storage | `superset.secretKey`, `superset.adminPassword`, `superset.resources` |
+| `airflow` | Fernet/secret key, admin password, wait-for-db, extra pip pkgs | `airflow.secretKey`, `airflow.extraPipPackages`, `airflow.resources` |
+| `backend` | JWT secret, SMTP credentials, OAuth/OIDC tabular array | `backend.auth`, `backend.smtp`, `backend.{google,apple,...}` |
+| `postgres` | Auth & Airflow database credentials, storage, DSN | `postgres.auth`, `postgres.airflow`, `postgres.resources` |
+| `connectors` | Tabular registry of ingestion schedules & credential refs | `connectors`, `stripe.secretKey`, `shopify.accessToken`, etc. |
+
+To compile your TOON file to standard Helm values:
+```bash
+python scripts/toon2helm.py --input lake-of-tears.local.toon --output values.yaml
+```
+
+For full details on TOON syntax, deep parameter mappings, and zero-disk streaming in CI/CD, refer to the [Deployment and Operations Wiki](docs/wiki/Deployment-and-Operations.md#2-unified-platform-configuration-toon).
+
+---
+
+### Configuration Reference (Environment & Secret Keys)
 
 **Core**
 

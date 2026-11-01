@@ -22,16 +22,17 @@ Lake of Tears standardizes 100% on Kubernetes and Helm across all environments.
 git clone https://github.com/Lake-of-Tears/lake-of-tears.git
 cd lake-of-tears
 
-# Copy the local example values
-cp deploy/helm/values-local.example.yaml values-local.yaml
-```
-
-Edit `values-local.yaml` if you need custom passwords or ports. Then deploy:
-
-```bash
+# Option A: Unified TOON deployment (Recommended)
+cp lake-of-tears.example.toon lake-of-tears.local.toon
 helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
   --namespace lake-of-tears --create-namespace \
-  -f values-local.yaml
+  -f <(python scripts/toon2helm.py -i lake-of-tears.local.toon)
+
+# Option B: Standard Helm values override
+# cp deploy/helm/values-local.example.yaml values-local.yaml
+# helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
+#   --namespace lake-of-tears --create-namespace \
+#   -f values-local.yaml
 ```
 
 Wait for pods to be ready:
@@ -55,7 +56,151 @@ helm upgrade lake-of-tears ./deploy/helm/lake-of-tears -n lake-of-tears -f value
 helm uninstall lake-of-tears -n lake-of-tears                   # teardown release
 ```
 
-## 2. Production on Kubernetes with Helm
+## 2. Unified Platform Configuration (TOON)
+
+Lake of Tears standardizes on **Token-Oriented Object Notation (TOON)** as its single unified specification for configuring the entire platform across local development, staging, and production. The canonical template is located at the root of the repository: [`lake-of-tears.example.toon`](../../lake-of-tears.example.toon).
+
+### Architectural Philosophy & Benefits
+
+Maintaining separate `values.yaml`, `values-prod.yaml`, and `values-secret.yaml` files frequently leads to configuration drift, orphaned credentials, and accidental leaks. TOON addresses this with three core design pillars:
+
+1. **40–60% Token Compression:** By utilizing tabular arrays (`key[N]{col1,col2}: ...`) for uniform collections (TLS definitions, OAuth providers, data connectors) and compact indentation for nested key-value pairs, TOON significantly reduces token counts compared to verbose YAML or JSON. This makes it exceptionally efficient for LLM-driven DevOps agents, CI/CD runners, and clean human audits.
+2. **Single Source of Truth:** All ingress hosts, storage class tiers, CPU/RAM budgets, database users, SSO providers, and ingestion connectors are declared in one authoritative file.
+3. **Multi-Level Dedenting Engine:** The Lake of Tears TOON parser (`pipeline/shared/toon.py` and `ui/toon.py`) utilizes common-prefix dedenting (`textwrap.dedent`), allowing arbitrarily deep sub-child dictionaries (e.g. `minio.resources.cpu_request` or `backend.auth.secretKey`) to maintain strict relative hierarchy without losing their parent context.
+
+---
+
+### Canonical Specification Domains (`lake-of-tears.example.toon`)
+
+The specification covers 8 core platform domains:
+
+| Domain | Key Sections | Purpose & Highlights |
+|---|---|---|
+| **Global** | `global.storageClass`, `global.allowDefaultNamespace` | Cluster PVC storage class (`local-path`, `nfs-client`, cloud CSI) and safety guards against deploying to the `default` namespace. |
+| **Ingress & TLS** | `ingress.host`, `ingress.minioConsoleHost`, `ingress.supersetHost`, `ingress.tls[N]` | Unified routing rules and a tabular TLS matrix mapping TLS certificates to multi-host SAN lists. |
+| **MinIO Storage** | `minio.rootUser`, `minio.rootPassword`, `minio.buckets`, `minio.persistence`, `minio.resources` | S3-compatible object storage configuration, persistent disk size, automatic initial bucket provisioning (`datalake`, `raw`, `analytics`, `workspaces`), and compute limits. |
+| **Lake UI Shell** | `lakeui.service.port`, `lakeui.resources`, `lakeui.minioConsoleUrl`, `lakeui.supersetUrl` | Unified FastAPI + Tailwind shell configuration and cross-service navigation endpoints. |
+| **JupyterLab** | `jupyter.token`, `jupyter.persistence.size`, `jupyter.resources` | Interactive notebook workspaces, internal token authentication, and persistent storage. |
+| **Apache Superset** | `superset.secretKey`, `superset.adminPassword`, `superset.persistence.size`, `superset.resources` | BI dashboarding engine, Flask session encryption key, and administrator credentials. |
+| **Apache Airflow** | `airflow.secretKey`, `airflow.adminPassword`, `airflow.extraPipPackages`, `airflow.waitForDb`, `airflow.resources` | Scheduled ETL orchestration, Fernet encryption key, PostgreSQL readiness probe container, and pre-installed Python libraries (`pandas`, `pyarrow`, `duckdb`). |
+| **Backend & SSO** | `backend.auth`, `backend.smtp`, `backend.oauth[N]`, `backend.resources` | JWT signing secret, public base URL, SMTP notification relay, and tabular OAuth identity matrix (Google, GitHub, Microsoft, Apple, etc.). |
+| **PostgreSQL** | `postgres.auth`, `postgres.airflow`, `postgres.persistence`, `postgres.resources`, `postgres.dsn` | Internal PostgreSQL database credentials for Lake auth and Airflow metadata, along with external DSN connectivity. |
+| **Connectors** | `connectors[N]`, `stripe`, `shopify`, `hubspot`, etc. | Tabular ingestion schedule matrix (`sync_history_days`, cron schedules, credential refs) and top-level connector API tokens. |
+
+---
+
+### The TOON-to-Helm Compiler (`scripts/toon2helm.py`)
+
+Lake of Tears includes a high-performance compiler utility in [`scripts/toon2helm.py`](../../scripts/toon2helm.py) (backed by [`pipeline/shared/toon2helm.py`](../../pipeline/shared/toon2helm.py)) to translate `.toon` files directly into Helm `values.yaml` dictionaries.
+
+#### Automated Normalization Rules:
+
+- **Compute Resources:** Converts flat TOON properties (`cpu_request`, `mem_request`, `cpu_limit`, `mem_limit`) into standard Kubernetes resource maps:
+  ```yaml
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+  ```
+- **TLS Host Lists:** Expands comma-separated host strings from tabular TLS rows into structured YAML arrays (`hosts: ["lake.example.com", "minio.example.com"]`).
+- **Dynamic URL Derivation:** Automatically calculates `lakeui.minioConsoleUrl` and `lakeui.supersetUrl` using the defined ingress hostnames if not explicitly configured.
+- **OAuth Expansion:** Expands the tabular `backend.oauth[...]` matrix into discrete Helm values blocks (`backend.google`, `backend.github`, `backend.microsoft`, `backend.apple`), populating `clientId`, `clientSecret`, `tenantId`, `teamId`, and `keyId`.
+
+#### CLI Compilation & In-Memory Streaming:
+
+```bash
+# 1. Compile TOON directly to a static values.yaml file
+python scripts/toon2helm.py --input /path/to/lake-of-tears.toon --output values-prod.yaml
+
+# 2. In-memory deployment via bash process substitution (no YAML written to disk)
+helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
+  --namespace lake-of-tears \
+  --create-namespace \
+  -f <(python scripts/toon2helm.py -i /path/to/lake-of-tears.toon) \
+  --wait --timeout 10m
+```
+
+---
+
+## 3. Zero-Disk Streaming & GitHub Actions CI/CD
+
+In production environments, persisting unencrypted YAML values files (such as `/etc/lake-of-tears/values-secret.yaml`) to runner disk or host storage creates compliance risks and security exposure.
+
+Lake of Tears implements a **Zero-Disk In-Memory Streaming** architecture in [lake-of-tears-infra](https://github.com/Lake-of-Tears/lake-of-tears-infra):
+
+### Architecture & Data Flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Dev as DevOps Engineer / Release Trigger
+    participant GHA as GitHub Actions Runner (deploy-prod.yml)
+    participant Sec as GitHub Secrets (PROD_CONFIG_TOON)
+    participant Host as Production K3s Host (Remote Node)
+    participant Helm as Helm 3 CLI
+    participant K8s as Kubernetes Cluster (lake-of-tears namespace)
+
+    Dev->>GHA: Trigger Deploy Workflow (select tag or branch)
+    GHA->>Sec: Fetch PROD_CONFIG_TOON into memory
+    GHA->>GHA: scripts/toon2helm.py compiles TOON to YAML stream in-memory
+    Note over GHA,Host: SSH pipe over stdin — zero plaintext files on disk!
+    GHA->>Host: ssh user@host "helm upgrade lake-of-tears ... -f -"
+    Host->>Helm: Pipe stream directly into Helm stdin (-f -)
+    Helm->>K8s: Render and apply Secret & Deployment manifests to K8s API
+    K8s-->>Host: Rollout pods, jobs, and schema migrations
+    Host-->>GHA: Return Helm status & exit code 0
+    GHA-->>Dev: Deployment Successful & Verified
+```
+
+### Key Security Guarantees:
+
+1. **Zero Runner Disk Footprint:** `PROD_CONFIG_TOON` is fetched directly into runner memory, piped into `scripts/toon2helm.py`, and streamed across the SSH connection. No intermediate `values.yaml` is ever written to the GitHub Actions runner filesystem.
+2. **Zero Host Disk Footprint:** The production host receives the YAML stream over SSH `stdin` directly into `helm upgrade ... -f -`. No plaintext secrets file resides on the remote server's filesystem.
+3. **Fail-Fast Validation:** The deployment workflow (`.github/workflows/deploy-prod.yml`) validates that `PROD_CONFIG_TOON` is present before triggering deployment steps.
+
+### Configuring `PROD_CONFIG_TOON` in GitHub Secrets
+
+Store your production configuration in GitHub Actions Secrets using the GitHub CLI:
+
+```bash
+# Upload production TOON file directly to GitHub Repository Secrets
+gh secret set PROD_CONFIG_TOON \
+  --repo Lake-of-Tears/lake-of-tears-infra \
+  < /secure/path/lake-of-tears.prod.toon
+```
+
+### GitHub Actions CI/CD Workflow Execution
+
+The production deployment step in `.github/workflows/deploy-prod.yml` executes the zero-disk pipeline:
+
+```yaml
+- name: Deploy Lake of Tears via In-Memory Stream
+  env:
+    PROD_CONFIG_TOON: ${{ secrets.PROD_CONFIG_TOON }}
+    TARGET_REF: ${{ steps.resolve_target.outputs.ref }}
+  run: |
+    # Fail-fast check
+    if [ -z "$PROD_CONFIG_TOON" ]; then
+      echo "::error::PROD_CONFIG_TOON secret is empty!"
+      exit 1
+    fi
+
+    # Compile TOON in-memory and pipe over SSH directly to Helm stdin
+    python scripts/toon2helm.py -i <(printf '%s\n' "$PROD_CONFIG_TOON") | \
+      ssh -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" \
+        "helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
+          --namespace lake-of-tears \
+          --create-namespace \
+          -f - \
+          --wait --timeout 10m"
+```
+
+---
+
+## 4. Production on Kubernetes with Helm
 
 ### Prerequisites
 
@@ -177,7 +322,7 @@ helm rollback lake-of-tears <revision> -n lake-of-tears
 
 Check what will be applied without a cluster with `helm template ... ` or `helm install ... --dry-run=client`, which also prints the post-install notes. The Jupyter URL appears in the notes only if you enabled the opt-in `jupyter.ingress`.
 
-## 3. Monitoring and Health Checks
+## 5. Monitoring and Health Checks
 
 ### Health endpoints
 
@@ -204,7 +349,7 @@ kubectl logs deploy/lake-of-tears-backend -n lake-of-tears
 
 Look at Airflow's task logs and DAG state for pipeline problems ([Airflow Orchestration](Airflow-Orchestration.md)).
 
-## 4. Maintenance
+## 6. Maintenance
 
 ### Upgrading
 
@@ -290,17 +435,17 @@ kubectl rollout restart deployment -n lake-of-tears
 | AI provider and key | Superadmin: Settings, Admin Panel, AI Provider | Stored encrypted in PostgreSQL; takes effect immediately |
 | SSO client secrets | Rotate at the provider, update values, rollout restart backend | Users re-authenticate |
 
-## 5. Troubleshooting
+## 7. Troubleshooting
 
 | Symptom | Cause and fix |
 |---|---|
 | Ingress / Port 80 not responding | Another service is using port 80 or your local Ingress controller is not running. Ensure Ingress controller (e.g. OrbStack or ingress-nginx) is enabled |
 | Sign-in shows "Not Found" | Make sure you access the application through the Ingress entrypoint (`http://localhost`), not the pod direct port |
 | `helm install` stops with `cannot be deployed into the 'default' namespace` | Add `--namespace lake-of-tears --create-namespace` |
-| `helm install` stops with `... is required` | A secret is missing from your values file (section 2) |
+| `helm install` stops with `... is required` | A required configuration or secret is missing from your TOON or values file (section 2 and section 4) |
 | Pods stay `Pending` | No usable StorageClass: verify `kubectl get storageclass` and set `global.storageClass` in values if needed |
 | Changed a secret but nothing changed | Kubernetes pods read Secrets on container startup; run `kubectl rollout restart deployment -n lake-of-tears` |
-| Changed `POSTGRES_AUTH_PASSWORD` and the backend cannot connect | The database user password was not updated inside PostgreSQL; run `ALTER USER` before updating secrets (section 4) |
+| Changed `POSTGRES_AUTH_PASSWORD` and the backend cannot connect | The database user password was not updated inside PostgreSQL; run `ALTER USER` before updating secrets (section 6) |
 | Notebooks disappear after a Jupyter pod restart | Ensure persistent volume is configured; see [#176](https://github.com/Lake-of-Tears/lake-of-tears/issues/176) |
 
 ## Related pages
