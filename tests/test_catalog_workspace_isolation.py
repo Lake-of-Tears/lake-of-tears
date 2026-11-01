@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -32,6 +32,7 @@ from models import (  # noqa: E402
     CatalogSchema,
     CatalogTable,
     User,
+    UserSession,
     Workspace,
     WorkspaceMember,
 )
@@ -70,22 +71,14 @@ def _setup_fixture():
         role="user",
         is_active=True,
     )
-    alice_token = jwt.encode(
-        {"sub": str(alice_id), "email": alice.email, "role": alice.role},
-        auth.SECRET_KEY,
-        algorithm="HS256",
-    )
-
     bob_id = uuid.uuid4()
     bob = User(
-        id=bob_id, email="bob@lake.local", display_name="Bob Beta", role="user", is_active=True
+        id=bob_id,
+        email="bob@lake.local",
+        display_name="Bob Beta",
+        role="user",
+        is_active=True,
     )
-    bob_token = jwt.encode(
-        {"sub": str(bob_id), "email": bob.email, "role": bob.role},
-        auth.SECRET_KEY,
-        algorithm="HS256",
-    )
-
     charlie_id = uuid.uuid4()
     charlie = User(
         id=charlie_id,
@@ -94,12 +87,6 @@ def _setup_fixture():
         role="user",
         is_active=True,
     )
-    charlie_token = jwt.encode(
-        {"sub": str(charlie_id), "email": charlie.email, "role": charlie.role},
-        auth.SECRET_KEY,
-        algorithm="HS256",
-    )
-
     sam_id = uuid.uuid4()
     sam = User(
         id=sam_id,
@@ -108,13 +95,31 @@ def _setup_fixture():
         role="superadmin",
         is_active=True,
     )
-    sam_token = jwt.encode(
-        {"sub": str(sam_id), "email": sam.email, "role": sam.role},
-        auth.SECRET_KEY,
-        algorithm="HS256",
-    )
-
     session.add_all([alice, bob, charlie, sam])
+    session.commit()
+
+    def _create_token(user):
+        sess_id = uuid.uuid4()
+        session.add(
+            UserSession(
+                id=sess_id,
+                user_id=user.id,
+                created_at=datetime.now(UTC),
+                last_active_at=datetime.now(UTC),
+                expires_at=datetime.now(UTC) + timedelta(hours=24),
+                is_revoked=False,
+            )
+        )
+        return jwt.encode(
+            {"sub": str(user.id), "email": user.email, "role": user.role, "jti": str(sess_id)},
+            auth.SECRET_KEY,
+            algorithm="HS256",
+        )
+
+    alice_token = _create_token(alice)
+    bob_token = _create_token(bob)
+    charlie_token = _create_token(charlie)
+    sam_token = _create_token(sam)
     session.commit()
 
     # Memberships
@@ -537,8 +542,20 @@ def test_catalog_access_request_requires_reason_and_exposes_requester_details():
         session.add(WorkspaceMember(workspace_id=fix["ws_b"].id, user_id=dave_id, role="read"))
         session.commit()
         session.refresh(dave)
+        dave_sess_id = uuid.uuid4()
+        session.add(
+            UserSession(
+                id=dave_sess_id,
+                user_id=dave.id,
+                created_at=datetime.now(UTC),
+                last_active_at=datetime.now(UTC),
+                expires_at=datetime.now(UTC) + timedelta(hours=24),
+                is_revoked=False,
+            )
+        )
+        session.commit()
         dave_token = jwt.encode(
-            {"sub": str(dave_id), "email": dave.email, "role": dave.role},
+            {"sub": str(dave_id), "email": dave.email, "role": dave.role, "jti": str(dave_sess_id)},
             auth.SECRET_KEY,
             algorithm="HS256",
         )
