@@ -78,8 +78,12 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index(op.f("ix_personal_access_tokens_is_revoked"), table_name="personal_access_tokens")
     op.drop_index(op.f("ix_personal_access_tokens_expires_at"), table_name="personal_access_tokens")
-    op.drop_index(op.f("ix_personal_access_tokens_workspace_id"), table_name="personal_access_tokens")
+    op.drop_index(
+        op.f("ix_personal_access_tokens_workspace_id"), table_name="personal_access_tokens"
+    )
     op.drop_index(op.f("ix_personal_access_tokens_token_hash"), table_name="personal_access_tokens")
-    op.drop_index(op.f("ix_personal_access_tokens_token_prefix"), table_name="personal_access_tokens")
+    op.drop_index(
+        op.f("ix_personal_access_tokens_token_prefix"), table_name="personal_access_tokens"
+    )
     op.drop_index(op.f("ix_personal_access_tokens_user_id"), table_name="personal_access_tokens")
     op.drop_table("personal_access_tokens")

@@ -131,32 +131,23 @@ class PersonalAccessToken(Base):
     token_prefix: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     workspace_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="SET NULL"), nullable=True, index=True
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
-    workspace_ids: Mapped[list[str]] = mapped_column(
-        JSONB, nullable=False, default=list
-    )
-    workspace_access: Mapped[dict[str, str]] = mapped_column(
-        JSONB, nullable=False, default=dict
-    )
-    scopes: Mapped[list[str]] = mapped_column(
-        JSONB, nullable=False, default=list
-    )
+    workspace_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    workspace_access: Mapped[dict[str, str]] = mapped_column(JSONB, nullable=False, default=dict)
+    scopes: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
     expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
-    last_used_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    is_revoked: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, index=True
-    )
-    revoked_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_revoked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="personal_access_tokens")
     workspace: Mapped["Workspace | None"] = relationship(foreign_keys=[workspace_id])

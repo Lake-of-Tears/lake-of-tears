@@ -30,6 +30,7 @@ from auth import (
     get_stored_gemini_api_key,
     get_stored_gemini_model,
     hash_password,
+    is_pat_user,
     is_registration_enabled,
     mask_secret,
     prune_expired_sessions,
@@ -1400,12 +1401,15 @@ def list_workspace_shares(
     if not ws:
         raise HTTPException(404, "Workspace not found")
 
-    if hasattr(current_user, "_pat_workspace_ids"):
-        if str(workspace_id) not in current_user._pat_workspace_ids:
+    if is_pat_user(current_user):
+        if str(workspace_id) not in (getattr(current_user, "_pat_workspace_ids", None) or []):
             raise HTTPException(403, "Personal access token does not have access to this workspace")
-    if hasattr(current_user, "_pat_workspace_access"):
-        if current_user._pat_workspace_access.get(str(workspace_id), "read") != "admin":
-            raise HTTPException(403, "Personal access token does not have admin access to this workspace")
+        if (getattr(current_user, "_pat_workspace_access", None) or {}).get(
+            str(workspace_id), "read"
+        ) != "admin":
+            raise HTTPException(
+                403, "Personal access token does not have admin access to this workspace"
+            )
 
     if current_user.role != "superadmin":
         admin_check = next(
@@ -1441,12 +1445,15 @@ def review_workspace_share(
     if not ws:
         raise HTTPException(404, "Workspace not found")
 
-    if hasattr(current_user, "_pat_workspace_ids"):
-        if str(workspace_id) not in current_user._pat_workspace_ids:
+    if is_pat_user(current_user):
+        if str(workspace_id) not in (getattr(current_user, "_pat_workspace_ids", None) or []):
             raise HTTPException(403, "Personal access token does not have access to this workspace")
-    if hasattr(current_user, "_pat_workspace_access"):
-        if current_user._pat_workspace_access.get(str(workspace_id), "read") != "admin":
-            raise HTTPException(403, "Personal access token does not have admin access to this workspace")
+        if (getattr(current_user, "_pat_workspace_access", None) or {}).get(
+            str(workspace_id), "read"
+        ) != "admin":
+            raise HTTPException(
+                403, "Personal access token does not have admin access to this workspace"
+            )
 
     if current_user.role != "superadmin":
         admin_check = next(
@@ -2016,15 +2023,18 @@ def _resolve_workspace(workspace_id: str | None, user: User, db: Session) -> Wor
     ws = db.query(Workspace).filter(Workspace.id == ws_uuid).first() if ws_uuid else None
     if not ws:
         raise HTTPException(404, "Workspace not found")
-    if hasattr(user, "_pat_workspace_ids"):
-        if str(ws.id) not in user._pat_workspace_ids:
-            raise HTTPException(403, f"Personal access token does not have access to workspace '{ws.name}'")
-    if hasattr(user, "_pat_scopes"):
-        if "write" not in user._pat_scopes and "admin" not in user._pat_scopes:
+    if is_pat_user(user):
+        if str(ws.id) not in (getattr(user, "_pat_workspace_ids", None) or []):
+            raise HTTPException(
+                403, f"Personal access token does not have access to workspace '{ws.name}'"
+            )
+        pat_scopes = getattr(user, "_pat_scopes", None) or []
+        if "write" not in pat_scopes and "admin" not in pat_scopes:
             raise HTTPException(403, "Personal access token does not have write scope")
-    if hasattr(user, "_pat_workspace_access"):
-        if user._pat_workspace_access.get(str(ws.id), "read") != "admin":
-            raise HTTPException(403, "Personal access token does not have admin access to this workspace")
+        if (getattr(user, "_pat_workspace_access", None) or {}).get(str(ws.id), "read") != "admin":
+            raise HTTPException(
+                403, "Personal access token does not have admin access to this workspace"
+            )
     if user.role != "superadmin":
         member = next(
             (
@@ -2046,8 +2056,8 @@ def catalog_directory(
     current_user: User = Depends(get_current_user),
 ):
     ws_uuid = _as_uuid(workspace_id)
-    if hasattr(current_user, "_pat_workspace_ids"):
-        if str(workspace_id) not in current_user._pat_workspace_ids:
+    if is_pat_user(current_user):
+        if str(workspace_id) not in (getattr(current_user, "_pat_workspace_ids", None) or []):
             raise HTTPException(403, "Personal access token does not have access to this workspace")
     membership = next(
         (m for m in current_user.workspace_memberships if str(m.workspace_id) == str(workspace_id)),
@@ -2858,8 +2868,8 @@ def workspace_catalogs(
     if not ws:
         raise HTTPException(404, "Workspace not found")
 
-    if hasattr(current_user, "_pat_workspace_ids"):
-        if str(workspace_id) not in current_user._pat_workspace_ids:
+    if is_pat_user(current_user):
+        if str(workspace_id) not in (getattr(current_user, "_pat_workspace_ids", None) or []):
             raise HTTPException(403, "Personal access token does not have access to this workspace")
 
     if current_user.role != "superadmin":
@@ -2914,8 +2924,8 @@ def workspace_catalog_manifest(
     if not ws:
         raise HTTPException(404, "Workspace not found")
 
-    if hasattr(current_user, "_pat_workspace_ids"):
-        if str(workspace_id) not in current_user._pat_workspace_ids:
+    if is_pat_user(current_user):
+        if str(workspace_id) not in (getattr(current_user, "_pat_workspace_ids", None) or []):
             raise HTTPException(403, "Personal access token does not have access to this workspace")
 
     if current_user.role != "superadmin":
@@ -2970,8 +2980,8 @@ def detect_workspace_anomalies(
     if not ws:
         raise HTTPException(404, "Workspace not found")
 
-    if hasattr(current_user, "_pat_workspace_ids"):
-        if str(workspace_id) not in current_user._pat_workspace_ids:
+    if is_pat_user(current_user):
+        if str(workspace_id) not in (getattr(current_user, "_pat_workspace_ids", None) or []):
             raise HTTPException(403, "Personal access token does not have access to this workspace")
 
     if current_user.role != "superadmin":

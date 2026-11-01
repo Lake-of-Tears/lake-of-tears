@@ -159,7 +159,9 @@ class PersonalAccessTokenCreate(BaseModel):
                 raise ValueError(f"Invalid workspace UUID: {raw_id}")
             role = str(raw_role).strip().lower()
             if role not in valid_roles:
-                raise ValueError(f"Invalid access level '{role}'. Must be one of: {sorted(valid_roles)}")
+                raise ValueError(
+                    f"Invalid access level '{role}'. Must be one of: {sorted(valid_roles)}"
+                )
             cleaned[ws_uuid] = role
         return cleaned
 
@@ -169,8 +171,8 @@ class PersonalAccessTokenCreate(BaseModel):
         if not self.workspace_ids and self.workspace_id:
             self.workspace_ids = [self.workspace_id]
 
-        has_explicit_access = (
-            "workspace_access" in self.__pydantic_fields_set__ and bool(self.workspace_access)
+        has_explicit_access = "workspace_access" in self.__pydantic_fields_set__ and bool(
+            self.workspace_access
         )
 
         # Sync workspace_access and workspace_ids

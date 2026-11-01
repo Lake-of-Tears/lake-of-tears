@@ -49,6 +49,13 @@ PAT_PREFIX = "lot_pat_"
 MAX_ACTIVE_PATS_PER_USER = 50
 
 
+def is_pat_user(user: Any) -> bool:
+    """Return True if user was authenticated using a Personal Access Token."""
+    return getattr(user, "_is_pat", False) is True or isinstance(
+        getattr(user, "_pat_workspace_ids", None), list | set | tuple
+    )
+
+
 def _keystream(enc_key: bytes, nonce: bytes, length: int) -> bytes:
     out = bytearray()
     counter = 0
@@ -582,6 +589,7 @@ def get_current_user(
             raise HTTPException(401, "User inactive or not found")
 
         user._current_session_id = None
+        user._is_pat = True
         user._pat = pat
         user._pat_scopes = pat.scopes or []
         wids = [str(wid) for wid in (pat.workspace_ids or [])]
@@ -662,7 +670,9 @@ def get_current_user(
 def require_superadmin(current_user: User = Depends(get_current_user)) -> User:
     if current_user.role != "superadmin":
         raise HTTPException(403, "Superadmin access required")
-    if hasattr(current_user, "_pat_scopes") and "admin" not in current_user._pat_scopes:
+    if is_pat_user(current_user) and "admin" not in (
+        getattr(current_user, "_pat_scopes", None) or []
+    ):
         raise HTTPException(403, "Personal access token does not have admin scope")
     return current_user
 
@@ -672,11 +682,9 @@ def get_workspace_member(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> WorkspaceMember:
-    if hasattr(current_user, "_pat_workspace_ids"):
-        if str(workspace_id) not in current_user._pat_workspace_ids:
-            raise HTTPException(
-                403, "Personal access token does not have access to this workspace"
-            )
+    if is_pat_user(current_user):
+        if str(workspace_id) not in (getattr(current_user, "_pat_workspace_ids", None) or []):
+            raise HTTPException(403, "Personal access token does not have access to this workspace")
 
     member = (
         db.query(WorkspaceMember)
@@ -696,15 +704,14 @@ def require_workspace_admin(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> WorkspaceMember:
-    if hasattr(current_user, "_pat_scopes") and "admin" not in current_user._pat_scopes:
-        raise HTTPException(403, "Personal access token does not have admin scope")
-    if hasattr(current_user, "_pat_workspace_ids"):
-        if str(workspace_id) not in current_user._pat_workspace_ids:
-            raise HTTPException(
-                403, "Personal access token does not have access to this workspace"
-            )
-    if hasattr(current_user, "_pat_workspace_access"):
-        token_role = current_user._pat_workspace_access.get(str(workspace_id), "read")
+    if is_pat_user(current_user):
+        if "admin" not in (getattr(current_user, "_pat_scopes", None) or []):
+            raise HTTPException(403, "Personal access token does not have admin scope")
+        if str(workspace_id) not in (getattr(current_user, "_pat_workspace_ids", None) or []):
+            raise HTTPException(403, "Personal access token does not have access to this workspace")
+        token_role = (getattr(current_user, "_pat_workspace_access", None) or {}).get(
+            str(workspace_id), "read"
+        )
         if token_role != "admin":
             raise HTTPException(
                 403, "Personal access token does not have admin access to this workspace"
@@ -825,36 +832,28 @@ def get_workspace_context(
         member.role if member else ("superadmin" if current_user.role == "superadmin" else "read")
     )
 
-    if hasattr(current_user, "_pat_workspace_ids"):
-        if str(ws.id) not in current_user._pat_workspace_ids:
+    if is_pat_user(current_user):
+        if str(ws.id) not in (getattr(current_user, "_pat_workspace_ids", None) or []):
             raise HTTPException(
                 403, f"Personal access token does not have access to workspace '{ws.name}'"
             )
 
     # Cap effective caller role to token's granted role on this workspace
-    if hasattr(current_user, "_pat_workspace_access") and current_user._pat_workspace_access:
-        pat_ws_role = current_user._pat_workspace_access.get(str(ws.id), "read")
+    pat_access = getattr(current_user, "_pat_workspace_access", None) or {}
+    pat_scopes = getattr(current_user, "_pat_scopes", None) or []
+    if is_pat_user(current_user) and pat_access:
+        pat_ws_role = pat_access.get(str(ws.id), "read")
         role_map = {"read": 1, "write": 2, "admin": 3, "superadmin": 4}
         if role_map.get(pat_ws_role, 1) < role_map.get(role, 1):
             role = pat_ws_role
 
-    if (
-        require_write
-        and (
-            (
-                current_user.role != "superadmin"
-                and (role in ("read", "viewer") or role not in ("write", "admin", "superadmin"))
-            )
-            or (
-                hasattr(current_user, "_pat_workspace_access")
-                and current_user._pat_workspace_access.get(str(ws.id), "read") == "read"
-            )
-            or (
-                hasattr(current_user, "_pat_scopes")
-                and "write" not in current_user._pat_scopes
-                and "admin" not in current_user._pat_scopes
-            )
+    if require_write and (
+        (
+            current_user.role != "superadmin"
+            and (role in ("read", "viewer") or role not in ("write", "admin", "superadmin"))
         )
+        or (is_pat_user(current_user) and pat_access.get(str(ws.id), "read") == "read")
+        or (is_pat_user(current_user) and "write" not in pat_scopes and "admin" not in pat_scopes)
     ):
         raise HTTPException(403, write_error_msg)
 
