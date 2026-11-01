@@ -169,8 +169,9 @@ class PersonalAccessTokenCreate(BaseModel):
         if not self.workspace_ids and self.workspace_id:
             self.workspace_ids = [self.workspace_id]
 
-        if not self.scopes:
-            raise ValueError("You must explicitly select at least one permission scope.")
+        has_explicit_access = (
+            "workspace_access" in self.__pydantic_fields_set__ and bool(self.workspace_access)
+        )
 
         # Sync workspace_access and workspace_ids
         if self.workspace_access:
@@ -191,6 +192,21 @@ class PersonalAccessTokenCreate(BaseModel):
 
         if not self.workspace_ids:
             raise ValueError("You must explicitly grant access to at least one workspace.")
+
+        # Auto-derive scopes from workspace_access if scopes were omitted
+        if not self.scopes and has_explicit_access:
+            derived_scopes = set()
+            for role in self.workspace_access.values():
+                if role == "read":
+                    derived_scopes.add("read")
+                elif role == "write":
+                    derived_scopes.update(["read", "write"])
+                elif role == "admin":
+                    derived_scopes.update(["read", "write", "admin"])
+            self.scopes = sorted(derived_scopes)
+
+        if not self.scopes:
+            raise ValueError("You must explicitly select at least one permission scope.")
 
         return self
 
