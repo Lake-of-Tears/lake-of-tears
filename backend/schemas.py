@@ -111,6 +111,23 @@ class InvitationResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class UserSessionResponse(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    email: str | None = None
+    display_name: str | None = None
+    ip_address: str | None = None
+    user_agent: str | None = None
+    created_at: datetime
+    last_active_at: datetime
+    expires_at: datetime
+    is_revoked: bool
+    revoked_at: datetime | None = None
+    is_current: bool = False
+
+    model_config = {"from_attributes": True}
+
+
 # ── Workspaces ────────────────────────────────────────────────────────────────
 
 

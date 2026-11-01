@@ -15,6 +15,7 @@ from auth import (
     COOKIE_NAME,
     SECRET_KEY,
     create_token,
+    create_user_session,
     get_session_expires_delta,
     is_registration_enabled,
 )
@@ -498,6 +499,9 @@ def handle_oauth_callback(
         return resp
 
     expires_delta = get_session_expires_delta(db)
+    ip_addr = request.client.host if request.client else None
+    ua = request.headers.get("user-agent")
+    user_sess = create_user_session(db, user, expires_delta, ip_address=ip_addr, user_agent=ua)
     token = create_token(
         {
             "sub": str(user.id),
@@ -506,6 +510,7 @@ def handle_oauth_callback(
             "display_name": user.display_name or "",
         },
         expires_delta=expires_delta,
+        session_id=str(user_sess.id),
     )
     next_url = state_data.get("next", "/")
     resp = RedirectResponse(url=next_url)

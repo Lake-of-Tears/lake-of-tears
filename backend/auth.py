@@ -13,7 +13,7 @@ import bcrypt
 import jwt
 from database import SessionLocal, get_db
 from fastapi import Cookie, Depends, Header, HTTPException, Query
-from models import SystemSetting, User, Workspace, WorkspaceMember, WorkspaceShare
+from models import SystemSetting, User, UserSession, Workspace, WorkspaceMember, WorkspaceShare
 from sqlalchemy.orm import Session
 
 SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "dev-secret-please-change-in-production")
@@ -225,12 +225,15 @@ def create_token(
     data: dict,
     expires_delta: timedelta | None = None,
     session_start_ts: float | None = None,
+    session_id: str | None = None,
 ) -> str:
     now = datetime.now(UTC)
     if expires_delta is None:
         expires_delta = _FALLBACK_TTL
+    jti = session_id or data.get("jti") or str(uuid.uuid4())
     payload = {
         **data,
+        "jti": str(jti),
         "ss": session_start_ts if session_start_ts is not None else now.timestamp(),
         "exp": now + expires_delta,
     }
@@ -239,6 +242,119 @@ def create_token(
 
 def decode_token(token: str) -> dict:
     return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+
+
+def create_user_session(
+    db: Session,
+    user: User,
+    expires_delta: timedelta,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+    session_id: uuid.UUID | None = None,
+) -> UserSession:
+    """Create and persist a new active session in user_sessions."""
+    now = datetime.now(UTC)
+    sess_id = session_id or uuid.uuid4()
+    session = UserSession(
+        id=sess_id,
+        user_id=user.id,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        created_at=now,
+        last_active_at=now,
+        expires_at=now + expires_delta,
+        is_revoked=False,
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+def get_current_session_id(
+    lake_token: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
+) -> uuid.UUID:
+    """Extract and validate the current session ID (jti) from the request token."""
+    token = lake_token
+    if not token and authorization and authorization.startswith("Bearer "):
+        token = authorization[7:]
+    if not token:
+        raise HTTPException(401, "Not authenticated")
+    try:
+        payload = decode_token(token)
+    except Exception:
+        raise HTTPException(401, "Invalid token")
+    jti = payload.get("jti")
+    if not jti:
+        raise HTTPException(
+            401, "Legacy session token expired or invalid (re-authentication required)"
+        )
+    try:
+        return uuid.UUID(str(jti))
+    except (ValueError, TypeError):
+        raise HTTPException(401, "Invalid session identifier")
+
+
+def revoke_user_session(
+    db: Session,
+    session_id: uuid.UUID,
+    user_id: uuid.UUID | None = None,
+) -> bool:
+    """Mark a user session as revoked. If user_id is provided, enforces ownership."""
+    query = db.query(UserSession).filter(UserSession.id == session_id)
+    if user_id is not None:
+        query = query.filter(UserSession.user_id == user_id)
+    session_rec = query.first()
+    if not session_rec:
+        return False
+    session_rec.is_revoked = True
+    session_rec.revoked_at = datetime.now(UTC)
+    db.commit()
+    return True
+
+
+def revoke_all_other_sessions(
+    db: Session,
+    user_id: uuid.UUID,
+    current_session_id: uuid.UUID,
+) -> int:
+    """Revoke all active sessions for a user except the currently active session."""
+    now = datetime.now(UTC)
+    updated = (
+        db.query(UserSession)
+        .filter(
+            UserSession.user_id == user_id,
+            UserSession.id != current_session_id,
+            UserSession.is_revoked == False,  # noqa: E712
+        )
+        .update(
+            {"is_revoked": True, "revoked_at": now},
+            synchronize_session=False,
+        )
+    )
+    if updated:
+        db.commit()
+    return updated
+
+
+def prune_expired_sessions(db: Session, retention_days: int = 30) -> int:
+    """Delete session records that were revoked or expired more than retention_days ago."""
+    threshold = datetime.now(UTC) - timedelta(days=retention_days)
+    deleted = (
+        db.query(UserSession)
+        .filter(
+            ((UserSession.is_revoked == True) & (UserSession.revoked_at < threshold))  # noqa: E712
+            | (UserSession.expires_at < threshold)
+        )
+        .delete(synchronize_session=False)
+    )
+    if deleted:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+    return deleted
 
 
 def get_current_user(
@@ -272,6 +388,46 @@ def get_current_user(
 
     if not user or not user.is_active:
         raise HTTPException(401, "Invalid token")
+
+    # Enforce active session tracking via jti claim in user_sessions
+    jti = payload.get("jti")
+    if not jti:
+        raise HTTPException(
+            401, "Legacy session token expired or invalid (re-authentication required)"
+        )
+
+    try:
+        session_id = uuid.UUID(str(jti))
+    except (ValueError, TypeError):
+        raise HTTPException(401, "Invalid session identifier")
+
+    session_rec = (
+        db.query(UserSession)
+        .filter(UserSession.id == session_id, UserSession.user_id == user.id)
+        .first()
+    )
+    if not session_rec or session_rec.is_revoked:
+        raise HTTPException(401, "Session has been revoked")
+
+    now = datetime.now(UTC)
+    expires_at = session_rec.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    if expires_at <= now:
+        raise HTTPException(401, "Session expired")
+
+    # Throttle last_active_at updates: write at most once per 60 seconds
+    last_active = session_rec.last_active_at
+    if last_active.tzinfo is None:
+        last_active = last_active.replace(tzinfo=UTC)
+    if (now - last_active).total_seconds() >= 60:
+        session_rec.last_active_at = now
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+
+    user._current_session_id = session_rec.id
     return user
 
 

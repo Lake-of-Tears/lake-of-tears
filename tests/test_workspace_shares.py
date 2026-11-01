@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import jwt
@@ -27,6 +27,7 @@ from models import (  # noqa: E402
     Catalog,
     CatalogAccess,
     User,
+    UserSession,
     Workspace,
     WorkspaceMember,
     WorkspaceShare,
@@ -60,12 +61,6 @@ def _setup_test_db():
         role="superadmin",
         is_active=True,
     )
-    superadmin_token = jwt.encode(
-        {"sub": str(admin_id), "email": superadmin.email, "role": superadmin.role},
-        auth.SECRET_KEY,
-        algorithm="HS256",
-    )
-
     # Workspace Owner / Admin
     owner_id = uuid.uuid4()
     ws_admin = User(
@@ -75,12 +70,6 @@ def _setup_test_db():
         role="user",
         is_active=True,
     )
-    ws_admin_token = jwt.encode(
-        {"sub": str(owner_id), "email": ws_admin.email, "role": ws_admin.role},
-        auth.SECRET_KEY,
-        algorithm="HS256",
-    )
-
     # Regular Requester User
     user_id = uuid.uuid4()
     requester = User(
@@ -90,12 +79,6 @@ def _setup_test_db():
         role="user",
         is_active=True,
     )
-    requester_token = jwt.encode(
-        {"sub": str(user_id), "email": requester.email, "role": requester.role},
-        auth.SECRET_KEY,
-        algorithm="HS256",
-    )
-
     # Other non-member User
     other_id = uuid.uuid4()
     other_user = User(
@@ -105,13 +88,32 @@ def _setup_test_db():
         role="user",
         is_active=True,
     )
-    other_token = jwt.encode(
-        {"sub": str(other_id), "email": other_user.email, "role": other_user.role},
-        auth.SECRET_KEY,
-        algorithm="HS256",
-    )
-
     session.add_all([superadmin, ws_admin, requester, other_user])
+    session.commit()
+
+    def _create_token(user):
+        sess_id = uuid.uuid4()
+        session.add(
+            UserSession(
+                id=sess_id,
+                user_id=user.id,
+                created_at=datetime.now(UTC),
+                last_active_at=datetime.now(UTC),
+                expires_at=datetime.now(UTC) + timedelta(hours=24),
+                is_revoked=False,
+            )
+        )
+        return jwt.encode(
+            {"sub": str(user.id), "email": user.email, "role": user.role, "jti": str(sess_id)},
+            auth.SECRET_KEY,
+            algorithm="HS256",
+        )
+
+    superadmin_token = _create_token(superadmin)
+    ws_admin_token = _create_token(ws_admin)
+    requester_token = _create_token(requester)
+    other_token = _create_token(other_user)
+    session.commit()
 
     # Workspace 1 (active)
     ws1 = Workspace(

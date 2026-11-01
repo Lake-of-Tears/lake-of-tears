@@ -214,7 +214,7 @@ def _get_session_config() -> dict:
             return _SESSION_CONFIG_CACHE
     except Exception:
         pass
-    return {"session_inactivity_timeout_minutes": 0, "session_max_hours": 24}
+    return {"session_inactivity_timeout_minutes": 60, "session_max_hours": 24}
 
 
 def _fetch_workspaces(token: str) -> list[dict] | None:
@@ -241,7 +241,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         request.state.workspaces = []
         request.state.has_shared_access = False
         request.state.session_config = {
-            "session_inactivity_timeout_minutes": 0,
+            "session_inactivity_timeout_minutes": 60,
             "session_max_hours": 24,
         }
 
@@ -795,9 +795,21 @@ async def login_page(request: Request):
 
 
 @app.post("/logout")
-async def logout():
+async def logout(request: Request):
+    token = request.cookies.get("lake_token")
+    if token:
+        try:
+            with httpx.Client(timeout=3) as client:
+                client.post(
+                    f"{BACKEND_URL}/api/auth/logout",
+                    headers={"Authorization": f"Bearer {token}"},
+                    cookies={"lake_token": token},
+                )
+        except Exception:
+            pass
     resp = RedirectResponse(url="/login", status_code=302)
     resp.delete_cookie("lake_token")
+    resp.delete_cookie(_WORKSPACE_COOKIE)
     return resp
 
 
@@ -2031,6 +2043,7 @@ def _backend_delete(
 async def settings_account_get(request: Request):
     token = request.cookies.get("lake_token")
     profile = _backend_get("/api/auth/me", token) if token else None
+    sessions = _backend_get("/api/auth/sessions", token) if token else []
     saved = request.query_params.get("saved")
     password_saved = request.query_params.get("password_saved")
     password_error = request.query_params.get("password_error")
@@ -2044,6 +2057,7 @@ async def settings_account_get(request: Request):
             "password_saved": password_saved,
             "password_error": password_error,
             "profile": profile,
+            "sessions": sessions or [],
         },
     )
 
@@ -2098,6 +2112,22 @@ async def settings_account_password_post(
             max_age = None
         resp.set_cookie("lake_token", new_token, max_age=max_age, httponly=True, samesite="lax")
     return resp
+
+
+@app.post("/settings/account/sessions/{session_id}/revoke")
+async def settings_account_session_revoke_post(request: Request, session_id: str):
+    token = request.cookies.get("lake_token")
+    if token:
+        _backend_delete(f"/api/auth/sessions/{session_id}", token)
+    return RedirectResponse(url="/settings/account?saved=revoked", status_code=302)
+
+
+@app.post("/settings/account/sessions/revoke-others")
+async def settings_account_session_revoke_others_post(request: Request):
+    token = request.cookies.get("lake_token")
+    if token:
+        _backend_post("/api/auth/sessions/revoke-others", token, {})
+    return RedirectResponse(url="/settings/account?saved=revoked_others", status_code=302)
 
 
 # ── Settings: Workspace ───────────────────────────────────────────────────
@@ -2256,10 +2286,11 @@ async def settings_admin_get(request: Request):
     users_list = _backend_get("/api/users", token) or []
     all_ws = _backend_get("/api/admin/workspaces", token) or []
     invitations_list = _backend_get("/api/admin/invitations", token) or []
+    active_sessions = _backend_get("/api/admin/sessions", token) or []
     admin_settings = _backend_get("/api/admin/settings", token) or {
         "catalog_soft_delete_days": 30,
         "workspace_inactive_grace_period_days": 30,
-        "session_inactivity_timeout_minutes": 0,
+        "session_inactivity_timeout_minutes": 60,
         "session_max_hours": 24,
         "gemini_api_key_configured": False,
         "gemini_api_key_masked": None,
@@ -2274,6 +2305,7 @@ async def settings_admin_get(request: Request):
             "users": users_list,
             "workspaces": all_ws,
             "invitations": invitations_list,
+            "active_sessions": active_sessions,
             "invite_error": request.query_params.get("invite_error"),
             "admin_settings": admin_settings,
             "auth_overview": _backend_get("/api/admin/auth-overview", token),
@@ -2377,6 +2409,17 @@ async def settings_admin_session_settings(
         },
     )
     return RedirectResponse(url="/settings/admin?saved=1", status_code=302)
+
+
+@app.post("/settings/admin/sessions/{session_id}/revoke")
+async def settings_admin_session_revoke(request: Request, session_id: str):
+    user = request.state.user
+    if not user or user.get("role") != "superadmin":
+        return RedirectResponse(url="/", status_code=302)
+    token = request.cookies.get("lake_token")
+    if token:
+        _backend_delete(f"/api/admin/sessions/{session_id}", token)
+    return RedirectResponse(url="/settings/admin?saved=session_revoked", status_code=302)
 
 
 def _backend_put(
