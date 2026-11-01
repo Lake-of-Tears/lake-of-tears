@@ -58,7 +58,7 @@ Prefix branch names with the type of change and include the corresponding GitHub
 | **Feature** | `feat/<issue#>-<description>` | `feat/51-first-time-setup-wizard` | New functionality or capabilities |
 | **Bug Fix** | `fix/<issue#>-<description>` | `fix/46-minio-image-references` | Resolving bugs or defects |
 | **Security** | `sec/<issue#>-<description>` | `sec/52-upgrade-jwt-multipart` | CVE fixes, security patches |
-| **Infrastructure** | `infra/<issue#>-<description>` | `infra/49-setup-local-script` | Helm, Docker, CI/CD, Terraform |
+| **Infrastructure** | `infra/<issue#>-<description>` | `infra/49-setup-local-script` | Helm, Docker, CI/CD |
 | **Documentation** | `docs/<issue#>-<description>` | `docs/branching-strategy` | Documentation improvements |
 | **Refactoring** | `refactor/<issue#>-<description>` | `refactor/duckdb-connection-pool` | Code cleanup with no functional change |
 

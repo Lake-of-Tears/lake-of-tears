@@ -15,7 +15,7 @@ body:
         - New data source connector
         - Lake UI
         - Pipeline (embed / anomaly / RAG)
-        - Deployment (Docker Compose / Helm / Terraform)
+        - Deployment (Helm / Kubernetes)
         - Developer experience
         - Documentation
         - Other

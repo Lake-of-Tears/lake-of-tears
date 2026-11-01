@@ -1,7 +1,6 @@
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-exclude = ["deploy/terraform/"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP"]
@@ -15,5 +14,5 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.bandit]
-exclude_dirs = ["deploy/terraform/", ".venv/"]
+exclude_dirs = [".venv/"]
 skips = ["B101", "B608"]

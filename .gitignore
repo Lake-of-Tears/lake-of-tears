@@ -3,18 +3,9 @@
 *.local.toon
 lake-of-tears.local.toon
 lake-of-tears.toon
-*.tfvars
-!*.tfvars.example
 deploy/helm/*secret*.yaml
 deploy/helm/values-*.yaml
 !deploy/helm/values-*.example.yaml
-
-# Terraform state
-**/.terraform/
-*.tfstate
-*.tfstate.backup
-*.tfstate.*.backup
-.terraform.lock.hcl
 
 # Python
 __pycache__/

@@ -17,9 +17,7 @@ body:
         - Pipeline — ingest
         - Pipeline — embed / summarize / anomaly detect
         - Pipeline — RAG query
-        - Docker Compose deployment
         - Helm / Kubernetes deployment
-        - Terraform
         - Documentation
     validations:
       required: true
