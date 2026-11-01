@@ -374,6 +374,7 @@ def create_personal_access_token(
     name: str,
     lifetime_days: int | None = 30,
     workspace_id: uuid.UUID | None = None,
+    workspace_ids: list[uuid.UUID] | list[str] | None = None,
     scopes: list[str] | None = None,
 ) -> tuple[PersonalAccessToken, str]:
     """Generate and store a new Personal Access Token for a user."""
@@ -393,28 +394,45 @@ def create_personal_access_token(
             f"Active personal access token limit ({MAX_ACTIVE_PATS_PER_USER}) reached. Please revoke unused tokens.",
         )
 
-    if workspace_id is not None:
+    # Normalize workspaces: default no access! Must explicitly grant at least one workspace.
+    resolved_wids: list[str] = []
+    if workspace_ids:
+        resolved_wids = [str(wid) for wid in workspace_ids]
+    elif workspace_id is not None:
+        resolved_wids = [str(workspace_id)]
+
+    if not resolved_wids:
+        raise HTTPException(400, "You must explicitly grant access to at least one workspace.")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    for wid in resolved_wids:
+        try:
+            wid_uuid = uuid.UUID(wid)
+        except (ValueError, TypeError):
+            raise HTTPException(400, f"Invalid workspace ID '{wid}'")
         ws = (
             db.query(Workspace)
-            .filter(Workspace.id == workspace_id, Workspace.status == "active")
+            .filter(Workspace.id == wid_uuid, Workspace.status == "active")
             .first()
         )
         if not ws:
-            raise HTTPException(404, "Workspace not found")
-        user = db.query(User).filter(User.id == user_id).first()
+            raise HTTPException(404, f"Workspace '{wid}' not found")
         if user and user.role != "superadmin":
             member = (
                 db.query(WorkspaceMember)
                 .filter(
-                    WorkspaceMember.workspace_id == workspace_id,
+                    WorkspaceMember.workspace_id == wid_uuid,
                     WorkspaceMember.user_id == user_id,
                 )
                 .first()
             )
             if not member:
                 raise HTTPException(
-                    403, "Cannot restrict token to a workspace you are not a member of"
+                    403, f"Cannot grant token access to workspace '{ws.name}' (not a member)"
                 )
+
+    if not scopes:
+        raise HTTPException(400, "You must explicitly select at least one permission scope.")
 
     random_hex = secrets.token_hex(32)
     raw_token = f"{PAT_PREFIX}{random_hex}"
@@ -423,15 +441,15 @@ def create_personal_access_token(
 
     now = datetime.now(UTC)
     expires_at = now + timedelta(days=lifetime_days) if lifetime_days is not None else None
-    assigned_scopes = scopes if scopes is not None else ["read", "write"]
 
     pat = PersonalAccessToken(
         user_id=user_id,
         name=name.strip(),
         token_prefix=token_prefix,
         token_hash=token_hash,
-        workspace_id=workspace_id,
-        scopes=assigned_scopes,
+        workspace_id=uuid.UUID(resolved_wids[0]) if resolved_wids else None,
+        workspace_ids=resolved_wids,
+        scopes=scopes,
         created_at=now,
         expires_at=expires_at,
         is_revoked=False,
@@ -510,8 +528,12 @@ def get_current_user(
 
         user._current_session_id = None
         user._pat = pat
-        user._pat_scopes = pat.scopes or ["read", "write"]
-        user._pat_workspace_id = pat.workspace_id
+        user._pat_scopes = pat.scopes or []
+        wids = [str(wid) for wid in (pat.workspace_ids or [])]
+        if pat.workspace_id and str(pat.workspace_id) not in wids:
+            wids.append(str(pat.workspace_id))
+        user._pat_workspace_ids = wids
+        user._pat_workspace_id = pat.workspace_id or (uuid.UUID(wids[0]) if wids else None)
         return user
 
     try:
@@ -591,16 +613,10 @@ def get_workspace_member(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> WorkspaceMember:
-    if getattr(current_user, "_pat_workspace_id", None) is not None:
-        try:
-            ws_uuid = uuid.UUID(str(workspace_id))
-            if ws_uuid != current_user._pat_workspace_id:
-                raise HTTPException(
-                    403, "Personal access token is restricted to a different workspace"
-                )
-        except (ValueError, TypeError):
+    if hasattr(current_user, "_pat_workspace_ids"):
+        if str(workspace_id) not in current_user._pat_workspace_ids:
             raise HTTPException(
-                403, "Personal access token is restricted to a different workspace"
+                403, "Personal access token does not have access to this workspace"
             )
 
     member = (
@@ -623,16 +639,10 @@ def require_workspace_admin(
 ) -> WorkspaceMember:
     if hasattr(current_user, "_pat_scopes") and "admin" not in current_user._pat_scopes:
         raise HTTPException(403, "Personal access token does not have admin scope")
-    if getattr(current_user, "_pat_workspace_id", None) is not None:
-        try:
-            ws_uuid = uuid.UUID(str(workspace_id))
-            if ws_uuid != current_user._pat_workspace_id:
-                raise HTTPException(
-                    403, "Personal access token is restricted to a different workspace"
-                )
-        except (ValueError, TypeError):
+    if hasattr(current_user, "_pat_workspace_ids"):
+        if str(workspace_id) not in current_user._pat_workspace_ids:
             raise HTTPException(
-                403, "Personal access token is restricted to a different workspace"
+                403, "Personal access token does not have access to this workspace"
             )
 
     if current_user.role == "superadmin":
@@ -750,10 +760,10 @@ def get_workspace_context(
         member.role if member else ("superadmin" if current_user.role == "superadmin" else "read")
     )
 
-    if getattr(current_user, "_pat_workspace_id", None) is not None:
-        if ws.id != current_user._pat_workspace_id:
+    if hasattr(current_user, "_pat_workspace_ids"):
+        if str(ws.id) not in current_user._pat_workspace_ids:
             raise HTTPException(
-                403, "Personal access token is restricted to a different workspace"
+                403, f"Personal access token does not have access to workspace '{ws.name}'"
             )
 
     if (

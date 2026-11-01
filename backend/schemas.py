@@ -135,7 +135,8 @@ class PersonalAccessTokenCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     lifetime_days: int | None = Field(default=30, ge=1, le=3650)
     workspace_id: uuid.UUID | None = None
-    scopes: list[str] = Field(default_factory=lambda: ["read", "write"])
+    workspace_ids: list[uuid.UUID] = Field(default_factory=list)
+    scopes: list[str] = Field(default_factory=list)
 
     @field_validator("name")
     @classmethod
@@ -144,6 +145,17 @@ class PersonalAccessTokenCreate(BaseModel):
         if not s:
             raise ValueError("Token name cannot be empty")
         return s
+
+    @model_validator(mode="after")
+    def validate_workspaces_and_scopes(self) -> Self:
+        # Normalize single workspace_id into workspace_ids
+        if not self.workspace_ids and self.workspace_id:
+            self.workspace_ids = [self.workspace_id]
+        if not self.workspace_ids:
+            raise ValueError("You must explicitly grant access to at least one workspace.")
+        if not self.scopes:
+            raise ValueError("You must explicitly select at least one permission scope.")
+        return self
 
     @field_validator("scopes")
     @classmethod
@@ -156,8 +168,6 @@ class PersonalAccessTokenCreate(BaseModel):
                 raise ValueError(f"Invalid scope '{item}'. Must be one of: {sorted(valid_scopes)}")
             if item not in cleaned:
                 cleaned.append(item)
-        if not cleaned:
-            raise ValueError("At least one scope must be provided")
         return cleaned
 
 
@@ -167,6 +177,7 @@ class PersonalAccessTokenCreatedResponse(BaseModel):
     token: str
     token_prefix: str
     workspace_id: uuid.UUID | None = None
+    workspace_ids: list[str] = Field(default_factory=list)
     scopes: list[str]
     created_at: datetime
     expires_at: datetime | None = None
@@ -180,6 +191,8 @@ class PersonalAccessTokenResponse(BaseModel):
     token_prefix: str
     workspace_id: uuid.UUID | None = None
     workspace_name: str | None = None
+    workspace_ids: list[str] = Field(default_factory=list)
+    workspace_names: list[str] = Field(default_factory=list)
     scopes: list[str]
     created_at: datetime
     expires_at: datetime | None = None
