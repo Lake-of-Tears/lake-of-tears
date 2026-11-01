@@ -477,3 +477,186 @@ class TestFastAPIEndpoints:
             data = resp.json()
             assert data["ok"] is False
             assert "Access Denied" in data["error"]
+
+    def test_is_read_only_sql_matrix(self):
+        """Verify duckdb_ai and ai_service correctly classify read-only vs write statements (Issue #174)."""
+        import ai_service
+        import duckdb_ai
+
+        valid_statements = [
+            "SELECT 1",
+            "SELECT * FROM tbl WHERE s = 'done;paid'",
+            "WITH x AS (SELECT 1) SELECT * FROM x",
+            "DESCRIBE tbl",
+            "SUMMARIZE tbl",
+            "SHOW TABLES",
+            "EXPLAIN SELECT 1",
+            "VALUES (1, 'val')",
+            "(SELECT 1)",
+        ]
+
+        forbidden_statements = [
+            "COPY (SELECT 1 AS x) TO 's3://datalake/test.parquet'",
+            "COPY tbl FROM 's3://datalake/test.parquet'",
+            "CREATE TABLE t AS SELECT 1",
+            "CREATE OR REPLACE TABLE t AS SELECT 1",
+            "DROP TABLE t",
+            "INSERT INTO t VALUES (1)",
+            "UPDATE t SET col = 1",
+            "DELETE FROM t",
+            "ALTER TABLE t ADD COLUMN c INT",
+            "ATTACH 'test.db' AS test_db",
+            "DETACH test_db",
+            "INSTALL httpfs",
+            "LOAD httpfs",
+            "PRAGMA threads=4",
+            "SELECT 1; SELECT 2",
+            "WITH x AS (DELETE FROM t RETURNING *) SELECT * FROM x",
+        ]
+
+        for mod in (duckdb_ai, ai_service):
+            for sql in valid_statements:
+                ok, err = mod.is_read_only_sql(sql)
+                assert ok is True, f"Expected {sql} to be allowed by {mod.__name__}, got err: {err}"
+
+            for sql in forbidden_statements:
+                ok, err = mod.is_read_only_sql(sql)
+                assert ok is False, f"Expected {sql} to be rejected by {mod.__name__}"
+                assert err is not None
+
+    def test_sql_editor_post_read_only_enforcement_for_all_roles(self):
+        """Verify POST /sql in UI blocks write statements for both standard users and superadmins (Issue #174)."""
+        # 1. Standard user / viewer attempts write queries
+        user_payload = {"sub": "user-std", "email": "viewer@lake.local", "role": "user"}
+        token = jwt.encode(user_payload, self.ui_main.AUTH_SECRET_KEY, algorithm="HS256")
+        self.ui_client.cookies.set("lake_token", token)
+        self.ui_client.cookies.set("lake_workspace_slug", "default")
+
+        resp_copy = self.ui_client.post(
+            "/sql",
+            data={"sql": "COPY (SELECT 1 AS x) TO 's3://datalake/test.parquet'"},
+        )
+        assert resp_copy.status_code == 200
+        assert "Query Blocked by Read-Only Policy" in resp_copy.text
+        assert "Only read-only queries" in resp_copy.text
+
+        resp_create = self.ui_client.post(
+            "/sql",
+            data={"sql": "CREATE TABLE t_evil AS SELECT 1"},
+        )
+        assert resp_create.status_code == 200
+        assert "Query Blocked by Read-Only Policy" in resp_create.text
+
+        # 2. Superadmin also has read-only policy enforced on POST /sql
+        admin_payload = {"sub": "admin-1", "email": "admin@lake.local", "role": "superadmin"}
+        admin_token = jwt.encode(admin_payload, self.ui_main.AUTH_SECRET_KEY, algorithm="HS256")
+        self.ui_client.cookies.set("lake_token", admin_token)
+
+        resp_admin_copy = self.ui_client.post(
+            "/sql",
+            data={"sql": "COPY (SELECT 1 AS x) TO 's3://datalake/admin_test.parquet'"},
+        )
+        assert resp_admin_copy.status_code == 200
+        assert "Query Blocked by Read-Only Policy" in resp_admin_copy.text
+
+        resp_admin_create = self.ui_client.post(
+            "/sql",
+            data={"sql": "CREATE TABLE t_admin AS SELECT 1"},
+        )
+        assert resp_admin_create.status_code == 200
+        assert "Query Blocked by Read-Only Policy" in resp_admin_create.text
+
+        # 3. Read query succeeds
+        resp_read = self.ui_client.post(
+            "/sql",
+            data={"sql": "SELECT 98765 AS test_metric"},
+        )
+        assert resp_read.status_code == 200
+        assert "98765" in resp_read.text
+        assert "Query Blocked by Read-Only Policy" not in resp_read.text
+
+    def test_api_sql_execute_unconditionally_enforces_read_only(self):
+        """Verify UI and backend SQL execution endpoints block writes even if read_only=False is passed (Issue #174)."""
+        import auth
+        import database
+        from models import User, Workspace, WorkspaceMember
+
+        # 1. UI endpoint /api/ai/sql/execute
+        user_payload = {"sub": "user-std", "email": "viewer@lake.local", "role": "user"}
+        token = jwt.encode(user_payload, self.ui_main.AUTH_SECRET_KEY, algorithm="HS256")
+        self.ui_client.cookies.set("lake_token", token)
+        self.ui_client.cookies.set("lake_workspace_slug", "default")
+
+        resp_ui = self.ui_client.post(
+            "/api/ai/sql/execute",
+            json={
+                "sql": "COPY (SELECT 1 AS x) TO 's3://datalake/test.parquet'",
+                "read_only": False,
+            },
+        )
+        assert resp_ui.status_code == 200
+        data_ui = resp_ui.json()
+        assert data_ui["ok"] is False
+        assert "Only read-only queries" in data_ui["error"]
+        assert data_ui["error_info"]["error_type"] == "READ_ONLY"
+
+        # 2. Backend endpoint /api/v1/ai/sql/execute
+        user_id = uuid.uuid4()
+        user = User(
+            id=user_id,
+            email="dev@lake.local",
+            display_name="Dev",
+            role="user",
+            is_active=True,
+        )
+        ws_id = uuid.uuid4()
+        workspace = Workspace(
+            id=ws_id,
+            name="Alpha Workspace",
+            slug="ws-alpha",
+            status="active",
+        )
+        member = WorkspaceMember(
+            id=uuid.uuid4(),
+            workspace_id=ws_id,
+            user_id=user_id,
+            role="read",
+        )
+        mock_db = MagicMock()
+
+        def query_side_effect(model, *args, **kwargs):
+            q = MagicMock()
+            if model is Workspace:
+                q.filter.return_value.first.return_value = workspace
+                q.filter.return_value.order_by.return_value.first.return_value = workspace
+            elif model is WorkspaceMember:
+                q.filter.return_value.first.return_value = member
+            else:
+                q.filter.return_value.order_by.return_value.all.return_value = []
+                q.filter.return_value.all.return_value = []
+            return q
+
+        mock_db.query.side_effect = query_side_effect
+        self.backend_main.app.dependency_overrides[database.get_db] = lambda: mock_db
+        self.backend_main.app.dependency_overrides[auth.get_current_user] = lambda: user
+
+        auth_token = jwt.encode(
+            {"sub": str(user_id), "email": user.email, "role": user.role},
+            auth.SECRET_KEY,
+            algorithm="HS256",
+        )
+        try:
+            resp_be = self.backend_client.post(
+                "/api/v1/ai/sql/execute",
+                headers={
+                    "Authorization": f"Bearer {auth_token}",
+                    "X-Workspace-Slug": workspace.slug,
+                },
+                json={"sql": "CREATE TABLE t AS SELECT 1", "read_only": False},
+            )
+            assert resp_be.status_code == 200
+            data_be = resp_be.json()
+            assert data_be["ok"] is False
+            assert "Only read-only queries" in data_be["error"]
+        finally:
+            self.backend_main.app.dependency_overrides.clear()

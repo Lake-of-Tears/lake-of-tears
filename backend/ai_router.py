@@ -89,7 +89,7 @@ def execute_sql(
     result = ai_service.execute_sql_query(
         sql=req.sql,
         catalogs=catalogs,
-        read_only=req.read_only,
+        read_only=True,
         max_ai_rows=req.max_ai_rows,
         workspace_slug=ws.slug,
         is_superadmin=is_superadmin,

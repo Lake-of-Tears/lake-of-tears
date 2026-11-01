@@ -13,6 +13,8 @@ from typing import Any
 
 import duckdb
 import pyarrow as pa
+import sqlglot
+from sqlglot import exp
 
 try:
     from ui.ai_gateway_client import GatewayClient
@@ -743,21 +745,50 @@ def is_read_only_sql(sql: str) -> tuple[bool, str | None]:
     if not cleaned:
         return False, "SQL query cannot be empty."
 
-    statements = [s.strip() for s in cleaned.split(";") if s.strip()]
-    if len(statements) > 1:
-        return False, "Only a single read-only SQL statement is permitted."
+    # 1. AST parsing via sqlglot for accurate statement count and write-node detection
+    try:
+        parsed_stmts = [s for s in sqlglot.parse(cleaned, read="duckdb") if s is not None]
+        if len(parsed_stmts) > 1:
+            return False, "Only a single read-only SQL statement is permitted."
+        if len(parsed_stmts) == 0:
+            return False, "SQL query cannot be empty."
 
-    stmt = statements[0]
-    if _FORBIDDEN_SQL_RE.match(stmt):
+        ast = parsed_stmts[0]
+        # Inspect for any write / modification AST nodes (including within CTEs)
+        has_write = any(
+            isinstance(
+                node,
+                exp.Insert | exp.Delete | exp.Update | exp.Create | exp.Drop | exp.Copy | exp.Alter,
+            )
+            for node in ast.walk()
+        )
+        if has_write:
+            return (
+                False,
+                "Only read-only queries (SELECT, WITH, DESCRIBE, SUMMARIZE, SHOW, EXPLAIN, VALUES) are allowed.",
+            )
+    except Exception:
+        # Fallback to semicolon-based splitting if AST parsing fails
+        statements = [s.strip() for s in cleaned.split(";") if s.strip()]
+        if len(statements) > 1:
+            return False, "Only a single read-only SQL statement is permitted."
+
+    # 2. Validate against forbidden verbs regex
+    if _FORBIDDEN_SQL_RE.match(cleaned):
         return (
             False,
-            "Only read-only queries (SELECT, WITH, DESCRIBE, SUMMARIZE, SHOW) are allowed.",
+            "Only read-only queries (SELECT, WITH, DESCRIBE, SUMMARIZE, SHOW, EXPLAIN, VALUES) are allowed.",
         )
 
-    if not re.match(r"^\s*(SELECT|WITH|DESCRIBE|SUMMARIZE|SHOW|EXPLAIN|VALUES)\b", stmt, re.I):
+    # 3. Require query to start with read-only statement keyword
+    if not re.match(
+        r"^\s*\(?\s*(SELECT|WITH|DESCRIBE|SUMMARIZE|SHOW|EXPLAIN|VALUES)\b",
+        cleaned,
+        re.IGNORECASE,
+    ):
         return (
             False,
-            "Query must begin with SELECT, WITH, DESCRIBE, SUMMARIZE, SHOW, or EXPLAIN.",
+            "Query must begin with SELECT, WITH, DESCRIBE, SUMMARIZE, SHOW, EXPLAIN, or VALUES.",
         )
 
     return True, None
