@@ -13,6 +13,7 @@ Every change made to this repo gets one row, newest first.
 
 | Date | Action | Ticket | Files | Summary |
 |---|---|---|---|---|
+| 20261101 | IMPROVEMENT | #261 | `docs/wiki/Workspaces-and-Catalog-Management.md` | Comprehensive overhaul of Workspaces and Catalog Management guide for workspace isolation: S3 prefix jailing, DuckDB AST SQL guardrails, two-tier RBAC (`admin`/`write`/`read`), user workspace guest sharing lifecycle, visual badges & Hide Shared Assets UI toggle, multi-environment/department segregation best practices, and workspace-scoped REST API reference |
 | 20261101 | ADD | #260 | `docs/decisions/0002-workspace-isolation-architecture.md`, `docs/wiki/Architecture-Overview.md` | Author Architecture Decision Record (ADR) 0002 and update Architecture Overview for Workspace Isolation: tenant boundary, S3 prefix jailing (`workspaces/<slug>/`), DuckDB SQL guardrails & view encapsulation, simplified two-tier RBAC, and sharing lifecycle |
 | 20261031 | IMPROVEMENT | #317 | `.github/workflows/ci.yml`, `deploy/airflow/Dockerfile`, `tests/test_ci_workflow.py` | Modularize CI workflow into discrete parallel jobs, build Airflow Docker image, generate deployable build tags (`v<appVersion>-build.<run>-<sha>`), auto-tag Git releases on `main`, and render detailed GitHub Actions step summary |
 | 20261031 | IMPROVEMENT | #265 | `README.md`, `docs/index.html`, `CONTRIBUTING.md`, `docs/wiki/` | Complete removal of legacy Docker Compose references across landing page and documentation; added image building guide from source |
