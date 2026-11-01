@@ -2,9 +2,9 @@
 {% block title %}Account Settings — Lake of Tears{% endblock %}
 
 {% block content %}
-<div class="max-w-xl">
+<div class="max-w-2xl">
   <h1 class="text-xl font-semibold text-gray-100 mb-1">Account Settings</h1>
-  <p class="text-sm text-gray-500 mb-6">Manage your personal profile.</p>
+  <p class="text-sm text-gray-500 mb-6">Manage your personal profile and credentials.</p>
 
   {% if saved == 'revoked' %}
   <div class="mb-4 px-4 py-3 rounded-md bg-emerald-900/30 border border-emerald-800/50 text-emerald-400 text-sm">
@@ -14,9 +14,47 @@
   <div class="mb-4 px-4 py-3 rounded-md bg-emerald-900/30 border border-emerald-800/50 text-emerald-400 text-sm">
     All other active sessions have been signed out.
   </div>
+  {% elif saved == 'token_created' %}
+  <div class="mb-4 px-4 py-3 rounded-md bg-emerald-900/30 border border-emerald-800/50 text-emerald-400 text-sm">
+    Personal access token generated successfully.
+  </div>
+  {% elif saved == 'token_revoked' %}
+  <div class="mb-4 px-4 py-3 rounded-md bg-emerald-900/30 border border-emerald-800/50 text-emerald-400 text-sm">
+    Personal access token revoked successfully.
+  </div>
   {% elif saved %}
   <div class="mb-4 px-4 py-3 rounded-md bg-emerald-900/30 border border-emerald-800/50 text-emerald-400 text-sm">
     Changes saved.
+  </div>
+  {% endif %}
+
+  {% if token_error %}
+  <div id="alert-token-error" class="mb-4 px-4 py-3 rounded-md bg-red-900/30 border border-red-800/50 text-red-400 text-sm flex items-center justify-between">
+    <span>{{ token_error }}</span>
+    <button type="button" onclick="document.getElementById('alert-token-error').remove()" class="text-red-400 hover:text-red-200 ml-3 text-base leading-none" aria-label="Dismiss">&times;</button>
+  </div>
+  {% endif %}
+
+  {% if new_token_secret %}
+  <div id="new-token-banner" class="card p-5 mb-6 border-amber-600/50 bg-amber-950/20">
+    <div class="flex items-start gap-3">
+      <svg class="w-5 h-5 text-amber-400 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+      </svg>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center justify-between">
+          <h3 class="text-sm font-semibold text-amber-300">New Token Generated: {{ new_token_name }}</h3>
+          <button type="button" onclick="document.getElementById('new-token-banner').remove()" class="text-amber-400 hover:text-amber-200 text-sm leading-none">&times;</button>
+        </div>
+        <p class="text-xs text-amber-200/80 mt-1">Make sure to copy your personal access token now. You won't be able to see it again!</p>
+        <div class="mt-3 flex items-center gap-2">
+          <input type="text" id="revealed-pat-input" readonly value="{{ new_token_secret }}" class="input-dark font-mono text-xs w-full select-all bg-gray-900 border-gray-700 text-emerald-400" />
+          <button type="button" onclick="copyPat('revealed-pat-input', this)" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-medium shrink-0 transition-colors">
+            Copy Token
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
   {% endif %}
 
@@ -191,6 +229,105 @@
     </div>
   </div>
 
+  <!-- Personal Access Tokens -->
+  <div class="card p-6 mb-6" id="tokens">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h2 class="text-sm font-semibold text-gray-300">Personal Access Tokens</h2>
+        <p class="text-xs text-gray-500 mt-0.5">Tokens for authenticating REST API requests and Angler CLI workflows.</p>
+      </div>
+      <button type="button" onclick="openPatModal()" class="btn-primary text-xs flex items-center gap-1.5 py-1.5 px-3">
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        Generate New Token
+      </button>
+    </div>
+
+    {% set active_tokens = [] %}
+    {% set inactive_tokens = [] %}
+    {% for tok in tokens %}
+      {% if tok.is_revoked %}
+        {% set _ = inactive_tokens.append(tok) %}
+      {% else %}
+        {% set _ = active_tokens.append(tok) %}
+      {% endif %}
+    {% endfor %}
+
+    <!-- Active Tokens List -->
+    <div class="divide-y divide-gray-800">
+      {% for tok in active_tokens %}
+      <div class="py-3 flex items-center justify-between gap-4">
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-xs font-semibold text-gray-200">{{ tok.name }}</span>
+            <code class="text-[11px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-400 font-mono">{{ tok.token_prefix }}…</code>
+            {% if tok.workspace_name %}
+            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-900/30 text-blue-400 border border-blue-800/40">
+              {{ tok.workspace_name }}
+            </span>
+            {% else %}
+            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-800 text-gray-400 border border-gray-700">
+              All Workspaces
+            </span>
+            {% endif %}
+            {% for sc in tok.scopes %}
+            <span class="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-medium bg-purple-900/30 text-purple-300 border border-purple-800/40">
+              {{ sc }}
+            </span>
+            {% endfor %}
+          </div>
+          <div class="text-[11px] text-gray-500 mt-1 flex items-center gap-3 flex-wrap">
+            <span>Created: {{ tok.created_at[:10] if tok.created_at else 'Unknown' }}</span>
+            <span>•</span>
+            <span>Last used: {{ tok.last_used_at[:19].replace('T', ' ') if tok.last_used_at else 'Never' }}</span>
+            <span>•</span>
+            {% if tok.expires_at %}
+            <span>Expires: {{ tok.expires_at[:10] }}</span>
+            {% else %}
+            <span class="text-amber-500/80">Never expires</span>
+            {% endif %}
+          </div>
+        </div>
+
+        <div>
+          <form action="/settings/account/tokens/{{ tok.id }}/revoke" method="post" onsubmit="return confirm('Revoke this personal access token? Any client or script using it will immediately lose access.');">
+            <button type="submit" class="text-xs text-red-400 hover:text-red-300 px-2.5 py-1 rounded hover:bg-red-950/30 border border-red-900/30 transition-colors">
+              Revoke
+            </button>
+          </form>
+        </div>
+      </div>
+      {% else %}
+      <p class="text-xs text-gray-500 py-3">No active personal access tokens.</p>
+      {% endfor %}
+    </div>
+
+    {% if inactive_tokens %}
+    <div class="mt-4 pt-3 border-t border-gray-800/60">
+      <button type="button" onclick="toggleRevokedTokens()" class="text-xs text-gray-400 hover:text-gray-300 flex items-center gap-1.5 transition-colors">
+        <svg id="revoked-caret" class="w-3 h-3 transform transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+        <span>Revoked Tokens ({{ inactive_tokens | length }})</span>
+      </button>
+
+      <div id="revoked-tokens-list" class="hidden mt-2 divide-y divide-gray-800/50">
+        {% for tok in inactive_tokens %}
+        <div class="py-2.5 flex items-center justify-between gap-4 text-xs">
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2 text-gray-400">
+              <span class="line-through text-gray-500 font-medium">{{ tok.name }}</span>
+              <code class="text-[10px] text-gray-600 font-mono">{{ tok.token_prefix }}…</code>
+              <span class="text-[10px] px-1 rounded bg-red-900/20 text-red-400 border border-red-800/30">Revoked</span>
+            </div>
+            <div class="text-[10px] text-gray-600 mt-0.5">
+              Revoked at: {{ tok.revoked_at[:19].replace('T', ' ') if tok.revoked_at else 'Unknown' }}
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
   <!-- Sign out -->
   <div class="card p-6">
     <h2 class="text-sm font-semibold text-gray-300 mb-1">Sign Out</h2>
@@ -202,4 +339,116 @@
     </form>
   </div>
 </div>
+
+<!-- Generate Token Modal -->
+<div id="pat-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+  <div class="bg-[#1a1a1a] border border-white/10 rounded-xl shadow-2xl w-full max-w-md p-6">
+    <div class="flex items-center justify-between mb-2">
+      <h2 class="text-base font-semibold text-gray-200">Generate Personal Access Token</h2>
+      <button type="button" onclick="closePatModal()" class="text-gray-400 hover:text-gray-200">&times;</button>
+    </div>
+    <p class="text-xs text-gray-400 mb-4">Generate an API token for scripts, agents, or the Angler CLI.</p>
+
+    <form action="/settings/account/tokens" method="post" class="flex flex-col gap-4">
+      <div>
+        <label class="block text-xs font-medium text-gray-400 mb-1">Token Name</label>
+        <input id="pat-name-input" name="name" type="text" required autocomplete="off" maxlength="100" placeholder="e.g. Angler CLI - Laptop"
+               class="input-dark w-full" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+      </div>
+
+      <div>
+        <label class="block text-xs font-medium text-gray-400 mb-1">Expiration</label>
+        <select name="lifetime_days" class="input-dark w-full" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);">
+          <option value="7">7 days</option>
+          <option value="30" selected>30 days (recommended)</option>
+          <option value="60">60 days</option>
+          <option value="90">90 days</option>
+          <option value="365">1 year</option>
+          <option value="never">No expiration</option>
+        </select>
+      </div>
+
+      <div>
+        <label class="block text-xs font-medium text-gray-400 mb-1">Workspace Restriction</label>
+        <select name="workspace_id" class="input-dark w-full" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);">
+          <option value="">All accessible workspaces</option>
+          {% for w in workspaces %}
+          <option value="{{ w.id }}">{{ w.name }} ({{ w.slug }})</option>
+          {% endfor %}
+        </select>
+        <p class="text-[11px] text-gray-500 mt-1">Restrict token access exclusively to a single workspace, or leave open to all workspaces you belong to.</p>
+      </div>
+
+      <div>
+        <label class="block text-xs font-medium text-gray-400 mb-1.5">Scopes & Permissions</label>
+        <div class="space-y-2 text-xs">
+          <label class="flex items-start gap-2.5 cursor-pointer">
+            <input type="checkbox" name="scopes" value="read" checked class="mt-0.5 rounded border-gray-700 text-blue-600 focus:ring-0" />
+            <div>
+              <span class="font-medium text-gray-300">read</span>
+              <p class="text-[11px] text-gray-500">Read catalog tables, pipelines, dashboards, and storage</p>
+            </div>
+          </label>
+          <label class="flex items-start gap-2.5 cursor-pointer">
+            <input type="checkbox" name="scopes" value="write" checked class="mt-0.5 rounded border-gray-700 text-blue-600 focus:ring-0" />
+            <div>
+              <span class="font-medium text-gray-300">write</span>
+              <p class="text-[11px] text-gray-500">Execute pipelines, upload storage, and modify datasets</p>
+            </div>
+          </label>
+          <label class="flex items-start gap-2.5 cursor-pointer">
+            <input type="checkbox" name="scopes" value="admin" class="mt-0.5 rounded border-gray-700 text-blue-600 focus:ring-0" />
+            <div>
+              <span class="font-medium text-gray-300">admin</span>
+              <p class="text-[11px] text-gray-500">Manage workspace settings, members, and catalog access rules</p>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <div class="flex gap-2 justify-end pt-2 border-t border-gray-800">
+        <button type="button" onclick="closePatModal()" class="btn-ghost text-xs">Cancel</button>
+        <button type="submit" class="btn-primary text-xs">Generate Token</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+function openPatModal() {
+  document.getElementById('pat-modal').classList.remove('hidden');
+  setTimeout(() => document.getElementById('pat-name-input').focus(), 50);
+}
+function closePatModal() {
+  document.getElementById('pat-modal').classList.add('hidden');
+}
+function toggleRevokedTokens() {
+  const list = document.getElementById('revoked-tokens-list');
+  const caret = document.getElementById('revoked-caret');
+  if (list.classList.contains('hidden')) {
+    list.classList.remove('hidden');
+    caret.classList.add('rotate-90');
+  } else {
+    list.classList.add('hidden');
+    caret.classList.remove('rotate-90');
+  }
+}
+function copyPat(inputId, btn) {
+  const input = document.getElementById(inputId);
+  input.select();
+  navigator.clipboard.writeText(input.value).then(() => {
+    if (btn) {
+      const originalText = btn.innerText;
+      btn.innerText = 'Copied!';
+      btn.classList.remove('bg-blue-600', 'hover:bg-blue-500');
+      btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500');
+      setTimeout(() => {
+        btn.innerText = originalText;
+        btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500');
+        btn.classList.add('bg-blue-600', 'hover:bg-blue-500');
+      }, 2000);
+    }
+  });
+}
+</script>
 {% endblock %}

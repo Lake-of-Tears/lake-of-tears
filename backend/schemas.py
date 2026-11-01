@@ -128,6 +128,68 @@ class UserSessionResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── Personal Access Tokens ──────────────────────────────────────────────────
+
+
+class PersonalAccessTokenCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    lifetime_days: int | None = Field(default=30, ge=1, le=3650)
+    workspace_id: uuid.UUID | None = None
+    scopes: list[str] = Field(default_factory=lambda: ["read", "write"])
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        s = v.strip()
+        if not s:
+            raise ValueError("Token name cannot be empty")
+        return s
+
+    @field_validator("scopes")
+    @classmethod
+    def validate_scopes(cls, v: list[str]) -> list[str]:
+        valid_scopes = {"read", "write", "admin"}
+        cleaned = []
+        for s in v:
+            item = s.strip().lower()
+            if item not in valid_scopes:
+                raise ValueError(f"Invalid scope '{item}'. Must be one of: {sorted(valid_scopes)}")
+            if item not in cleaned:
+                cleaned.append(item)
+        if not cleaned:
+            raise ValueError("At least one scope must be provided")
+        return cleaned
+
+
+class PersonalAccessTokenCreatedResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    token: str
+    token_prefix: str
+    workspace_id: uuid.UUID | None = None
+    scopes: list[str]
+    created_at: datetime
+    expires_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class PersonalAccessTokenResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    token_prefix: str
+    workspace_id: uuid.UUID | None = None
+    workspace_name: str | None = None
+    scopes: list[str]
+    created_at: datetime
+    expires_at: datetime | None = None
+    last_used_at: datetime | None = None
+    is_revoked: bool
+    revoked_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
 # ── Workspaces ────────────────────────────────────────────────────────────────
 
 

@@ -19,6 +19,7 @@ from ai_router import router as ai_router
 from auth import (
     COOKIE_NAME,
     SECRET_KEY,
+    create_personal_access_token,
     create_token,
     create_user_session,
     decode_token,
@@ -34,6 +35,7 @@ from auth import (
     prune_expired_sessions,
     require_superadmin,
     revoke_all_other_sessions,
+    revoke_personal_access_token,
     revoke_user_session,
     set_stored_gemini_api_key,
     set_stored_gemini_model,
@@ -65,6 +67,7 @@ from models import (
     CatalogAccess,
     CatalogSchema,
     CatalogTable,
+    PersonalAccessToken,
     SystemSetting,
     User,
     UserInvitation,
@@ -96,6 +99,9 @@ from schemas import (
     InvitationResponse,
     LoginRequest,
     OutboundCatalogAccessItem,
+    PersonalAccessTokenCreate,
+    PersonalAccessTokenCreatedResponse,
+    PersonalAccessTokenResponse,
     PurgeCatalogRequest,
     RegisterRequest,
     RequestAccessRequest,
@@ -717,6 +723,87 @@ def revoke_other_user_sessions(
     return {"ok": True, "revoked_count": count}
 
 
+# ── Personal Access Tokens Endpoints ─────────────────────────────────────────
+
+
+@app.post(
+    "/api/auth/tokens",
+    response_model=PersonalAccessTokenCreatedResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_token_endpoint(
+    body: PersonalAccessTokenCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    pat, raw_token = create_personal_access_token(
+        db=db,
+        user_id=current_user.id,
+        name=body.name,
+        lifetime_days=body.lifetime_days,
+        workspace_id=body.workspace_id,
+        scopes=body.scopes,
+    )
+    return PersonalAccessTokenCreatedResponse(
+        id=pat.id,
+        name=pat.name,
+        token=raw_token,
+        token_prefix=pat.token_prefix,
+        workspace_id=pat.workspace_id,
+        scopes=pat.scopes,
+        created_at=pat.created_at,
+        expires_at=pat.expires_at,
+    )
+
+
+@app.get("/api/auth/tokens", response_model=list[PersonalAccessTokenResponse])
+def get_user_tokens(
+    include_revoked: bool = Query(False),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    query = db.query(PersonalAccessToken).filter(PersonalAccessToken.user_id == current_user.id)
+    if not include_revoked:
+        now = datetime.now(UTC)
+        query = query.filter(
+            PersonalAccessToken.is_revoked == False,  # noqa: E712
+            (PersonalAccessToken.expires_at == None)  # noqa: E711
+            | (PersonalAccessToken.expires_at > now),
+        )
+    pats = query.order_by(PersonalAccessToken.created_at.desc()).all()
+
+    result = []
+    for pat in pats:
+        ws_name = pat.workspace.name if pat.workspace else None
+        item = PersonalAccessTokenResponse(
+            id=pat.id,
+            name=pat.name,
+            token_prefix=pat.token_prefix,
+            workspace_id=pat.workspace_id,
+            workspace_name=ws_name,
+            scopes=pat.scopes or ["read", "write"],
+            created_at=pat.created_at,
+            expires_at=pat.expires_at,
+            last_used_at=pat.last_used_at,
+            is_revoked=pat.is_revoked,
+            revoked_at=pat.revoked_at,
+        )
+        result.append(item)
+    return result
+
+
+@app.delete("/api/auth/tokens/{token_id}")
+def revoke_token_endpoint(
+    token_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    revoked = revoke_personal_access_token(db=db, token_id=token_id, user_id=current_user.id)
+    if not revoked:
+        raise HTTPException(404, "Personal access token not found or already revoked")
+    return {"ok": True, "revoked_id": str(token_id)}
+
+
 @app.get("/api/admin/sessions", response_model=list[UserSessionResponse])
 def get_all_admin_sessions(
     db: Session = Depends(get_db),
@@ -1287,6 +1374,10 @@ def list_workspace_shares(
     if not ws:
         raise HTTPException(404, "Workspace not found")
 
+    if getattr(current_user, "_pat_workspace_id", None) is not None:
+        if str(current_user._pat_workspace_id) != str(workspace_id):
+            raise HTTPException(403, "Personal access token is restricted to a different workspace")
+
     if current_user.role != "superadmin":
         admin_check = next(
             (m for m in ws.members if m.user_id == current_user.id and m.role == "admin"),
@@ -1320,6 +1411,10 @@ def review_workspace_share(
     ws = db.query(Workspace).filter(Workspace.id == ws_uuid).first()
     if not ws:
         raise HTTPException(404, "Workspace not found")
+
+    if getattr(current_user, "_pat_workspace_id", None) is not None:
+        if str(current_user._pat_workspace_id) != str(workspace_id):
+            raise HTTPException(403, "Personal access token is restricted to a different workspace")
 
     if current_user.role != "superadmin":
         admin_check = next(
@@ -1889,6 +1984,12 @@ def _resolve_workspace(workspace_id: str | None, user: User, db: Session) -> Wor
     ws = db.query(Workspace).filter(Workspace.id == ws_uuid).first() if ws_uuid else None
     if not ws:
         raise HTTPException(404, "Workspace not found")
+    if getattr(user, "_pat_workspace_id", None) is not None:
+        if user._pat_workspace_id != ws.id:
+            raise HTTPException(403, "Personal access token is restricted to a different workspace")
+    if hasattr(user, "_pat_scopes"):
+        if "write" not in user._pat_scopes and "admin" not in user._pat_scopes:
+            raise HTTPException(403, "Personal access token does not have write scope")
     if user.role != "superadmin":
         member = next(
             (
@@ -1910,6 +2011,9 @@ def catalog_directory(
     current_user: User = Depends(get_current_user),
 ):
     ws_uuid = _as_uuid(workspace_id)
+    if getattr(current_user, "_pat_workspace_id", None) is not None:
+        if str(current_user._pat_workspace_id) != str(workspace_id):
+            raise HTTPException(403, "Personal access token is restricted to a different workspace")
     membership = next(
         (m for m in current_user.workspace_memberships if str(m.workspace_id) == str(workspace_id)),
         None,
@@ -2719,6 +2823,10 @@ def workspace_catalogs(
     if not ws:
         raise HTTPException(404, "Workspace not found")
 
+    if getattr(current_user, "_pat_workspace_id", None) is not None:
+        if str(current_user._pat_workspace_id) != str(workspace_id):
+            raise HTTPException(403, "Personal access token is restricted to a different workspace")
+
     if current_user.role != "superadmin":
         is_member = any(
             str(m.workspace_id) == str(workspace_id) for m in current_user.workspace_memberships
@@ -2771,6 +2879,10 @@ def workspace_catalog_manifest(
     if not ws:
         raise HTTPException(404, "Workspace not found")
 
+    if getattr(current_user, "_pat_workspace_id", None) is not None:
+        if str(current_user._pat_workspace_id) != str(workspace_id):
+            raise HTTPException(403, "Personal access token is restricted to a different workspace")
+
     if current_user.role != "superadmin":
         is_member = any(
             str(m.workspace_id) == str(workspace_id) for m in current_user.workspace_memberships
@@ -2822,6 +2934,10 @@ def detect_workspace_anomalies(
     )
     if not ws:
         raise HTTPException(404, "Workspace not found")
+
+    if getattr(current_user, "_pat_workspace_id", None) is not None:
+        if str(current_user._pat_workspace_id) != str(workspace_id):
+            raise HTTPException(403, "Personal access token is restricted to a different workspace")
 
     if current_user.role != "superadmin":
         is_member = any(
