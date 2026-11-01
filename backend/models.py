@@ -136,6 +136,9 @@ class PersonalAccessToken(Base):
     workspace_ids: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, default=list
     )
+    workspace_access: Mapped[dict[str, str]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
     scopes: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, default=list
     )

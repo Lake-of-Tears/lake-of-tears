@@ -375,6 +375,7 @@ def create_personal_access_token(
     lifetime_days: int | None = 30,
     workspace_id: uuid.UUID | None = None,
     workspace_ids: list[uuid.UUID] | list[str] | None = None,
+    workspace_access: dict[str, str] | None = None,
     scopes: list[str] | None = None,
 ) -> tuple[PersonalAccessToken, str]:
     """Generate and store a new Personal Access Token for a user."""
@@ -394,30 +395,57 @@ def create_personal_access_token(
             f"Active personal access token limit ({MAX_ACTIVE_PATS_PER_USER}) reached. Please revoke unused tokens.",
         )
 
-    # Normalize workspaces: default no access! Must explicitly grant at least one workspace.
-    resolved_wids: list[str] = []
-    if workspace_ids:
-        resolved_wids = [str(wid) for wid in workspace_ids]
-    elif workspace_id is not None:
-        resolved_wids = [str(workspace_id)]
+    ROLE_LEVELS = {
+        "read": 1,
+        "write": 2,
+        "admin": 3,
+        "superadmin": 4,
+    }
 
-    if not resolved_wids:
+    resolved_access: dict[str, str] = {}
+    if workspace_access:
+        for k, v in workspace_access.items():
+            resolved_access[str(k).strip()] = str(v).strip().lower()
+
+    if workspace_ids:
+        for wid in workspace_ids:
+            wid_str = str(wid).strip()
+            if wid_str not in resolved_access:
+                resolved_access[wid_str] = "read"
+    elif workspace_id is not None:
+        wid_str = str(workspace_id).strip()
+        if wid_str not in resolved_access:
+            resolved_access[wid_str] = "read"
+
+    if not resolved_access:
         raise HTTPException(400, "You must explicitly grant access to at least one workspace.")
 
     user = db.query(User).filter(User.id == user_id).first()
-    for wid in resolved_wids:
+    user_is_superadmin = (user.role == "superadmin") if user else False
+
+    final_access: dict[str, str] = {}
+    for wid_str, req_role in resolved_access.items():
         try:
-            wid_uuid = uuid.UUID(wid)
+            wid_uuid = uuid.UUID(wid_str)
         except (ValueError, TypeError):
-            raise HTTPException(400, f"Invalid workspace ID '{wid}'")
+            raise HTTPException(400, f"Invalid workspace ID '{wid_str}'")
+
         ws = (
             db.query(Workspace)
             .filter(Workspace.id == wid_uuid, Workspace.status == "active")
             .first()
         )
         if not ws:
-            raise HTTPException(404, f"Workspace '{wid}' not found")
-        if user and user.role != "superadmin":
+            raise HTTPException(404, f"Workspace '{wid_str}' not found")
+
+        req_role_clean = req_role.strip().lower()
+        if req_role_clean not in ("read", "write", "admin"):
+            raise HTTPException(
+                400,
+                f"Invalid access level '{req_role}' for workspace '{ws.name}'. Must be one of: read, write, admin.",
+            )
+
+        if not user_is_superadmin:
             member = (
                 db.query(WorkspaceMember)
                 .filter(
@@ -428,10 +456,36 @@ def create_personal_access_token(
             )
             if not member:
                 raise HTTPException(
-                    403, f"Cannot grant token access to workspace '{ws.name}' (not a member)"
+                    403,
+                    f"Cannot grant token access to workspace '{ws.name}': you are not a member of this workspace.",
                 )
 
-    if not scopes:
+            user_level = ROLE_LEVELS.get(member.role, 1)
+            req_level = ROLE_LEVELS.get(req_role_clean, 0)
+            if req_level > user_level:
+                raise HTTPException(
+                    400,
+                    f"Cannot grant '{req_role_clean}' access to workspace '{ws.name}': your permission level in this workspace is only '{member.role}'.",
+                )
+
+        final_access[str(wid_uuid)] = req_role_clean
+
+    resolved_wids = list(final_access.keys())
+
+    # Build or reconcile scopes
+    final_scopes = list(scopes) if scopes else []
+    if not final_scopes:
+        derived_scopes = set()
+        for r in final_access.values():
+            if r == "read":
+                derived_scopes.add("read")
+            elif r == "write":
+                derived_scopes.update(["read", "write"])
+            elif r == "admin":
+                derived_scopes.update(["read", "write", "admin"])
+        final_scopes = sorted(derived_scopes)
+
+    if not final_scopes:
         raise HTTPException(400, "You must explicitly select at least one permission scope.")
 
     random_hex = secrets.token_hex(32)
@@ -449,7 +503,8 @@ def create_personal_access_token(
         token_hash=token_hash,
         workspace_id=uuid.UUID(resolved_wids[0]) if resolved_wids else None,
         workspace_ids=resolved_wids,
-        scopes=scopes,
+        workspace_access=final_access,
+        scopes=final_scopes,
         created_at=now,
         expires_at=expires_at,
         is_revoked=False,
@@ -534,6 +589,10 @@ def get_current_user(
             wids.append(str(pat.workspace_id))
         user._pat_workspace_ids = wids
         user._pat_workspace_id = pat.workspace_id or (uuid.UUID(wids[0]) if wids else None)
+        user._pat_workspace_access = pat.workspace_access or {}
+        for wid in wids:
+            if wid not in user._pat_workspace_access:
+                user._pat_workspace_access[wid] = "read"
         return user
 
     try:
@@ -643,6 +702,12 @@ def require_workspace_admin(
         if str(workspace_id) not in current_user._pat_workspace_ids:
             raise HTTPException(
                 403, "Personal access token does not have access to this workspace"
+            )
+    if hasattr(current_user, "_pat_workspace_access"):
+        token_role = current_user._pat_workspace_access.get(str(workspace_id), "read")
+        if token_role != "admin":
+            raise HTTPException(
+                403, "Personal access token does not have admin access to this workspace"
             )
 
     if current_user.role == "superadmin":
@@ -766,12 +831,23 @@ def get_workspace_context(
                 403, f"Personal access token does not have access to workspace '{ws.name}'"
             )
 
+    # Cap effective caller role to token's granted role on this workspace
+    if hasattr(current_user, "_pat_workspace_access") and current_user._pat_workspace_access:
+        pat_ws_role = current_user._pat_workspace_access.get(str(ws.id), "read")
+        role_map = {"read": 1, "write": 2, "admin": 3, "superadmin": 4}
+        if role_map.get(pat_ws_role, 1) < role_map.get(role, 1):
+            role = pat_ws_role
+
     if (
         require_write
         and (
             (
                 current_user.role != "superadmin"
                 and (role in ("read", "viewer") or role not in ("write", "admin", "superadmin"))
+            )
+            or (
+                hasattr(current_user, "_pat_workspace_access")
+                and current_user._pat_workspace_access.get(str(ws.id), "read") == "read"
             )
             or (
                 hasattr(current_user, "_pat_scopes")

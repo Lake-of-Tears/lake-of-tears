@@ -136,6 +136,7 @@ class PersonalAccessTokenCreate(BaseModel):
     lifetime_days: int | None = Field(default=30, ge=1, le=3650)
     workspace_id: uuid.UUID | None = None
     workspace_ids: list[uuid.UUID] = Field(default_factory=list)
+    workspace_access: dict[str, str] = Field(default_factory=dict)
     scopes: list[str] = Field(default_factory=list)
 
     @field_validator("name")
@@ -146,15 +147,51 @@ class PersonalAccessTokenCreate(BaseModel):
             raise ValueError("Token name cannot be empty")
         return s
 
+    @field_validator("workspace_access")
+    @classmethod
+    def validate_workspace_access(cls, v: dict[str, str]) -> dict[str, str]:
+        valid_roles = {"read", "write", "admin"}
+        cleaned: dict[str, str] = {}
+        for raw_id, raw_role in v.items():
+            try:
+                ws_uuid = str(uuid.UUID(str(raw_id).strip()))
+            except Exception:
+                raise ValueError(f"Invalid workspace UUID: {raw_id}")
+            role = str(raw_role).strip().lower()
+            if role not in valid_roles:
+                raise ValueError(f"Invalid access level '{role}'. Must be one of: {sorted(valid_roles)}")
+            cleaned[ws_uuid] = role
+        return cleaned
+
     @model_validator(mode="after")
     def validate_workspaces_and_scopes(self) -> Self:
         # Normalize single workspace_id into workspace_ids
         if not self.workspace_ids and self.workspace_id:
             self.workspace_ids = [self.workspace_id]
-        if not self.workspace_ids:
-            raise ValueError("You must explicitly grant access to at least one workspace.")
+
         if not self.scopes:
             raise ValueError("You must explicitly select at least one permission scope.")
+
+        # Sync workspace_access and workspace_ids
+        if self.workspace_access:
+            access_wids = [uuid.UUID(k) for k in self.workspace_access.keys()]
+            if not self.workspace_ids:
+                self.workspace_ids = access_wids
+            else:
+                for wid in self.workspace_ids:
+                    if str(wid) not in self.workspace_access:
+                        self.workspace_access[str(wid)] = "read"
+        elif self.workspace_ids:
+            default_role = "read"
+            if "admin" in self.scopes:
+                default_role = "admin"
+            elif "write" in self.scopes:
+                default_role = "write"
+            self.workspace_access = {str(wid): default_role for wid in self.workspace_ids}
+
+        if not self.workspace_ids:
+            raise ValueError("You must explicitly grant access to at least one workspace.")
+
         return self
 
     @field_validator("scopes")
@@ -178,6 +215,7 @@ class PersonalAccessTokenCreatedResponse(BaseModel):
     token_prefix: str
     workspace_id: uuid.UUID | None = None
     workspace_ids: list[str] = Field(default_factory=list)
+    workspace_access: dict[str, str] = Field(default_factory=dict)
     scopes: list[str]
     created_at: datetime
     expires_at: datetime | None = None
@@ -193,6 +231,8 @@ class PersonalAccessTokenResponse(BaseModel):
     workspace_name: str | None = None
     workspace_ids: list[str] = Field(default_factory=list)
     workspace_names: list[str] = Field(default_factory=list)
+    workspace_access: dict[str, str] = Field(default_factory=dict)
+    workspace_details: list[dict[str, Any]] = Field(default_factory=list)
     scopes: list[str]
     created_at: datetime
     expires_at: datetime | None = None
