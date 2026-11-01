@@ -742,14 +742,19 @@ def create_token_endpoint(
         name=body.name,
         lifetime_days=body.lifetime_days,
         workspace_id=body.workspace_id,
+        workspace_ids=body.workspace_ids,
         scopes=body.scopes,
     )
+    w_ids = [str(wid) for wid in (pat.workspace_ids or [])]
+    if pat.workspace_id and str(pat.workspace_id) not in w_ids:
+        w_ids.append(str(pat.workspace_id))
     return PersonalAccessTokenCreatedResponse(
         id=pat.id,
         name=pat.name,
         token=raw_token,
         token_prefix=pat.token_prefix,
         workspace_id=pat.workspace_id,
+        workspace_ids=w_ids,
         scopes=pat.scopes,
         created_at=pat.created_at,
         expires_at=pat.expires_at,
@@ -772,16 +777,24 @@ def get_user_tokens(
         )
     pats = query.order_by(PersonalAccessToken.created_at.desc()).all()
 
+    all_workspaces = {str(w.id): w.name for w in db.query(Workspace).all()}
+
     result = []
     for pat in pats:
-        ws_name = pat.workspace.name if pat.workspace else None
+        w_ids = [str(wid) for wid in (pat.workspace_ids or [])]
+        if pat.workspace_id and str(pat.workspace_id) not in w_ids:
+            w_ids.append(str(pat.workspace_id))
+        w_names = [all_workspaces.get(wid, "Unknown Workspace") for wid in w_ids]
+        primary_ws_name = w_names[0] if w_names else None
         item = PersonalAccessTokenResponse(
             id=pat.id,
             name=pat.name,
             token_prefix=pat.token_prefix,
             workspace_id=pat.workspace_id,
-            workspace_name=ws_name,
-            scopes=pat.scopes or ["read", "write"],
+            workspace_name=primary_ws_name,
+            workspace_ids=w_ids,
+            workspace_names=w_names,
+            scopes=pat.scopes or [],
             created_at=pat.created_at,
             expires_at=pat.expires_at,
             last_used_at=pat.last_used_at,
@@ -1374,9 +1387,9 @@ def list_workspace_shares(
     if not ws:
         raise HTTPException(404, "Workspace not found")
 
-    if getattr(current_user, "_pat_workspace_id", None) is not None:
-        if str(current_user._pat_workspace_id) != str(workspace_id):
-            raise HTTPException(403, "Personal access token is restricted to a different workspace")
+    if hasattr(current_user, "_pat_workspace_ids"):
+        if str(workspace_id) not in current_user._pat_workspace_ids:
+            raise HTTPException(403, "Personal access token does not have access to this workspace")
 
     if current_user.role != "superadmin":
         admin_check = next(
@@ -1412,9 +1425,9 @@ def review_workspace_share(
     if not ws:
         raise HTTPException(404, "Workspace not found")
 
-    if getattr(current_user, "_pat_workspace_id", None) is not None:
-        if str(current_user._pat_workspace_id) != str(workspace_id):
-            raise HTTPException(403, "Personal access token is restricted to a different workspace")
+    if hasattr(current_user, "_pat_workspace_ids"):
+        if str(workspace_id) not in current_user._pat_workspace_ids:
+            raise HTTPException(403, "Personal access token does not have access to this workspace")
 
     if current_user.role != "superadmin":
         admin_check = next(
@@ -1984,9 +1997,9 @@ def _resolve_workspace(workspace_id: str | None, user: User, db: Session) -> Wor
     ws = db.query(Workspace).filter(Workspace.id == ws_uuid).first() if ws_uuid else None
     if not ws:
         raise HTTPException(404, "Workspace not found")
-    if getattr(user, "_pat_workspace_id", None) is not None:
-        if user._pat_workspace_id != ws.id:
-            raise HTTPException(403, "Personal access token is restricted to a different workspace")
+    if hasattr(user, "_pat_workspace_ids"):
+        if str(ws.id) not in user._pat_workspace_ids:
+            raise HTTPException(403, f"Personal access token does not have access to workspace '{ws.name}'")
     if hasattr(user, "_pat_scopes"):
         if "write" not in user._pat_scopes and "admin" not in user._pat_scopes:
             raise HTTPException(403, "Personal access token does not have write scope")
@@ -2011,9 +2024,9 @@ def catalog_directory(
     current_user: User = Depends(get_current_user),
 ):
     ws_uuid = _as_uuid(workspace_id)
-    if getattr(current_user, "_pat_workspace_id", None) is not None:
-        if str(current_user._pat_workspace_id) != str(workspace_id):
-            raise HTTPException(403, "Personal access token is restricted to a different workspace")
+    if hasattr(current_user, "_pat_workspace_ids"):
+        if str(workspace_id) not in current_user._pat_workspace_ids:
+            raise HTTPException(403, "Personal access token does not have access to this workspace")
     membership = next(
         (m for m in current_user.workspace_memberships if str(m.workspace_id) == str(workspace_id)),
         None,
@@ -2823,9 +2836,9 @@ def workspace_catalogs(
     if not ws:
         raise HTTPException(404, "Workspace not found")
 
-    if getattr(current_user, "_pat_workspace_id", None) is not None:
-        if str(current_user._pat_workspace_id) != str(workspace_id):
-            raise HTTPException(403, "Personal access token is restricted to a different workspace")
+    if hasattr(current_user, "_pat_workspace_ids"):
+        if str(workspace_id) not in current_user._pat_workspace_ids:
+            raise HTTPException(403, "Personal access token does not have access to this workspace")
 
     if current_user.role != "superadmin":
         is_member = any(
@@ -2879,9 +2892,9 @@ def workspace_catalog_manifest(
     if not ws:
         raise HTTPException(404, "Workspace not found")
 
-    if getattr(current_user, "_pat_workspace_id", None) is not None:
-        if str(current_user._pat_workspace_id) != str(workspace_id):
-            raise HTTPException(403, "Personal access token is restricted to a different workspace")
+    if hasattr(current_user, "_pat_workspace_ids"):
+        if str(workspace_id) not in current_user._pat_workspace_ids:
+            raise HTTPException(403, "Personal access token does not have access to this workspace")
 
     if current_user.role != "superadmin":
         is_member = any(
@@ -2935,9 +2948,9 @@ def detect_workspace_anomalies(
     if not ws:
         raise HTTPException(404, "Workspace not found")
 
-    if getattr(current_user, "_pat_workspace_id", None) is not None:
-        if str(current_user._pat_workspace_id) != str(workspace_id):
-            raise HTTPException(403, "Personal access token is restricted to a different workspace")
+    if hasattr(current_user, "_pat_workspace_ids"):
+        if str(workspace_id) not in current_user._pat_workspace_ids:
+            raise HTTPException(403, "Personal access token does not have access to this workspace")
 
     if current_user.role != "superadmin":
         is_member = any(

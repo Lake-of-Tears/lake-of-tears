@@ -260,14 +260,20 @@
           <div class="flex items-center gap-2 flex-wrap">
             <span class="text-xs font-semibold text-gray-200">{{ tok.name }}</span>
             <code class="text-[11px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-400 font-mono">{{ tok.token_prefix }}…</code>
-            {% if tok.workspace_name %}
-            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-900/30 text-blue-400 border border-blue-800/40">
-              {{ tok.workspace_name }}
-            </span>
+            {% if tok.workspace_names %}
+              {% for wn in tok.workspace_names %}
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-900/30 text-blue-400 border border-blue-800/40">
+                {{ wn }}
+              </span>
+              {% endfor %}
+            {% elif tok.workspace_name %}
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-900/30 text-blue-400 border border-blue-800/40">
+                {{ tok.workspace_name }}
+              </span>
             {% else %}
-            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-800 text-gray-400 border border-gray-700">
-              All Workspaces
-            </span>
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-800 text-gray-500 border border-gray-700">
+                No Workspaces
+              </span>
             {% endif %}
             {% for sc in tok.scopes %}
             <span class="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-medium bg-purple-900/30 text-purple-300 border border-purple-800/40">
@@ -349,7 +355,7 @@
     </div>
     <p class="text-xs text-gray-400 mb-4">Generate an API token for scripts, agents, or the Angler CLI.</p>
 
-    <form action="/settings/account/tokens" method="post" class="flex flex-col gap-4">
+    <form action="/settings/account/tokens" method="post" onsubmit="return validatePatForm(event);" class="flex flex-col gap-4">
       <div>
         <label class="block text-xs font-medium text-gray-400 mb-1">Token Name</label>
         <input id="pat-name-input" name="name" type="text" required autocomplete="off" maxlength="100" placeholder="e.g. Angler CLI - Laptop"
@@ -368,29 +374,51 @@
         </select>
       </div>
 
+      <!-- Workspaces List Controller (Default: No Access) -->
       <div>
-        <label class="block text-xs font-medium text-gray-400 mb-1">Workspace Restriction</label>
-        <select name="workspace_id" class="input-dark w-full" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);">
-          <option value="">All accessible workspaces</option>
-          {% for w in workspaces %}
-          <option value="{{ w.id }}">{{ w.name }} ({{ w.slug }})</option>
-          {% endfor %}
-        </select>
-        <p class="text-[11px] text-gray-500 mt-1">Restrict token access exclusively to a single workspace, or leave open to all workspaces you belong to.</p>
+        <div class="flex items-center justify-between mb-1">
+          <label class="block text-xs font-medium text-gray-400">Permitted Workspaces</label>
+          <span class="text-[10px] text-amber-400/90 font-medium">Default: No Access</span>
+        </div>
+        <p class="text-[11px] text-gray-500 mb-2">Explicitly add the workspaces this token is authorized to access.</p>
+
+        <!-- Selector Row -->
+        <div class="flex items-center gap-2 mb-2">
+          <select id="pat-ws-select" class="input-dark flex-1 text-xs" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);">
+            {% for w in workspaces %}
+            <option value="{{ w.id }}" data-name="{{ w.name }}" data-slug="{{ w.slug }}">{{ w.name }} ({{ w.slug }})</option>
+            {% endfor %}
+          </select>
+          <button type="button" onclick="addPatWorkspace()" class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 text-xs rounded font-medium transition-colors">
+            Add
+          </button>
+        </div>
+
+        <!-- Selected Workspaces Container -->
+        <div id="pat-selected-workspaces-container" class="space-y-1.5 max-h-36 overflow-y-auto p-2 rounded-lg bg-black/30 border border-gray-800">
+          <div id="pat-no-ws-notice" class="p-2 text-center text-[11px] text-amber-300/80 bg-amber-950/20 border border-amber-800/30 rounded">
+            No workspaces added. The token will have zero access. You must add at least one workspace.
+          </div>
+        </div>
       </div>
 
+      <!-- Scopes & Permissions (Default: No Access) -->
       <div>
-        <label class="block text-xs font-medium text-gray-400 mb-1.5">Scopes & Permissions</label>
+        <div class="flex items-center justify-between mb-1">
+          <label class="block text-xs font-medium text-gray-400">Scopes & Permissions</label>
+          <span class="text-[10px] text-amber-400/90 font-medium">Default: None</span>
+        </div>
+        <p class="text-[11px] text-gray-500 mb-2">Explicitly select the operations this token can perform.</p>
         <div class="space-y-2 text-xs">
           <label class="flex items-start gap-2.5 cursor-pointer">
-            <input type="checkbox" name="scopes" value="read" checked class="mt-0.5 rounded border-gray-700 text-blue-600 focus:ring-0" />
+            <input type="checkbox" name="scopes" value="read" class="mt-0.5 rounded border-gray-700 text-blue-600 focus:ring-0" />
             <div>
               <span class="font-medium text-gray-300">read</span>
               <p class="text-[11px] text-gray-500">Read catalog tables, pipelines, dashboards, and storage</p>
             </div>
           </label>
           <label class="flex items-start gap-2.5 cursor-pointer">
-            <input type="checkbox" name="scopes" value="write" checked class="mt-0.5 rounded border-gray-700 text-blue-600 focus:ring-0" />
+            <input type="checkbox" name="scopes" value="write" class="mt-0.5 rounded border-gray-700 text-blue-600 focus:ring-0" />
             <div>
               <span class="font-medium text-gray-300">write</span>
               <p class="text-[11px] text-gray-500">Execute pipelines, upload storage, and modify datasets</p>
@@ -415,6 +443,70 @@
 </div>
 
 <script>
+const selectedWorkspaces = new Map();
+
+function addPatWorkspace() {
+  const sel = document.getElementById('pat-ws-select');
+  if (!sel || !sel.value) return;
+  const wsId = sel.value;
+  const opt = sel.options[sel.selectedIndex];
+  const wsName = opt.getAttribute('data-name') || opt.text;
+  const wsSlug = opt.getAttribute('data-slug') || '';
+
+  if (selectedWorkspaces.has(wsId)) return;
+  selectedWorkspaces.set(wsId, { name: wsName, slug: wsSlug });
+  renderSelectedWorkspaces();
+}
+
+function removePatWorkspace(wsId) {
+  selectedWorkspaces.delete(wsId);
+  renderSelectedWorkspaces();
+}
+
+function renderSelectedWorkspaces() {
+  const container = document.getElementById('pat-selected-workspaces-container');
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (selectedWorkspaces.size === 0) {
+    container.innerHTML = `
+      <div id="pat-no-ws-notice" class="p-2 text-center text-[11px] text-amber-300/80 bg-amber-950/20 border border-amber-800/30 rounded">
+        No workspaces added. The token will have zero access. You must add at least one workspace.
+      </div>
+    `;
+    return;
+  }
+
+  selectedWorkspaces.forEach((info, wsId) => {
+    const row = document.createElement('div');
+    row.className = 'flex items-center justify-between px-2.5 py-1.5 rounded bg-gray-900 border border-gray-800 text-xs';
+    row.innerHTML = `
+      <div class="flex items-center gap-2 truncate">
+        <span class="font-medium text-gray-200 truncate">${info.name}</span>
+        <span class="text-[10px] text-gray-500 font-mono">(${info.slug})</span>
+        <input type="hidden" name="workspace_ids" value="${wsId}" />
+      </div>
+      <button type="button" onclick="removePatWorkspace('${wsId}')" class="text-gray-400 hover:text-red-400 ml-2 text-base leading-none" title="Remove">&times;</button>
+    `;
+    container.appendChild(row);
+  });
+}
+
+function validatePatForm(event) {
+  if (selectedWorkspaces.size === 0) {
+    alert('You must explicitly add at least one workspace for the token to access.');
+    event.preventDefault();
+    return false;
+  }
+  const scopes = document.querySelectorAll('#pat-modal input[name="scopes"]:checked');
+  if (scopes.length === 0) {
+    alert('You must explicitly select at least one permission scope (read, write, or admin).');
+    event.preventDefault();
+    return false;
+  }
+  return true;
+}
+
 function openPatModal() {
   document.getElementById('pat-modal').classList.remove('hidden');
   setTimeout(() => document.getElementById('pat-name-input').focus(), 50);

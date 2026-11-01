@@ -133,8 +133,11 @@ class PersonalAccessToken(Base):
     workspace_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    workspace_ids: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
     scopes: Mapped[list[str]] = mapped_column(
-        JSONB, nullable=False, default=lambda: ["read", "write"]
+        JSONB, nullable=False, default=list
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False

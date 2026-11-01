@@ -158,14 +158,18 @@ def _login_token(client, email: str = "test@example.com", password: str = "Secre
 def test_create_pat_success(client, db_session):
     user = _create_user(db_session, "pat_user@example.com")
     jwt_token = _login_token(client, "pat_user@example.com")
+    ws = _create_workspace(db_session, "WS 1", "ws-1")
+    db_session.add(WorkspaceMember(workspace_id=ws.id, user_id=user.id, role="write"))
+    db_session.commit()
 
-    # Create PAT
+    # Create PAT with explicit workspace and scopes
     resp = client.post(
         "/api/auth/tokens",
         headers={"Authorization": f"Bearer {jwt_token}"},
         json={
             "name": "Angler CLI - Laptop",
             "lifetime_days": 30,
+            "workspace_ids": [str(ws.id)],
             "scopes": ["read", "write"],
         },
     )
@@ -176,6 +180,7 @@ def test_create_pat_success(client, db_session):
     assert data["token"].startswith("lot_pat_")
     assert len(data["token"]) > 32
     assert data["token_prefix"] == data["token"][:16]
+    assert data["workspace_ids"] == [str(ws.id)]
     assert data["scopes"] == ["read", "write"]
     assert data["expires_at"] is not None
 
@@ -190,15 +195,49 @@ def test_create_pat_success(client, db_session):
     assert pat_in_db.is_revoked is False
 
 
+def test_create_pat_fails_without_workspaces(client, db_session):
+    user = _create_user(db_session, "no_ws@example.com")
+    jwt_token = _login_token(client, "no_ws@example.com")
+
+    # Creating without workspace_ids or workspace_id fails (Default: No Access)
+    resp = client.post(
+        "/api/auth/tokens",
+        headers={"Authorization": f"Bearer {jwt_token}"},
+        json={"name": "No WS Token", "scopes": ["read"]},
+    )
+    assert resp.status_code in (400, 422)
+    assert "workspace" in resp.text.lower()
+
+
+def test_create_pat_fails_without_scopes(client, db_session):
+    user = _create_user(db_session, "no_scopes@example.com")
+    jwt_token = _login_token(client, "no_scopes@example.com")
+    ws = _create_workspace(db_session, "WS 1", "ws-1")
+    db_session.add(WorkspaceMember(workspace_id=ws.id, user_id=user.id, role="write"))
+    db_session.commit()
+
+    # Creating with empty scopes fails (Default: No Access)
+    resp = client.post(
+        "/api/auth/tokens",
+        headers={"Authorization": f"Bearer {jwt_token}"},
+        json={"name": "No Scope Token", "workspace_ids": [str(ws.id)], "scopes": []},
+    )
+    assert resp.status_code in (400, 422)
+    assert "scope" in resp.text.lower()
+
+
 def test_authenticate_with_pat(client, db_session):
     user = _create_user(db_session, "auth_user@example.com")
     jwt_token = _login_token(client, "auth_user@example.com")
+    ws = _create_workspace(db_session, "WS 1", "ws-1")
+    db_session.add(WorkspaceMember(workspace_id=ws.id, user_id=user.id, role="write"))
+    db_session.commit()
 
     # Create token
     create_resp = client.post(
         "/api/auth/tokens",
         headers={"Authorization": f"Bearer {jwt_token}"},
-        json={"name": "Test Key", "lifetime_days": 7},
+        json={"name": "Test Key", "lifetime_days": 7, "workspace_ids": [str(ws.id)], "scopes": ["read"]},
     )
     assert create_resp.status_code == 201
     pat_secret = create_resp.json()["token"]
@@ -213,11 +252,17 @@ def test_authenticate_with_pat(client, db_session):
 
 def test_pat_expiration(client, db_session):
     user = _create_user(db_session, "expired_pat@example.com")
+    ws = _create_workspace(db_session, "WS 1", "ws-1")
+    db_session.add(WorkspaceMember(workspace_id=ws.id, user_id=user.id, role="write"))
+    db_session.commit()
+
     pat, raw_token = auth.create_personal_access_token(
         db_session,
         user_id=user.id,
         name="Expired Token",
         lifetime_days=1,
+        workspace_ids=[ws.id],
+        scopes=["read"],
     )
 
     # Force expiration in past
@@ -233,12 +278,15 @@ def test_pat_expiration(client, db_session):
 def test_pat_revocation(client, db_session):
     user = _create_user(db_session, "revoke_pat@example.com")
     jwt_token = _login_token(client, "revoke_pat@example.com")
+    ws = _create_workspace(db_session, "WS 1", "ws-1")
+    db_session.add(WorkspaceMember(workspace_id=ws.id, user_id=user.id, role="write"))
+    db_session.commit()
 
     # Create token
     create_resp = client.post(
         "/api/auth/tokens",
         headers={"Authorization": f"Bearer {jwt_token}"},
-        json={"name": "To Revoke"},
+        json={"name": "To Revoke", "workspace_ids": [str(ws.id)], "scopes": ["read"]},
     )
     assert create_resp.status_code == 201
     token_id = create_resp.json()["id"]
@@ -264,10 +312,21 @@ def test_pat_revocation(client, db_session):
 def test_list_tokens_filtering(client, db_session):
     user = _create_user(db_session, "list_pat@example.com")
     jwt_token = _login_token(client, "list_pat@example.com")
+    ws = _create_workspace(db_session, "WS 1", "ws-1")
+    db_session.add(WorkspaceMember(workspace_id=ws.id, user_id=user.id, role="write"))
+    db_session.commit()
 
     # Create 2 tokens
-    r1 = client.post("/api/auth/tokens", headers={"Authorization": f"Bearer {jwt_token}"}, json={"name": "Active 1"})
-    r2 = client.post("/api/auth/tokens", headers={"Authorization": f"Bearer {jwt_token}"}, json={"name": "Active 2"})
+    r1 = client.post(
+        "/api/auth/tokens",
+        headers={"Authorization": f"Bearer {jwt_token}"},
+        json={"name": "Active 1", "workspace_ids": [str(ws.id)], "scopes": ["read"]},
+    )
+    r2 = client.post(
+        "/api/auth/tokens",
+        headers={"Authorization": f"Bearer {jwt_token}"},
+        json={"name": "Active 2", "workspace_ids": [str(ws.id)], "scopes": ["read"]},
+    )
     t1_id = r1.json()["id"]
     t2_id = r2.json()["id"]
 
@@ -288,40 +347,47 @@ def test_list_tokens_filtering(client, db_session):
     assert len(all_items) == 2
 
 
-def test_pat_workspace_restriction(client, db_session):
-    user = _create_user(db_session, "ws_pat_user@example.com")
+def test_pat_multi_workspace_access(client, db_session):
+    user = _create_user(db_session, "multi_ws@example.com")
     ws1 = _create_workspace(db_session, "Workspace 1", "ws-1")
     ws2 = _create_workspace(db_session, "Workspace 2", "ws-2")
+    ws3 = _create_workspace(db_session, "Workspace 3", "ws-3")
 
-    # Add user to both workspaces
+    # Add user to all three workspaces
     db_session.add(WorkspaceMember(workspace_id=ws1.id, user_id=user.id, role="write"))
     db_session.add(WorkspaceMember(workspace_id=ws2.id, user_id=user.id, role="write"))
+    db_session.add(WorkspaceMember(workspace_id=ws3.id, user_id=user.id, role="write"))
     db_session.commit()
 
-    # Create token restricted to ws1
+    # Create token restricted exclusively to ws1 and ws2
     pat, raw_token = auth.create_personal_access_token(
         db_session,
         user_id=user.id,
-        name="WS1 Restricted Token",
-        workspace_id=ws1.id,
+        name="WS1 and WS2 Token",
+        workspace_ids=[ws1.id, ws2.id],
         scopes=["read", "write"],
     )
 
-    # Calling with X-Workspace-Slug ws-1 succeeds
-    # Using a workspace context endpoint, e.g. /api/catalogs
+    # Calling with ws1 succeeds
     resp_ws1 = client.get(
         f"/api/workspaces/{ws1.id}/catalogs",
         headers={"Authorization": f"Bearer {raw_token}", "X-Workspace-Id": str(ws1.id)},
     )
     assert resp_ws1.status_code == 200
 
-    # Calling with X-Workspace-Slug ws-2 is rejected with 403
+    # Calling with ws2 succeeds
     resp_ws2 = client.get(
         f"/api/workspaces/{ws2.id}/catalogs",
         headers={"Authorization": f"Bearer {raw_token}", "X-Workspace-Id": str(ws2.id)},
     )
-    assert resp_ws2.status_code == 403
-    assert "restricted to a different workspace" in resp_ws2.json()["detail"].lower()
+    assert resp_ws2.status_code == 200
+
+    # Calling with ws3 is rejected with 403 Forbidden
+    resp_ws3 = client.get(
+        f"/api/workspaces/{ws3.id}/catalogs",
+        headers={"Authorization": f"Bearer {raw_token}", "X-Workspace-Id": str(ws3.id)},
+    )
+    assert resp_ws3.status_code == 403
 
 
 def test_pat_scopes_enforcement(client, db_session):
@@ -335,7 +401,7 @@ def test_pat_scopes_enforcement(client, db_session):
         db_session,
         user_id=user.id,
         name="Read Only Token",
-        workspace_id=ws.id,
+        workspace_ids=[ws.id],
         scopes=["read"],
     )
 
@@ -359,6 +425,9 @@ def test_pat_scopes_enforcement(client, db_session):
 def test_max_active_tokens_limit(client, db_session):
     user = _create_user(db_session, "cap_user@example.com")
     jwt_token = _login_token(client, "cap_user@example.com")
+    ws = _create_workspace(db_session, "Cap WS", "cap-ws")
+    db_session.add(WorkspaceMember(workspace_id=ws.id, user_id=user.id, role="write"))
+    db_session.commit()
 
     # Create 50 tokens
     for i in range(50):
@@ -367,6 +436,7 @@ def test_max_active_tokens_limit(client, db_session):
             name=f"Token {i}",
             token_prefix=f"lot_pat_{i:04d}",
             token_hash=f"hash_{i:04d}" + "0" * 55,
+            workspace_ids=[str(ws.id)],
             scopes=["read"],
             created_at=datetime.now(UTC),
             is_revoked=False,
@@ -378,7 +448,7 @@ def test_max_active_tokens_limit(client, db_session):
     resp = client.post(
         "/api/auth/tokens",
         headers={"Authorization": f"Bearer {jwt_token}"},
-        json={"name": "51st Token"},
+        json={"name": "51st Token", "workspace_ids": [str(ws.id)], "scopes": ["read"]},
     )
     assert resp.status_code == 400
     assert "limit" in resp.json()["detail"].lower()
@@ -386,10 +456,16 @@ def test_max_active_tokens_limit(client, db_session):
 
 def test_last_used_at_throttling(client, db_session):
     user = _create_user(db_session, "throttle@example.com")
+    ws = _create_workspace(db_session, "Throttle WS", "throttle-ws")
+    db_session.add(WorkspaceMember(workspace_id=ws.id, user_id=user.id, role="write"))
+    db_session.commit()
+
     pat, raw_token = auth.create_personal_access_token(
         db_session,
         user_id=user.id,
         name="Throttled Token",
+        workspace_ids=[ws.id],
+        scopes=["read"],
     )
     assert pat.last_used_at is None
 
@@ -421,8 +497,8 @@ def test_ui_settings_account_renders_tokens():
             "id": str(uuid.uuid4()),
             "name": "Angler CLI Token",
             "token_prefix": "lot_pat_12345678",
-            "workspace_id": None,
-            "workspace_name": None,
+            "workspace_ids": ["ws-1"],
+            "workspace_names": ["Engineering Workspace"],
             "scopes": ["read", "write"],
             "created_at": "2026-11-01T12:00:00Z",
             "expires_at": "2026-12-01T12:00:00Z",
@@ -440,6 +516,8 @@ def test_ui_settings_account_renders_tokens():
             if "/api/auth/tokens" in path
             else {"email": "ui_pat@example.com", "display_name": "UI User"}
             if "/api/auth/me" in path
+            else [{"id": "ws-1", "name": "Engineering Workspace", "slug": "engineering"}]
+            if "/api/workspaces" in path
             else []
         )
         resp = client.get("/settings/account", cookies={"lake_token": token})
@@ -447,7 +525,9 @@ def test_ui_settings_account_renders_tokens():
         assert "Personal Access Tokens" in resp.text
         assert "Angler CLI Token" in resp.text
         assert "lot_pat_12345678" in resp.text
+        assert "Engineering Workspace" in resp.text
         assert "Generate New Token" in resp.text
+        assert "Permitted Workspaces" in resp.text
 
 
 def test_ui_settings_account_create_and_revoke_token():
@@ -460,7 +540,7 @@ def test_ui_settings_account_create_and_revoke_token():
 
     from unittest.mock import patch
 
-    # Test Create Token via form
+    # Test Create Token via form with workspace_ids and scopes
     with patch.object(ui_main, "_backend_post_with_error") as mock_post:
         mock_post.return_value = (
             {"id": str(uuid.uuid4()), "name": "New Key", "token": "lot_pat_secretkey123"},
@@ -468,7 +548,12 @@ def test_ui_settings_account_create_and_revoke_token():
         )
         resp = client.post(
             "/settings/account/tokens",
-            data={"name": "New Key", "lifetime_days": "30", "workspace_id": "", "scopes": ["read", "write"]},
+            data={
+                "name": "New Key",
+                "lifetime_days": "30",
+                "workspace_ids": ["ws-123"],
+                "scopes": ["read", "write"],
+            },
             cookies={"lake_token": token},
         )
         assert resp.status_code == 302

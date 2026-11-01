@@ -2144,8 +2144,9 @@ async def settings_account_tokens_post(
     request: Request,
     name: str = Form(...),
     lifetime_days: str = Form("30"),
+    workspace_ids: list[str] = Form(default=[]),
     workspace_id: str = Form(""),
-    scopes: list[str] = Form(default=["read", "write"]),
+    scopes: list[str] = Form(default=[]),
 ):
     token = request.cookies.get("lake_token")
     if not token:
@@ -2156,13 +2157,31 @@ async def settings_account_tokens_post(
     except ValueError:
         days = 30
 
-    ws_id = workspace_id.strip() if workspace_id and workspace_id.strip() else None
+    selected_wids = [w.strip() for w in workspace_ids if w and w.strip()]
+    if not selected_wids and workspace_id and workspace_id.strip():
+        selected_wids = [workspace_id.strip()]
+
+    if not selected_wids:
+        return RedirectResponse(
+            url="/settings/account?token_error="
+            + urllib.parse.quote_plus("You must explicitly grant access to at least one workspace.")
+            + "#tokens",
+            status_code=302,
+        )
+
+    if not scopes:
+        return RedirectResponse(
+            url="/settings/account?token_error="
+            + urllib.parse.quote_plus("You must explicitly select at least one permission scope.")
+            + "#tokens",
+            status_code=302,
+        )
 
     payload = {
         "name": name,
         "lifetime_days": days,
-        "workspace_id": ws_id,
-        "scopes": scopes if scopes else ["read", "write"],
+        "workspace_ids": selected_wids,
+        "scopes": scopes,
     }
     data, err = _backend_post_with_error("/api/auth/tokens", token, payload)
     if err:
