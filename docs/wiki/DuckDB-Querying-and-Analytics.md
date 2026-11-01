@@ -10,13 +10,13 @@ The queries in this guide were run against a local stack with three days of samp
 
 | Where | Good for | Notes |
 |---|---|---|
-| **SQL Editor** in the Lake UI (`/sql`) | Interactive exploration; catalog tables appear as views | Runs in a pool of warm DuckDB connections with S3 already configured. See the write-access note below. |
+| **SQL Editor** in the Lake UI (`/sql`) | Interactive exploration; catalog tables appear as views | Runs in a pool of warm DuckDB connections with S3 already configured. Strictly read-only analytical queries. |
 | **AI Query, SQL assistant and Genie** | Plain-English questions, SQL generation, fixing and explaining queries | Read-only: only `SELECT`, `WITH`, `DESCRIBE`, `SUMMARIZE`, `SHOW`, `EXPLAIN` and `VALUES`, and a single statement |
 | **Notebooks** (JupyterLab) | Analysis in Python with pandas | DuckDB is installed; MinIO credentials are in the environment |
 | **Python scripts and DAGs** | Pipelines | `pipeline/shared/storage_writer.py` builds a connection |
 | **Apache Superset** | BI dashboards | Needs a DuckDB driver that the image does not include; see section 6 |
 
-> **Write access in the SQL Editor.** The SQL Editor currently runs whatever you submit. In our test, `COPY ... TO 's3://...'` and `CREATE TABLE` both succeeded there, while the AI endpoints refused them. Treat the editor as having write access to the whole bucket. Whether that should change is tracked in [#174](https://github.com/Lake-of-Tears/lake-of-tears/issues/174).
+> **Read-only enforcement in the SQL Editor and AI Endpoints.** The SQL Editor (`/sql`) and AI execution endpoints (`/api/ai/sql/execute`, `/api/v1/ai/sql/execute`) strictly enforce read-only execution for all users and roles. Only analytical statements (`SELECT`, `WITH`, `DESCRIBE`, `SUMMARIZE`, `SHOW`, `EXPLAIN`, `VALUES`) are permitted. Write and state-altering statements (such as `COPY ... TO 's3://...'`, `CREATE`, `DROP`, `DELETE`, `INSERT`, `UPDATE`, `ALTER`, `ATTACH`, `LOAD`) are blocked.
 
 ## 2. Connecting DuckDB to MinIO
 

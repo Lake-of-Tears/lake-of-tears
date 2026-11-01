@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 
 import duckdb
 import pyarrow as pa
+import sqlglot
 from ai_providers import AIProvider, ProviderNotConfigured, get_active_provider
 from ai_providers.compat import ProviderClient
 from ai_providers.gemini import GeminiProvider
@@ -20,6 +21,7 @@ from auth import DEFAULT_GEMINI_MODEL
 from sql_guardrails import validate_sql_s3_paths
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
+from sqlglot import exp
 
 logger = logging.getLogger("lake.backend.ai.service")
 
@@ -920,27 +922,56 @@ def build_schema_prompt_context(catalogs: list[dict[str, Any]] | None = None) ->
 
 
 def is_read_only_sql(sql: str) -> tuple[bool, str | None]:
-    """Validate that a SQL query is read-only (SELECT, WITH, DESCRIBE, SUMMARIZE, SHOW, EXPLAIN)."""
+    """Validate that a SQL query is read-only (SELECT, WITH, DESCRIBE, SUMMARIZE, SHOW, EXPLAIN, VALUES)."""
     cleaned = re.sub(r"--.*?$", "", sql, flags=re.MULTILINE)
     cleaned = re.sub(r"/\*.*?\*/", "", cleaned, flags=re.DOTALL).strip()
     if not cleaned:
         return False, "SQL query cannot be empty."
 
-    statements = [s.strip() for s in cleaned.split(";") if s.strip()]
-    if len(statements) > 1:
-        return False, "Only a single read-only SQL statement is permitted."
+    # 1. AST parsing via sqlglot for accurate statement count and write-node detection
+    try:
+        parsed_stmts = [s for s in sqlglot.parse(cleaned, read="duckdb") if s is not None]
+        if len(parsed_stmts) > 1:
+            return False, "Only a single read-only SQL statement is permitted."
+        if len(parsed_stmts) == 0:
+            return False, "SQL query cannot be empty."
 
-    stmt = statements[0]
-    if _FORBIDDEN_SQL_RE.match(stmt):
+        ast = parsed_stmts[0]
+        # Inspect for any write / modification AST nodes (including within CTEs)
+        has_write = any(
+            isinstance(
+                node,
+                exp.Insert | exp.Delete | exp.Update | exp.Create | exp.Drop | exp.Copy | exp.Alter,
+            )
+            for node in ast.walk()
+        )
+        if has_write:
+            return (
+                False,
+                "Only read-only queries (SELECT, WITH, DESCRIBE, SUMMARIZE, SHOW, EXPLAIN, VALUES) are allowed.",
+            )
+    except Exception:
+        # Fallback to semicolon-based splitting if AST parsing fails
+        statements = [s.strip() for s in cleaned.split(";") if s.strip()]
+        if len(statements) > 1:
+            return False, "Only a single read-only SQL statement is permitted."
+
+    # 2. Validate against forbidden verbs regex
+    if _FORBIDDEN_SQL_RE.match(cleaned):
         return (
             False,
-            "Only read-only queries (SELECT, WITH, DESCRIBE, SUMMARIZE, SHOW) are allowed.",
+            "Only read-only queries (SELECT, WITH, DESCRIBE, SUMMARIZE, SHOW, EXPLAIN, VALUES) are allowed.",
         )
 
-    if not re.match(r"^\s*(SELECT|WITH|DESCRIBE|SUMMARIZE|SHOW|EXPLAIN|VALUES)\b", stmt, re.I):
+    # 3. Require query to start with read-only statement keyword
+    if not re.match(
+        r"^\s*\(?\s*(SELECT|WITH|DESCRIBE|SUMMARIZE|SHOW|EXPLAIN|VALUES)\b",
+        cleaned,
+        re.IGNORECASE,
+    ):
         return (
             False,
-            "Query must begin with SELECT, WITH, DESCRIBE, SUMMARIZE, SHOW, or EXPLAIN.",
+            "Query must begin with SELECT, WITH, DESCRIBE, SUMMARIZE, SHOW, EXPLAIN, or VALUES.",
         )
 
     return True, None
@@ -963,7 +994,7 @@ def _serialize_cell(val: Any) -> Any:
 def execute_sql_query(
     sql: str,
     catalogs: list[dict[str, Any]] | None = None,
-    read_only: bool = False,
+    read_only: bool = True,
     max_ai_rows: int = AI_MAX_ROWS_PER_QUERY,
     api_key: str | None = None,
     workspace_slug: str | None = None,

@@ -589,7 +589,7 @@ class DashboardStatsResponse(BaseModel):
 
 class SqlExecuteRequest(BaseModel):
     sql: str
-    read_only: bool = False
+    read_only: bool = True
     max_ai_rows: int = 50
 
 

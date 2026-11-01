@@ -542,7 +542,7 @@ duckdb_pool_instance = duckdb_pool.DuckDBConnectionPool(
 def _run_query(
     sql: str,
     catalogs: list[dict[str, Any]] | None = None,
-    read_only: bool = False,
+    read_only: bool = True,
     max_ai_rows: int = 50,
     cancel: Any = None,
     workspace_slug: str | None = None,
@@ -1256,6 +1256,7 @@ async def sql_post(request: Request, sql: str = Form(...)):
     result = _run_query(
         sql,
         catalogs=all_catalogs,
+        read_only=True,
         workspace_slug=ws_slug,
         is_superadmin=is_superadmin,
     )
@@ -5007,7 +5008,8 @@ async def ui_ai_context(request: Request):
 async def ui_ai_sql_execute(request: Request):
     body = await request.json()
     sql = str(body.get("sql") or "")
-    read_only = bool(body.get("read_only", False))
+    # Read-only is strictly enforced unconditionally for all users and endpoints
+    read_only = True
     max_ai_rows = int(body.get("max_ai_rows", 50))
     catalogs = _resolve_ui_all_catalogs(request)
     ws = getattr(request.state, "workspace", None)

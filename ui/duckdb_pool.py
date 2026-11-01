@@ -427,12 +427,16 @@ def classify_query_error(
         }
 
     # 3. Read-Only SQL violation
-    if "only read-only select queries are allowed" in err_str.lower():
+    if (
+        "read-only" in err_str.lower()
+        or "read only" in err_str.lower()
+        or "query must begin with select" in err_str.lower()
+    ):
         return {
             "error_type": "READ_ONLY",
             "title": "Query Blocked by Read-Only Policy",
-            "message": "Only read-only queries (SELECT, WITH, PRAGMA) are permitted in this mode.",
-            "suggestion": "Remove any DDL or data modification statements (DROP, DELETE, UPDATE, INSERT) from your query.",
+            "message": "Only read-only queries (SELECT, WITH, DESCRIBE, SUMMARIZE, SHOW, EXPLAIN, VALUES) are permitted.",
+            "suggestion": "Remove write or modification statements (such as COPY to S3, CREATE, DROP, DELETE, UPDATE, INSERT, ATTACH) from your query.",
             "details": err_str,
         }
 
