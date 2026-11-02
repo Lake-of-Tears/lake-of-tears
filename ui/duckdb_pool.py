@@ -162,6 +162,10 @@ def reset_connection_state(
     callers that know a request's SQL contained no macro or function statement may skip it with
     ``sweep_macros=False``.
     """
+    try:
+        con.complete()
+    except Exception:
+        pass
     current = con.execute("SELECT current_database()").fetchone()[0]
     con.execute(
         f"USE {_qident(current)}.main"
@@ -318,7 +322,7 @@ class DuckDBConnectionPool:
         sweep_macros = sql is None or bool(_MACRO_WORDS.search(sql))
         con, counted = self._take(timeout)
         try:
-            con.execute("SELECT 1")  # quick health check before handing it out
+            con.execute("SELECT 1").fetchall()  # quick health check before handing it out
         except Exception:
             self._baselines.pop(id(con), None)
             try:

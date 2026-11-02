@@ -661,6 +661,10 @@ def _execute_statement_on_duckdb(
         ]
 
         raw_rows = rel.fetchmany(req.row_limit + 1) if desc_list else []
+        try:
+            con.complete()
+        except Exception:
+            pass
 
         # If DDL/DML modified or created a managed table, export to workspace S3 & sync CatalogTable
         if op in ("CREATE", "INSERT", "UPDATE", "DELETE", "ALTER") and ddl_schema and ddl_table:

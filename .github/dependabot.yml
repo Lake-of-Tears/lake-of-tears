@@ -13,6 +13,10 @@ updates:
     schedule:
       interval: weekly
     labels: [dependencies]
+    groups:
+      python-deps:
+        patterns:
+          - "*"
 
   - package-ecosystem: docker
     directories:
