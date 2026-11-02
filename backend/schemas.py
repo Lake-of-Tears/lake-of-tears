@@ -841,3 +841,97 @@ class AnomalyDetectRequest(BaseModel):
     source: str | None = None
     table_slug: str | None = None
     contamination: float = 0.05
+
+
+# ── Statement Execution API (/api/sql/statements) ─────────────────────────────
+
+
+class StatementParameterItem(BaseModel):
+    name: str | None = None
+    value: Any = None
+    type: str | None = None
+
+
+class StatementExecutionRequest(BaseModel):
+    statement: str
+    warehouse_id: str = "default"
+    catalog: str = "main"
+    schema_name: str = Field(default="default", alias="schema", serialization_alias="schema")
+    parameters: list[Any] = Field(default_factory=list)
+    row_limit: int = Field(default=1000, ge=1, le=100000)
+    byte_limit: int = Field(default=10485760, ge=256, le=104857600)
+    chunk_size: int = Field(default=500, ge=1, le=50000)
+    format: Literal["JSON_ARRAY", "JSON_OBJECT", "CSV"] = "JSON_ARRAY"
+    wait_timeout: str | None = None
+
+    model_config = {"populate_by_name": True}
+
+
+class StatementErrorInfo(BaseModel):
+    error_code: str = "EXECUTION_ERROR"
+    message: str
+
+
+class StatementStatus(BaseModel):
+    state: Literal["PENDING", "RUNNING", "SUCCEEDED", "FAILED", "CANCELED", "CLOSED"]
+    error: StatementErrorInfo | None = None
+
+
+class StatementColumnInfo(BaseModel):
+    name: str
+    type_text: str = "VARCHAR"
+    type_name: str | None = None
+    position: int = 0
+
+
+class StatementSchemaInfo(BaseModel):
+    column_count: int = 0
+    columns: list[StatementColumnInfo] = Field(default_factory=list)
+
+
+class StatementChunkInfo(BaseModel):
+    chunk_index: int
+    row_offset: int
+    row_count: int
+    byte_count: int
+
+
+class StatementManifest(BaseModel):
+    format: str = "JSON_ARRAY"
+    schema_info: StatementSchemaInfo = Field(
+        default_factory=StatementSchemaInfo,
+        alias="schema",
+        serialization_alias="schema",
+    )
+    total_chunk_count: int = 0
+    chunks: list[StatementChunkInfo] = Field(default_factory=list)
+    total_row_count: int = 0
+    total_byte_count: int = 0
+    truncated: bool = False
+
+    model_config = {"populate_by_name": True}
+
+
+class StatementResultChunk(BaseModel):
+    chunk_index: int = 0
+    row_offset: int = 0
+    row_count: int = 0
+    next_chunk_index: int | None = None
+    next_chunk_internal_link: str | None = None
+    data_array: list[list[Any]] | None = None
+    data_objects: list[dict[str, Any]] | None = None
+    csv_data: str | None = None
+
+
+class StatementExecutionResponse(BaseModel):
+    statement_id: str
+    status: StatementStatus
+    manifest: StatementManifest | None = None
+    result: StatementResultChunk | None = None
+    execution_ms: float | None = None
+    workspace_slug: str | None = None
+    catalog: str | None = None
+    schema_name: str | None = Field(default=None, alias="schema", serialization_alias="schema")
+    created_at: str | None = None
+
+    model_config = {"populate_by_name": True}

@@ -129,6 +129,7 @@ from schemas import (
     WorkspaceShareResponse,
     WorkspaceShareReviewRequest,
 )
+from sql_router import router as sql_router
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 from storage_router import router as storage_router
@@ -181,6 +182,8 @@ app.include_router(dashboards_router, prefix="/api/v1/dashboards", tags=["dashbo
 app.include_router(dashboards_router, prefix="/api/dashboards", tags=["dashboards"])
 app.include_router(ai_router, prefix="/api/v1/ai", tags=["ai"])
 app.include_router(ai_router, prefix="/api/ai", tags=["ai"])
+app.include_router(sql_router, prefix="/api/v1/sql", tags=["sql"])
+app.include_router(sql_router, prefix="/api/sql", tags=["sql"])
 app.include_router(ai_gateway_router, prefix="/api/internal/ai", tags=["ai-internal"])
 app.include_router(ai_admin_router, prefix="/api/admin/ai-provider", tags=["ai-admin"])
 
