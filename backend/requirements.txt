@@ -16,4 +16,4 @@ pyarrow>=26.0.0
 duckdb==1.5.6
 google-genai==2.34.0
 numpy>=2.5.4
-sqlglot>=30.23.0
+sqlglot>=30.25.0
