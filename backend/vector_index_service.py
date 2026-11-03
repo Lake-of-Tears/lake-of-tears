@@ -31,6 +31,7 @@ def _record_sync_error(table: CatalogTable, db: Session, error_msg: str) -> None
         updated_cfg = dict(table.vector_index or {})
         updated_cfg["status"] = "error"
         updated_cfg["last_error"] = error_msg
+        updated_cfg["failed_at"] = datetime.now(UTC).isoformat()
         table.vector_index = updated_cfg
         db.commit()
         db.refresh(table)
@@ -114,6 +115,9 @@ def sync_table_vector_index(
             updated_cfg["dimension"] = dim
             updated_cfg["status"] = "synced"
             updated_cfg["total_vectors"] = 0
+            updated_cfg["processed_rows"] = 0
+            updated_cfg["total_rows"] = 0
+            updated_cfg["percent"] = 100
             updated_cfg["last_synced_at"] = now_dt.isoformat()
             updated_cfg.pop("last_error", None)
             table.vector_index = updated_cfg
@@ -122,6 +126,9 @@ def sync_table_vector_index(
             return {
                 "ok": True,
                 "total_vectors": 0,
+                "processed_rows": 0,
+                "total_rows": 0,
+                "percent": 100,
                 "status": "synced",
                 "message": "No records found to embed",
             }
@@ -197,6 +204,21 @@ def sync_table_vector_index(
         id_idx = col_names.index("id") if "id" in col_names else None
         source_idx = col_names.index(source_col)
 
+        # Initial progress before batches run
+        updated_cfg = dict(table.vector_index or {})
+        updated_cfg["status"] = "syncing"
+        updated_cfg["processed_rows"] = 0
+        updated_cfg["total_rows"] = total
+        updated_cfg["percent"] = 0
+        if "started_at" not in updated_cfg:
+            updated_cfg["started_at"] = now_dt.isoformat()
+        table.vector_index = updated_cfg
+        try:
+            db.commit()
+            db.refresh(table)
+        except Exception:
+            pass
+
         for i in range(0, total, batch_size):
             batch = raw_rows[i : i + batch_size]
             texts = []
@@ -248,6 +270,21 @@ def sync_table_vector_index(
                 insert_rows,
             )
 
+            # Update batch progress in DB
+            processed = min(i + len(batch), total)
+            percent = int((processed / total) * 100) if total > 0 else 100
+            updated_cfg = dict(table.vector_index or {})
+            updated_cfg["status"] = "syncing"
+            updated_cfg["processed_rows"] = processed
+            updated_cfg["total_rows"] = total
+            updated_cfg["percent"] = percent
+            table.vector_index = updated_cfg
+            try:
+                db.commit()
+                db.refresh(table)
+            except Exception:
+                pass
+
         # Write to destination S3 Parquet
         con.execute(f"COPY _vector_sync_batch TO '{dest_s3}' (FORMAT PARQUET)")
 
@@ -261,6 +298,9 @@ def sync_table_vector_index(
         updated_cfg["dimension"] = dim
         updated_cfg["status"] = "synced"
         updated_cfg["total_vectors"] = total
+        updated_cfg["processed_rows"] = total
+        updated_cfg["total_rows"] = total
+        updated_cfg["percent"] = 100
         updated_cfg["last_synced_at"] = now_dt.isoformat()
         updated_cfg["s3_vector_path"] = dest_s3
         updated_cfg.pop("last_error", None)
@@ -272,6 +312,9 @@ def sync_table_vector_index(
         return {
             "ok": True,
             "total_vectors": total,
+            "processed_rows": total,
+            "total_rows": total,
+            "percent": 100,
             "status": "synced",
             "s3_vector_path": dest_s3,
             "last_synced_at": now_dt.isoformat(),

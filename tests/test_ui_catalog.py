@@ -609,7 +609,7 @@ def test_catalog_vector_sync_success_passes_workspace_context():
             },
             cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-100"},
         )
-        assert res.status_code == 200
+        assert res.status_code == 202
         data = res.json()
         assert data["ok"] is True
         assert data["table"] == mock_table
@@ -626,6 +626,72 @@ def test_catalog_vector_sync_success_passes_workspace_context():
         assert post_kwargs.get("workspace_id") == "ws-100"
         assert post_kwargs.get("workspace_slug") == "test-ws"
         assert post_kwargs.get("timeout") == 180.0
+
+
+def test_catalog_vector_sync_concurrency_conflict():
+    token = _make_token()
+    mock_workspaces = [
+        {"id": "ws-100", "slug": "test-ws", "name": "Test Workspace", "role": "admin"}
+    ]
+
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
+        patch.object(main, "_backend_patch"),
+        patch.object(
+            main,
+            "_backend_post_with_error",
+            return_value=(None, "A vector sync is already in progress for this table"),
+        ),
+    ):
+        res = client.post(
+            "/catalog/vector-sync",
+            json={
+                "catalog_id": "cat-1",
+                "schema_id": "sch-1",
+                "table_id": "tbl-1",
+            },
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-100"},
+        )
+        assert res.status_code == 409
+        assert res.json()["ok"] is False
+        assert res.json()["conflict"] is True
+        assert "already in progress" in res.json()["error"]
+
+
+def test_catalog_table_status_endpoint():
+    token = _make_token()
+    mock_workspaces = [
+        {"id": "ws-100", "slug": "test-ws", "name": "Test Workspace", "role": "admin"}
+    ]
+    mock_table = {
+        "id": "tbl-1",
+        "name": "clinical_trials",
+        "vector_index": {
+            "status": "syncing",
+            "processed_rows": 150,
+            "total_rows": 1000,
+            "percent": 15,
+        },
+    }
+
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
+        patch.object(
+            main, "_backend_get_async", return_value=mock_table
+        ) as mock_get,
+    ):
+        res = client.get(
+            "/catalog/table-status?catalog_id=cat-1&schema_id=sch-1&table_id=tbl-1",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-100"},
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["ok"] is True
+        assert data["table"]["vector_index"]["status"] == "syncing"
+        assert data["table"]["vector_index"]["percent"] == 15
+        mock_get.assert_called_once()
 
 
 def test_catalog_vector_sync_unauthenticated():
