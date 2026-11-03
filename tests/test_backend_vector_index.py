@@ -491,3 +491,154 @@ def test_backend_get_table_endpoint():
         assert data["vector_index"]["percent"] == 50
     finally:
         backend_main.app.dependency_overrides.clear()
+
+
+def test_sync_table_vector_index_recursive_chunking_and_lineage(tmp_path: Path):
+    import json
+
+    import duckdb
+
+    # Create parquet with 1 short row and 1 long row
+    src_parquet = tmp_path / "src_long.parquet"
+    out_parquet = tmp_path / "out_chunked.parquet"
+    long_overview = (
+        "In a future where mind theft is reality, Dom Cobb is a master thief. "
+        "He enters peoples subconscious during REM sleep to steal corporate secrets. "
+        "Now he is offered a final redemption job: inception, the planting of an idea. "
+        "If he succeeds, he can finally return home to his children in America."
+    )
+    con = duckdb.connect()
+    con.execute(f"""
+        COPY (
+            SELECT 'doc1' as id, 'Short Movie' as title, 'A brief summary.' as overview, '2021' as release_date
+            UNION ALL
+            SELECT 'doc2' as id, 'Epic Inception' as title, '{long_overview}' as overview, '2010' as release_date
+        ) TO '{src_parquet}' (FORMAT PARQUET)
+    """)
+    con.close()
+
+    mock_table = MagicMock(spec=CatalogTable)
+    mock_table.slug = "movies-long"
+    mock_table.s3_path_pattern = str(src_parquet)
+    # Configure recursive chunking with small chunk size to trigger multi-chunk explosion
+    mock_table.vector_index = {
+        "enabled": True,
+        "source_column": "overview",
+        "chunking": "recursive",
+        "chunk_size": 100,
+        "chunk_overlap": 20,
+    }
+
+    provider = FakeProvider(dimension=8, embedding_model="fake-embed")
+    res = vector_index_service.sync_table_vector_index(
+        mock_table,
+        MagicMock(),
+        dest_s3=str(out_parquet),
+        provider=provider,
+    )
+    assert res["ok"] is True
+    assert res["total_rows"] == 2
+    assert res["total_vectors"] > 2
+    assert res["chunking"] == "recursive"
+    assert res["chunk_size"] == 100
+    assert res["chunk_overlap"] == 20
+
+    # Inspect the generated parquet schema and rows
+    c = duckdb.connect()
+    df = c.execute(f"SELECT * FROM read_parquet('{out_parquet}')").fetchdf()
+    c.close()
+
+    expected_cols = [
+        "id",
+        "source",
+        "content",
+        "embedding",
+        "source_date",
+        "provider",
+        "model",
+        "dimension",
+        "parent_id",
+        "chunk_index",
+        "total_chunks",
+        "metadata",
+        "ingested_at",
+    ]
+    assert list(df.columns) == expected_cols
+
+    # Check doc1 (single chunk)
+    doc1_rows = df[df["parent_id"] == "doc1"]
+    assert len(doc1_rows) == 1
+    doc1 = doc1_rows.iloc[0]
+    assert doc1["id"] == "doc1"
+    assert doc1["chunk_index"] == 0
+    assert doc1["total_chunks"] == 1
+    meta1 = json.loads(doc1["metadata"])
+    assert meta1["title"] == "Short Movie"
+    assert meta1["release_date"] == "2021"
+    assert "overview" not in meta1
+    assert "id" not in meta1
+
+    # Check doc2 (multi chunks)
+    doc2_rows = df[df["parent_id"] == "doc2"]
+    assert len(doc2_rows) > 1
+    tot = len(doc2_rows)
+    for idx, row in enumerate(doc2_rows.itertuples()):
+        assert row.id == f"doc2:{idx}"
+        assert row.chunk_index == idx
+        assert row.total_chunks == tot
+        meta2 = json.loads(row.metadata)
+        assert meta2["title"] == "Epic Inception"
+        assert meta2["release_date"] == "2010"
+        assert "overview" not in meta2
+
+
+def test_sync_table_vector_index_document_chunking_strategy(tmp_path: Path):
+    import duckdb
+
+    src_parquet = tmp_path / "src_doc.parquet"
+    out_parquet = tmp_path / "out_doc.parquet"
+    long_overview = "Word " * 200
+    con = duckdb.connect()
+    con.execute(f"""
+        COPY (
+            SELECT 'doc1' as id, 'Long Movie' as title, '{long_overview}' as overview
+        ) TO '{src_parquet}' (FORMAT PARQUET)
+    """)
+    con.close()
+
+    mock_table = MagicMock(spec=CatalogTable)
+    mock_table.slug = "movies-doc"
+    mock_table.s3_path_pattern = str(src_parquet)
+    mock_table.vector_index = {
+        "enabled": True,
+        "source_column": "overview",
+        "chunking": "document",
+    }
+
+    provider = FakeProvider(dimension=8, embedding_model="fake-embed")
+    res = vector_index_service.sync_table_vector_index(
+        mock_table,
+        MagicMock(),
+        dest_s3=str(out_parquet),
+        provider=provider,
+    )
+    assert res["ok"] is True
+    assert res["total_rows"] == 1
+    assert res["total_vectors"] == 1
+    assert res["chunking"] == "document"
+
+
+def test_sync_table_vector_index_invalid_chunking_config(tmp_path: Path):
+    mock_table = _movies_table(_movies_parquet(tmp_path))
+    mock_table.vector_index["chunking"] = "unknown_strategy"
+    mock_db = MagicMock()
+    res = vector_index_service.sync_table_vector_index(
+        mock_table,
+        mock_db,
+        dest_s3=str(tmp_path / "out_err.parquet"),
+        provider=FakeProvider(),
+    )
+    assert res["ok"] is False
+    assert "Invalid chunking configuration" in res["error"]
+    assert mock_table.vector_index["status"] == "error"
+

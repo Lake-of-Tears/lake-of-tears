@@ -895,6 +895,17 @@ function startVectorPolling(catId, schId, tblId) {
   }, 3000);
 }
 
+function toggleVectorChunkFields(val) {
+  const el = document.getElementById('vector-cfg-chunk-params');
+  if (el) {
+    if (val === 'recursive') {
+      el.classList.remove('hidden');
+    } else {
+      el.classList.add('hidden');
+    }
+  }
+}
+
 function renderVectorTab(t) {
   const container = document.getElementById('drawer-tab-vector');
   if (!container) return;
@@ -906,6 +917,9 @@ function renderVectorTab(t) {
   const dim = v.dimension || 768;
   const lastSynced = v.last_synced_at ? new Date(v.last_synced_at).toLocaleString() : 'Never';
   const formatTpl = v.format_template || '';
+  const chunking = v.chunking || 'recursive';
+  const chunkSize = v.chunk_size !== undefined ? v.chunk_size : 512;
+  const chunkOverlap = v.chunk_overlap !== undefined ? v.chunk_overlap : 64;
 
   const cols = (t.column_defs || []).map(c => c.name).filter(Boolean);
 
@@ -981,6 +995,10 @@ function renderVectorTab(t) {
             <span class="text-xs font-mono text-emerald-400">${sourceCol}</span>
           </div>
           <div class="bg-white/[0.02] border border-white/[0.04] rounded p-2.5">
+            <span class="text-[10px] text-gray-500 uppercase font-semibold block mb-0.5">Chunking Strategy</span>
+            <span class="text-xs font-mono text-purple-400 block truncate" title="${chunking}">${chunking}${chunking === 'recursive' ? ` (${chunkSize}/${chunkOverlap})` : ''}</span>
+          </div>
+          <div class="bg-white/[0.02] border border-white/[0.04] rounded p-2.5 col-span-2">
             <span class="text-[10px] text-gray-500 uppercase font-semibold block mb-0.5">Last Synchronized</span>
             <span class="text-xs text-gray-400">${lastSynced}</span>
           </div>
@@ -998,6 +1016,29 @@ function renderVectorTab(t) {
               ${!cols.includes(sourceCol) ? `<option value="${sourceCol}" selected>${sourceCol}</option>` : ''}
             </select>
             <p class="text-[11px] text-gray-500 mt-1">The primary text content to embed per row.</p>
+          </div>
+
+          <div>
+            <label class="block text-gray-400 mb-1">Chunking Strategy</label>
+            <select id="vector-cfg-chunking" class="input-dark text-xs w-full py-1.5" ${status === 'syncing' ? 'disabled' : ''} onchange="toggleVectorChunkFields(this.value)">
+              <option value="recursive" ${chunking === 'recursive' ? 'selected' : ''}>Recursive (Split by character size/overlap)</option>
+              <option value="document" ${chunking === 'document' ? 'selected' : ''}>Document (1 row = 1 chunk)</option>
+              <option value="agentic" ${chunking === 'agentic' ? 'selected' : ''}>Agentic (LLM Proposition extraction)</option>
+            </select>
+            <p class="text-[11px] text-gray-500 mt-1">Select how large rows are segmented before embedding.</p>
+          </div>
+
+          <div id="vector-cfg-chunk-params" class="grid grid-cols-2 gap-2 ${chunking === 'recursive' ? '' : 'hidden'}">
+            <div>
+              <label class="block text-gray-400 mb-1">Chunk Size (chars)</label>
+              <input type="number" id="vector-cfg-chunk-size" value="${chunkSize}" min="32" max="8192"
+                     class="input-dark text-xs w-full py-1.5 font-mono" ${status === 'syncing' ? 'disabled' : ''}/>
+            </div>
+            <div>
+              <label class="block text-gray-400 mb-1">Chunk Overlap (chars)</label>
+              <input type="number" id="vector-cfg-chunk-overlap" value="${chunkOverlap}" min="0" max="1024"
+                     class="input-dark text-xs w-full py-1.5 font-mono" ${status === 'syncing' ? 'disabled' : ''}/>
+            </div>
           </div>
 
           <div>
@@ -1034,12 +1075,19 @@ function triggerVectorSync(btn, force = false) {
 
   const colEl = document.getElementById('vector-cfg-column');
   const tplEl = document.getElementById('vector-cfg-template');
+  const chunkEl = document.getElementById('vector-cfg-chunking');
+  const sizeEl = document.getElementById('vector-cfg-chunk-size');
+  const overlapEl = document.getElementById('vector-cfg-chunk-overlap');
+
   const payload = {
     catalog_id: currentCatId,
     schema_id: currentSchId,
     table_id: currentTableId,
     source_column: colEl ? colEl.value : (currentTableData.vector_index || {}).source_column || 'overview',
     format_template: tplEl ? tplEl.value : (currentTableData.vector_index || {}).format_template || '',
+    chunking: chunkEl ? chunkEl.value : (currentTableData.vector_index || {}).chunking || 'recursive',
+    chunk_size: sizeEl ? parseInt(sizeEl.value, 10) : (currentTableData.vector_index || {}).chunk_size || 512,
+    chunk_overlap: overlapEl ? parseInt(overlapEl.value, 10) : (currentTableData.vector_index || {}).chunk_overlap || 64,
     force: force,
   };
 

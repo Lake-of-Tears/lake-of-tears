@@ -8,6 +8,13 @@ from typing import Any
 
 from ai_providers import AIProvider, ProviderError, get_active_provider
 from ai_service import create_duckdb_connection
+from chunking import (
+    DEFAULT_CHUNK_OVERLAP,
+    DEFAULT_CHUNK_SIZE,
+    DEFAULT_STRATEGY,
+    explode_chunks,
+    get_chunker,
+)
 from models import CatalogTable
 from sqlalchemy.orm import Session
 
@@ -52,12 +59,11 @@ def sync_table_vector_index(
 ) -> dict[str, Any]:
     """Incrementally synchronize vector embeddings for a catalog table.
 
-    Reads raw data from `table.s3_path_pattern`, composes text chunks using
-    the configured source column or template, embeds it with the AI provider selected in the
-    Admin Panel (or ``provider``), and writes Parquet files to
-    `s3://datalake/workspaces/<workspace_slug>/embeddings/<table_slug>/data.parquet` with the provider,
-    model and dimension that made each row. The model and dimension come from the provider, not from
-    the table settings.
+    Reads raw data from `table.s3_path_pattern`, explodes rows into chunks using
+    the configured chunking strategy (defaulting to recursive), embeds chunks with the
+    AI provider selected in the Admin Panel (or ``provider``), and writes Parquet files to
+    `s3://datalake/workspaces/<workspace_slug>/embeddings/<table_slug>/data.parquet` with
+    standard lineage and model tracking columns.
     """
     s3_path = (table.s3_path_pattern or "").strip()
     if not s3_path:
@@ -68,6 +74,26 @@ def sync_table_vector_index(
     vector_cfg = table.vector_index or {}
     source_col = (vector_cfg.get("source_column") or "overview").strip()
     format_template = (vector_cfg.get("format_template") or "").strip()
+
+    chunk_strategy = (vector_cfg.get("chunking") or DEFAULT_STRATEGY).strip().lower()
+    chunk_size = int(vector_cfg.get("chunk_size") or DEFAULT_CHUNK_SIZE)
+    chunk_overlap = int(
+        vector_cfg.get("chunk_overlap")
+        if vector_cfg.get("chunk_overlap") is not None
+        else DEFAULT_CHUNK_OVERLAP
+    )
+
+    chunker_opts: dict[str, Any] = {}
+    if chunk_strategy == "recursive":
+        chunker_opts["chunk_size"] = chunk_size
+        chunker_opts["chunk_overlap"] = chunk_overlap
+
+    try:
+        chunker = get_chunker(chunk_strategy, **chunker_opts)
+    except ValueError as exc:
+        err = f"Invalid chunking configuration: {exc}"
+        _record_sync_error(table, db, err)
+        return {"ok": False, "error": err}
 
     try:
         provider = provider or get_active_provider(db)
@@ -110,6 +136,9 @@ def sync_table_vector_index(
             updated_cfg["enabled"] = True
             updated_cfg["source_column"] = source_col
             updated_cfg["format_template"] = format_template
+            updated_cfg["chunking"] = chunk_strategy
+            updated_cfg["chunk_size"] = chunk_size
+            updated_cfg["chunk_overlap"] = chunk_overlap
             updated_cfg["provider"] = provider.name
             updated_cfg["model"] = model
             updated_cfg["dimension"] = dim
@@ -130,6 +159,9 @@ def sync_table_vector_index(
                 "total_rows": 0,
                 "percent": 100,
                 "status": "synced",
+                "chunking": chunk_strategy,
+                "chunk_size": chunk_size,
+                "chunk_overlap": chunk_overlap,
                 "message": "No records found to embed",
             }
 
@@ -184,18 +216,21 @@ def sync_table_vector_index(
                 f"s3://{MINIO_BUCKET}/workspaces/{ws_slug}/embeddings/{table_slug}/data.parquet"
             )
 
-        # Create temporary table in DuckDB to hold batch embeddings
+        # Create temporary table in DuckDB to hold batch embeddings with unified lineage schema
         con.execute("""
             CREATE TEMP TABLE _vector_sync_batch (
                 id VARCHAR,
                 source VARCHAR,
-                summary VARCHAR,
                 content VARCHAR,
                 embedding DOUBLE[],
                 source_date VARCHAR,
                 provider VARCHAR,
                 model VARCHAR,
                 dimension BIGINT,
+                parent_id VARCHAR,
+                chunk_index BIGINT,
+                total_chunks BIGINT,
+                metadata VARCHAR,
                 ingested_at TIMESTAMP
             )
         """)
@@ -203,12 +238,14 @@ def sync_table_vector_index(
         total = len(raw_rows)
         id_idx = col_names.index("id") if "id" in col_names else None
         source_idx = col_names.index(source_col)
+        exclude_meta = ("id", "source", "content", "embedding", "source_date", "metadata", source_col)
 
         # Initial progress before batches run
         updated_cfg = dict(table.vector_index or {})
         updated_cfg["status"] = "syncing"
         updated_cfg["processed_rows"] = 0
         updated_cfg["total_rows"] = total
+        updated_cfg["total_vectors"] = 0
         updated_cfg["percent"] = 0
         if "started_at" not in updated_cfg:
             updated_cfg["started_at"] = now_dt.isoformat()
@@ -219,8 +256,14 @@ def sync_table_vector_index(
         except Exception:
             pass
 
+        total_vectors = 0
         for i in range(0, total, batch_size):
             batch = raw_rows[i : i + batch_size]
+            batch_dicts = [dict(zip(col_names, r)) for r in batch]
+            parent_ids = [
+                str(r[id_idx]) if id_idx is not None else f"{table_slug}_{i + idx}"
+                for idx, r in enumerate(batch)
+            ]
             texts = []
             for r in batch:
                 row_dict = dict(zip(col_names, r))
@@ -235,40 +278,52 @@ def sync_table_vector_index(
                     text = str(r[source_idx] or "")
                 texts.append(text)
 
-            embeddings = provider.embed_texts(texts)
-            if len(embeddings) != len(texts):
-                raise ProviderError(
-                    f"{model} returned {len(embeddings)} vectors for {len(texts)} texts"
-                )
-
-            insert_rows = []
-            for idx, r in enumerate(batch):
-                rec_id = str(r[id_idx]) if id_idx is not None else f"{table_slug}_{i + idx}"
-                chunk_text = texts[idx]
-                emb_vec = embeddings[idx]
-                insert_rows.append(
-                    (
-                        rec_id,
-                        table_slug,
-                        chunk_text,
-                        chunk_text,
-                        emb_vec,
-                        f"{y}-{m}-{d}",
-                        provider.name,
-                        model,
-                        len(emb_vec),
-                    )
-                )
-
-            con.executemany(
-                """
-                INSERT INTO _vector_sync_batch
-                    (id, source, summary, content, embedding, source_date, provider, model,
-                     dimension, ingested_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, now())
-                """,
-                insert_rows,
+            chunk_rows = explode_chunks(
+                batch_dicts,
+                texts,
+                parent_ids,
+                chunker,
+                exclude_metadata=exclude_meta,
             )
+
+            if chunk_rows:
+                chunk_texts = [c["content"] for c in chunk_rows]
+                embeddings = provider.embed_texts(chunk_texts)
+                if len(embeddings) != len(chunk_texts):
+                    raise ProviderError(
+                        f"{model} returned {len(embeddings)} vectors for {len(chunk_texts)} chunks"
+                    )
+
+                insert_rows = []
+                for idx, c in enumerate(chunk_rows):
+                    emb_vec = embeddings[idx]
+                    insert_rows.append(
+                        (
+                            c["id"],
+                            table_slug,
+                            c["content"],
+                            emb_vec,
+                            f"{y}-{m}-{d}",
+                            provider.name,
+                            model,
+                            len(emb_vec),
+                            c["parent_id"],
+                            c["chunk_index"],
+                            c["total_chunks"],
+                            c["metadata"],
+                        )
+                    )
+
+                con.executemany(
+                    """
+                    INSERT INTO _vector_sync_batch
+                        (id, source, content, embedding, source_date, provider, model,
+                         dimension, parent_id, chunk_index, total_chunks, metadata, ingested_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
+                    """,
+                    insert_rows,
+                )
+                total_vectors += len(chunk_rows)
 
             # Update batch progress in DB
             processed = min(i + len(batch), total)
@@ -277,6 +332,7 @@ def sync_table_vector_index(
             updated_cfg["status"] = "syncing"
             updated_cfg["processed_rows"] = processed
             updated_cfg["total_rows"] = total
+            updated_cfg["total_vectors"] = total_vectors
             updated_cfg["percent"] = percent
             table.vector_index = updated_cfg
             try:
@@ -293,11 +349,14 @@ def sync_table_vector_index(
         updated_cfg["enabled"] = True
         updated_cfg["source_column"] = source_col
         updated_cfg["format_template"] = format_template
+        updated_cfg["chunking"] = chunk_strategy
+        updated_cfg["chunk_size"] = chunk_size
+        updated_cfg["chunk_overlap"] = chunk_overlap
         updated_cfg["provider"] = provider.name
         updated_cfg["model"] = model
         updated_cfg["dimension"] = dim
         updated_cfg["status"] = "synced"
-        updated_cfg["total_vectors"] = total
+        updated_cfg["total_vectors"] = total_vectors
         updated_cfg["processed_rows"] = total
         updated_cfg["total_rows"] = total
         updated_cfg["percent"] = 100
@@ -311,11 +370,14 @@ def sync_table_vector_index(
 
         return {
             "ok": True,
-            "total_vectors": total,
+            "total_vectors": total_vectors,
             "processed_rows": total,
             "total_rows": total,
             "percent": 100,
             "status": "synced",
+            "chunking": chunk_strategy,
+            "chunk_size": chunk_size,
+            "chunk_overlap": chunk_overlap,
             "s3_vector_path": dest_s3,
             "last_synced_at": now_dt.isoformat(),
         }
