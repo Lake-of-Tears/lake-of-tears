@@ -62,22 +62,38 @@
       </div>
 
       <!-- SQL Editor Form -->
-      <form method="post" action="/sql" id="sqlEditorForm" class="flex flex-col gap-2.5 shrink-0">
+      <form method="post" action="/sql" id="sqlEditorForm" onsubmit="return handleFormSubmit(event)" class="flex flex-col gap-2.5 shrink-0">
         <div class="flex items-start gap-3">
-          <div class="flex-1">
+          <div class="flex-1 min-w-0 relative rounded-lg border border-gray-800 bg-gray-900 overflow-hidden focus-within:border-blue-500/50 transition-colors shadow-inner">
+            <!-- Hidden textarea for standard form POST submission and fallback -->
             <textarea
               name="sql"
               id="sqlTextarea"
-              rows="7"
-              class="input-dark font-mono text-xs resize-y h-40 w-full leading-relaxed"
-              placeholder="SELECT * FROM read_parquet('s3://datalake/raw/**/*.parquet') LIMIT 10"
+              class="hidden font-mono text-xs w-full h-60 p-3 bg-gray-900 text-gray-200 border-0 focus:ring-0 leading-relaxed"
               spellcheck="false"
             >{{ sql }}</textarea>
+            <!-- Monaco Editor Container -->
+            <div id="monacoEditorContainer" class="w-full h-60 min-h-[240px]">
+              <div id="monacoLoading" class="flex items-center justify-center h-full text-xs text-gray-500 gap-2">
+                <svg class="w-4 h-4 animate-spin text-blue-400" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg>
+                <span>Loading SQL Editor…</span>
+              </div>
+            </div>
           </div>
           <div class="flex flex-col gap-2 shrink-0">
-            <button type="submit" id="btnRunQuery" class="btn-primary whitespace-nowrap justify-center">
+            <button type="submit" id="btnRunQuery" class="btn-primary whitespace-nowrap justify-center flex items-center gap-1.5 shadow-sm">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-              Run Query
+              <span>Run Query</span>
+            </button>
+            <button
+              type="button"
+              id="btnFormatQuery"
+              onclick="triggerFormatSql()"
+              class="btn-ghost text-xs py-2 px-3 border border-gray-800 rounded-md whitespace-nowrap flex items-center justify-center gap-1.5 hover:border-blue-500/40"
+              title="Format SQL (Shift+Alt+F)"
+            >
+              <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h10M4 18h14"/></svg>
+              <span>Format SQL</span>
             </button>
             <button
               type="button"
@@ -86,21 +102,27 @@
               class="btn-ghost text-xs py-2 px-3 border border-gray-800 rounded-md whitespace-nowrap flex items-center justify-center gap-1.5 hover:border-blue-500/40"
             >
               <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-              Explain Query
+              <span>Explain Query</span>
             </button>
           </div>
         </div>
 
-        <!-- Example queries -->
-        <div class="flex flex-wrap items-center gap-1.5">
-          <span class="text-[11px] text-gray-500 mr-1">Examples:</span>
-          {% for eq in example_queries %}
-          <button type="button"
-                  onclick="document.querySelector('textarea[name=sql]').value = {{ eq.sql | tojson }}"
-                  class="btn-ghost text-xs py-1 px-2 border border-gray-800/60 rounded">
-            {{ eq.label }}
-          </button>
-          {% endfor %}
+        <!-- Example queries & Shortcuts badge -->
+        <div class="flex items-center justify-between flex-wrap gap-2">
+          <div class="flex flex-wrap items-center gap-1.5">
+            <span class="text-[11px] text-gray-500 mr-1">Examples:</span>
+            {% for eq in example_queries %}
+            <button type="button"
+                    onclick="setEditorSql({{ eq.sql | tojson }})"
+                    class="btn-ghost text-xs py-1 px-2 border border-gray-800/60 rounded">
+              {{ eq.label }}
+            </button>
+            {% endfor %}
+          </div>
+          <div class="flex items-center gap-2 text-[11px] text-gray-500 font-mono">
+            <span class="px-1.5 py-0.5 rounded bg-gray-800/60 border border-gray-800">⌘/Ctrl + Enter: Run</span>
+            <span class="px-1.5 py-0.5 rounded bg-gray-800/60 border border-gray-800">⇧ + ⌥ + F: Format</span>
+          </div>
         </div>
       </form>
 
@@ -419,8 +441,172 @@
   </div>
 </div>
 
+<!-- Monaco Editor & SQL Formatter -->
+<script src="https://cdn.jsdelivr.net/npm/sql-formatter@15.4.11/dist/sql-formatter.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
 <script>
+let monacoEditor = null;
 let _lastFixedSql = "";
+
+function formatSqlText(sql) {
+  if (!sql || typeof sql !== "string" || !sql.trim()) return sql || "";
+  try {
+    if (window.sqlFormatter && typeof window.sqlFormatter.format === "function") {
+      return window.sqlFormatter.format(sql, {
+        language: "postgresql",
+        keywordCase: "upper",
+        tabWidth: 2,
+        linesBetweenQueries: 2,
+      });
+    }
+  } catch (err) {
+    console.warn("SQL formatter error, falling back to original:", err);
+  }
+  return sql;
+}
+
+function getEditorSql() {
+  if (monacoEditor) {
+    return monacoEditor.getValue();
+  }
+  const textarea = document.getElementById("sqlTextarea");
+  return textarea ? textarea.value : "";
+}
+
+function setEditorSql(sql, autoFormat = true) {
+  let val = sql || "";
+  if (autoFormat) {
+    val = formatSqlText(val);
+  }
+  if (monacoEditor) {
+    monacoEditor.setValue(val);
+  }
+  const textarea = document.getElementById("sqlTextarea");
+  if (textarea) {
+    textarea.value = val;
+  }
+}
+
+function handleFormSubmit(event) {
+  const current = getEditorSql();
+  const formatted = formatSqlText(current);
+  setEditorSql(formatted, false);
+  const textarea = document.getElementById("sqlTextarea");
+  if (textarea) {
+    textarea.value = formatted;
+  }
+  return true;
+}
+
+function executeRunQuery() {
+  handleFormSubmit();
+  const form = document.getElementById("sqlEditorForm");
+  if (form) form.submit();
+}
+
+function triggerFormatSql() {
+  if (monacoEditor) {
+    const current = monacoEditor.getValue();
+    const formatted = formatSqlText(current);
+    monacoEditor.setValue(formatted);
+    const textarea = document.getElementById("sqlTextarea");
+    if (textarea) textarea.value = formatted;
+  }
+}
+
+// Initialize Monaco Editor
+if (typeof require !== "undefined") {
+  require.config({ paths: { vs: "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs" } });
+  require(["vs/editor/editor.main"], function () {
+    const container = document.getElementById("monacoEditorContainer");
+    const textarea = document.getElementById("sqlTextarea");
+    const loadingEl = document.getElementById("monacoLoading");
+
+    // Custom dark theme matching Lake of Tears UI
+    monaco.editor.defineTheme("lake-dark", {
+      base: "vs-dark",
+      inherit: true,
+      rules: [
+        { token: "keyword", foreground: "60a5fa", fontStyle: "bold" },
+        { token: "string", foreground: "86efac" },
+        { token: "number", foreground: "fde047" },
+        { token: "comment", foreground: "6b7280", fontStyle: "italic" },
+        { token: "delimiter", foreground: "94a3b8" },
+        { token: "operator", foreground: "f472b6" },
+      ],
+      colors: {
+        "editor.background": "#111827",
+        "editor.foreground": "#f3f4f6",
+        "editorLineNumber.foreground": "#4b5563",
+        "editorLineNumber.activeForeground": "#9ca3af",
+        "editor.lineHighlightBackground": "#1f293755",
+        "editorCursor.foreground": "#60a5fa",
+        "editor.selectionBackground": "#2563eb44",
+        "editor.inactiveSelectionBackground": "#1e3a8a33",
+      },
+    });
+
+    // Register Document Formatting Edit Provider for SQL
+    monaco.languages.registerDocumentFormattingEditProvider("sql", {
+      provideDocumentFormattingEdits: function (model, options, token) {
+        const text = model.getValue();
+        const formatted = formatSqlText(text);
+        return [
+          {
+            range: model.getFullModelRange(),
+            text: formatted,
+          },
+        ];
+      },
+    });
+
+    if (loadingEl) loadingEl.remove();
+
+    let initialVal = textarea ? textarea.value : "";
+    if (initialVal && initialVal.trim()) {
+      initialVal = formatSqlText(initialVal);
+      if (textarea) textarea.value = initialVal;
+    }
+
+    monacoEditor = monaco.editor.create(container, {
+      value: initialVal,
+      language: "sql",
+      theme: "lake-dark",
+      automaticLayout: true,
+      fontSize: 13,
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+      minimap: { enabled: false },
+      scrollBeyondLastLine: false,
+      lineNumbers: "on",
+      renderLineHighlight: "all",
+      tabSize: 2,
+      wordWrap: "on",
+      padding: { top: 10, bottom: 10 },
+      fixedOverflowWidgets: true,
+      suggestOnTriggerCharacters: true,
+    });
+
+    monacoEditor.onDidChangeModelContent(() => {
+      if (textarea) textarea.value = monacoEditor.getValue();
+    });
+
+    // Keyboard Shortcuts: Cmd/Ctrl + Enter to Run Query
+    monacoEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, function () {
+      executeRunQuery();
+    });
+
+    // Shift + Alt/Option + F to Format
+    monacoEditor.addCommand(monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF, function () {
+      triggerFormatSql();
+    });
+  });
+} else {
+  // Fallback if CDN fails
+  const textarea = document.getElementById("sqlTextarea");
+  if (textarea) textarea.classList.remove("hidden");
+  const loadingEl = document.getElementById("monacoLoading");
+  if (loadingEl) loadingEl.remove();
+}
 
 function toggleSqlSidebar() {
   const sb = document.getElementById("sqlReferenceSidebar");
@@ -447,15 +633,15 @@ function switchSidebarTab(tab) {
 }
 
 function insertSqlSnippet(snippet) {
-  const textarea = document.getElementById("sqlTextarea");
-  textarea.value = snippet;
-  textarea.focus();
+  setEditorSql(snippet, true);
+  if (monacoEditor) {
+    monacoEditor.focus();
+  }
 }
 
 async function generateSqlWithAi() {
   const promptInput = document.getElementById("aiSqlPrompt");
   const btn = document.getElementById("btnGenerateSql");
-  const textarea = document.getElementById("sqlTextarea");
   const banner = document.getElementById("aiGeneratedBanner");
   const explanationEl = document.getElementById("aiGeneratedExplanation");
   const badgesEl = document.getElementById("aiGeneratedBadges");
@@ -468,14 +654,15 @@ async function generateSqlWithAi() {
   btn.textContent = "Generating…";
 
   try {
+    const currentSql = getEditorSql();
     const resp = await fetch("/api/v1/ai/sql/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: prompt, current_sql: textarea.value })
+      body: JSON.stringify({ prompt: prompt, current_sql: currentSql })
     });
     const data = await resp.json();
     if (data.ok && data.sql) {
-      textarea.value = data.sql;
+      setEditorSql(data.sql, true);
       explanationEl.textContent = data.explanation || "Generated DuckDB SQL query.";
       badgesEl.innerHTML = "";
       (data.tables_used || []).forEach(t => {
@@ -507,7 +694,6 @@ async function generateSqlWithAi() {
 
 async function fixQueryWithAi() {
   const btn = document.getElementById("btnFixWithAi");
-  const textarea = document.getElementById("sqlTextarea");
   const errEl = document.getElementById("queryErrorMessage");
   const container = document.getElementById("aiFixContainer");
   const expEl = document.getElementById("aiFixExplanation");
@@ -518,11 +704,12 @@ async function fixQueryWithAi() {
   btn.textContent = "Diagnosing…";
 
   try {
+    const currentSql = getEditorSql();
     const resp = await fetch("/api/v1/ai/sql/fix", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        sql: textarea.value,
+        sql: currentSql,
         error: errEl.textContent.trim()
       })
     });
@@ -530,7 +717,7 @@ async function fixQueryWithAi() {
     if (data.ok && data.fixed_sql) {
       _lastFixedSql = data.fixed_sql;
       expEl.textContent = data.explanation || "Fixed query based on DuckDB error message.";
-      previewEl.textContent = data.fixed_sql;
+      previewEl.textContent = formatSqlText(data.fixed_sql);
       container.classList.remove("hidden");
     } else {
       expEl.textContent = "Unable to auto-fix: " + (data.error || "Unknown error");
@@ -548,18 +735,16 @@ async function fixQueryWithAi() {
 
 function applyFixedSql(andRun) {
   if (!_lastFixedSql) return;
-  const textarea = document.getElementById("sqlTextarea");
-  textarea.value = _lastFixedSql;
+  setEditorSql(_lastFixedSql, true);
   if (andRun) {
-    document.getElementById("sqlEditorForm").submit();
+    executeRunQuery();
   }
 }
 
 async function explainCurrentQuery() {
-  const textarea = document.getElementById("sqlTextarea");
   const modal = document.getElementById("explainQueryModal");
   const body = document.getElementById("explainModalBody");
-  const sql = textarea.value.trim();
+  const sql = getEditorSql().trim();
   if (!sql) return;
 
   modal.classList.remove("hidden");
