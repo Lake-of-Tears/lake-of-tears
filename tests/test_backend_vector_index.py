@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -270,6 +270,8 @@ def test_backend_sync_endpoint():
         workspace,
         "admin",
     )
+    orig_get_bg_db = backend_main.get_bg_db
+    backend_main.get_bg_db = lambda: mock_db
 
     try:
         with patch(
@@ -283,8 +285,209 @@ def test_backend_sync_endpoint():
                     "X-Workspace-Id": str(ws_id),
                 },
             )
-            assert resp.status_code == 200
+            assert resp.status_code == 202
             data = resp.json()
             assert data["slug"] == "trending"
+            assert data["vector_index"]["status"] == "syncing"
+    finally:
+        backend_main.get_bg_db = orig_get_bg_db
+        backend_main.app.dependency_overrides.clear()
+
+
+def test_backend_sync_endpoint_concurrency_conflict():
+    user_id = uuid.uuid4()
+    cat_id = uuid.uuid4()
+    sch_id = uuid.uuid4()
+    tbl_id = uuid.uuid4()
+    ws_id = uuid.uuid4()
+
+    workspace = Workspace(id=ws_id, name="default", slug="default", status="active")
+    user = User(id=user_id, email="admin@lake.local", role="admin", is_active=True)
+    user.workspace_memberships = [
+        WorkspaceMember(workspace_id=ws_id, user_id=user_id, role="admin")
+    ]
+    token = jwt.encode(
+        {"sub": str(user_id), "email": user.email, "role": user.role},
+        auth.SECRET_KEY,
+        algorithm="HS256",
+    )
+    catalog = Catalog(id=cat_id, name="default", slug="default", owner_workspace_id=ws_id)
+    # Table already in syncing state with recent started_at
+    table = CatalogTable(
+        id=tbl_id,
+        schema_id=sch_id,
+        name="Trending",
+        slug="trending",
+        s3_path_pattern="s3://datalake/raw/test/*.parquet",
+        vector_index={
+            "enabled": True,
+            "status": "syncing",
+            "started_at": datetime.now(UTC).isoformat(),
+        },
+        schema_drift=False,
+        created_at=datetime.now(UTC),
+    )
+
+    mock_db = MagicMock()
+    mock_db.query.return_value.filter.return_value.first.return_value = catalog
+    mock_db.query.return_value.filter_by.return_value.first.return_value = table
+
+    backend_main.app.dependency_overrides[backend_main.get_db] = lambda: mock_db
+    backend_main.app.dependency_overrides[backend_main.get_current_user] = lambda: user
+    backend_main.app.dependency_overrides[auth.get_catalog_workspace_and_role] = lambda: (
+        workspace,
+        "admin",
+    )
+
+    try:
+        # First request should fail with 409 Conflict
+        resp = client.post(
+            f"/api/catalogs/{cat_id}/schemas/{sch_id}/tables/{tbl_id}/vector-index/sync",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-Workspace-Id": str(ws_id),
+            },
+        )
+        assert resp.status_code == 409
+        assert "already in progress" in resp.json()["detail"]
+
+        # Request with ?force=true should succeed with 202 Accepted
+        orig_get_bg_db = backend_main.get_bg_db
+        backend_main.get_bg_db = lambda: mock_db
+        with patch("vector_index_service.sync_table_vector_index"):
+            resp_force = client.post(
+                f"/api/catalogs/{cat_id}/schemas/{sch_id}/tables/{tbl_id}/vector-index/sync?force=true",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "X-Workspace-Id": str(ws_id),
+                },
+            )
+            assert resp_force.status_code == 202
+        backend_main.get_bg_db = orig_get_bg_db
+    finally:
+        backend_main.app.dependency_overrides.clear()
+
+
+def test_backend_sync_endpoint_stale_lock_timeout():
+    user_id = uuid.uuid4()
+    cat_id = uuid.uuid4()
+    sch_id = uuid.uuid4()
+    tbl_id = uuid.uuid4()
+    ws_id = uuid.uuid4()
+
+    workspace = Workspace(id=ws_id, name="default", slug="default", status="active")
+    user = User(id=user_id, email="admin@lake.local", role="admin", is_active=True)
+    user.workspace_memberships = [
+        WorkspaceMember(workspace_id=ws_id, user_id=user_id, role="admin")
+    ]
+    token = jwt.encode(
+        {"sub": str(user_id), "email": user.email, "role": user.role},
+        auth.SECRET_KEY,
+        algorithm="HS256",
+    )
+    catalog = Catalog(id=cat_id, name="default", slug="default", owner_workspace_id=ws_id)
+    # Stale started_at older than 30 minutes (e.g. 45 minutes ago)
+    stale_time = (datetime.now(UTC) - timedelta(minutes=45)).isoformat()
+    table = CatalogTable(
+        id=tbl_id,
+        schema_id=sch_id,
+        name="Trending",
+        slug="trending",
+        s3_path_pattern="s3://datalake/raw/test/*.parquet",
+        vector_index={"enabled": True, "status": "syncing", "started_at": stale_time},
+        schema_drift=False,
+        created_at=datetime.now(UTC),
+    )
+
+    mock_db = MagicMock()
+    mock_db.query.return_value.filter.return_value.first.return_value = catalog
+    mock_db.query.return_value.filter_by.return_value.first.return_value = table
+
+    backend_main.app.dependency_overrides[backend_main.get_db] = lambda: mock_db
+    backend_main.app.dependency_overrides[backend_main.get_current_user] = lambda: user
+    backend_main.app.dependency_overrides[auth.get_catalog_workspace_and_role] = lambda: (
+        workspace,
+        "admin",
+    )
+
+    orig_get_bg_db = backend_main.get_bg_db
+    backend_main.get_bg_db = lambda: mock_db
+
+    try:
+        with patch("vector_index_service.sync_table_vector_index"):
+            resp = client.post(
+                f"/api/catalogs/{cat_id}/schemas/{sch_id}/tables/{tbl_id}/vector-index/sync",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "X-Workspace-Id": str(ws_id),
+                },
+            )
+            # Should not 409 because 45 minutes > 30 minutes timeout
+            assert resp.status_code == 202
+    finally:
+        backend_main.get_bg_db = orig_get_bg_db
+        backend_main.app.dependency_overrides.clear()
+
+
+def test_backend_get_table_endpoint():
+    user_id = uuid.uuid4()
+    cat_id = uuid.uuid4()
+    sch_id = uuid.uuid4()
+    tbl_id = uuid.uuid4()
+    ws_id = uuid.uuid4()
+
+    workspace = Workspace(id=ws_id, name="default", slug="default", status="active")
+    user = User(id=user_id, email="admin@lake.local", role="admin", is_active=True)
+    user.workspace_memberships = [
+        WorkspaceMember(workspace_id=ws_id, user_id=user_id, role="admin")
+    ]
+    token = jwt.encode(
+        {"sub": str(user_id), "email": user.email, "role": user.role},
+        auth.SECRET_KEY,
+        algorithm="HS256",
+    )
+    catalog = Catalog(id=cat_id, name="default", slug="default", owner_workspace_id=ws_id)
+    access = CatalogAccess(catalog_id=cat_id, workspace_id=ws_id, mode="read", status="approved")
+    table = CatalogTable(
+        id=tbl_id,
+        schema_id=sch_id,
+        name="Trending",
+        slug="trending",
+        s3_path_pattern="s3://datalake/raw/test/*.parquet",
+        vector_index={
+            "enabled": True,
+            "status": "syncing",
+            "processed_rows": 50,
+            "total_rows": 100,
+            "percent": 50,
+        },
+        schema_drift=False,
+        created_at=datetime.now(UTC),
+    )
+
+    mock_db = MagicMock()
+    mock_db.query.return_value.filter.return_value.first.side_effect = [catalog, access]
+    mock_db.query.return_value.filter_by.return_value.first.return_value = table
+
+    backend_main.app.dependency_overrides[backend_main.get_db] = lambda: mock_db
+    backend_main.app.dependency_overrides[backend_main.get_current_user] = lambda: user
+    backend_main.app.dependency_overrides[auth.get_catalog_workspace_and_role] = lambda: (
+        workspace,
+        "admin",
+    )
+
+    try:
+        resp = client.get(
+            f"/api/catalogs/{cat_id}/schemas/{sch_id}/tables/{tbl_id}",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-Workspace-Id": str(ws_id),
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["slug"] == "trending"
+        assert data["vector_index"]["processed_rows"] == 50
+        assert data["vector_index"]["percent"] == 50
     finally:
         backend_main.app.dependency_overrides.clear()

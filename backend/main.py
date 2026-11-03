@@ -52,6 +52,7 @@ from email_service import (
     send_invitation,
 )
 from fastapi import (
+    BackgroundTasks,
     Cookie,
     Depends,
     FastAPI,
@@ -2494,6 +2495,36 @@ def create_table(
     return CatalogTableResponse.model_validate(table)
 
 
+@app.get(
+    "/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}",
+    response_model=CatalogTableResponse,
+)
+def get_table(
+    catalog_id: str,
+    schema_id: str,
+    table_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    ws_ctx: tuple[Workspace, str] | None = Depends(get_catalog_workspace_and_role),
+):
+    ws = _extract_ws(ws_ctx)
+    cat_uuid = _as_uuid(catalog_id)
+    sch_uuid = _as_uuid(schema_id)
+    tbl_uuid = _as_uuid(table_id)
+    catalog = db.query(Catalog).filter(Catalog.id == cat_uuid).first() if cat_uuid else None
+    if not catalog:
+        raise HTTPException(404, "Catalog not found")
+    _assert_catalog_access(db, catalog, current_user, "read", ws=ws)
+    table = (
+        db.query(CatalogTable).filter_by(id=tbl_uuid, schema_id=sch_uuid).first()
+        if (tbl_uuid and sch_uuid)
+        else None
+    )
+    if not table:
+        raise HTTPException(404, "Table not found")
+    return CatalogTableResponse.model_validate(table)
+
+
 @app.patch(
     "/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}",
     response_model=CatalogTableResponse,
@@ -2535,14 +2566,39 @@ def update_table(
     return CatalogTableResponse.model_validate(table)
 
 
+def get_bg_db() -> Session:
+    from database import SessionLocal
+
+    return SessionLocal()
+
+
+def _bg_sync_table_vector_index(table_id: Any, workspace_slug: str | None = None) -> None:
+    import vector_index_service
+
+    bg_db = get_bg_db()
+    try:
+        tbl = bg_db.query(CatalogTable).filter_by(id=table_id).first()
+        if not tbl:
+            logger.error("Background vector sync could not find table %s", table_id)
+            return
+        vector_index_service.sync_table_vector_index(tbl, bg_db, workspace_slug=workspace_slug)
+    except Exception as exc:
+        logger.exception("Background vector sync failed for table %s: %s", table_id, exc)
+    finally:
+        bg_db.close()
+
+
 @app.post(
     "/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}/vector-index/sync",
     response_model=CatalogTableResponse,
+    status_code=status.HTTP_202_ACCEPTED,
 )
 def sync_table_vector_index_endpoint(
     catalog_id: str,
     schema_id: str,
     table_id: str,
+    background_tasks: BackgroundTasks,
+    force: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     ws_ctx: tuple[Workspace, str] | None = Depends(get_catalog_workspace_and_role),
@@ -2563,14 +2619,46 @@ def sync_table_vector_index_endpoint(
     if not table:
         raise HTTPException(404, "Table not found")
 
-    import vector_index_service
+    v_cfg = table.vector_index or {}
+    if v_cfg.get("status") == "syncing" and not force:
+        started_at_str = v_cfg.get("started_at")
+        is_stale = False
+        if started_at_str:
+            try:
+                started_dt = datetime.fromisoformat(started_at_str)
+                if started_dt.tzinfo is None:
+                    started_dt = started_dt.replace(tzinfo=UTC)
+                if (datetime.now(UTC) - started_dt).total_seconds() > 1800:
+                    is_stale = True
+            except Exception:
+                is_stale = True
+        if not is_stale:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A vector sync is already in progress for this table",
+            )
 
     ws_slug = (ws.slug if ws else None) or (
         catalog.owner_workspace.slug if getattr(catalog, "owner_workspace", None) else None
     )
-    res = vector_index_service.sync_table_vector_index(table, db, workspace_slug=ws_slug)
-    if not res.get("ok"):
-        raise HTTPException(500, res.get("error", "Failed to sync vector index"))
+
+    now_iso = datetime.now(UTC).isoformat()
+    updated_cfg = dict(table.vector_index or {})
+    updated_cfg["status"] = "syncing"
+    updated_cfg["processed_rows"] = 0
+    updated_cfg["percent"] = 0
+    updated_cfg["started_at"] = now_iso
+    updated_cfg.pop("last_error", None)
+    table.vector_index = updated_cfg
+    db.commit()
+    db.refresh(table)
+
+    background_tasks.add_task(
+        _bg_sync_table_vector_index,
+        table_id=table.id,
+        workspace_slug=ws_slug,
+    )
+
     return CatalogTableResponse.model_validate(table)
 
 

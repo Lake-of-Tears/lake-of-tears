@@ -972,13 +972,15 @@ async def catalog_vector_sync(request: Request):
         or data.get("workspace_slug")
     )
 
+    force = bool(data.get("force", False))
+    force_query = "?force=true" if force else ""
+
     if source_col is not None:
         patch_payload = {
             "vector_index": {
                 "enabled": True,
                 "source_column": source_col,
                 "format_template": format_template or "",
-                "status": "syncing",
             }
         }
         _backend_patch(
@@ -990,7 +992,7 @@ async def catalog_vector_sync(request: Request):
         )
 
     sync_res, err = _backend_post_with_error(
-        f"/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}/vector-index/sync",
+        f"/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}/vector-index/sync{force_query}",
         token or "",
         {},
         workspace_id=effective_workspace_id,
@@ -998,8 +1000,45 @@ async def catalog_vector_sync(request: Request):
         timeout=180.0,
     )
     if err:
-        return JSONResponse({"ok": False, "error": err}, status_code=500)
-    return JSONResponse({"ok": True, "table": sync_res})
+        status_code = 409 if "already in progress" in (err or "").lower() else 500
+        return JSONResponse(
+            {"ok": False, "error": err, "conflict": status_code == 409}, status_code=status_code
+        )
+    return JSONResponse({"ok": True, "table": sync_res}, status_code=202)
+
+
+@app.get("/catalog/table-status")
+async def catalog_table_status(
+    request: Request,
+    catalog_id: str,
+    schema_id: str,
+    table_id: str,
+):
+    token = request.cookies.get("lake_token")
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"ok": False, "error": "Not authenticated"}, status_code=401)
+
+    ws = getattr(request.state, "workspace", None)
+    effective_workspace_id = (
+        (str(ws["id"]) if ws and isinstance(ws, dict) and "id" in ws else None)
+        or request.cookies.get("lake_workspace_id")
+        or request.cookies.get("lake_active_workspace")
+    )
+    effective_workspace_slug = (
+        ws.get("slug") if ws and isinstance(ws, dict) else None
+    ) or request.cookies.get("lake_workspace_slug")
+
+    tbl_data = await _backend_get_async(
+        f"/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}",
+        token or "",
+        workspace_id=effective_workspace_id,
+        workspace_slug=effective_workspace_slug,
+    )
+    if not tbl_data or not isinstance(tbl_data, dict):
+        return JSONResponse(
+            {"ok": False, "error": "Failed to fetch table details"}, status_code=404
+        )
+    return JSONResponse({"ok": True, "table": tbl_data})
 
 
 @app.post("/catalog/create")
@@ -1957,7 +1996,7 @@ def _backend_post_with_error(
                 json=json,
                 headers=_build_backend_headers(token, workspace_id, workspace_slug),
             )
-        if resp.status_code in (200, 201):
+        if resp.status_code in (200, 201, 202):
             return resp.json(), None
 
         try:
