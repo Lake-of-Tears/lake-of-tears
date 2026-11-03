@@ -678,9 +678,7 @@ def test_catalog_table_status_endpoint():
     with (
         patch.object(main, "AUTH_ENABLED", True),
         patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
-        patch.object(
-            main, "_backend_get_async", return_value=mock_table
-        ) as mock_get,
+        patch.object(main, "_backend_get_async", return_value=mock_table) as mock_get,
     ):
         res = client.get(
             "/catalog/table-status?catalog_id=cat-1&schema_id=sch-1&table_id=tbl-1",

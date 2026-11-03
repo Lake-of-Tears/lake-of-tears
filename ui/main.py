@@ -1001,7 +1001,9 @@ async def catalog_vector_sync(request: Request):
     )
     if err:
         status_code = 409 if "already in progress" in (err or "").lower() else 500
-        return JSONResponse({"ok": False, "error": err, "conflict": status_code == 409}, status_code=status_code)
+        return JSONResponse(
+            {"ok": False, "error": err, "conflict": status_code == 409}, status_code=status_code
+        )
     return JSONResponse({"ok": True, "table": sync_res}, status_code=202)
 
 
@@ -1023,9 +1025,8 @@ async def catalog_table_status(
         or request.cookies.get("lake_active_workspace")
     )
     effective_workspace_slug = (
-        (ws.get("slug") if ws and isinstance(ws, dict) else None)
-        or request.cookies.get("lake_workspace_slug")
-    )
+        ws.get("slug") if ws and isinstance(ws, dict) else None
+    ) or request.cookies.get("lake_workspace_slug")
 
     tbl_data = await _backend_get_async(
         f"/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}",
@@ -1034,7 +1035,9 @@ async def catalog_table_status(
         workspace_slug=effective_workspace_slug,
     )
     if not tbl_data or not isinstance(tbl_data, dict):
-        return JSONResponse({"ok": False, "error": "Failed to fetch table details"}, status_code=404)
+        return JSONResponse(
+            {"ok": False, "error": "Failed to fetch table details"}, status_code=404
+        )
     return JSONResponse({"ok": True, "table": tbl_data})
 
 

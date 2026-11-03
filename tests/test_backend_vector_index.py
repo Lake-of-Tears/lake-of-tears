@@ -312,7 +312,6 @@ def test_backend_sync_endpoint_concurrency_conflict():
         algorithm="HS256",
     )
     catalog = Catalog(id=cat_id, name="default", slug="default", owner_workspace_id=ws_id)
-    access = CatalogAccess(catalog_id=cat_id, workspace_id=ws_id, mode="write", status="approved")
     # Table already in syncing state with recent started_at
     table = CatalogTable(
         id=tbl_id,
@@ -320,7 +319,11 @@ def test_backend_sync_endpoint_concurrency_conflict():
         name="Trending",
         slug="trending",
         s3_path_pattern="s3://datalake/raw/test/*.parquet",
-        vector_index={"enabled": True, "status": "syncing", "started_at": datetime.now(UTC).isoformat()},
+        vector_index={
+            "enabled": True,
+            "status": "syncing",
+            "started_at": datetime.now(UTC).isoformat(),
+        },
         schema_drift=False,
         created_at=datetime.now(UTC),
     )
@@ -451,7 +454,13 @@ def test_backend_get_table_endpoint():
         name="Trending",
         slug="trending",
         s3_path_pattern="s3://datalake/raw/test/*.parquet",
-        vector_index={"enabled": True, "status": "syncing", "processed_rows": 50, "total_rows": 100, "percent": 50},
+        vector_index={
+            "enabled": True,
+            "status": "syncing",
+            "processed_rows": 50,
+            "total_rows": 100,
+            "percent": 50,
+        },
         schema_drift=False,
         created_at=datetime.now(UTC),
     )
