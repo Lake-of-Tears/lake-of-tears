@@ -17,3 +17,5 @@ duckdb==2.0.0
 google-genai==2.34.0
 numpy>=2.5.4
 sqlglot>=30.26.0
+pytz>=2025.1
+
