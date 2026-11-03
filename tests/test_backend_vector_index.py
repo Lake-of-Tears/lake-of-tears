@@ -641,4 +641,3 @@ def test_sync_table_vector_index_invalid_chunking_config(tmp_path: Path):
     assert res["ok"] is False
     assert "Invalid chunking configuration" in res["error"]
     assert mock_table.vector_index["status"] == "error"
-

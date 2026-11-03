@@ -238,7 +238,15 @@ def sync_table_vector_index(
         total = len(raw_rows)
         id_idx = col_names.index("id") if "id" in col_names else None
         source_idx = col_names.index(source_col)
-        exclude_meta = ("id", "source", "content", "embedding", "source_date", "metadata", source_col)
+        exclude_meta = (
+            "id",
+            "source",
+            "content",
+            "embedding",
+            "source_date",
+            "metadata",
+            source_col,
+        )
 
         # Initial progress before batches run
         updated_cfg = dict(table.vector_index or {})

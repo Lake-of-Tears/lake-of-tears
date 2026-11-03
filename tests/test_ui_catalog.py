@@ -675,7 +675,6 @@ def test_catalog_vector_sync_passes_chunking_config():
         assert patch_payload["vector_index"]["source_column"] == "content"
 
 
-
 def test_catalog_vector_sync_concurrency_conflict():
     token = _make_token()
     mock_workspaces = [
