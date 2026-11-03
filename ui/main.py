@@ -1266,6 +1266,7 @@ async def sql_get(request: Request):
     selected_sql = query_sql if query_sql else EXAMPLE_QUERIES[0]["sql"]
     catalogs = _resolve_ui_catalogs(request)
     shared_workspaces_catalogs = _resolve_ui_shared_catalogs(request)
+    ai_info = ai_gateway_client.provider_info()
     return templates.TemplateResponse(
         request=request,
         name="sql.html",
@@ -1279,6 +1280,7 @@ async def sql_get(request: Request):
             "shared_workspaces_catalogs": shared_workspaces_catalogs,
             "default_datasets": duckdb_ai.get_default_datasets(MINIO_BUCKET),
             "sql_ai_functions": duckdb_ai.SQL_AI_FUNCTIONS,
+            "ai_info": ai_info,
         },
     )
 
@@ -1308,6 +1310,7 @@ async def sql_post(request: Request, sql: str = Form(...)):
         workspace_slug=ws_slug,
         is_superadmin=is_superadmin,
     )
+    ai_info = ai_gateway_client.provider_info()
     return templates.TemplateResponse(
         request=request,
         name="sql.html",
@@ -1321,6 +1324,7 @@ async def sql_post(request: Request, sql: str = Form(...)):
             "shared_workspaces_catalogs": shared_workspaces_catalogs,
             "default_datasets": duckdb_ai.get_default_datasets(MINIO_BUCKET),
             "sql_ai_functions": duckdb_ai.SQL_AI_FUNCTIONS,
+            "ai_info": ai_info,
         },
     )
 

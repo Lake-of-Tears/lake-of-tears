@@ -72,9 +72,12 @@ def embed(req: EmbedRequest, db: Session = Depends(get_db)) -> dict[str, Any]:
 @router.post("/generate", dependencies=[Depends(require_internal_secret)])
 def generate(req: GenerateRequest, db: Session = Depends(get_db)) -> dict[str, Any]:
     provider = _provider(db)
+    model = req.model
+    if model and provider.name != "gemini" and ("gemini" in model.lower()):
+        model = None
     try:
         text = provider.generate(
-            req.prompt, system=req.system, model=req.model, temperature=req.temperature
+            req.prompt, system=req.system, model=model, temperature=req.temperature
         )
     except ProviderError as exc:
         logger.warning("generate failed (%s): %s", provider.name, exc)

@@ -62,10 +62,13 @@ def provider_info() -> dict[str, Any] | None:
     if _info_cache is not None and now - _info_cache[1] < _INFO_TTL:
         return _info_cache[0]
     try:
-        info: dict[str, Any] | None = _call("GET", "/info", timeout=3)
+        info: dict[str, Any] | None = _call("GET", "/info", timeout=10)
     except GatewayError:
         info = None
-    _info_cache = (info, now)
+    if info is not None:
+        _info_cache = (info, now)
+    else:
+        _info_cache = None
     return info
 
 
