@@ -2452,6 +2452,40 @@ async def ui_disconnect_workspace_share(workspace_id: str, request: Request):
         return JSONResponse({"detail": str(exc)}, status_code=502)
 
 
+@app.get("/api/workspaces/{workspace_id}/webhook-secret")
+@app.get("/api/v1/workspaces/{workspace_id}/webhook-secret")
+async def ui_get_workspace_webhook_secret(workspace_id: str, request: Request):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{BACKEND_URL}/api/v1/workspaces/{workspace_id}/webhook-secret",
+                headers=headers,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json() if resp.content else {}, status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=502)
+
+
+@app.post("/api/workspaces/{workspace_id}/webhook-secret/regenerate")
+@app.post("/api/v1/workspaces/{workspace_id}/webhook-secret/regenerate")
+async def ui_regenerate_workspace_webhook_secret(workspace_id: str, request: Request):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{BACKEND_URL}/api/v1/workspaces/{workspace_id}/webhook-secret/regenerate",
+                headers=headers,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json() if resp.content else {}, status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=502)
+
+
 # ── Settings: Admin ───────────────────────────────────────────────────────
 
 

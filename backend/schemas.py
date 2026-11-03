@@ -935,3 +935,19 @@ class StatementExecutionResponse(BaseModel):
     created_at: str | None = None
 
     model_config = {"populate_by_name": True}
+
+
+class WebhookSecretResponse(BaseModel):
+    workspace_id: uuid.UUID
+    workspace_slug: str
+    webhook_secret: str
+    webhook_url: str
+
+    model_config = {"from_attributes": True}
+
+
+class WebhookIngestResponse(BaseModel):
+    status: str = "accepted"
+    event_id: str
+    workspace_slug: str
+    received_at: datetime
