@@ -1411,6 +1411,7 @@ async def notebooks(request: Request):
             "workspace": ws,
             "shared_workspaces": shared_workspaces,
             "my_role": my_role,
+            "user": user,
         },
     )
 
@@ -1456,6 +1457,7 @@ async def ingest(request: Request):
             "workspace": ws,
             "shared_workspaces": shared_workspaces,
             "my_role": my_role,
+            "user": user,
         },
     )
 

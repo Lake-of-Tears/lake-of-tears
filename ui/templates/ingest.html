@@ -659,7 +659,7 @@
       <div>
         <div class="flex items-center justify-between mb-1.5">
           <label class="font-medium text-gray-300">Workspace Secret Token</label>
-          {% if my_role == 'admin' or my_role == 'owner' or user.role == 'superadmin' %}
+          {% if my_role in ['admin', 'owner', 'superadmin'] %}
           <button
             type="button"
             onclick="regenerateWebhookSecret()"
