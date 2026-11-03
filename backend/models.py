@@ -1,3 +1,4 @@
+import secrets
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -153,6 +154,10 @@ class PersonalAccessToken(Base):
     workspace: Mapped["Workspace | None"] = relationship(foreign_keys=[workspace_id])
 
 
+def generate_webhook_secret() -> str:
+    return f"whsec_{secrets.token_hex(24)}"
+
+
 class Workspace(Base):
     __tablename__ = "workspaces"
 
@@ -171,6 +176,9 @@ class Workspace(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    webhook_secret: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, default=generate_webhook_secret
     )
 
     members: Mapped[list["WorkspaceMember"]] = relationship(

@@ -32,6 +32,7 @@ CONNECTOR_DAG_MAPPING = {
     "jellyfin": "ingest_jellyfin",
     "alexa": "ingest_alexa",
     "tmdb": "ingest_tmdb_movies",
+    "webhook": "ingest_webhook",
 }
 
 

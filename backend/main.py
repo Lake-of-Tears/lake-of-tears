@@ -122,6 +122,7 @@ from schemas import (
     UpdateWorkspaceRequest,
     UserResponse,
     UserSessionResponse,
+    WebhookSecretResponse,
     WorkspaceAdminResponse,
     WorkspaceCatalogSettingsResponse,
     WorkspaceMemberResponse,
@@ -134,6 +135,7 @@ from sql_router import router as sql_router
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 from storage_router import router as storage_router
+from webhooks_router import router as webhooks_router
 
 logger = logging.getLogger("lakehouse.backend")
 
@@ -185,6 +187,8 @@ app.include_router(ai_router, prefix="/api/v1/ai", tags=["ai"])
 app.include_router(ai_router, prefix="/api/ai", tags=["ai"])
 app.include_router(sql_router, prefix="/api/v1/sql", tags=["sql"])
 app.include_router(sql_router, prefix="/api/sql", tags=["sql"])
+app.include_router(webhooks_router, prefix="/api/v1/ingest/webhooks", tags=["webhooks"])
+app.include_router(webhooks_router, prefix="/api/ingest/webhooks", tags=["webhooks"])
 app.include_router(ai_gateway_router, prefix="/api/internal/ai", tags=["ai-internal"])
 app.include_router(ai_admin_router, prefix="/api/admin/ai-provider", tags=["ai-admin"])
 
@@ -1144,6 +1148,114 @@ def update_workspace(
         ws.description = req.description
     db.commit()
     return _workspace_response(ws, current_user)
+
+
+@app.get("/api/workspaces/{workspace_id}/webhook-secret", response_model=WebhookSecretResponse)
+@app.get("/api/v1/workspaces/{workspace_id}/webhook-secret", response_model=WebhookSecretResponse)
+def get_workspace_webhook_secret_endpoint(
+    workspace_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    ws_uuid = _as_uuid(workspace_id)
+    ws = None
+    if ws_uuid:
+        ws = (
+            db.query(Workspace)
+            .filter(
+                Workspace.id == ws_uuid,
+                Workspace.status == "active",
+                Workspace.deleted_at.is_(None),
+            )
+            .first()
+        )
+    if not ws:
+        ws = (
+            db.query(Workspace)
+            .filter(
+                Workspace.slug == workspace_id,
+                Workspace.status == "active",
+                Workspace.deleted_at.is_(None),
+            )
+            .first()
+        )
+    if not ws:
+        raise HTTPException(404, "Workspace not found")
+
+    if current_user.role != "superadmin":
+        if not any(m.user_id == current_user.id for m in ws.members):
+            raise HTTPException(403, "Not a member of this workspace")
+
+    if not ws.webhook_secret:
+        from models import generate_webhook_secret
+
+        ws.webhook_secret = generate_webhook_secret()
+        db.commit()
+
+    return WebhookSecretResponse(
+        workspace_id=ws.id,
+        workspace_slug=ws.slug,
+        webhook_secret=ws.webhook_secret,
+        webhook_url=f"/api/v1/ingest/webhooks/{ws.slug}",
+    )
+
+
+@app.post(
+    "/api/workspaces/{workspace_id}/webhook-secret/regenerate", response_model=WebhookSecretResponse
+)
+@app.post(
+    "/api/v1/workspaces/{workspace_id}/webhook-secret/regenerate",
+    response_model=WebhookSecretResponse,
+)
+def regenerate_workspace_webhook_secret_endpoint(
+    workspace_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    ws_uuid = _as_uuid(workspace_id)
+    ws = None
+    if ws_uuid:
+        ws = (
+            db.query(Workspace)
+            .filter(
+                Workspace.id == ws_uuid,
+                Workspace.status == "active",
+                Workspace.deleted_at.is_(None),
+            )
+            .first()
+        )
+    if not ws:
+        ws = (
+            db.query(Workspace)
+            .filter(
+                Workspace.slug == workspace_id,
+                Workspace.status == "active",
+                Workspace.deleted_at.is_(None),
+            )
+            .first()
+        )
+    if not ws:
+        raise HTTPException(404, "Workspace not found")
+
+    if current_user.role != "superadmin":
+        member = next(
+            (m for m in ws.members if m.user_id == current_user.id and m.role == "admin"),
+            None,
+        )
+        if not member:
+            raise HTTPException(403, "Workspace admin access required")
+
+    from models import generate_webhook_secret
+
+    ws.webhook_secret = generate_webhook_secret()
+    db.commit()
+
+    return WebhookSecretResponse(
+        workspace_id=ws.id,
+        workspace_slug=ws.slug,
+        webhook_secret=ws.webhook_secret,
+        webhook_url=f"/api/v1/ingest/webhooks/{ws.slug}",
+    )
 
 
 # ── Workspace members ─────────────────────────────────────────────────────────
