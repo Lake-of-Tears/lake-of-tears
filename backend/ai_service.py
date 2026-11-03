@@ -801,11 +801,14 @@ def get_workspace_catalogs_from_db(
     """Query active owned and approved shared catalogs with schemas and tables for a workspace and user."""
     from models import Catalog, CatalogAccess, WorkspaceShare
 
-    shared_ids = db.query(CatalogAccess.catalog_id).filter(
+    shared_filters = [
         CatalogAccess.workspace_id == workspace_id,
         CatalogAccess.status == "approved",
         CatalogAccess.suspended.is_(False),
-    )
+    ]
+    if user_id:
+        shared_filters.append(CatalogAccess.requested_by == user_id)
+    shared_ids = db.query(CatalogAccess.catalog_id).filter(*shared_filters)
 
     query_filters = [
         Catalog.owner_workspace_id == workspace_id,

@@ -366,6 +366,7 @@ def _workspace_response(ws: Workspace, user: User, is_shared: bool = False) -> W
             .join(Catalog, Catalog.id == CatalogAccess.catalog_id)
             .filter(
                 CatalogAccess.workspace_id == ws.id,
+                CatalogAccess.requested_by == user.id,
                 CatalogAccess.status == "approved",
                 CatalogAccess.suspended.is_(False),
                 Catalog.deleted_at.is_(None),
@@ -1827,12 +1828,13 @@ def _caller_access(
                 return "write"
             return "read"
 
-        # Cross-workspace: strictly verify approved sharing grant for active workspace
+        # Cross-workspace: strictly verify approved sharing grant for active workspace and user
         grant = (
             db.query(CatalogAccess)
             .filter(
                 CatalogAccess.catalog_id == catalog.id,
                 CatalogAccess.workspace_id == ws.id,
+                CatalogAccess.requested_by == user.id,
                 CatalogAccess.status == "approved",
                 CatalogAccess.suspended.is_(False),
             )
@@ -1851,6 +1853,7 @@ def _caller_access(
         .filter(
             CatalogAccess.catalog_id == catalog.id,
             CatalogAccess.workspace_id.in_(ws_ids),
+            CatalogAccess.requested_by == user.id,
             CatalogAccess.status == "approved",
             CatalogAccess.suspended.is_(False),
         )
@@ -2011,6 +2014,7 @@ def list_catalogs(
 
     shared_ids = db.query(CatalogAccess.catalog_id).filter(
         CatalogAccess.workspace_id == ws.id,
+        CatalogAccess.requested_by == current_user.id,
         CatalogAccess.status == "approved",
         CatalogAccess.suspended.is_(False),
     )
@@ -2085,6 +2089,7 @@ def catalogs_manifest(
 
     shared_ids = db.query(CatalogAccess.catalog_id).filter(
         CatalogAccess.workspace_id == ws.id,
+        CatalogAccess.requested_by == current_user.id,
         CatalogAccess.status == "approved",
         CatalogAccess.suspended.is_(False),
     )
@@ -2195,7 +2200,12 @@ def catalog_directory(
     )
 
     grants = (
-        db.query(CatalogAccess).filter(CatalogAccess.workspace_id == ws_uuid).all()
+        db.query(CatalogAccess)
+        .filter(
+            CatalogAccess.workspace_id == ws_uuid,
+            CatalogAccess.requested_by == current_user.id,
+        )
+        .all()
         if ws_uuid
         else []
     )
@@ -2887,7 +2897,9 @@ def request_access(
 
     ws_uuid = _as_uuid(ws_id)
     existing = (
-        db.query(CatalogAccess).filter_by(catalog_id=cat_uuid, workspace_id=ws_uuid).first()
+        db.query(CatalogAccess)
+        .filter_by(catalog_id=cat_uuid, workspace_id=ws_uuid, requested_by=current_user.id)
+        .first()
         if (cat_uuid and ws_uuid)
         else None
     )
@@ -3096,6 +3108,7 @@ def workspace_catalogs(
 
     shared_ids = db.query(CatalogAccess.catalog_id).filter(
         CatalogAccess.workspace_id == ws_uuid,
+        CatalogAccess.requested_by == current_user.id,
         CatalogAccess.status == "approved",
         CatalogAccess.suspended.is_(False),
     )
@@ -3152,6 +3165,7 @@ def workspace_catalog_manifest(
 
     shared_ids = db.query(CatalogAccess.catalog_id).filter(
         CatalogAccess.workspace_id == ws_uuid,
+        CatalogAccess.requested_by == current_user.id,
         CatalogAccess.status == "approved",
         CatalogAccess.suspended.is_(False),
     )
@@ -3265,6 +3279,7 @@ def workspace_catalog_settings(
         db.query(CatalogAccess)
         .filter(
             CatalogAccess.workspace_id == ws_uuid,
+            CatalogAccess.requested_by == current_user.id,
             CatalogAccess.status.in_(["pending", "approved"]),
         )
         .all()
@@ -3358,28 +3373,38 @@ def remove_shared_catalog(
     ws = db.query(Workspace).filter(Workspace.id == ws_uuid).first() if ws_uuid else None
     if not ws:
         raise HTTPException(404, "Workspace not found")
-    if current_user.role != "superadmin":
-        member = next(
-            (
-                m
-                for m in current_user.workspace_memberships
-                if str(m.workspace_id) == str(workspace_id) and m.role == "admin"
-            ),
-            None,
-        )
-        if not member:
-            raise HTTPException(403, "Workspace admin access required")
+    membership = next(
+        (m for m in current_user.workspace_memberships if str(m.workspace_id) == str(workspace_id)),
+        None,
+    )
+    if not membership and current_user.role != "superadmin":
+        raise HTTPException(403, "Not a member of this workspace")
 
+    # The requesting user can remove their own grant; workspace admins or superadmins can also remove any grant for this catalog
     grant = (
         db.query(CatalogAccess)
         .filter(
             CatalogAccess.workspace_id == ws_uuid,
             CatalogAccess.catalog_id == cat_uuid,
+            CatalogAccess.requested_by == current_user.id,
         )
         .first()
         if (ws_uuid and cat_uuid)
         else None
     )
+    if not grant and (
+        current_user.role == "superadmin" or (membership and membership.role == "admin")
+    ):
+        grant = (
+            db.query(CatalogAccess)
+            .filter(
+                CatalogAccess.workspace_id == ws_uuid,
+                CatalogAccess.catalog_id == cat_uuid,
+            )
+            .first()
+            if (ws_uuid and cat_uuid)
+            else None
+        )
     if not grant:
         raise HTTPException(404, "Shared catalog not found")
 

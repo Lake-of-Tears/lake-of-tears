@@ -330,7 +330,11 @@ class CatalogTable(Base):
 
 class CatalogAccess(Base):
     __tablename__ = "catalog_access"
-    __table_args__ = (UniqueConstraint("catalog_id", "workspace_id", name="uq_catalog_access"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "catalog_id", "workspace_id", "requested_by", name="uq_catalog_access_user"
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     catalog_id: Mapped[uuid.UUID] = mapped_column(
@@ -347,7 +351,7 @@ class CatalogAccess(Base):
     # Why the requester wants access (shown to the owning workspace's admins)
     request_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     requested_by: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True
     )
     reviewed_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True

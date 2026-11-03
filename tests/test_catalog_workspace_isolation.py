@@ -173,11 +173,12 @@ def _setup_fixture():
     session.add(table_priv)
     session.commit()
 
-    # Share cat_a_shared to ws_b (read-only)
+    # Share cat_a_shared to ws_b (read-only for bob)
     grant = CatalogAccess(
         id=uuid.uuid4(),
         catalog_id=cat_a_shared.id,
         workspace_id=ws_b.id,
+        requested_by=bob.id,
         mode="read",
         status="approved",
         suspended=False,
