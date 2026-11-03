@@ -67,9 +67,21 @@ class AgenticChunker(BaseChunker):
 
     def _llm(self) -> Callable[..., str]:
         if self._generate is None:
-            from ai_gateway import generate  # shared pipeline client, found at run time
+            try:
+                from ai_gateway import generate  # shared pipeline client, found at run time
 
-            self._generate = generate
+                self._generate = generate
+            except ImportError:
+                try:
+                    import ai_service
+
+                    self._generate = lambda prompt, **kw: ai_service._call_gemini_text(
+                        prompt,
+                        system_instruction=kw.get("system"),
+                        temperature=kw.get("temperature", 0.0),
+                    )
+                except Exception:
+                    self._generate = None
         return self._generate
 
     def split(self, text: str) -> list[str]:
@@ -77,12 +89,14 @@ class AgenticChunker(BaseChunker):
         for window in self._windows.split(text):
             parsed = None
             try:
-                reply = self._llm()(
-                    "Split this text into propositions:\n\n" + window,
-                    system=SYSTEM_PROMPT,
-                    temperature=0.0,
-                )
-                parsed = parse_propositions(reply)
+                llm = self._llm()
+                if llm is not None:
+                    reply = llm(
+                        "Split this text into propositions:\n\n" + window,
+                        system=SYSTEM_PROMPT,
+                        temperature=0.0,
+                    )
+                    parsed = parse_propositions(reply)
             except Exception as exc:
                 logger.warning("Agentic chunking could not use the model: %s", exc)
             if parsed:

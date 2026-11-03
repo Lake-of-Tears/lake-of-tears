@@ -41,3 +41,16 @@
     - Enhanced search input and topbar contrast in light mode.
   - **Local Deployment:** Rebuilt `lake-of-tears-ui:latest` and rolled out to local k8s deployment `lake-of-tears-lakeui`. Running at http://localhost.
 
+- **Issue #245 (Pluggable Chunking and Lineage Columns in Table Vector Sync):**
+  - **Status:** **COMPLETED, DEPLOYED & TESTED**
+  - **Pull Request:** [PR #377](https://github.com/Lake-of-Tears/lake-of-tears/pull/377) on branch `feat/vector-index-chunking-lineage-245`.
+  - **Kanban Board:** Added to [Lake of Tears (Main) Project #3](https://github.com/orgs/Lake-of-Tears/projects/3) (Item ID `PVTI_lADOFEJxWM4Bmf-gzhB5SFc`).
+  - **Changes:**
+    - Pluggable chunkers (`RecursiveChunker`, `DocumentChunker`, `AgenticChunker`) integrated into table vector indexing.
+    - Output Parquet schema standardized: `["id", "source", "content", "embedding", "source_date", "provider", "model", "dimension", "parent_id", "chunk_index", "total_chunks", "metadata", "ingested_at"]`.
+    - Lineage preservation: single chunks retain `id == parent_id`, multi-chunk rows receive `<parent_id>:<chunk_index>` IDs.
+    - Metadata serialization of non-indexed columns with oversized values truncated to 200 chars.
+    - Catalog drawer UI controls added for Chunking Strategy, Chunk Size, and Chunk Overlap, plus Strategy display pill in status overview.
+  - **Local Deployment:** Rebuilt images `lake-of-tears-backend:latest` and `lake-of-tears-ui:latest`; rolled out to local k8s deployments `lake-of-tears-backend` and `lake-of-tears-lakeui`. Verified live table sync and multi-chunk explosion on `tmdb-trending`.
+
+

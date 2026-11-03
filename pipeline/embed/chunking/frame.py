@@ -1,4 +1,4 @@
-"""Explode a DataFrame of documents into one row per chunk, with lineage."""
+"""Explode a DataFrame or sequence of documents into one row per chunk, with lineage."""
 
 from __future__ import annotations
 
@@ -7,7 +7,11 @@ import math
 from collections.abc import Sequence
 from typing import Any
 
-import pandas as pd
+try:
+    import pandas as pd
+except ImportError:
+    pd = None
+
 from chunking.base import BaseChunker
 
 LINEAGE_COLUMNS = ("parent_id", "chunk_index", "total_chunks")
@@ -23,23 +27,29 @@ def _json_value(value: Any) -> Any:
     return text if len(text) <= METADATA_VALUE_LIMIT else text[:METADATA_VALUE_LIMIT] + "…"
 
 
-def row_metadata(row: pd.Series, exclude: Sequence[str]) -> str:
+def row_metadata(row: Any, exclude: Sequence[str] = ()) -> str:
     """The parent row's other fields as compact JSON (long values shortened, missing ones left out)."""
+    if hasattr(row, "items"):
+        items = row.items()
+    elif isinstance(row, Sequence) and not isinstance(row, str | bytes):
+        items = enumerate(row)
+    else:
+        items = ()
     data = {
         str(key): _json_value(value)
-        for key, value in row.items()
+        for key, value in items
         if key not in exclude and _json_value(value) is not None
     }
     return json.dumps(data, ensure_ascii=False, default=str, sort_keys=True)
 
 
 def explode_chunks(
-    df: pd.DataFrame,
+    df: Any,
     texts: Sequence[object],
     parent_ids: Sequence[str],
     chunker: BaseChunker,
     exclude_metadata: Sequence[str] = (),
-) -> pd.DataFrame:
+) -> Any:
     """One output row per chunk, in document order.
 
     Columns: ``id``, ``parent_id``, ``chunk_index``, ``total_chunks``, ``content``, ``metadata``.
@@ -47,7 +57,12 @@ def explode_chunks(
     a longer one gets ``<parent_id>:<chunk_index>``. Documents with no text produce no rows.
     """
     rows: list[dict[str, Any]] = []
-    for (_, source_row), text, parent_id in zip(df.iterrows(), texts, parent_ids, strict=True):
+    if hasattr(df, "iterrows"):
+        source_iterable = (row for _, row in df.iterrows())
+    else:
+        source_iterable = iter(df)
+
+    for source_row, text, parent_id in zip(source_iterable, texts, parent_ids, strict=True):
         chunks = chunker.chunk(text)
         if not chunks:
             continue
@@ -64,4 +79,6 @@ def explode_chunks(
                 }
             )
     columns = ["id", "parent_id", "chunk_index", "total_chunks", "content", "metadata"]
-    return pd.DataFrame(rows, columns=columns)
+    if pd is not None and isinstance(df, getattr(pd, "DataFrame", type(None))):
+        return pd.DataFrame(rows, columns=columns)
+    return rows

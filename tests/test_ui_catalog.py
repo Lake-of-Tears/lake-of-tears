@@ -628,6 +628,53 @@ def test_catalog_vector_sync_success_passes_workspace_context():
         assert post_kwargs.get("timeout") == 180.0
 
 
+def test_catalog_vector_sync_passes_chunking_config():
+    token = _make_token()
+    mock_workspaces = [
+        {"id": "ws-100", "slug": "test-ws", "name": "Test Workspace", "role": "admin"}
+    ]
+    mock_table = {
+        "id": "tbl-1",
+        "slug": "movies",
+        "vector_index": {
+            "status": "syncing",
+            "chunking": "recursive",
+            "chunk_size": 256,
+            "chunk_overlap": 32,
+        },
+    }
+
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
+        patch.object(main, "_backend_patch") as mock_patch,
+        patch.object(main, "_backend_post_with_error", return_value=(mock_table, None)),
+    ):
+        res = client.post(
+            "/catalog/vector-sync",
+            json={
+                "catalog_id": "cat-1",
+                "schema_id": "sch-1",
+                "table_id": "tbl-1",
+                "source_column": "content",
+                "format_template": "{content}",
+                "chunking": "recursive",
+                "chunk_size": 256,
+                "chunk_overlap": 32,
+            },
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-100"},
+        )
+        assert res.status_code == 202
+        assert res.json()["ok"] is True
+
+        mock_patch.assert_called_once()
+        patch_payload = mock_patch.call_args[0][2]
+        assert patch_payload["vector_index"]["chunking"] == "recursive"
+        assert patch_payload["vector_index"]["chunk_size"] == 256
+        assert patch_payload["vector_index"]["chunk_overlap"] == 32
+        assert patch_payload["vector_index"]["source_column"] == "content"
+
+
 def test_catalog_vector_sync_concurrency_conflict():
     token = _make_token()
     mock_workspaces = [

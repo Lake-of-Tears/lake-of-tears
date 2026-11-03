@@ -954,6 +954,9 @@ async def catalog_vector_sync(request: Request):
     table_id = data.get("table_id")
     source_col = data.get("source_column")
     format_template = data.get("format_template")
+    chunking = data.get("chunking")
+    chunk_size = data.get("chunk_size")
+    chunk_overlap = data.get("chunk_overlap")
 
     if not catalog_id or not schema_id or not table_id:
         return JSONResponse(
@@ -977,12 +980,15 @@ async def catalog_vector_sync(request: Request):
     force = bool(data.get("force", False))
     force_query = "?force=true" if force else ""
 
-    if source_col is not None:
+    if source_col is not None or chunking is not None:
         patch_payload = {
             "vector_index": {
                 "enabled": True,
-                "source_column": source_col,
+                "source_column": source_col or "overview",
                 "format_template": format_template or "",
+                "chunking": (chunking or "recursive").strip().lower(),
+                "chunk_size": int(chunk_size) if chunk_size else 512,
+                "chunk_overlap": int(chunk_overlap) if chunk_overlap is not None else 64,
             }
         }
         _backend_patch(

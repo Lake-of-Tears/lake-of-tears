@@ -4,7 +4,13 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal, Self
 
+import email_validator
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
+
+# Allow internal/private self-hosted domains (e.g. .local, .localhost) for Lake of Tears deployments
+for _domain in ("local", "localhost"):
+    if _domain in email_validator.SPECIAL_USE_DOMAIN_NAMES:
+        email_validator.SPECIAL_USE_DOMAIN_NAMES.remove(_domain)
 
 # bcrypt only reads the first 72 bytes of a password, so a longer one would be silently cut and a
 # change made past that point would not change anything. Passwords that long are refused instead.
