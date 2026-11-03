@@ -687,14 +687,13 @@ def register_catalog_views(
                         f"SELECT * FROM read_parquet('{escaped_path}')"
                     )
                     registered.append(f"{schema_slug}.{table_slug}")
-                    if schema_slug in ("default", "main"):
-                        try:
-                            con.execute(
-                                f'CREATE OR REPLACE VIEW "{table_slug}" AS '
-                                f"SELECT * FROM read_parquet('{escaped_path}')"
-                            )
-                        except Exception:
-                            pass
+                    try:
+                        con.execute(
+                            f'CREATE OR REPLACE VIEW "{table_slug}" AS '
+                            f"SELECT * FROM read_parquet('{escaped_path}')"
+                        )
+                    except Exception:
+                        pass
                 except Exception:
                     pass
     return registered

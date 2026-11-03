@@ -780,6 +780,13 @@ def register_catalog_views(
                         f"SELECT * FROM read_parquet('{escaped_path}')"
                     )
                     registered.append(f"{schema_slug}.{table_slug}")
+                    try:
+                        con.execute(
+                            f'CREATE OR REPLACE VIEW "{table_slug}" AS '
+                            f"SELECT * FROM read_parquet('{escaped_path}')"
+                        )
+                    except Exception:
+                        pass
                 except Exception:
                     # View creation may fail if S3 bucket/files do not exist yet; ignore safely
                     pass
