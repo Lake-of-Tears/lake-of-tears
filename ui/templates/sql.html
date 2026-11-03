@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}SQL Editor — Lake of Tears{% endblock %}
 {% block content %}
+{% set has_ai = (ai_info is defined and ai_info and ai_info.provider) %}
 
 <div class="h-full flex flex-col gap-4">
 
@@ -33,29 +34,31 @@
           <div class="flex items-center gap-1.5 text-xs font-semibold text-blue-400 shrink-0">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
             <span>AI Assistant</span>
-            {% if ai_info and ai_info.provider %}
+            {% if has_ai %}
             <span class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono font-normal flex items-center gap-1">
               <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
               {{ ai_info.provider | capitalize }}{% if ai_info.chat_model %} · {{ ai_info.chat_model }}{% endif %}
             </span>
             {% else %}
-            <span class="text-[10px] px-2 py-0.5 rounded-full bg-gray-800 text-gray-400 border border-gray-700 font-mono font-normal">
-              No Provider
-            </span>
+            <a href="/settings/admin#ai" class="text-[10px] px-2 py-0.5 rounded-full bg-gray-800 text-gray-400 hover:text-blue-400 border border-gray-700 font-mono font-normal flex items-center gap-1" title="Click to configure an AI provider in Settings → Admin Panel">
+              No Provider <span class="text-blue-400 font-semibold">Setup →</span>
+            </a>
             {% endif %}
           </div>
           <input
             type="text"
             id="aiSqlPrompt"
-            class="input-dark text-xs py-1.5 flex-1"
-            placeholder="Describe a query in plain English (e.g. 'Show monthly revenue from Stripe charges for 2026' or 'Classify HubSpot deal stages with ai_classify')…"
+            class="input-dark text-xs py-1.5 flex-1 {% if not has_ai %}opacity-50 cursor-not-allowed bg-gray-900/40{% endif %}"
+            placeholder="{% if has_ai %}Describe a query in plain English (e.g. 'Show monthly revenue from Stripe charges for 2026' or 'Classify HubSpot deal stages with ai_classify')…{% else %}No AI provider configured (configure one in Settings → Admin Panel to enable AI generation)…{% endif %}"
+            {% if not has_ai %}disabled{% endif %}
             autocomplete="off"
           />
           <button
             type="button"
             id="btnGenerateSql"
             onclick="generateSqlWithAi()"
-            class="btn-primary text-xs py-1.5 px-3 whitespace-nowrap shrink-0"
+            class="btn-primary text-xs py-1.5 px-3 whitespace-nowrap shrink-0 {% if not has_ai %}opacity-50 cursor-not-allowed pointer-events-none{% endif %}"
+            {% if not has_ai %}disabled title="No AI provider configured in Admin Panel"{% endif %}
           >
             Generate SQL
           </button>
@@ -109,9 +112,10 @@
               type="button"
               id="btnExplainQuery"
               onclick="explainCurrentQuery()"
-              class="btn-ghost text-xs py-2 px-3 border border-gray-800 rounded-md whitespace-nowrap flex items-center justify-center gap-1.5 hover:border-blue-500/40"
+              class="btn-ghost text-xs py-2 px-3 border border-gray-800 rounded-md whitespace-nowrap flex items-center justify-center gap-1.5 {% if has_ai %}hover:border-blue-500/40{% else %}opacity-50 cursor-not-allowed pointer-events-none{% endif %}"
+              {% if not has_ai %}disabled title="AI explanation unavailable: configure an AI provider in Settings → Admin Panel"{% endif %}
             >
-              <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              <svg class="w-3.5 h-3.5 {% if has_ai %}text-blue-400{% else %}text-gray-500{% endif %}" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
               <span>Explain Query</span>
             </button>
           </div>
@@ -204,7 +208,8 @@
                   type="button"
                   id="btnFixWithAi"
                   onclick="fixQueryWithAi()"
-                  class="btn-primary text-xs py-1.5 px-3 shrink-0 flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500"
+                  class="btn-primary text-xs py-1.5 px-3 shrink-0 flex items-center gap-1.5 bg-blue-600 {% if has_ai %}hover:bg-blue-500{% else %}opacity-50 cursor-not-allowed pointer-events-none{% endif %}"
+                  {% if not has_ai %}disabled title="AI auto-fix unavailable: configure an AI provider in Settings → Admin Panel"{% endif %}
                 >
                   <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
                   Fix with AI
@@ -239,7 +244,8 @@
               type="button"
               id="btnFixWithAi"
               onclick="fixQueryWithAi()"
-              class="btn-primary text-xs py-1.5 px-3 shrink-0 flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500"
+              class="btn-primary text-xs py-1.5 px-3 shrink-0 flex items-center gap-1.5 bg-blue-600 {% if has_ai %}hover:bg-blue-500{% else %}opacity-50 cursor-not-allowed pointer-events-none{% endif %}"
+              {% if not has_ai %}disabled title="AI auto-fix unavailable: configure an AI provider in Settings → Admin Panel"{% endif %}
             >
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
               Fix with AI
@@ -652,6 +658,7 @@ function insertSqlSnippet(snippet) {
 async function generateSqlWithAi() {
   const promptInput = document.getElementById("aiSqlPrompt");
   const btn = document.getElementById("btnGenerateSql");
+  if (!btn || btn.disabled) return;
   const banner = document.getElementById("aiGeneratedBanner");
   const explanationEl = document.getElementById("aiGeneratedExplanation");
   const badgesEl = document.getElementById("aiGeneratedBadges");
@@ -752,6 +759,8 @@ function applyFixedSql(andRun) {
 }
 
 async function explainCurrentQuery() {
+  const btn = document.getElementById("btnExplainQuery");
+  if (btn && btn.disabled) return;
   const modal = document.getElementById("explainQueryModal");
   const body = document.getElementById("explainModalBody");
   const sql = getEditorSql().trim();
