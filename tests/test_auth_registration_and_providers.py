@@ -970,3 +970,45 @@ def test_oauth_bypasses_disabled_flag_with_valid_invite():
         assert res.headers["location"] == "/"
         assert invite.status == "accepted"
         assert invite.accepted_at is not None
+
+
+def test_login_and_register_with_local_domain():
+    import schemas
+
+    # Verify Pydantic schemas accept .local and .localhost email addresses
+    login_req = schemas.LoginRequest(email="admin@lake.local", password="ValidPassword123!")
+    assert login_req.email == "admin@lake.local"
+
+    reg_req = schemas.RegisterRequest(email="admin@lake.local", password="ValidPassword123!")
+    assert reg_req.email == "admin@lake.local"
+
+    invite_req = schemas.CreateInvitationRequest(email="newuser@lake.local", role="user")
+    assert invite_req.email == "newuser@lake.local"
+
+    member_req = schemas.AddMemberRequest(email="colleague@lake.local", role="write")
+    assert member_req.email == "colleague@lake.local"
+
+    # Verify backend login endpoint accepts admin@lake.local without 422 Unprocessable Entity
+    user = _make_user(email="admin@lake.local", role="admin")
+    mock_db = MagicMock()
+
+    def query_mock(model):
+        m = MagicMock()
+        if model is User:
+            m.filter.return_value.first.return_value = user
+        else:
+            m.filter.return_value.first.return_value = None
+        return m
+
+    mock_db.query.side_effect = query_mock
+
+    backend_main.app.dependency_overrides[database.get_db] = lambda: mock_db
+    try:
+        res = backend_client.post(
+            "/api/auth/login",
+            json={"email": "admin@lake.local", "password": "ValidPassword123!"},
+        )
+        assert res.status_code == 200
+        assert res.json() == {"ok": True, "role": "admin"}
+    finally:
+        backend_main.app.dependency_overrides.clear()
