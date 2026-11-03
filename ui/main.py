@@ -170,6 +170,8 @@ _PUBLIC_PREFIXES = (
     "/logout",
     "/api/",
     "/health",
+    "/static/",
+    "/favicon.ico",
     "/workspace/search",
     "/catalog/preview",
 )

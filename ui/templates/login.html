@@ -4,127 +4,211 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Sign in — Lake of Tears</title>
+  <link rel="icon" type="image/png" href="/static/img/favicon.png" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script>tailwind.config = { darkMode: 'class' }</script>
   <style type="text/tailwindcss">
-    @layer base { html, body { height: 100%; } }
+    @layer base {
+      html, body {
+        height: 100%;
+      }
+    }
+    @keyframes kenburnsGlide {
+      0% {
+        transform: scale(1.0) translate3d(0, 0, 0);
+      }
+      50% {
+        transform: scale(1.10) translate3d(-1%, -0.75%, 0);
+      }
+      100% {
+        transform: scale(1.0) translate3d(0, 0, 0);
+      }
+    }
+    .kenburns-bg {
+      animation: kenburnsGlide 28s ease-in-out infinite alternate;
+      will-change: transform;
+      transform-origin: center center;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .kenburns-bg {
+        animation: none !important;
+      }
+    }
   </style>
 </head>
-<body class="dark h-full bg-[#0d0d0d] flex items-center justify-center p-4">
+<body class="dark h-full bg-[#07090e] text-gray-100 flex flex-col font-sans antialiased overflow-x-hidden selection:bg-blue-600/30 selection:text-white">
 
-  <div class="w-full max-w-sm">
-
-    <!-- Logo -->
-    <div class="flex items-center justify-center gap-2.5 mb-8">
-      <span class="text-2xl">💧</span>
-      <span class="text-xl font-bold text-gray-100 tracking-tight">Lake of Tears</span>
+  <!-- ── Top Header Bar ────────────────────────────────────────────────────── -->
+  <header class="fixed top-0 inset-x-0 z-30 h-14 backdrop-blur-md bg-black/40 border-b border-white/10 px-4 sm:px-6 flex items-center justify-between transition-colors">
+    <!-- Brand Info -->
+    <div class="flex items-center gap-3">
+      <a href="/" class="flex items-center gap-2.5 group focus:outline-none">
+        <img src="/static/img/logo.png" alt="Lake of Tears" class="w-7 h-7 rounded-md object-cover ring-1 ring-white/15 shadow-sm group-hover:ring-blue-500/50 transition-all" />
+        <span class="text-sm sm:text-base font-semibold text-gray-100 tracking-tight group-hover:text-white transition-colors">Lake of Tears</span>
+      </a>
+      <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-white/5 text-gray-400 border border-white/10 font-mono tracking-tight">v0.1.0</span>
     </div>
 
-    <!-- Card -->
-    <div class="bg-[#161616] border border-white/[0.08] rounded-xl p-8">
-
-      <!-- Tabs: Sign in / Create account -->
-      <div id="auth-tabs" class="flex gap-1 mb-6 bg-black/30 rounded-lg p-1 {% if registration_enabled is defined and not registration_enabled %}hidden{% endif %}">
-        <button id="tab-login" onclick="setTab('login')"
-          class="flex-1 text-sm py-1.5 rounded-md font-medium transition-colors text-white bg-white/10">
-          Sign in
-        </button>
-        <button id="tab-register" onclick="setTab('register')"
-          class="flex-1 text-sm py-1.5 rounded-md font-medium transition-colors text-gray-500 hover:text-gray-300">
-          Create account
-        </button>
+    <!-- Header Actions / Links -->
+    <div class="flex items-center gap-3 sm:gap-4">
+      <!-- Operational Status Badge -->
+      <div class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span class="hidden xs:inline">Operational</span>
       </div>
 
-      <!-- Error / success banner -->
-      {% set qp = request.query_params if (request is defined and request and request.scope is defined and 'query_string' in request.scope) else {} %}
-      {% set err_code = qp.get('error') if qp else None %}
-      {% set reason_code = qp.get('reason') if qp else None %}
-      {% if err_code %}
-      <div id="banner" class="mb-4 px-3 py-2 rounded-md text-sm bg-red-900/40 text-red-400 border border-red-800/50">
-        {% if err_code == 'registration_disabled' %}
-          You don't have an account yet. Access is by invite only — please contact your administrator to be added.
-        {% elif err_code == 'disabled' %}
-          Your account has been disabled.
-        {% elif err_code == 'expired' %}
-          Session expired — please sign in again.
-        {% elif err_code == 'invalid' %}
-          Invalid session.
-        {% else %}
-          Authentication error.
-        {% endif %}
-      </div>
-      {% elif reason_code %}
-      <div id="banner" class="mb-4 px-3 py-2 rounded-md text-sm bg-red-900/40 text-red-400 border border-red-800/50">
-        {% if reason_code == 'inactivity' %}
-          You were signed out due to inactivity.
-        {% elif reason_code == 'session_expired' %}
-          Your session has expired — please sign in again.
-        {% else %}
-          You have been signed out.
-        {% endif %}
-      </div>
-      {% else %}
-      <div id="banner" class="hidden mb-4 px-3 py-2 rounded-md text-sm"></div>
-      {% endif %}
+      <div class="hidden sm:block w-px h-3.5 bg-white/10"></div>
 
-      <!-- Login form -->
-      <form id="form-login" onsubmit="submitLogin(event)" class="space-y-3">
-        <div>
-          <label class="block text-xs text-gray-500 mb-1">Email</label>
-          <input id="login-email" type="email" required placeholder="you@example.com"
-            class="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500 text-sm" />
-        </div>
-        <div>
-          <label class="block text-xs text-gray-500 mb-1">Password</label>
-          <input id="login-password" type="password" required placeholder="••••••••"
-            class="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500 text-sm" />
-        </div>
-        <button type="submit"
-          class="w-full mt-1 py-2 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-sm font-medium rounded-md transition-colors">
-          Sign in
-        </button>
-      </form>
+      <!-- Docs Link -->
+      <a href="/docs" target="_blank" class="hidden sm:inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25"/>
+        </svg>
+        <span>Docs</span>
+      </a>
 
-      <!-- Register form (hidden by default) -->
-      <form id="form-register" onsubmit="submitRegister(event)" class="space-y-3 hidden">
-        <div>
-          <label class="block text-xs text-gray-500 mb-1">Display name</label>
-          <input id="reg-name" type="text" placeholder="Your name"
-            class="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500 text-sm" />
-        </div>
-        <div>
-          <label class="block text-xs text-gray-500 mb-1">Email</label>
-          <input id="reg-email" type="email" required placeholder="you@example.com"
-            class="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500 text-sm" />
-        </div>
-        <div>
-          <label class="block text-xs text-gray-500 mb-1">Password</label>
-          <input id="reg-password" type="password" required placeholder="At least 8 characters"
-            class="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500 text-sm" />
-        </div>
-        <button type="submit"
-          class="w-full mt-1 py-2 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-sm font-medium rounded-md transition-colors">
-          Create account
-        </button>
-      </form>
+      <!-- GitHub Link -->
+      <a href="https://github.com/Lake-of-Tears/lake-of-tears" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors">
+        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
+        </svg>
+        <span class="hidden sm:inline">GitHub</span>
+      </a>
+    </div>
+  </header>
 
-      <!-- SSO divider + buttons -->
-      <div id="sso-section" class="mt-5 hidden">
-        <div class="flex items-center gap-3 mb-4">
-          <div class="flex-1 h-px bg-white/[0.08]"></div>
-          <span class="text-xs text-gray-600">or continue with</span>
-          <div class="flex-1 h-px bg-white/[0.08]"></div>
-        </div>
-        <div id="sso-buttons" class="flex flex-col gap-2"></div>
-      </div>
-
+  <!-- ── Cinematic Lakehouse Background Visual & Motion ─────────────────────── -->
+  <div class="fixed inset-0 overflow-hidden pointer-events-none select-none z-0">
+    <!-- Camera gliding background wrapper -->
+    <div class="absolute inset-0 w-full h-full kenburns-bg">
+      <video autoplay loop muted playsinline poster="/static/img/lakehouse_twilight.webp"
+             class="absolute inset-0 w-full h-full object-cover">
+        <source src="/static/img/lakehouse_twilight.mp4" type="video/mp4" />
+        <source src="/static/img/lakehouse_twilight.webm" type="video/webm" />
+        <img src="/static/img/lakehouse_twilight.webp" alt="Lake of Tears Nordic Twilight Lakehouse" class="w-full h-full object-cover" />
+      </video>
     </div>
 
-    <p class="text-center text-xs text-gray-700 mt-6">
-      Lake of Tears &middot; Self-hosted datalakehouse
-    </p>
+    <!-- Atmospheric Vignette & Contrast Overlay -->
+    <div class="absolute inset-0 bg-gradient-to-t from-[#06080d]/90 via-[#080c14]/55 to-[#06090e]/75"></div>
+    <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-transparent via-[#06090f]/45 to-[#030408]/90"></div>
   </div>
 
+  <!-- ── Main Auth Content ─────────────────────────────────────────────────── -->
+  <main class="relative z-10 flex-1 flex flex-col items-center justify-center px-4 pt-20 pb-8 sm:px-6">
+
+    <div class="w-full max-w-sm sm:max-w-md">
+
+      <!-- Glassmorphic Card -->
+      <div class="backdrop-blur-[6px] bg-black/60 border border-white/10 rounded-2xl p-7 sm:p-8 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.8)] ring-1 ring-white/5 transition-all">
+
+        <!-- Tabs: Sign in / Create account -->
+        <div id="auth-tabs" class="flex gap-1 mb-6 bg-black/45 border border-white/10 rounded-lg p-1 {% if registration_enabled is defined and not registration_enabled %}hidden{% endif %}">
+          <button id="tab-login" onclick="setTab('login')"
+            class="flex-1 text-sm py-1.5 rounded-md font-medium transition-all text-white bg-white/15 shadow-sm">
+            Sign in
+          </button>
+          <button id="tab-register" onclick="setTab('register')"
+            class="flex-1 text-sm py-1.5 rounded-md font-medium transition-all text-gray-400 hover:text-gray-200">
+            Create account
+          </button>
+        </div>
+
+        <!-- Error / success banner -->
+        {% set qp = request.query_params if (request is defined and request and request.scope is defined and 'query_string' in request.scope) else {} %}
+        {% set err_code = qp.get('error') if qp else None %}
+        {% set reason_code = qp.get('reason') if qp else None %}
+        {% if err_code %}
+        <div id="banner" class="mb-4 px-3.5 py-2.5 rounded-lg text-sm bg-red-900/40 text-red-300 border border-red-700/50 backdrop-blur-sm">
+          {% if err_code == 'registration_disabled' %}
+            You don't have an account yet. Access is by invite only — please contact your administrator to be added.
+          {% elif err_code == 'disabled' %}
+            Your account has been disabled.
+          {% elif err_code == 'expired' %}
+            Session expired — please sign in again.
+          {% elif err_code == 'invalid' %}
+            Invalid session.
+          {% else %}
+            Authentication error.
+          {% endif %}
+        </div>
+        {% elif reason_code %}
+        <div id="banner" class="mb-4 px-3.5 py-2.5 rounded-lg text-sm bg-red-900/40 text-red-300 border border-red-700/50 backdrop-blur-sm">
+          {% if reason_code == 'inactivity' %}
+            You were signed out due to inactivity.
+          {% elif reason_code == 'session_expired' %}
+            Your session has expired — please sign in again.
+          {% else %}
+            You have been signed out.
+          {% endif %}
+        </div>
+        {% else %}
+        <div id="banner" class="hidden mb-4 px-3.5 py-2.5 rounded-lg text-sm backdrop-blur-sm"></div>
+        {% endif %}
+
+        <!-- Login form -->
+        <form id="form-login" onsubmit="submitLogin(event)" class="space-y-4">
+          <div>
+            <label class="block text-xs font-medium text-gray-300 mb-1.5">Email address</label>
+            <input id="login-email" type="email" required placeholder="you@example.com"
+              class="w-full bg-black/40 border border-white/20 rounded-lg px-3.5 py-2.5 text-gray-100 placeholder-gray-400 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400/50 transition-colors text-sm" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-300 mb-1.5">Password</label>
+            <input id="login-password" type="password" required placeholder="••••••••"
+              class="w-full bg-black/40 border border-white/20 rounded-lg px-3.5 py-2.5 text-gray-100 placeholder-gray-400 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400/50 transition-colors text-sm" />
+          </div>
+          <button type="submit"
+            class="w-full mt-2 py-2.5 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-lg shadow-blue-600/25 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-black">
+            Sign in
+          </button>
+        </form>
+
+        <!-- Register form (hidden by default) -->
+        <form id="form-register" onsubmit="submitRegister(event)" class="space-y-4 hidden">
+          <div>
+            <label class="block text-xs font-medium text-gray-300 mb-1.5">Display name</label>
+            <input id="reg-name" type="text" placeholder="Your name"
+              class="w-full bg-black/40 border border-white/20 rounded-lg px-3.5 py-2.5 text-gray-100 placeholder-gray-400 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400/50 transition-colors text-sm" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-300 mb-1.5">Email address</label>
+            <input id="reg-email" type="email" required placeholder="you@example.com"
+              class="w-full bg-black/40 border border-white/20 rounded-lg px-3.5 py-2.5 text-gray-100 placeholder-gray-400 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400/50 transition-colors text-sm" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-300 mb-1.5">Password</label>
+            <input id="reg-password" type="password" required placeholder="At least 8 characters"
+              class="w-full bg-black/40 border border-white/20 rounded-lg px-3.5 py-2.5 text-gray-100 placeholder-gray-400 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400/50 transition-colors text-sm" />
+          </div>
+          <button type="submit"
+            class="w-full mt-2 py-2.5 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-lg shadow-blue-600/25 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-black">
+            Create account
+          </button>
+        </form>
+
+        <!-- SSO divider + buttons -->
+        <div id="sso-section" class="mt-6 hidden">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="flex-1 h-px bg-white/10"></div>
+            <span class="text-xs text-gray-400">or continue with</span>
+            <div class="flex-1 h-px bg-white/10"></div>
+          </div>
+          <div id="sso-buttons" class="flex flex-col gap-2.5"></div>
+        </div>
+
+      </div>
+
+      <!-- Footer Note -->
+      <p class="text-center text-xs text-gray-400/80 mt-6 font-medium">
+        Lake of Tears &middot; Self-hosted datalakehouse
+      </p>
+
+    </div>
+
+  </main>
+
+  <!-- ── Client Logic ──────────────────────────────────────────────────────── -->
   <script>
     const NEXT = new URLSearchParams(window.location.search).get('next') || '/';
     const ERROR = new URLSearchParams(window.location.search).get('error');
@@ -147,8 +231,8 @@
       const el = document.getElementById('banner');
       el.textContent = msg;
       el.className = type === 'error'
-        ? 'mb-4 px-3 py-2 rounded-md text-sm bg-red-900/40 text-red-400 border border-red-800/50'
-        : 'mb-4 px-3 py-2 rounded-md text-sm bg-emerald-900/40 text-emerald-400 border border-emerald-800/50';
+        ? 'mb-4 px-3.5 py-2.5 rounded-lg text-sm bg-red-900/40 text-red-300 border border-red-700/50 backdrop-blur-sm'
+        : 'mb-4 px-3.5 py-2.5 rounded-lg text-sm bg-emerald-900/40 text-emerald-300 border border-emerald-700/50 backdrop-blur-sm';
       el.classList.remove('hidden');
     }
 
@@ -156,8 +240,9 @@
       const isLogin = tab === 'login';
       document.getElementById('form-login').classList.toggle('hidden', !isLogin);
       document.getElementById('form-register').classList.toggle('hidden', isLogin);
-      document.getElementById('tab-login').className = `flex-1 text-sm py-1.5 rounded-md font-medium transition-colors ${isLogin ? 'text-white bg-white/10' : 'text-gray-500 hover:text-gray-300'}`;
-      document.getElementById('tab-register').className = `flex-1 text-sm py-1.5 rounded-md font-medium transition-colors ${!isLogin ? 'text-white bg-white/10' : 'text-gray-500 hover:text-gray-300'}`;
+      document.getElementById('tab-login').className = `flex-1 text-sm py-1.5 rounded-md font-medium transition-all ${isLogin ? 'text-white bg-white/10 shadow-sm' : 'text-gray-400 hover:text-gray-200'}`;
+      document.getElementById('tab-register').className = `flex-1 text-sm py-1.5 rounded-md font-medium transition-all ${!isLogin ? 'text-white bg-white/10 shadow-sm' : 'text-gray-400 hover:text-gray-200'}`;
+
       if (clearBanner) {
         document.getElementById('banner').classList.add('hidden');
       }
@@ -248,7 +333,7 @@
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.onclick = () => oauthLogin(p.key);
-        btn.className = 'flex items-center justify-center gap-2.5 w-full py-2 px-4 bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] rounded-md text-gray-300 text-sm font-medium transition-colors';
+        btn.className = 'flex items-center justify-center gap-2.5 w-full py-2.5 px-4 bg-white/[0.05] hover:bg-white/[0.1] active:bg-white/[0.15] border border-white/[0.08] rounded-lg text-gray-200 text-sm font-medium transition-all shadow-sm';
         btn.innerHTML = `${PROVIDER_ICONS[p.key] || PROVIDER_ICONS.oidc || ''}<span>Continue with ${p.label}</span>`;
         container.appendChild(btn);
       });
