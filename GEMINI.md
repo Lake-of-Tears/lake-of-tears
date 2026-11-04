@@ -54,4 +54,22 @@
     - Catalog drawer UI controls added for Chunking Strategy, Chunk Size, and Chunk Overlap, plus Strategy display pill in status overview.
   - **Local Deployment:** Rebuilt images `lake-of-tears-backend:latest` and `lake-of-tears-ui:latest`; rolled out to local k8s deployments `lake-of-tears-backend` and `lake-of-tears-lakeui`. Verified live table sync and multi-chunk explosion on `tmdb-trending`.
 
+- **PR #378 ('Need help signing in?' Modal, Password Reset, and Account Discovery Flow):**
+  - **Status:** **COMPLETED, DEPLOYED, MERGED & CI GREEN**
+  - **Pull Request:** Merged via PR #378 into `main` (`f755392`).
+  - **Kanban Board:** Moved to **Done** on [Lake of Tears (Main) Project #3](https://github.com/orgs/Lake-of-Tears/projects/3) (Item ID `PVTI_lADOFEJxWM4Bmf-gzhF2YEA`).
+  - **Database Migration:** Alembic revision `0020_password_reset_tokens` applied.
+  - **Test Suite:** 771 tests passing (`tests/test_password_reset.py`).
+  - **Changes:**
+    - Right-aligned link under password input on `/login`: "Need help signing in?".
+    - Glassmorphic modal overlay collecting email address, rate-limited to 3 requests per 15 minutes per IP/email.
+    - Privacy-preserving generic UI response preventing email enumeration.
+    - Contextual email handling: password reset link for password accounts, SSO reminder for OAuth accounts, and registration/admin guidance for unknown accounts.
+    - Dev mode fallback logging reset links to console when SMTP is unconfigured.
+    - Database-backed single-use SHA-256 tokens (`password_reset_tokens` table) with 30-minute expiration.
+    - Immediate token verification on page load when visiting `/login?reset_token=...`.
+    - Dedicated "Set a new password" form with client and server password matching and validation.
+    - Full session revocation on password reset; returns to Sign In with success banner.
+  - **Local Deployment:** Rebuilt images `lake-of-tears-backend:latest` and `lake-of-tears-ui:latest`; rolled out to local k8s deployments `lake-of-tears-backend` and `lake-of-tears-lakeui`. Verified live at http://localhost.
+
 
