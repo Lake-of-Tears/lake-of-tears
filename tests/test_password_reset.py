@@ -34,9 +34,7 @@ sys.modules["backend_main_reset_test"] = backend_main
 backend_spec.loader.exec_module(backend_main)
 
 # Load UI app
-ui_spec = importlib.util.spec_from_file_location(
-    "ui_main_reset_test", repo_root / "ui" / "main.py"
-)
+ui_spec = importlib.util.spec_from_file_location("ui_main_reset_test", repo_root / "ui" / "main.py")
 ui_main = importlib.util.module_from_spec(ui_spec)
 sys.modules["ui_main_reset_test"] = ui_main
 ui_spec.loader.exec_module(ui_main)
@@ -99,10 +97,11 @@ def test_forgot_password_for_password_user(client, reset_db_session):
     reset_db_session.add(user)
     reset_db_session.commit()
 
-    with patch.object(backend_main, "send_password_reset") as mock_reset_email, \
-         patch.object(backend_main, "send_sso_reminder") as mock_sso_email, \
-         patch.object(backend_main, "send_account_not_found") as mock_not_found_email:
-
+    with (
+        patch.object(backend_main, "send_password_reset") as mock_reset_email,
+        patch.object(backend_main, "send_sso_reminder") as mock_sso_email,
+        patch.object(backend_main, "send_account_not_found") as mock_not_found_email,
+    ):
         resp = client.post(
             "/api/auth/forgot-password",
             json={"email": "test_reset@example.com"},
@@ -156,10 +155,11 @@ def test_forgot_password_for_sso_user(client, reset_db_session):
     reset_db_session.add(oauth_acc)
     reset_db_session.commit()
 
-    with patch.object(backend_main, "send_password_reset") as mock_reset_email, \
-         patch.object(backend_main, "send_sso_reminder") as mock_sso_email, \
-         patch.object(backend_main, "send_account_not_found") as mock_not_found_email:
-
+    with (
+        patch.object(backend_main, "send_password_reset") as mock_reset_email,
+        patch.object(backend_main, "send_sso_reminder") as mock_sso_email,
+        patch.object(backend_main, "send_account_not_found") as mock_not_found_email,
+    ):
         resp = client.post(
             "/api/auth/forgot-password",
             json={"email": "sso_user@example.com"},
@@ -182,10 +182,11 @@ def test_forgot_password_for_sso_user(client, reset_db_session):
 
 
 def test_forgot_password_for_non_existent_user(client, reset_db_session):
-    with patch.object(backend_main, "send_password_reset") as mock_reset_email, \
-         patch.object(backend_main, "send_sso_reminder") as mock_sso_email, \
-         patch.object(backend_main, "send_account_not_found") as mock_not_found_email:
-
+    with (
+        patch.object(backend_main, "send_password_reset") as mock_reset_email,
+        patch.object(backend_main, "send_sso_reminder") as mock_sso_email,
+        patch.object(backend_main, "send_account_not_found") as mock_not_found_email,
+    ):
         resp = client.post(
             "/api/auth/forgot-password",
             json={"email": "nonexistent@example.com"},

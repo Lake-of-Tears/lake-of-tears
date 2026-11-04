@@ -703,7 +703,9 @@ def forgot_password(
     ip_key = f"ip:{client_ip}"
 
     # Rate limiting: 3 requests per 15 minutes per email/IP
-    if not check_and_record_help_rate_limit(email_key) or not check_and_record_help_rate_limit(ip_key):
+    if not check_and_record_help_rate_limit(email_key) or not check_and_record_help_rate_limit(
+        ip_key
+    ):
         raise HTTPException(
             status_code=429,
             detail="Too many requests. Please wait a few minutes before trying again.",
@@ -714,7 +716,9 @@ def forgot_password(
 
     if user and user.is_active:
         if user.hashed_password:
-            raw_token = create_password_reset_token(db, user, ip_address=client_ip, valid_minutes=30)
+            raw_token = create_password_reset_token(
+                db, user, ip_address=client_ip, valid_minutes=30
+            )
             reset_url = f"{base_url.rstrip('/')}/login?reset_token={raw_token}"
             try:
                 send_password_reset(to_email=user.email, reset_url=reset_url)
@@ -777,7 +781,10 @@ def reset_password(
     revoke_all_user_sessions(db, user.id)
 
     db.commit()
-    return {"ok": True, "message": "Password reset successfully. Please sign in with your new password."}
+    return {
+        "ok": True,
+        "message": "Password reset successfully. Please sign in with your new password.",
+    }
 
 
 @app.get("/api/auth/sessions", response_model=list[UserSessionResponse])

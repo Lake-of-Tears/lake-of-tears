@@ -422,11 +422,7 @@ def verify_password_reset_token(
     if not raw_token or not raw_token.strip():
         return None
     token_hash = hash_reset_token(raw_token.strip())
-    rec = (
-        db.query(PasswordResetToken)
-        .filter(PasswordResetToken.token_hash == token_hash)
-        .first()
-    )
+    rec = db.query(PasswordResetToken).filter(PasswordResetToken.token_hash == token_hash).first()
     if not rec or rec.used_at is not None:
         return None
     now = datetime.now(UTC)
