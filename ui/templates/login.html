@@ -157,6 +157,11 @@
             <label class="block text-xs font-medium text-gray-300 mb-1.5">Password</label>
             <input id="login-password" type="password" required placeholder="••••••••"
               class="w-full bg-black/40 border border-white/20 rounded-lg px-3.5 py-2.5 text-gray-100 placeholder-gray-400 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400/50 transition-colors text-sm" />
+            <div class="flex justify-end mt-1.5">
+              <button type="button" onclick="openHelpModal()" class="text-xs text-blue-400 hover:text-blue-300 transition-colors focus:outline-none">
+                Need help signing in?
+              </button>
+            </div>
           </div>
           <button type="submit"
             class="w-full mt-2 py-2.5 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-lg shadow-blue-600/25 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-black">
@@ -187,6 +192,33 @@
           </button>
         </form>
 
+        <!-- Reset Password form (shown when reset_token is in URL) -->
+        <form id="form-reset" onsubmit="submitResetPassword(event)" class="space-y-4 hidden">
+          <div class="mb-3">
+            <h2 class="text-base font-semibold text-gray-100">Set a new password</h2>
+            <p id="reset-account-desc" class="text-xs text-gray-400 mt-1">Enter and confirm your new password below.</p>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-300 mb-1.5">New password</label>
+            <input id="reset-new-password" type="password" required placeholder="At least 8 characters"
+              class="w-full bg-black/40 border border-white/20 rounded-lg px-3.5 py-2.5 text-gray-100 placeholder-gray-400 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400/50 transition-colors text-sm" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-300 mb-1.5">Confirm new password</label>
+            <input id="reset-confirm-password" type="password" required placeholder="Re-enter new password"
+              class="w-full bg-black/40 border border-white/20 rounded-lg px-3.5 py-2.5 text-gray-100 placeholder-gray-400 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400/50 transition-colors text-sm" />
+          </div>
+          <button id="btn-reset-submit" type="submit"
+            class="w-full mt-2 py-2.5 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-lg shadow-blue-600/25 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-black">
+            Reset password
+          </button>
+          <div class="text-center pt-1">
+            <button type="button" onclick="cancelReset()" class="text-xs text-gray-400 hover:text-gray-200 transition-colors focus:outline-none">
+              &larr; Back to Sign in
+            </button>
+          </div>
+        </form>
+
         <!-- SSO divider + buttons -->
         <div id="sso-section" class="mt-6 hidden">
           <div class="flex items-center gap-3 mb-4">
@@ -208,11 +240,68 @@
 
   </main>
 
+  <!-- ── Help / Forgot Password Modal ──────────────────────────────────────── -->
+  <div id="help-modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm hidden transition-opacity" onclick="closeHelpModal()">
+    <div class="backdrop-blur-md bg-[#0e131f]/95 border border-white/15 rounded-2xl p-6 sm:p-7 max-w-md w-full shadow-2xl relative text-left ring-1 ring-white/10" onclick="event.stopPropagation()">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-base font-semibold text-gray-100">Need help signing in?</h3>
+        <button type="button" onclick="closeHelpModal()" class="text-gray-400 hover:text-gray-200 p-1 rounded-lg hover:bg-white/10 transition-colors focus:outline-none">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <div id="help-modal-banner" class="hidden mb-4 px-3.5 py-2.5 rounded-lg text-sm backdrop-blur-sm"></div>
+
+      <div id="help-modal-form-wrap">
+        <p class="text-xs text-gray-300 mb-4 leading-relaxed">
+          Enter your email address and we'll send you instructions to access your account.
+        </p>
+        <form id="form-help" onsubmit="submitHelp(event)" class="space-y-4">
+          <div>
+            <label class="block text-xs font-medium text-gray-300 mb-1.5">Email address</label>
+            <input id="help-email" type="email" required placeholder="you@example.com"
+              class="w-full bg-black/40 border border-white/20 rounded-lg px-3.5 py-2.5 text-gray-100 placeholder-gray-400 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400/50 transition-colors text-sm" />
+          </div>
+          <div class="flex items-center justify-end gap-3 pt-2">
+            <button type="button" onclick="closeHelpModal()"
+              class="px-4 py-2 text-xs font-medium text-gray-300 hover:text-white rounded-lg hover:bg-white/5 transition-colors focus:outline-none">
+              Cancel
+            </button>
+            <button id="btn-help-submit" type="submit"
+              class="px-4 py-2 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-md transition-all focus:outline-none focus:ring-2 focus:ring-blue-500">
+              Send help link
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <div id="help-modal-done-wrap" class="hidden text-center space-y-4 py-2">
+        <div class="w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+        <p class="text-xs text-gray-300 leading-relaxed px-2">
+          If an account is associated with this email, we have sent instructions to access your account. Please check your inbox (and spam folder).
+        </p>
+        <button type="button" onclick="closeHelpModal()"
+          class="w-full py-2.5 bg-white/10 hover:bg-white/15 text-white text-xs font-semibold rounded-lg transition-colors focus:outline-none">
+          Done
+        </button>
+      </div>
+
+    </div>
+  </div>
+
   <!-- ── Client Logic ──────────────────────────────────────────────────────── -->
   <script>
     const NEXT = new URLSearchParams(window.location.search).get('next') || '/';
     const ERROR = new URLSearchParams(window.location.search).get('error');
     const REASON = new URLSearchParams(window.location.search).get('reason');
+    const RESET_TOKEN = new URLSearchParams(window.location.search).get('reset_token');
+    let resetEmail = null;
 
     if (ERROR) {
       const msgs = {
@@ -339,6 +428,155 @@
       });
     }
 
+    function openHelpModal() {
+      const modal = document.getElementById('help-modal');
+      const emailInput = document.getElementById('help-email');
+      const loginEmail = document.getElementById('login-email').value;
+      if (loginEmail && !emailInput.value) {
+        emailInput.value = loginEmail;
+      }
+      document.getElementById('help-modal-banner').classList.add('hidden');
+      document.getElementById('help-modal-form-wrap').classList.remove('hidden');
+      document.getElementById('help-modal-done-wrap').classList.add('hidden');
+      modal.classList.remove('hidden');
+      setTimeout(() => emailInput.focus(), 50);
+    }
+
+    function closeHelpModal() {
+      document.getElementById('help-modal').classList.add('hidden');
+    }
+
+    async function submitHelp(e) {
+      e.preventDefault();
+      const email = document.getElementById('help-email').value.trim();
+      if (!email) return;
+      const btn = document.getElementById('btn-help-submit');
+      btn.disabled = true;
+      btn.textContent = 'Sending…';
+      try {
+        const res = await fetch('/api/auth/forgot-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          document.getElementById('help-modal-form-wrap').classList.add('hidden');
+          document.getElementById('help-modal-done-wrap').classList.remove('hidden');
+        } else {
+          const banner = document.getElementById('help-modal-banner');
+          banner.textContent = formatError(data.detail, 'Failed to send help email.');
+          banner.className = 'mb-4 px-3.5 py-2.5 rounded-lg text-sm bg-red-900/40 text-red-300 border border-red-700/50 backdrop-blur-sm';
+          banner.classList.remove('hidden');
+        }
+      } catch {
+        const banner = document.getElementById('help-modal-banner');
+        banner.textContent = 'Network error — please try again later.';
+        banner.className = 'mb-4 px-3.5 py-2.5 rounded-lg text-sm bg-red-900/40 text-red-300 border border-red-700/50 backdrop-blur-sm';
+        banner.classList.remove('hidden');
+      }
+      btn.disabled = false;
+      btn.textContent = 'Send help link';
+    }
+
+    function initResetPasswordMode() {
+      if (!RESET_TOKEN) return;
+      const tabs = document.getElementById('auth-tabs');
+      if (tabs) tabs.classList.add('hidden');
+      document.getElementById('form-login').classList.add('hidden');
+      document.getElementById('form-register').classList.add('hidden');
+      const sso = document.getElementById('sso-section');
+      if (sso) sso.classList.add('hidden');
+      document.getElementById('form-reset').classList.remove('hidden');
+
+      verifyResetToken();
+    }
+
+    async function verifyResetToken() {
+      try {
+        const res = await fetch(`/api/auth/reset-password/verify?token=${encodeURIComponent(RESET_TOKEN)}`);
+        const data = await res.json();
+        if (data && data.valid) {
+          resetEmail = data.email || null;
+          if (resetEmail) {
+            document.getElementById('reset-account-desc').textContent = `Resetting password for ${resetEmail}`;
+          }
+        } else {
+          showBanner('This password reset link is invalid or has expired. Please request a new one.', 'error');
+          document.getElementById('reset-new-password').disabled = true;
+          document.getElementById('reset-confirm-password').disabled = true;
+          const btn = document.getElementById('btn-reset-submit');
+          btn.disabled = true;
+          btn.classList.add('opacity-50', 'cursor-not-allowed');
+        }
+      } catch {
+        showBanner('Unable to verify reset link at this time.', 'error');
+      }
+    }
+
+    function cancelReset() {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('reset_token');
+      window.history.replaceState({}, '', url.pathname + (url.search ? url.search : ''));
+
+      document.getElementById('form-reset').classList.add('hidden');
+      setTab('login', true);
+      loadConfig();
+    }
+
+    async function submitResetPassword(e) {
+      e.preventDefault();
+      const pwd = document.getElementById('reset-new-password').value;
+      const confirmPwd = document.getElementById('reset-confirm-password').value;
+
+      if (pwd.length < 8) {
+        showBanner('Password must be at least 8 characters.', 'error');
+        return;
+      }
+      if (pwd !== confirmPwd) {
+        showBanner('Passwords do not match.', 'error');
+        return;
+      }
+
+      const btn = document.getElementById('btn-reset-submit');
+      btn.disabled = true;
+      btn.textContent = 'Resetting password…';
+      try {
+        const res = await fetch('/api/auth/reset-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            token: RESET_TOKEN,
+            new_password: pwd,
+            confirm_password: confirmPwd,
+          }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          const url = new URL(window.location.href);
+          url.searchParams.delete('reset_token');
+          window.history.replaceState({}, '', url.pathname + (url.search ? url.search : ''));
+
+          document.getElementById('form-reset').classList.add('hidden');
+          setTab('login', false);
+          loadConfig();
+          showBanner('Password reset successfully. Please sign in with your new password.', 'success');
+
+          if (resetEmail) {
+            document.getElementById('login-email').value = resetEmail;
+          }
+          document.getElementById('login-password').value = '';
+          document.getElementById('login-password').focus();
+        } else {
+          showBanner(formatError(data.detail, 'Failed to reset password.'), 'error');
+        }
+      } catch {
+        showBanner('Network error — please try again.', 'error');
+      }
+      btn.disabled = false;
+      btn.textContent = 'Reset password';
+    }
+
     async function loadConfig() {
       try {
         const res = await fetch('/api/auth/config');
@@ -367,7 +605,11 @@
       } catch { /* SSO section stays hidden */ }
     }
 
-    loadConfig();
+    if (RESET_TOKEN) {
+      initResetPasswordMode();
+    } else {
+      loadConfig();
+    }
   </script>
 </body>
 </html>

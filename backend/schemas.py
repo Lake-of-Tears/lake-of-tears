@@ -67,6 +67,34 @@ class ChangePasswordRequest(BaseModel):
         return self
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordVerifyResponse(BaseModel):
+    valid: bool
+    email: str | None = None
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+    confirm_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, v: str) -> str:
+        if len(v) < PASSWORD_MIN_LENGTH:
+            raise ValueError(f"New password must be at least {PASSWORD_MIN_LENGTH} characters long")
+        return check_password_length(v)
+
+    @model_validator(mode="after")
+    def passwords_match(self) -> Self:
+        if self.new_password != self.confirm_password:
+            raise ValueError("Passwords do not match")
+        return self
+
+
 class UserResponse(BaseModel):
     id: uuid.UUID
     email: str

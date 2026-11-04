@@ -14,6 +14,7 @@ import jwt
 from database import SessionLocal, get_db
 from fastapi import Cookie, Depends, Header, HTTPException, Query
 from models import (
+    PasswordResetToken,
     PersonalAccessToken,
     SystemSetting,
     User,
@@ -354,6 +355,112 @@ def revoke_all_other_sessions(
     if updated:
         db.commit()
     return updated
+
+
+def revoke_all_user_sessions(
+    db: Session,
+    user_id: uuid.UUID,
+) -> int:
+    """Revoke all active sessions for a user."""
+    now = datetime.now(UTC)
+    updated = (
+        db.query(UserSession)
+        .filter(
+            UserSession.user_id == user_id,
+            UserSession.is_revoked == False,  # noqa: E712
+        )
+        .update(
+            {"is_revoked": True, "revoked_at": now},
+            synchronize_session=False,
+        )
+    )
+    if updated:
+        db.commit()
+    return updated
+
+
+def hash_reset_token(raw_token: str) -> str:
+    """Hash a password reset token with SHA-256."""
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+
+def create_password_reset_token(
+    db: Session,
+    user: User,
+    ip_address: str | None = None,
+    valid_minutes: int = 30,
+) -> str:
+    """Generate a single-use password reset token, invalidate existing tokens, and store hash."""
+    now = datetime.now(UTC)
+    # Invalidate existing pending tokens
+    db.query(PasswordResetToken).filter(
+        PasswordResetToken.user_id == user.id,
+        PasswordResetToken.used_at.is_(None),
+    ).update({"used_at": now}, synchronize_session=False)
+
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hash_reset_token(raw_token)
+    expires_at = now + timedelta(minutes=valid_minutes)
+
+    reset_rec = PasswordResetToken(
+        user_id=user.id,
+        token_hash=token_hash,
+        expires_at=expires_at,
+        created_at=now,
+        ip_address=ip_address,
+    )
+    db.add(reset_rec)
+    db.commit()
+    return raw_token
+
+
+def verify_password_reset_token(
+    db: Session,
+    raw_token: str,
+) -> PasswordResetToken | None:
+    """Verify that a raw password reset token exists, is unconsumed, and not expired."""
+    if not raw_token or not raw_token.strip():
+        return None
+    token_hash = hash_reset_token(raw_token.strip())
+    rec = (
+        db.query(PasswordResetToken)
+        .filter(PasswordResetToken.token_hash == token_hash)
+        .first()
+    )
+    if not rec or rec.used_at is not None:
+        return None
+    now = datetime.now(UTC)
+    # Check expiry
+    rec_exp = rec.expires_at
+    if rec_exp.tzinfo is None:
+        rec_exp = rec_exp.replace(tzinfo=UTC)
+    if rec_exp < now:
+        return None
+    return rec
+
+
+# In-memory sliding window rate limiter for login help requests
+_HELP_REQUESTS_LOG: list[tuple[float, str]] = []
+
+
+def check_and_record_help_rate_limit(
+    key: str,
+    max_requests: int = 3,
+    window_seconds: int = 900,  # 15 minutes
+) -> bool:
+    """Return True if request is allowed, False if rate limit exceeded. Records timestamp if allowed."""
+    import time
+
+    now = time.time()
+    cutoff = now - window_seconds
+    global _HELP_REQUESTS_LOG
+    # Prune old
+    _HELP_REQUESTS_LOG = [entry for entry in _HELP_REQUESTS_LOG if entry[0] > cutoff]
+    recent_count = sum(1 for entry in _HELP_REQUESTS_LOG if entry[1] == key)
+    if recent_count >= max_requests:
+        return False
+    _HELP_REQUESTS_LOG.append((now, key))
+    return True
 
 
 def prune_expired_sessions(db: Session, retention_days: int = 30) -> int:
