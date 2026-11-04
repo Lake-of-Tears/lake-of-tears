@@ -49,7 +49,7 @@ def test_ci_workflow_security_docker_scans_airflow():
         data = yaml.safe_load(f)
     sec_docker = data["jobs"]["security-docker"]
     steps = sec_docker.get("steps", [])
-    scan_steps = [s for s in steps if "trivy" in str(s.get("run", "")).lower()]
+    scan_steps = [s for s in steps if "trivy config" in str(s.get("run", "")).lower()]
     assert len(scan_steps) >= 1
     run_cmd = scan_steps[0]["run"]
     assert "backend/Dockerfile" in run_cmd
