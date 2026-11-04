@@ -42,9 +42,10 @@
   - **Local Deployment:** Rebuilt `lake-of-tears-ui:latest` and rolled out to local k8s deployment `lake-of-tears-lakeui`. Running at http://localhost.
 
 - **Issue #245 (Pluggable Chunking and Lineage Columns in Table Vector Sync):**
-  - **Status:** **COMPLETED, DEPLOYED & TESTED**
-  - **Pull Request:** [PR #377](https://github.com/Lake-of-Tears/lake-of-tears/pull/377) on branch `feat/vector-index-chunking-lineage-245`.
-  - **Kanban Board:** Added to [Lake of Tears (Main) Project #3](https://github.com/orgs/Lake-of-Tears/projects/3) (Item ID `PVTI_lADOFEJxWM4Bmf-gzhB5SFc`).
+  - **Status:** **COMPLETED, DEPLOYED, MERGED & CI GREEN**
+  - **Pull Request:** Merged via PR #377 into `main` (`1dd47ed`).
+  - **Kanban Board:** Moved to **Done** on [Lake of Tears (Main) Project #3](https://github.com/orgs/Lake-of-Tears/projects/3) (Item ID `PVTI_lADOFEJxWM4Bmf-gzhB5SFc`).
+  - **CI Workflow Hardening:** Fixed Trivy installation in GitHub Actions (`.github/workflows/ci.yml`) by pulling directly from official GitHub releases to avoid upstream DNS outages on `get.trivy.dev`. CI on `main` is 100% green (run `41747619823`).
   - **Changes:**
     - Pluggable chunkers (`RecursiveChunker`, `DocumentChunker`, `AgenticChunker`) integrated into table vector indexing.
     - Output Parquet schema standardized: `["id", "source", "content", "embedding", "source_date", "provider", "model", "dimension", "parent_id", "chunk_index", "total_chunks", "metadata", "ingested_at"]`.
