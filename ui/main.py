@@ -782,7 +782,7 @@ EXAMPLE_QUESTIONS = [
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    if AUTH_ENABLED:
+    if AUTH_ENABLED and not request.query_params.get("reset_token"):
         token = request.cookies.get("lake_token")
         if token:
             try:

@@ -19,6 +19,8 @@ from ai_router import router as ai_router
 from auth import (
     COOKIE_NAME,
     SECRET_KEY,
+    check_and_record_help_rate_limit,
+    create_password_reset_token,
     create_personal_access_token,
     create_token,
     create_user_session,
@@ -36,11 +38,13 @@ from auth import (
     prune_expired_sessions,
     require_superadmin,
     revoke_all_other_sessions,
+    revoke_all_user_sessions,
     revoke_personal_access_token,
     revoke_user_session,
     set_stored_gemini_api_key,
     set_stored_gemini_model,
     verify_password,
+    verify_password_reset_token,
 )
 from catalog_storage import delete_prefix, prefixes_to_delete
 from dashboards_router import router as dashboards_router
@@ -49,7 +53,10 @@ from email_service import (
     send_access_removed,
     send_access_requested,
     send_access_reviewed,
+    send_account_not_found,
     send_invitation,
+    send_password_reset,
+    send_sso_reminder,
 )
 from fastapi import (
     BackgroundTasks,
@@ -97,6 +104,7 @@ from schemas import (
     CreateTableRequest,
     CreateWorkspaceRequest,
     DeleteWorkspaceRequest,
+    ForgotPasswordRequest,
     InboundAccessRequest,
     InvitationResponse,
     LoginRequest,
@@ -107,6 +115,8 @@ from schemas import (
     PurgeCatalogRequest,
     RegisterRequest,
     RequestAccessRequest,
+    ResetPasswordRequest,
+    ResetPasswordVerifyResponse,
     ReviewAccessRequest,
     SharedCatalogSettingsItem,
     SystemSettingResponse,
@@ -676,6 +686,105 @@ def change_password(
         existing_session_id=str(getattr(current_user, "_current_session_id", "") or ""),
     )
     return {"ok": True, "token": token}
+
+
+@app.post("/api/auth/forgot-password")
+def forgot_password(
+    req: ForgotPasswordRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    forwarded = request.headers.get("x-forwarded-for", "")
+    client_ip = (forwarded.split(",")[0].strip() if forwarded else None) or (
+        request.client.host if request.client else "unknown"
+    )
+    email_clean = req.email.strip().lower()
+    email_key = f"email:{email_clean}"
+    ip_key = f"ip:{client_ip}"
+
+    # Rate limiting: 3 requests per 15 minutes per email/IP
+    if not check_and_record_help_rate_limit(email_key) or not check_and_record_help_rate_limit(
+        ip_key
+    ):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests. Please wait a few minutes before trying again.",
+        )
+
+    base_url = os.getenv("AUTH_BASE_URL", str(request.base_url).rstrip("/"))
+    user = db.query(User).filter(func.lower(User.email) == email_clean).first()
+
+    if user and user.is_active:
+        if user.hashed_password:
+            raw_token = create_password_reset_token(
+                db, user, ip_address=client_ip, valid_minutes=30
+            )
+            reset_url = f"{base_url.rstrip('/')}/login?reset_token={raw_token}"
+            try:
+                send_password_reset(to_email=user.email, reset_url=reset_url)
+            except Exception as e:
+                logger.warning(f"Failed to send password reset email: {e}")
+        else:
+            providers = [acc.provider for acc in user.oauth_accounts]
+            try:
+                send_sso_reminder(to_email=user.email, providers=providers, base_url=base_url)
+            except Exception as e:
+                logger.warning(f"Failed to send SSO reminder email: {e}")
+    else:
+        # Non-existent or inactive user
+        reg_enabled = is_registration_enabled()
+        try:
+            send_account_not_found(
+                to_email=email_clean,
+                registration_enabled=reg_enabled,
+                base_url=base_url,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send account not found email: {e}")
+
+    return {
+        "ok": True,
+        "message": "If an account is associated with this email, we have sent instructions to access your account.",
+    }
+
+
+@app.get("/api/auth/reset-password/verify", response_model=ResetPasswordVerifyResponse)
+def verify_reset_password_token(
+    token: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    rec = verify_password_reset_token(db, token)
+    if not rec:
+        return ResetPasswordVerifyResponse(valid=False, email=None)
+    user = db.query(User).filter(User.id == rec.user_id).first()
+    return ResetPasswordVerifyResponse(valid=True, email=user.email if user else None)
+
+
+@app.post("/api/auth/reset-password")
+def reset_password(
+    req: ResetPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    rec = verify_password_reset_token(db, req.token)
+    if not rec:
+        raise HTTPException(400, "This password reset link is invalid or has expired.")
+
+    user = db.query(User).filter(User.id == rec.user_id).first()
+    if not user or not user.is_active:
+        raise HTTPException(400, "Account not found or inactive.")
+
+    # Update password hash
+    user.hashed_password = hash_password(req.new_password)
+    # Mark reset token as used
+    rec.used_at = datetime.now(UTC)
+    # Invalidate all active user sessions for security
+    revoke_all_user_sessions(db, user.id)
+
+    db.commit()
+    return {
+        "ok": True,
+        "message": "Password reset successfully. Please sign in with your new password.",
+    }
 
 
 @app.get("/api/auth/sessions", response_model=list[UserSessionResponse])
