@@ -22,25 +22,25 @@ Lake of Tears standardizes 100% on Kubernetes and Helm across all environments.
 git clone https://github.com/Lake-of-Tears/lake-of-tears.git
 cd lake-of-tears
 
-# Option A: Unified TOON deployment (Recommended)
-cp lake-of-tears.example.toon lake-of-tears.local.toon
-helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
-  --namespace lake-of-tears --create-namespace \
-  -f <(python scripts/toon2helm.py -i lake-of-tears.local.toon)
+# Option A: One-Command Lifecycle CLI (Recommended)
+./lot install --auto-generate-secrets
 
-# Option B: Standard Helm values override
+# Option B: Direct TOON process substitution
+# cp lake-of-tears.example.toon lake-of-tears.local.toon
+# helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
+#   --namespace lake-of-tears --create-namespace \
+#   -f <(python scripts/toon2helm.py -i lake-of-tears.local.toon)
+
+# Option C: Standard Helm values override
 # cp deploy/helm/values-local.example.yaml values-local.yaml
 # helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
 #   --namespace lake-of-tears --create-namespace \
 #   -f values-local.yaml
 ```
 
-Wait for pods to be ready:
+Wait for pods to be ready (or run `./lot status`):
 ```bash
-kubectl wait --namespace lake-of-tears \
-  --for=condition=ready pod \
-  --selector=app.kubernetes.io/instance=lake-of-tears \
-  --timeout=180s
+./lot status
 ```
 
 Open **http://localhost** and register the first account: it becomes the superadmin.
@@ -48,15 +48,97 @@ Open **http://localhost** and register the first account: it becomes the superad
 ### Everyday commands
 
 ```bash
-kubectl get pods,svc,ingress -n lake-of-tears      # status of all workloads
-kubectl logs -f deployment/lake-of-tears-backend -n lake-of-tears # follow backend logs
-kubectl logs -f deployment/lake-of-tears-ui -n lake-of-tears      # follow UI logs
-kubectl rollout restart deployment -n lake-of-tears             # restart deployments
-helm upgrade lake-of-tears ./deploy/helm/lake-of-tears -n lake-of-tears -f values-local.yaml # apply changes
-helm uninstall lake-of-tears -n lake-of-tears                   # teardown release
+./lot status                                                       # inspect workloads, Helm release & endpoints
+./lot update --check-only                                          # check for available platform updates
+./lot update                                                       # apply rolling update atomically with rollback safety
+./lot destroy --keep-data                                          # teardown release while preserving databases & buckets
+kubectl logs -f deployment/lake-of-tears-backend -n lake-of-tears  # follow backend logs
+kubectl logs -f deployment/lake-of-tears-ui -n lake-of-tears       # follow UI logs
 ```
 
-## 2. Unified Platform Configuration (TOON)
+---
+
+## 2. Automated Lifecycle Management Suite (`./lot`)
+
+Lake of Tears includes a unified platform management suite driven natively by **Token-Oriented Object Notation (TOON)** specifications. All operations can be invoked via the root `./lot` CLI runner or directly through modular scripts in `deploy/scripts/`:
+
+```
+                       ┌────────────────────────┐
+                       │   Root CLI (./lot)     │
+                       └───────────┬────────────┘
+         ┌─────────────────┬───────┴─────────┬─────────────────┐
+         ▼                 ▼                 ▼                 ▼
+ ┌───────────────┐ ┌───────────────┐ ┌───────────────┐ ┌───────────────┐
+ │  install.sh   │ │   update.sh   │ │  destroy.sh   │ │   status.sh   │
+ └───────┬───────┘ └───────┬───────┘ └───────┬───────┘ └───────┬───────┘
+         │                 │                 │                 │
+         │ (Stream values) │ (Rollback safe) │ (Safe default)  │ (Live status)
+         ▼                 ▼                 ▼                 ▼
+ ┌─────────────────────────────────────────────────────────────────────┐
+ │                    Kubernetes & Helm Engine                         │
+ └─────────────────────────────────────────────────────────────────────┘
+```
+
+### CLI Command Reference
+
+| Command | Script | Description | Key Flags |
+|---|---|---|---|
+| `./lot install` | `deploy/scripts/install.sh` | Deploys or upgrades the platform using Helm and TOON | `--config <path>`, `--namespace <ns>`, `--auto-generate-secrets`, `--dry-run`, `--skip-health-check`, `--timeout <dur>` |
+| `./lot update` | `deploy/scripts/update.sh` | Checks for and applies TrueNAS-style platform updates | `--train <stable\|edge>`, `--check-only`, `--json`, `--yes`, `--no-fetch` |
+| `./lot destroy` | `deploy/scripts/destroy.sh` | Teardown deployment with persistent data retention | `--keep-data` (default), `--purge-data`, `--force`, `--namespace <ns>` |
+| `./lot status` | `deploy/scripts/status.sh` | Quick operational inspection of pods, releases, and URLs | `--namespace <ns>`, `--config <path>` |
+| `./lot config` | `scripts/lifecycle_helper.py` | Inspect, validate, or generate secrets in TOON files | `scan-placeholders`, `generate-secrets`, `extract-urls` |
+
+---
+
+### Secret Auto-Generation & Placeholder Guards
+When deploying a fresh cluster from `lake-of-tears.example.toon`, the specification contains template placeholders (such as `changeme-minio-root-password` or `changeme-backend-auth-jwt-secret-key-32-bytes`).
+- Running `./lot install --auto-generate-secrets` automatically scans for any `changeme-*` placeholders and populates them with cryptographically secure random secrets (`secrets.token_urlsafe` for service passwords and `secrets.token_hex` for 32-byte JWT/Fernet keys).
+- In interactive mode, `./lot install` prompts the operator before continuing so insecure default passwords are never accidentally deployed to production.
+- A `.bak` backup of the original specification is automatically preserved.
+
+---
+
+### TrueNAS-Style Platform Updates
+Modeled after TrueNAS SCALE's system update architecture, `./lot update` provides automated version checking and rolling updates:
+
+1. **Update Trains:**
+   - **`stable` (Default):** Tracks official GitHub release build tags (`v1.x.x`). Recommended for staging and production clusters.
+   - **`edge`:** Tracks the latest commit on `origin/main`. Ideal for development environments.
+2. **Pre-Flight Inspection & JSON Output:**
+   Run `./lot update --check-only` to view pending release notes without altering cluster state:
+   ```bash
+   ./lot update --check-only
+   ```
+   Pass `--json` for machine-readable output:
+   ```json
+   {
+     "status": "AVAILABLE",
+     "train": "stable",
+     "current_version": "v1.0.0-build.601-a375d39",
+     "latest_version": "v1.0.0-build.625-e27c680",
+     "changelog": [
+       "feat(deploy): implement Helm lifecycle scripts and ./lot CLI (#296)",
+       "feat(ui): convert admin#services to minimalist list view (#269)"
+     ],
+     "can_update": true,
+     "error": null
+   }
+   ```
+   *(This endpoint is designed for direct integration into the Lake UI Admin Panel at `/settings/admin#updates`)*.
+3. **Atomic Upgrades & Automatic Rollback:**
+   Upgrades execute via `helm upgrade --atomic --timeout 10m`. If new pods fail health checks or crash on startup, Helm automatically reverts the release to the previous working revision with zero data loss.
+
+---
+
+### Teardown & Persistent Volume Protection
+Kubernetes by design preserves `PersistentVolumeClaims` (PVCs) when a Helm chart is uninstalled. `./lot destroy` strictly honors this safety standard:
+- **Safe by Default (`./lot destroy --keep-data`):** Removes deployments, ingress, and configmaps, but leaves MinIO data lakes, PostgreSQL tables, Airflow DAGs, and Jupyter notebook volumes completely intact in the namespace.
+- **Permanent Purge (`./lot destroy --purge-data`):** Permanently erases all volumes and the namespace. In interactive mode, the operator must explicitly type the namespace name (`lake-of-tears`) to confirm data destruction. Pass `--force` for non-interactive CI/CD cleanup scripts.
+
+---
+
+## 3. Unified Platform Configuration (TOON)
 
 Lake of Tears standardizes on **Token-Oriented Object Notation (TOON)** as its single unified specification for configuring the entire platform across local development, staging, and production. The canonical template is located at the root of the repository: [`lake-of-tears.example.toon`](../../lake-of-tears.example.toon).
 
@@ -125,7 +207,7 @@ helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
 
 ---
 
-## 3. Zero-Disk Streaming & GitHub Actions CI/CD
+## 4. Zero-Disk Streaming & GitHub Actions CI/CD
 
 In production environments, persisting unencrypted YAML values files (such as `/etc/lake-of-tears/values-secret.yaml`) to runner disk or host storage creates compliance risks and security exposure.
 
@@ -200,7 +282,7 @@ The production deployment step in `.github/workflows/deploy-prod.yml` executes t
 
 ---
 
-## 4. Production on Kubernetes with Helm
+## 5. Production on Kubernetes with Helm
 
 ### Prerequisites
 
@@ -322,7 +404,7 @@ helm rollback lake-of-tears <revision> -n lake-of-tears
 
 Check what will be applied without a cluster with `helm template ... ` or `helm install ... --dry-run=client`, which also prints the post-install notes. The Jupyter URL appears in the notes only if you enabled the opt-in `jupyter.ingress`.
 
-## 5. Monitoring and Health Checks
+## 6. Monitoring and Health Checks
 
 ### Health endpoints
 
@@ -349,7 +431,7 @@ kubectl logs deploy/lake-of-tears-backend -n lake-of-tears
 
 Look at Airflow's task logs and DAG state for pipeline problems ([Airflow Orchestration](Airflow-Orchestration.md)).
 
-## 6. Maintenance
+## 7. Maintenance
 
 ### Upgrading
 
@@ -435,7 +517,7 @@ kubectl rollout restart deployment -n lake-of-tears
 | AI provider and key | Superadmin: Settings, Admin Panel, AI Provider | Stored encrypted in PostgreSQL; takes effect immediately |
 | SSO client secrets | Rotate at the provider, update values, rollout restart backend | Users re-authenticate |
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 | Symptom | Cause and fix |
 |---|---|
