@@ -1,23 +1,22 @@
 from __future__ import annotations
 
-import io
 import json
 import sys
 import uuid
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import jwt
 import pytest
+from starlette.testclient import TestClient
+
+import ui.main as ui_main
 from pipeline.shared.toon_catalog import (
     schema_to_toon,
     table_to_toon,
     toon_to_sql_ddl,
     toon_to_table_spec,
 )
-from starlette.testclient import TestClient
-import jwt
-
-import ui.main as ui_main
 
 
 @pytest.fixture
@@ -43,12 +42,42 @@ def test_table_to_toon_serialization():
         "description": "Daily customer orders and fulfillment items",
         "s3_path_pattern": "s3://datalake/workspaces/default/main/silver/customer_orders/*.parquet",
         "column_defs": [
-            {"name": "order_id", "type": "VARCHAR", "description": "Unique order ID", "nullable": False},
-            {"name": "customer_id", "type": "VARCHAR", "description": "Customer foreign key", "nullable": False},
-            {"name": "line_items", "type": "JSON", "description": "Array of item objects", "nullable": True},
-            {"name": "total_amount", "type": "DOUBLE", "description": "Total order charge", "nullable": True},
-            {"name": "status", "type": "VARCHAR", "description": "Order lifecycle status", "nullable": True},
-            {"name": "created_at", "type": "TIMESTAMP", "description": "Order timestamp", "nullable": True},
+            {
+                "name": "order_id",
+                "type": "VARCHAR",
+                "description": "Unique order ID",
+                "nullable": False,
+            },
+            {
+                "name": "customer_id",
+                "type": "VARCHAR",
+                "description": "Customer foreign key",
+                "nullable": False,
+            },
+            {
+                "name": "line_items",
+                "type": "JSON",
+                "description": "Array of item objects",
+                "nullable": True,
+            },
+            {
+                "name": "total_amount",
+                "type": "DOUBLE",
+                "description": "Total order charge",
+                "nullable": True,
+            },
+            {
+                "name": "status",
+                "type": "VARCHAR",
+                "description": "Order lifecycle status",
+                "nullable": True,
+            },
+            {
+                "name": "created_at",
+                "type": "TIMESTAMP",
+                "description": "Order timestamp",
+                "nullable": True,
+            },
         ],
     }
     toon_str = table_to_toon(table, catalog_name="main", schema_name="silver")
@@ -113,7 +142,9 @@ columns[4]{name,type,description,nullable}:
 def test_ai_generate_table_from_prompt_heuristic():
     import backend.ai_service as ai_service
 
-    prompt = "Create a customer orders table with order_id, user_id, amount, line_items json, and status"
+    prompt = (
+        "Create a customer orders table with order_id, user_id, amount, line_items json, and status"
+    )
     result = ai_service.generate_table_from_prompt(prompt, catalog="main", schema="silver")
     assert result["ok"] is True
     assert "orders" in result["table_name"]
@@ -133,7 +164,9 @@ def test_ai_generate_semantic_description_heuristic():
         catalog_name="main",
     )
     assert result["ok"] is True
-    assert "Finance Reporting" in result["description"] or "finance" in result["description"].lower()
+    assert (
+        "Finance Reporting" in result["description"] or "finance" in result["description"].lower()
+    )
 
     table_result = ai_service.generate_semantic_description(
         asset_type="table",
@@ -217,10 +250,11 @@ def test_ui_api_create_table_from_toon(ui_client):
     ]
 
     mock_s3 = MagicMock()
-    with patch("ui.main._resolve_ui_catalogs", return_value=mock_catalogs), \
-         patch("ui.main._s3_client", return_value=mock_s3), \
-         patch("ui.main._backend_post") as mock_post:
-
+    with (
+        patch("ui.main._resolve_ui_catalogs", return_value=mock_catalogs),
+        patch("ui.main._s3_client", return_value=mock_s3),
+        patch("ui.main._backend_post") as mock_post,
+    ):
         mock_post.return_value = {
             "id": tbl_id,
             "name": "user_clicks",
@@ -235,10 +269,22 @@ def test_ui_api_create_table_from_toon(ui_client):
                 "schema_id": sch_id,
                 "table_name": "user_clicks",
                 "description": "User clickstream telemetry",
-                "columns_json": json.dumps([
-                    {"name": "click_id", "type": "VARCHAR", "description": "Primary key", "nullable": False},
-                    {"name": "page_url", "type": "VARCHAR", "description": "Target URL", "nullable": True},
-                ]),
+                "columns_json": json.dumps(
+                    [
+                        {
+                            "name": "click_id",
+                            "type": "VARCHAR",
+                            "description": "Primary key",
+                            "nullable": False,
+                        },
+                        {
+                            "name": "page_url",
+                            "type": "VARCHAR",
+                            "description": "Target URL",
+                            "nullable": True,
+                        },
+                    ]
+                ),
             },
             cookies={"lake_token": token},
         )
@@ -297,8 +343,9 @@ def test_backend_export_toon_functions():
     if backend_dir not in sys.path:
         sys.path.insert(0, backend_dir)
 
-    import backend.main as b_main
     from models import Catalog, CatalogSchema, CatalogTable, User
+
+    import backend.main as b_main
 
     db = MagicMock()
     cat_id = str(uuid.uuid4())

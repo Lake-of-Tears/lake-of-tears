@@ -1269,17 +1269,33 @@ def _heuristic_table_from_prompt(
     # Detect table name candidate
     clean_prompt = prompt.strip()
     tbl_name = "dataset"
-    before_table = re.search(r"\b([a-zA-Z0-9_]+(?:\s+[a-zA-Z0-9_]+)?)\s+table\b", clean_prompt, re.I)
+    before_table = re.search(
+        r"\b([a-zA-Z0-9_]+(?:\s+[a-zA-Z0-9_]+)?)\s+table\b", clean_prompt, re.I
+    )
     if before_table:
         cand = before_table.group(1).lower().strip()
         cand = re.sub(r"^(?:a|an|the|new|silver|gold|bronze)\s+", "", cand).strip()
         if cand:
             tbl_name = cand
     else:
-        after_verb = re.search(r"\b(?:create|table|for|dataset)\s+(?:a|an|the|new|silver|gold|bronze\s+)?([a-zA-Z0-9_]+)\b", clean_prompt, re.I)
+        after_verb = re.search(
+            r"\b(?:create|table|for|dataset)\s+(?:a|an|the|new|silver|gold|bronze\s+)?([a-zA-Z0-9_]+)\b",
+            clean_prompt,
+            re.I,
+        )
         if after_verb:
             cand = after_verb.group(1).lower().strip()
-            if cand not in ("a", "an", "the", "new", "table", "dataset", "silver", "gold", "bronze"):
+            if cand not in (
+                "a",
+                "an",
+                "the",
+                "new",
+                "table",
+                "dataset",
+                "silver",
+                "gold",
+                "bronze",
+            ):
                 tbl_name = cand
         else:
             first_word = re.findall(r"\b[a-zA-Z0-9_]{3,}\b", clean_prompt)
@@ -1313,7 +1329,9 @@ def _heuristic_table_from_prompt(
             item_lower = item.lower()
             if "json" in item_lower or "metadata" in item_lower or "payload" in item_lower:
                 c_type = "JSON"
-            elif any(w in col_name for w in ("amount", "price", "rate", "cost", "total", "pct", "score")):
+            elif any(
+                w in col_name for w in ("amount", "price", "rate", "cost", "total", "pct", "score")
+            ):
                 c_type = "DOUBLE"
             elif any(w in col_name for w in ("count", "qty", "quantity", "num", "idx", "index")):
                 c_type = "BIGINT"
@@ -1325,19 +1343,41 @@ def _heuristic_table_from_prompt(
                 c_type = "VARCHAR"
 
             nullable = not (col_name.endswith("_id") or col_name == "id" or idx == 0)
-            cols.append({
-                "name": col_name,
-                "type": c_type,
-                "description": f"{col_name.replace('_', ' ').title()} attribute",
-                "nullable": nullable,
-            })
+            cols.append(
+                {
+                    "name": col_name,
+                    "type": c_type,
+                    "description": f"{col_name.replace('_', ' ').title()} attribute",
+                    "nullable": nullable,
+                }
+            )
 
     if not cols:
         cols = [
-            {"name": f"{slug}_id", "type": "VARCHAR", "description": f"Unique {display_name} identifier", "nullable": False},
-            {"name": "name", "type": "VARCHAR", "description": f"{display_name} name or label", "nullable": True},
-            {"name": "status", "type": "VARCHAR", "description": "Operational lifecycle status", "nullable": True},
-            {"name": "created_at", "type": "TIMESTAMP", "description": "Record ingestion timestamp", "nullable": True},
+            {
+                "name": f"{slug}_id",
+                "type": "VARCHAR",
+                "description": f"Unique {display_name} identifier",
+                "nullable": False,
+            },
+            {
+                "name": "name",
+                "type": "VARCHAR",
+                "description": f"{display_name} name or label",
+                "nullable": True,
+            },
+            {
+                "name": "status",
+                "type": "VARCHAR",
+                "description": "Operational lifecycle status",
+                "nullable": True,
+            },
+            {
+                "name": "created_at",
+                "type": "TIMESTAMP",
+                "description": "Record ingestion timestamp",
+                "nullable": True,
+            },
         ]
 
     spec = {
@@ -1406,7 +1446,7 @@ def generate_table_from_prompt(
         )
 
         try:
-            full_prompt = f"Create table specification for: {prompt}"
+            full_prompt = f"{system_prompt}\n\nUser Request: {prompt}"
             raw = _call_gemini_text(full_prompt, model=model, api_key=effective_key)
             cleaned = _strip_code_fences(raw).strip()
             spec = toon_to_table_spec(cleaned)
@@ -1415,7 +1455,9 @@ def generate_table_from_prompt(
                     spec["catalog"] = cat_slug
                 if not spec.get("schema"):
                     spec["schema"] = sch_slug
-                canonical_toon = table_to_toon(spec, catalog_name=spec["catalog"], schema_name=spec["schema"])
+                canonical_toon = table_to_toon(
+                    spec, catalog_name=spec["catalog"], schema_name=spec["schema"]
+                )
                 sql_ddl = toon_to_sql_ddl(spec)
                 return {
                     "ok": True,
@@ -1450,7 +1492,9 @@ def generate_semantic_description(
     if effective_key:
         col_ctx = ""
         if columns:
-            col_ctx = "Columns: " + ", ".join(f"{c.get('name')} ({c.get('type')})" for c in columns if isinstance(c, dict))
+            col_ctx = "Columns: " + ", ".join(
+                f"{c.get('name')} ({c.get('type')})" for c in columns if isinstance(c, dict)
+            )
 
         prompt = (
             f"You are a semantic metadata curator for Lake of Tears.\n"
@@ -1465,7 +1509,9 @@ def generate_semantic_description(
         try:
             raw = _call_gemini_text(prompt, model=model, api_key=effective_key)
             parsed = _parse_json_response(raw)
-            desc = str(parsed.get("description") or f"Semantic dataset for {human_name} operations.").strip()
+            desc = str(
+                parsed.get("description") or f"Semantic dataset for {human_name} operations."
+            ).strip()
             col_descs = parsed.get("column_descriptions")
             if not isinstance(col_descs, dict):
                 col_descs = {}
@@ -1485,7 +1531,9 @@ def generate_semantic_description(
             if isinstance(c, dict) and c.get("name"):
                 c_name = c["name"]
                 if c_name.endswith("_id") or c_name == "id":
-                    col_dict[c_name] = f"Unique {c_name.replace('_id', '').replace('_', ' ').title()} identifier"
+                    col_dict[c_name] = (
+                        f"Unique {c_name.replace('_id', '').replace('_', ' ').title()} identifier"
+                    )
                 elif any(w in c_name for w in ("date", "time", "at")):
                     col_dict[c_name] = f"Timestamp of the {c_name.replace('_', ' ')} event"
                 elif any(w in c_name for w in ("amount", "price", "total", "cost")):

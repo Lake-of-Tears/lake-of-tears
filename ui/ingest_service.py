@@ -97,8 +97,7 @@ def preview_uploaded_file(
         # Inferred columns & types
         desc_rows = con.execute(f"DESCRIBE SELECT * FROM {read_sql}").fetchall()
         columns = [
-            {"name": r[0], "type": r[1], "nullable": True, "description": ""}
-            for r in desc_rows
+            {"name": r[0], "type": r[1], "nullable": True, "description": ""} for r in desc_rows
         ]
 
         # Preview sample rows
@@ -178,18 +177,23 @@ def convert_to_parquet_file(
                     select_items.append(f'CAST("{src}" AS {c_type}) AS "{target}"')
                 else:
                     select_items.append(f'"{src}" AS "{target}"')
-                final_columns.append({
-                    "name": target,
-                    "type": c_type or "VARCHAR",
-                    "description": c_desc,
-                    "nullable": nullable,
-                })
-            query = f"SELECT {', '.join(select_items)} FROM {read_sql}" if select_items else f"SELECT * FROM {read_sql}"
+                final_columns.append(
+                    {
+                        "name": target,
+                        "type": c_type or "VARCHAR",
+                        "description": c_desc,
+                        "nullable": nullable,
+                    }
+                )
+            query = (
+                f"SELECT {', '.join(select_items)} FROM {read_sql}"
+                if select_items
+                else f"SELECT * FROM {read_sql}"
+            )
         else:
             desc_rows = con.execute(f"DESCRIBE SELECT * FROM {read_sql}").fetchall()
             final_columns = [
-                {"name": r[0], "type": r[1], "nullable": True, "description": ""}
-                for r in desc_rows
+                {"name": r[0], "type": r[1], "nullable": True, "description": ""} for r in desc_rows
             ]
             query = f"SELECT * FROM {read_sql}"
 

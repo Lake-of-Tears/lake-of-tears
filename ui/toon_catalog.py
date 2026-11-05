@@ -62,12 +62,14 @@ def table_to_toon(
             continue
 
         if c_name:
-            formatted_cols.append({
-                "name": c_name,
-                "type": c_type,
-                "description": c_desc,
-                "nullable": c_nullable,
-            })
+            formatted_cols.append(
+                {
+                    "name": c_name,
+                    "type": c_type,
+                    "description": c_desc,
+                    "nullable": c_nullable,
+                }
+            )
 
     data: dict[str, Any] = {
         "table": tbl_slug,
@@ -128,11 +130,13 @@ def schema_to_toon(
             continue
 
         if t_name:
-            table_rows.append({
-                "name": t_name,
-                "columns": col_count,
-                "description": t_desc,
-            })
+            table_rows.append(
+                {
+                    "name": t_name,
+                    "columns": col_count,
+                    "description": t_desc,
+                }
+            )
 
     data: dict[str, Any] = {
         "schema": sch_slug,
@@ -174,12 +178,14 @@ def toon_to_table_spec(toon_str: str) -> dict[str, Any]:
             c_desc = _safe_str(col.get("description"))
             c_null = bool(col.get("nullable", True))
             if c_name:
-                columns.append({
-                    "name": c_name,
-                    "type": c_type,
-                    "description": c_desc,
-                    "nullable": c_null,
-                })
+                columns.append(
+                    {
+                        "name": c_name,
+                        "type": c_type,
+                        "description": c_desc,
+                        "nullable": c_null,
+                    }
+                )
 
     return {
         "table": clean_slug,

@@ -73,27 +73,12 @@ except ImportError:
             from pipeline.shared.connector_registry import registry as connector_registry
 
 try:
-    from pipeline.shared.toon_catalog import (
-        schema_to_toon,
-        table_to_toon,
-        toon_to_sql_ddl,
-        toon_to_table_spec,
-    )
+    from pipeline.shared.toon_catalog import toon_to_table_spec
 except ImportError:
     try:
-        from toon_catalog import (
-            schema_to_toon,
-            table_to_toon,
-            toon_to_sql_ddl,
-            toon_to_table_spec,
-        )
+        from toon_catalog import toon_to_table_spec
     except ImportError:
-        from ui.toon_catalog import (
-            schema_to_toon,
-            table_to_toon,
-            toon_to_sql_ddl,
-            toon_to_table_spec,
-        )
+        from ui.toon_catalog import toon_to_table_spec
 
 logger = logging.getLogger("lake.ui")
 
@@ -1824,7 +1809,12 @@ async def api_catalog_create_table_from_toon(
     if not columns:
         columns = [
             {"name": "id", "type": "VARCHAR", "description": "Primary key", "nullable": False},
-            {"name": "created_at", "type": "TIMESTAMP", "description": "Creation timestamp", "nullable": True},
+            {
+                "name": "created_at",
+                "type": "TIMESTAMP",
+                "description": "Creation timestamp",
+                "nullable": True,
+            },
         ]
 
     # Verify target catalog and schema
@@ -1973,9 +1963,7 @@ async def api_catalog_schema_toon(request: Request, catalog_id: str, schema_id: 
 
 
 @app.get("/api/catalog/{catalog_id}/schemas/{schema_id}/tables/{table_id}/toon")
-async def api_catalog_table_toon(
-    request: Request, catalog_id: str, schema_id: str, table_id: str
-):
+async def api_catalog_table_toon(request: Request, catalog_id: str, schema_id: str, table_id: str):
     token = _get_request_token(request)
     if not token and AUTH_ENABLED:
         return JSONResponse({"ok": False, "error": "Not authenticated"}, status_code=401)

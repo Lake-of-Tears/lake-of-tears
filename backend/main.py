@@ -72,6 +72,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
+
 try:
     from pipeline.shared.toon_catalog import schema_to_toon, table_to_toon
 except ImportError:
@@ -2846,7 +2847,9 @@ def export_table_toon(
         db.query(CatalogSchema).filter_by(id=sch_uuid).first() if sch_uuid else None
     )
     sch_name = schema.slug if schema else ""
-    toon_text = table_to_toon(table, catalog_name=catalog.name or catalog.slug, schema_name=sch_name)
+    toon_text = table_to_toon(
+        table, catalog_name=catalog.name or catalog.slug, schema_name=sch_name
+    )
     if (format or "").strip().lower() in ("raw", "toon", "text"):
         return PlainTextResponse(toon_text, media_type="text/plain")
 
