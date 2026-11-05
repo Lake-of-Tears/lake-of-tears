@@ -1,0 +1,33 @@
+{{- if and .Values.backend (dig "enabled" true .Values.backend) }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "lake-of-tears.fullname" . }}-services-manager
+  labels:
+    {{- include "lake-of-tears.labels" . | nindent 4 }}
+rules:
+- apiGroups: ["apps"]
+  resources: ["deployments", "deployments/scale"]
+  verbs: ["get", "list", "watch", "patch", "update"]
+- apiGroups: [""]
+  resources: ["pods", "pods/log", "services"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "lake-of-tears.fullname" . }}-services-manager-binding
+  labels:
+    {{- include "lake-of-tears.labels" . | nindent 4 }}
+subjects:
+- kind: ServiceAccount
+  name: {{ .Values.backend.serviceAccountName | default "default" }}
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: {{ include "lake-of-tears.fullname" . }}-services-manager
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
