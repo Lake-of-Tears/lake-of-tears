@@ -102,15 +102,35 @@
       <!-- Glassmorphic Card -->
       <div class="backdrop-blur-[6px] bg-black/60 border border-white/10 rounded-2xl p-7 sm:p-8 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.8)] ring-1 ring-white/5 transition-all">
 
+        <!-- Bootstrap Mode Banner (First-time deployment) -->
+        <div id="bootstrap-banner" class="{% if not bootstrap_active %}hidden{% endif %} mb-5 p-3.5 rounded-xl bg-gradient-to-r from-blue-950/70 via-indigo-950/60 to-purple-950/70 border border-blue-500/40 text-blue-100 shadow-lg shadow-blue-950/40 backdrop-blur-md">
+          <div class="flex items-start gap-3">
+            <div class="w-8 h-8 rounded-lg bg-blue-500/20 border border-blue-400/30 text-blue-300 flex items-center justify-center shrink-0 mt-0.5">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+              </svg>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-semibold uppercase tracking-wider text-blue-300">Initial Setup Mode</span>
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono bg-blue-400/20 text-blue-200 border border-blue-400/30">Day-0 Bootstrap</span>
+              </div>
+              <p class="text-xs text-blue-100/90 mt-1 leading-relaxed">
+                No user accounts exist yet. Register below to initialize the platform and claim the root <strong class="text-white font-semibold">Superadmin</strong> role.
+              </p>
+            </div>
+          </div>
+        </div>
+
         <!-- Tabs: Sign in / Create account -->
-        <div id="auth-tabs" class="flex gap-1 mb-6 bg-black/45 border border-white/10 rounded-lg p-1 {% if registration_enabled is defined and not registration_enabled %}hidden{% endif %}">
-          <button id="tab-login" onclick="setTab('login')"
-            class="flex-1 text-sm py-1.5 rounded-md font-medium transition-all text-white bg-white/15 shadow-sm">
+        <div id="auth-tabs" class="flex gap-1 mb-6 bg-black/45 border border-white/10 rounded-lg p-1 {% if not registration_enabled and not bootstrap_active %}hidden{% endif %}">
+          <button id="tab-login" onclick="setTab('login', true, true)"
+            class="flex-1 text-sm py-1.5 rounded-md font-medium transition-all {% if bootstrap_active %}text-gray-400 hover:text-gray-200{% else %}text-white bg-white/15 shadow-sm{% endif %}">
             Sign in
           </button>
-          <button id="tab-register" onclick="setTab('register')"
-            class="flex-1 text-sm py-1.5 rounded-md font-medium transition-all text-gray-400 hover:text-gray-200">
-            Create account
+          <button id="tab-register" onclick="setTab('register', true, true)"
+            class="flex-1 text-sm py-1.5 rounded-md font-medium transition-all {% if bootstrap_active %}text-white bg-white/15 shadow-sm{% else %}text-gray-400 hover:text-gray-200{% endif %}">
+            <span id="tab-register-text">{% if bootstrap_active %}Setup Superadmin{% else %}Create account{% endif %}</span>
           </button>
         </div>
 
@@ -147,7 +167,16 @@
         {% endif %}
 
         <!-- Login form -->
-        <form id="form-login" onsubmit="submitLogin(event)" class="space-y-4">
+        <form id="form-login" onsubmit="submitLogin(event)" class="space-y-4 {% if bootstrap_active %}hidden{% endif %}">
+          <div id="login-bootstrap-hint" class="{% if not bootstrap_active %}hidden{% endif %} mb-3.5 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-200">
+            <div class="flex items-start justify-between gap-2">
+              <div>
+                <span class="font-medium">Database is uninitialized (0 users exist).</span>
+                <p class="text-[11px] text-amber-300/80 mt-0.5">Please create the initial Superadmin account to get started.</p>
+              </div>
+              <button type="button" onclick="setTab('register', true, true)" class="text-xs font-semibold text-amber-400 hover:text-amber-300 underline underline-offset-2 whitespace-nowrap">Setup Superadmin &rarr;</button>
+            </div>
+          </div>
           <div>
             <label class="block text-xs font-medium text-gray-300 mb-1.5">Email address</label>
             <input id="login-email" type="email" required placeholder="you@example.com"
@@ -169,8 +198,19 @@
           </button>
         </form>
 
-        <!-- Register form (hidden by default) -->
-        <form id="form-register" onsubmit="submitRegister(event)" class="space-y-4 hidden">
+        <!-- Register form (hidden by default unless bootstrap_active) -->
+        <form id="form-register" onsubmit="submitRegister(event)" class="space-y-4 {% if not bootstrap_active %}hidden{% endif %}">
+          <div id="reg-bootstrap-notice" class="{% if not bootstrap_active %}hidden{% endif %} mb-3.5 p-3 rounded-lg bg-blue-500/10 border border-blue-500/20 text-xs">
+            <div class="flex items-center gap-1.5 text-blue-300 font-medium">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+              </svg>
+              <span>Root Superadmin Account</span>
+            </div>
+            <p class="text-[11px] text-gray-300/90 mt-1 leading-relaxed">
+              The first registered account automatically becomes the platform <span class="text-white font-semibold">Superadmin</span> with full cluster access and workspace permissions.
+            </p>
+          </div>
           <div>
             <label class="block text-xs font-medium text-gray-300 mb-1.5">Display name</label>
             <input id="reg-name" type="text" placeholder="Your name"
@@ -186,9 +226,9 @@
             <input id="reg-password" type="password" required placeholder="At least 8 characters"
               class="w-full bg-black/40 border border-white/20 rounded-lg px-3.5 py-2.5 text-gray-100 placeholder-gray-400 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400/50 transition-colors text-sm" />
           </div>
-          <button type="submit"
+          <button id="btn-register-submit" type="submit"
             class="w-full mt-2 py-2.5 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-lg shadow-blue-600/25 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-black">
-            Create account
+            <span id="btn-register-text">{% if bootstrap_active %}Initialize Superadmin Account{% else %}Create account{% endif %}</span>
           </button>
         </form>
 
@@ -302,6 +342,8 @@
     const REASON = new URLSearchParams(window.location.search).get('reason');
     const RESET_TOKEN = new URLSearchParams(window.location.search).get('reset_token');
     let resetEmail = null;
+    let isBootstrapActive = {{ 'true' if bootstrap_active else 'false' }};
+    window._userInteractedTab = false;
 
     if (ERROR) {
       const msgs = {
@@ -325,7 +367,31 @@
       el.classList.remove('hidden');
     }
 
-    function setTab(tab, clearBanner = true) {
+    function applyBootstrapMode(active) {
+      isBootstrapActive = active;
+      const bBanner = document.getElementById('bootstrap-banner');
+      if (bBanner) bBanner.classList.toggle('hidden', !active);
+
+      const regNotice = document.getElementById('reg-bootstrap-notice');
+      if (regNotice) regNotice.classList.toggle('hidden', !active);
+
+      const loginHint = document.getElementById('login-bootstrap-hint');
+      if (loginHint) loginHint.classList.toggle('hidden', !active);
+
+      const regBtnText = document.getElementById('btn-register-text');
+      if (regBtnText) regBtnText.textContent = active ? 'Initialize Superadmin Account' : 'Create account';
+
+      const regTabText = document.getElementById('tab-register-text');
+      if (regTabText) regTabText.textContent = active ? 'Setup Superadmin' : 'Create account';
+
+      const tabs = document.getElementById('auth-tabs');
+      if (active && tabs) {
+        tabs.classList.remove('hidden');
+      }
+    }
+
+    function setTab(tab, clearBanner = true, byUser = false) {
+      if (byUser) window._userInteractedTab = true;
       const isLogin = tab === 'login';
       document.getElementById('form-login').classList.toggle('hidden', !isLogin);
       document.getElementById('form-register').classList.toggle('hidden', isLogin);
@@ -380,7 +446,8 @@
       const pwd = document.getElementById('reg-password').value;
       if (pwd.length < 8) { showBanner('Password must be at least 8 characters.', 'error'); return; }
       const btn = e.target.querySelector('button[type=submit]');
-      btn.disabled = true; btn.textContent = 'Creating account…';
+      btn.disabled = true;
+      btn.textContent = isBootstrapActive ? 'Initializing Superadmin…' : 'Creating account…';
       try {
         const res = await fetch('/api/auth/register', {
           method: 'POST',
@@ -396,7 +463,13 @@
         if (res.ok) { window.location.href = NEXT; }
         else { showBanner(formatError(data.detail, 'Registration failed.'), 'error'); }
       } catch { showBanner('Network error — is the backend running?', 'error'); }
-      btn.disabled = false; btn.textContent = 'Create account';
+      btn.disabled = false;
+      const regBtnText = document.getElementById('btn-register-text');
+      if (regBtnText) {
+        regBtnText.textContent = isBootstrapActive ? 'Initialize Superadmin Account' : 'Create account';
+      } else {
+        btn.innerHTML = `<span id="btn-register-text">${isBootstrapActive ? 'Initialize Superadmin Account' : 'Create account'}</span>`;
+      }
     }
 
     function oauthLogin(provider) {
@@ -582,13 +655,23 @@
         const res = await fetch('/api/auth/config');
         if (res.ok) {
           const cfg = await res.json();
-          if (cfg.registration_enabled === false) {
-            const tabs = document.getElementById('auth-tabs');
-            if (tabs) tabs.classList.add('hidden');
-          } else if (cfg.registration_enabled === true) {
-            const tabs = document.getElementById('auth-tabs');
+          const bootstrap = Boolean(cfg.bootstrap_active);
+          applyBootstrapMode(bootstrap);
+
+          const tabs = document.getElementById('auth-tabs');
+          if (bootstrap) {
             if (tabs) tabs.classList.remove('hidden');
+            if (!window._userInteractedTab && !new URLSearchParams(window.location.search).get('tab')) {
+              setTab('register', false);
+            }
+          } else {
+            if (cfg.registration_enabled === false) {
+              if (tabs) tabs.classList.add('hidden');
+            } else if (cfg.registration_enabled === true) {
+              if (tabs) tabs.classList.remove('hidden');
+            }
           }
+
           if (cfg.providers && cfg.providers.length) {
             renderProviders(cfg.providers);
           }

@@ -790,10 +790,25 @@ async def login_page(request: Request):
                 return RedirectResponse(url="/", status_code=302)
             except jwt.InvalidTokenError:
                 pass
+
+    bootstrap_active = False
+    registration_enabled = AUTH_REGISTRATION_ENABLED
+    try:
+        cfg = await _backend_get_async("/api/auth/config", "")
+        if isinstance(cfg, dict):
+            bootstrap_active = bool(cfg.get("bootstrap_active", False))
+            registration_enabled = bool(cfg.get("registration_enabled", registration_enabled))
+    except Exception:
+        pass
+
     return templates.TemplateResponse(
         request=request,
         name="login.html",
-        context={"request": request, "registration_enabled": AUTH_REGISTRATION_ENABLED},
+        context={
+            "request": request,
+            "registration_enabled": registration_enabled,
+            "bootstrap_active": bootstrap_active,
+        },
     )
 
 

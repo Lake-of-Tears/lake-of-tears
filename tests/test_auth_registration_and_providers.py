@@ -157,7 +157,26 @@ def test_auth_config_endpoint():
             assert resp.status_code == 200
             data = resp.json()
             assert data["registration_enabled"] is False
+            assert data["bootstrap_active"] is False
+            assert data["user_count"] == 3
             assert any(p["key"] == "google" for p in data["providers"])
+    finally:
+        backend_main.app.dependency_overrides.clear()
+
+
+def test_auth_config_endpoint_bootstrap_active_when_zero_users():
+    mock_db = MagicMock()
+    mock_db.query.return_value.count.return_value = 0
+
+    backend_main.app.dependency_overrides[database.get_db] = lambda: mock_db
+    try:
+        with patch.dict(os.environ, {"AUTH_REGISTRATION_ENABLED": "false"}):
+            resp = backend_client.get("/api/auth/config")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["bootstrap_active"] is True
+            assert data["registration_enabled"] is True
+            assert data["user_count"] == 0
     finally:
         backend_main.app.dependency_overrides.clear()
 
@@ -360,9 +379,45 @@ def test_ui_login_page_renders_with_registration_disabled():
     with patch.dict(os.environ, {"AUTH_REGISTRATION_ENABLED": "false"}):
         resp = ui_client.get("/login")
         assert resp.status_code == 200
-        # The tabs container has the hidden class when registration is disabled
+        # The tabs container has the hidden class when registration is disabled and not bootstrap
         assert "hidden" in resp.text
         assert "Sign in" in resp.text
+
+
+def test_ui_login_page_renders_bootstrap_active_when_zero_users():
+    async def mock_get(path, token, *args, **kwargs):
+        if path == "/api/auth/config":
+            return {"bootstrap_active": True, "registration_enabled": True, "user_count": 0}
+        return None
+
+    with patch.object(ui_main, "_backend_get_async", side_effect=mock_get):
+        with patch.dict(os.environ, {"AUTH_REGISTRATION_ENABLED": "false"}):
+            resp = ui_client.get("/login")
+            assert resp.status_code == 200
+            # Bootstrap banner and setup cues are rendered
+            assert "Initial Setup Mode" in resp.text
+            assert "Day-0 Bootstrap" in resp.text
+            assert "Setup Superadmin" in resp.text
+            assert "Root Superadmin Account" in resp.text
+            assert "Initialize Superadmin Account" in resp.text
+            # Tabs container must NOT be hidden during Day-0 bootstrap even if AUTH_REGISTRATION_ENABLED is false!
+            assert 'id="auth-tabs" class="flex gap-1 mb-6 bg-black/45 border border-white/10 rounded-lg p-1 "' in resp.text
+
+
+def test_ui_login_page_renders_normal_when_existing_users_and_registration_disabled():
+    async def mock_get(path, token, *args, **kwargs):
+        if path == "/api/auth/config":
+            return {"bootstrap_active": False, "registration_enabled": False, "user_count": 3}
+        return None
+
+    with patch.object(ui_main, "_backend_get_async", side_effect=mock_get):
+        with patch.dict(os.environ, {"AUTH_REGISTRATION_ENABLED": "false"}):
+            resp = ui_client.get("/login")
+            assert resp.status_code == 200
+            # Bootstrap banner is hidden
+            assert 'id="bootstrap-banner" class="hidden ' in resp.text
+            # Tabs container is hidden when registration is disabled and existing users exist
+            assert 'id="auth-tabs" class="flex gap-1 mb-6 bg-black/45 border border-white/10 rounded-lg p-1 hidden"' in resp.text
 
 
 def test_ui_settings_admin_renders_auth_overview():

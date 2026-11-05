@@ -108,7 +108,7 @@ helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
 #   -f deploy/helm/values-local.example.yaml
 ```
 
-Open **http://localhost** — you'll be redirected to the login page. **Register the first account and you become the superadmin.** All subsequent registrations are viewers by default; manage them in the admin panel.
+Open **http://localhost** — on a fresh deployment (0 users), the login screen automatically opens in **Initial Setup Mode** with a Day-0 Bootstrap banner. **Register the first account to initialize the platform as root Superadmin.** Even if public registration is disabled (`AUTH_REGISTRATION_ENABLED=false`), Day-0 Bootstrap remains unlocked until the initial Superadmin is created. All subsequent registrations are viewers by default; manage them in the admin panel.
 
 All services are accessible through the unified Ingress routes:
 
