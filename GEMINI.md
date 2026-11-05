@@ -22,6 +22,23 @@
      ```
 
 ## Current Project State & Next Steps (as of Nov 5, 2026)
+- **Issue #269 & PR #390 (Platform Service & Process Management and Tabbed Admin Panel UI):**
+  - **Status:** **COMPLETED, DEPLOYED, MERGED & ALL 806 TESTS PASSING**
+  - **Pull Request:** Merged via PR #390 into `main` (`4537efa`).
+  - **Kanban Board:** Moved to **Done** on [Lake of Tears (Main) Project #3](https://github.com/orgs/Lake-of-Tears/projects/3) (Issue item `PVTI_lADOFEJxWM4Bmf-gzhCTUsA`, PR item `PVTI_lADOFEJxWM4Bmf-gzhGSmKQ`).
+  - **Test Suite:** 806 tests passing (`tests/test_service_management.py`).
+  - **Changes:**
+    - Expanded Admin Panel width from cramped `max-w-3xl` (768px) to `max-w-6xl` responsive wide layout.
+    - Added horizontal tab navigation with bidirectional URL hash/query sync (`#services`, `#users`, `#workspaces`, `#vaults`, `#platform`).
+    - Kubernetes in-cluster service observability and lifecycle API in `backend/services_manager/` and `backend/services_admin_router.py`:
+      - `GET /api/admin/services`: Lists all platform deployments, pod phase, replicas, restart counts, and container specs.
+      - `POST /api/admin/services/{service_name}/restart`: Rollout restart via deployment annotation patch.
+      - `POST /api/admin/services/{service_name}/stop`: Scale deployment replicas to 0. Core services (`backend`, `lakeui`) are strictly safeguarded with `400 Bad Request`.
+      - `POST /api/admin/services/{service_name}/start`: Scale deployment replicas to 1.
+    - Helm RBAC template `deploy/helm/lake-of-tears/templates/rbac.yaml` creating Role and RoleBinding for backend ServiceAccount in `lake-of-tears` namespace.
+    - Interactive Services UI with status badges, replica counters, uptime, limits, action buttons with loading spinners, confirmation modal for disruptive actions, and 10s auto-polling toggle.
+  - **Local Deployment:** Rebuilt images `lake-of-tears-backend:latest` and `lake-of-tears-ui:latest`; rolled out to local k8s deployments `lake-of-tears-backend` and `lake-of-tears-lakeui`. Verified live health check at `http://localhost/api/health` and live UI at `http://localhost/settings/admin#services`.
+
 - **Issue #50 & PR #389 (Clarify First-Time Bootstrap Flow & Resolve Day-0 Registration Lockout):**
   - **Status:** **COMPLETED, MERGED & ALL 798 TESTS PASSING**
   - **Pull Request:** Merged via PR #389 into `main` (`8f8749f`).
