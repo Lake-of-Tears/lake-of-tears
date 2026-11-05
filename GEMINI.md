@@ -54,6 +54,18 @@
     - Catalog drawer UI controls added for Chunking Strategy, Chunk Size, and Chunk Overlap, plus Strategy display pill in status overview.
   - **Local Deployment:** Rebuilt images `lake-of-tears-backend:latest` and `lake-of-tears-ui:latest`; rolled out to local k8s deployments `lake-of-tears-backend` and `lake-of-tears-lakeui`. Verified live table sync and multi-chunk explosion on `tmdb-trending`.
 
+- **Issue #382 & PR #387 (Secret Consumption Runtime, SDK & Automatic Log Redaction):**
+  - **Status:** **COMPLETED, DEPLOYED, MERGED & CI GREEN**
+  - **Pull Request:** Merged via PR #387 into `main` (`4b0174f`).
+  - **Kanban Board:** Moved to **Done** on [Lake of Tears (Main) Project #3](https://github.com/orgs/Lake-of-Tears/projects/3) (Item IDs `PVTI_lADOFEJxWM4Bmf-gzhGI8_U` and `PVTI_lADOFEJxWM4Bmf-gzhGKlYQ`).
+  - **Test Suite:** 786 tests passing (`tests/test_secret_runtime_and_redaction.py`).
+  - **Changes:**
+    - Python SDK client in `lake_of_tears.secrets` and `lot.secrets` with Databricks `dbutils.secrets` parity (`secrets.get(scope, key)`, `secrets.list(scope)`, `secrets.list_scopes()`).
+    - Config template placeholder interpolator in `backend/secrets_manager/templating.py` supporting `{{secrets/scope/key}}`, `{{secrets.scope.key}}`, and `${secrets:scope:key}` across nested dictionaries, lists, and strings with permission enforcement.
+    - Automatic real-time output log redaction in `backend/secrets_manager/redaction.py` with thread-safe secret registry, `SecretRedactionFilter`, and `RedactingStream`.
+    - Airflow task instance execution log sanitization in `get_task_log` in `backend/pipeline_service.py`.
+  - **Local Deployment:** Rebuilt image `lake-of-tears-backend:latest`; rolled out to local k8s deployment `lake-of-tears-backend` in namespace `lake-of-tears`. Verified live health check at `http://localhost/api/health`.
+
 - **Issue #381 & PR #386 (Cloud Provider Integrations for Azure Key Vault & AWS Secrets Manager):**
   - **Status:** **COMPLETED, DEPLOYED, MERGED & CI GREEN**
   - **Pull Request:** Merged via PR #386 into `main` (`85999e0`).
