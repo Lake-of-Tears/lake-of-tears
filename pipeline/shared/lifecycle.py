@@ -174,15 +174,11 @@ def check_platform_updates(
                     timeout=15,
                     check=False,
                 )
-            except Exception as e:
+            except Exception:
                 # If network fetch fails, continue with local cache
                 pass
 
         if train == "stable":
-            # List all remote and local build tags matching v*
-            tags_output = _run_git_cmd(["tag", "-l", "v*"], root)
-            tags = [t.strip() for t in tags_output.splitlines() if t.strip()]
-
             # Sort tags using git's version:refname order
             sorted_tags_output = _run_git_cmd(
                 ["tag", "-l", "v*", "--sort=-version:refname"], root
@@ -203,7 +199,7 @@ def check_platform_updates(
                             ["log", "--oneline", f"{current_tag}..{latest_tag}"], root
                         )
                         result["changelog"] = [
-                            l.strip() for l in log_output.splitlines() if l.strip()
+                            line.strip() for line in log_output.splitlines() if line.strip()
                         ]
                     except Exception:
                         result["changelog"] = [f"Upgrade available from {current_tag} to {latest_tag}"]
@@ -232,7 +228,7 @@ def check_platform_updates(
                         ["log", "--oneline", f"{current_commit}..origin/main"], root
                     )
                     result["changelog"] = [
-                        l.strip() for l in log_output.splitlines() if l.strip()
+                        line.strip() for line in log_output.splitlines() if line.strip()
                     ]
                 else:
                     result["status"] = "UNAVAILABLE"

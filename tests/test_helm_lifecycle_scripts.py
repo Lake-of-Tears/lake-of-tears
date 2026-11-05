@@ -15,8 +15,6 @@ import os
 import subprocess
 from pathlib import Path
 
-import pytest
-
 from pipeline.shared.lifecycle import (
     check_platform_updates,
     find_toon_config,
