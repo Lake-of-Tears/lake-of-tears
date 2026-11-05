@@ -1057,7 +1057,11 @@ async def catalog(request: Request):
     shared_workspaces_catalogs = _resolve_ui_shared_catalogs(request)
     error = request.query_params.get("error")
     ai_info = ai_gateway_client.provider_info()
-    has_ai = bool(ai_info and ai_info.get("provider"))
+    has_ai = bool(
+        ai_info
+        and ai_info.get("provider")
+        and str(ai_info.get("provider")).lower() not in ("none", "", "null")
+    )
     return templates.TemplateResponse(
         request=request,
         name="catalog.html",

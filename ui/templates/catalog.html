@@ -2,7 +2,255 @@
 {% block title %}Catalog — Lake of Tears{% endblock %}
 
 {% block content %}
-{% set has_ai = (has_ai or (ai_info is defined and ai_info and ai_info.provider)) %}
+{% set has_ai = (has_ai or (ai_info is defined and ai_info and ai_info.provider and (ai_info.provider|lower not in ('none', '', 'null')))) %}
+
+<style>
+  /* ── Lake of Tears Toast Notifications ─────────────────────── */
+  .catalog-toast {
+    background-color: rgba(22, 26, 35, 0.95);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #f3f4f6;
+  }
+  .catalog-toast-success { border-color: rgba(16, 185, 129, 0.5) !important; }
+  .catalog-toast-error   { border-color: rgba(244, 63, 94, 0.5) !important; }
+  .catalog-toast-warning { border-color: rgba(245, 158, 11, 0.5) !important; }
+  .catalog-toast-info    { border-color: rgba(6, 182, 212, 0.5) !important; }
+
+  /* ── Light Mode Polish for Catalog Explorer ─────────────────── */
+  html[data-theme="light"] h1,
+  html[data-theme="light"] h2,
+  html[data-theme="light"] h3,
+  html[data-theme="light"] #panel-title {
+    color: #111827 !important;
+  }
+  html[data-theme="light"] .card {
+    background-color: #ffffff !important;
+    border-color: #e5e7eb !important;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05) !important;
+  }
+  html[data-theme="light"] .card span.text-gray-100 {
+    color: #111827 !important;
+  }
+  html[data-theme="light"] .card span.text-gray-200,
+  html[data-theme="light"] .card span.text-gray-300 {
+    color: #1f2937 !important;
+  }
+  html[data-theme="light"] .card span.text-cyan-400 {
+    color: #0891b2 !important;
+  }
+  html[data-theme="light"] .card .group:hover .text-cyan-400,
+  html[data-theme="light"] .card .group-hover\:text-cyan-300 {
+    color: #0e7490 !important;
+  }
+  html[data-theme="light"] .hover\:bg-white\/\[0\.03\]:hover,
+  html[data-theme="light"] .hover\:bg-white\/\[0\.02\]:hover {
+    background-color: #f9fafb !important;
+  }
+  html[data-theme="light"] .border-white\/\[0\.04\],
+  html[data-theme="light"] .border-white\/\[0\.05\],
+  html[data-theme="light"] .border-white\/\[0\.06\],
+  html[data-theme="light"] .border-white\/\[0\.08\] {
+    border-color: #e5e7eb !important;
+  }
+  html[data-theme="light"] .divide-white\/\[0\.04\] > :not([hidden]) ~ :not([hidden]) {
+    border-color: #f3f4f6 !important;
+  }
+
+  /* Table Creation Tray in Light Mode */
+  html[data-theme="light"] [id^="dropdown-schema-"] {
+    background-color: #f9fafb !important;
+    border-color: rgba(16, 185, 129, 0.4) !important;
+  }
+  html[data-theme="light"] [id^="dropdown-schema-"] button.bg-gray-900\/90,
+  html[data-theme="light"] [id^="dropdown-schema-"] a.bg-gray-900\/90 {
+    background-color: #ffffff !important;
+    border-color: #e5e7eb !important;
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05) !important;
+  }
+  html[data-theme="light"] [id^="dropdown-schema-"] button.bg-gray-900\/90:hover,
+  html[data-theme="light"] [id^="dropdown-schema-"] a.bg-gray-900\/90:hover {
+    background-color: #f3f4f6 !important;
+    border-color: #d1d5db !important;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05) !important;
+  }
+  html[data-theme="light"] [id^="dropdown-schema-"] .text-gray-200 {
+    color: #111827 !important;
+  }
+  html[data-theme="light"] [id^="dropdown-schema-"] .text-gray-500 {
+    color: #6b7280 !important;
+  }
+  html[data-theme="light"] [id^="dropdown-schema-"] .bg-gray-900\/50 {
+    background-color: #f3f4f6 !important;
+    border-color: #e5e7eb !important;
+  }
+
+  /* Slide-Over Details Drawer in Light Mode */
+  html[data-theme="light"] #table-panel {
+    background-color: #ffffff !important;
+    border-left-color: #e5e7eb !important;
+    color: #111827 !important;
+    box-shadow: -10px 0 25px -5px rgba(0, 0, 0, 0.08) !important;
+  }
+  html[data-theme="light"] #table-panel div[class*="border-b"],
+  html[data-theme="light"] #table-panel div[class*="border-t"] {
+    border-color: #e5e7eb !important;
+  }
+  html[data-theme="light"] #table-panel .text-gray-100,
+  html[data-theme="light"] #table-panel .text-gray-200,
+  html[data-theme="light"] #table-panel .text-gray-300 {
+    color: #111827 !important;
+  }
+  html[data-theme="light"] #table-panel .text-gray-400 {
+    color: #4b5563 !important;
+  }
+  html[data-theme="light"] #table-panel .text-gray-500 {
+    color: #6b7280 !important;
+  }
+  html[data-theme="light"] #table-panel .bg-\[\#202020\] {
+    background-color: #f9fafb !important;
+    color: #4b5563 !important;
+    border-color: #e5e7eb !important;
+  }
+  html[data-theme="light"] #table-panel thead th {
+    background-color: #f9fafb !important;
+    color: #4b5563 !important;
+    border-color: #e5e7eb !important;
+  }
+  html[data-theme="light"] #table-panel tbody tr:hover {
+    background-color: #f9fafb !important;
+  }
+  html[data-theme="light"] #table-panel .bg-black\/30,
+  html[data-theme="light"] #table-panel .bg-black\/20 {
+    background-color: #f9fafb !important;
+    border-color: #e5e7eb !important;
+  }
+  html[data-theme="light"] #panel-namespace-row code {
+    background-color: #eff6ff !important;
+    border-color: #bfdbfe !important;
+    color: #1d4ed8 !important;
+  }
+  html[data-theme="light"] #panel-parquet-btn {
+    color: #4b5563 !important;
+  }
+  html[data-theme="light"] #panel-parquet-btn:hover {
+    color: #111827 !important;
+    background-color: #f3f4f6 !important;
+  }
+  html[data-theme="light"] #panel-toon-btn {
+    background-color: #ecfeff !important;
+    border-color: #a5f3fc !important;
+    color: #0891b2 !important;
+  }
+  html[data-theme="light"] #panel-toon-btn:hover {
+    background-color: #cffafe !important;
+    color: #0e7490 !important;
+  }
+  html[data-theme="light"] #panel-ai-btn:not(:disabled) {
+    background-color: #faf5ff !important;
+    border-color: #e9d5ff !important;
+    color: #9333ea !important;
+  }
+  html[data-theme="light"] #panel-ai-btn:not(:disabled):hover {
+    background-color: #f3e8ff !important;
+    color: #7e22ce !important;
+  }
+  html[data-theme="light"] #panel-ai-btn:disabled {
+    background-color: #f3f4f6 !important;
+    border-color: #e5e7eb !important;
+    color: #9ca3af !important;
+  }
+
+  /* Modals in Light Mode */
+  html[data-theme="light"] #create-catalog-modal > div,
+  html[data-theme="light"] #create-schema-modal > div,
+  html[data-theme="light"] #create-table-upload-modal > div,
+  html[data-theme="light"] #create-table-prompt-modal > div,
+  html[data-theme="light"] #export-toon-modal > div {
+    background-color: #ffffff !important;
+    border-color: #e5e7eb !important;
+    color: #111827 !important;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04) !important;
+  }
+  html[data-theme="light"] #create-schema-modal label,
+  html[data-theme="light"] #create-table-upload-modal label,
+  html[data-theme="light"] #create-table-prompt-modal label,
+  html[data-theme="light"] #create-catalog-modal label {
+    color: #374151 !important;
+  }
+  html[data-theme="light"] #create-schema-modal div[class*="border-b"],
+  html[data-theme="light"] #create-table-upload-modal div[class*="border-b"],
+  html[data-theme="light"] #create-table-upload-modal div[class*="border-t"],
+  html[data-theme="light"] #create-table-prompt-modal div[class*="border-b"],
+  html[data-theme="light"] #create-table-prompt-modal div[class*="border-t"],
+  html[data-theme="light"] #export-toon-modal div[class*="border-b"],
+  html[data-theme="light"] #export-toon-modal div[class*="border-t"],
+  html[data-theme="light"] #create-catalog-modal div[class*="border-b"] {
+    border-color: #e5e7eb !important;
+  }
+  html[data-theme="light"] #upload-dropzone {
+    background-color: #f9fafb !important;
+    border-color: #d1d5db !important;
+  }
+  html[data-theme="light"] #upload-dropzone:hover {
+    background-color: #eff6ff !important;
+    border-color: #3b82f6 !important;
+  }
+  html[data-theme="light"] #upload-cols-table thead,
+  html[data-theme="light"] #upload-cols-table thead th {
+    background-color: #f9fafb !important;
+    color: #4b5563 !important;
+    border-color: #e5e7eb !important;
+  }
+  html[data-theme="light"] #upload-cols-tbody tr {
+    border-color: #f3f4f6 !important;
+  }
+  html[data-theme="light"] #upload-cols-tbody tr:hover {
+    background-color: #f9fafb !important;
+  }
+  html[data-theme="light"] #create-table-upload-modal .bg-\[\#141414\],
+  html[data-theme="light"] #create-table-upload-modal .bg-\[\#181818\] {
+    background-color: #f9fafb !important;
+    border-color: #e5e7eb !important;
+  }
+  html[data-theme="light"] #export-toon-code,
+  html[data-theme="light"] #prompt-toon-preview {
+    background-color: #0f172a !important;
+    border-color: #1e293b !important;
+    color: #38bdf8 !important;
+  }
+
+  /* Toasts in Light Mode */
+  html[data-theme="light"] .catalog-toast {
+    background-color: #ffffff !important;
+    border-color: #e5e7eb !important;
+    color: #111827 !important;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05) !important;
+  }
+  html[data-theme="light"] .catalog-toast .toast-msg {
+    color: #111827 !important;
+  }
+  html[data-theme="light"] .catalog-toast .toast-close {
+    color: #6b7280 !important;
+  }
+  html[data-theme="light"] .catalog-toast .toast-close:hover {
+    color: #111827 !important;
+  }
+  html[data-theme="light"] .catalog-toast-success {
+    border-left: 4px solid #10b981 !important;
+  }
+  html[data-theme="light"] .catalog-toast-error {
+    border-left: 4px solid #f43f5e !important;
+  }
+  html[data-theme="light"] .catalog-toast-warning {
+    border-left: 4px solid #f59e0b !important;
+  }
+  html[data-theme="light"] .catalog-toast-info {
+    border-left: 4px solid #06b6d4 !important;
+  }
+</style>
+
 <div class="max-w-4xl mx-auto">
 
   {% if error %}
@@ -879,6 +1127,44 @@
 <script>
 const HAS_AI_CONFIGURED = {{ 'true' if has_ai else 'false' }};
 
+function showCatalogToast(message, type = 'info') {
+  let container = document.getElementById('catalog-toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'catalog-toast-container';
+    container.className = 'fixed bottom-5 right-5 z-[9999] flex flex-col gap-2 pointer-events-none';
+    document.body.appendChild(container);
+  }
+  const icons = {
+    success: '<svg class="w-4 h-4 text-emerald-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>',
+    error: '<svg class="w-4 h-4 text-rose-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>',
+    warning: '<svg class="w-4 h-4 text-amber-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4c-.77-1.33-2.69-1.33-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z"/></svg>',
+    info: '<svg class="w-4 h-4 text-cyan-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>'
+  };
+  const t = icons[type] ? type : 'info';
+  const toast = document.createElement('div');
+  toast.className = `catalog-toast catalog-toast-${t} pointer-events-auto max-w-sm flex items-start gap-2.5 px-4 py-3 rounded-xl shadow-2xl text-xs transition-all duration-300 transform translate-y-2 opacity-0`;
+  const msg = document.createElement('span');
+  msg.className = 'toast-msg flex-1 leading-relaxed';
+  msg.textContent = String(message);
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'toast-close text-gray-500 hover:text-gray-200 -mr-1';
+  close.innerHTML = '&times;';
+  toast.insertAdjacentHTML('afterbegin', icons[t]);
+  toast.appendChild(msg);
+  toast.appendChild(close);
+  container.appendChild(toast);
+  const dismiss = () => {
+    toast.classList.add('opacity-0', 'translate-y-2');
+    setTimeout(() => toast.remove(), 300);
+  };
+  close.onclick = dismiss;
+  requestAnimationFrame(() => toast.classList.remove('opacity-0', 'translate-y-2'));
+  setTimeout(dismiss, t === 'error' ? 6000 : 3500);
+}
+
+
 function _key(id) { return 'lot-open-' + id; }
 
 function toggleCatalog(id) {
@@ -1016,6 +1302,13 @@ function showTable(catIdent, schIdent, tableIdent, table) {
     parquetBtn.classList.remove('hidden');
   } else {
     parquetBtn.classList.add('hidden');
+  }
+
+  const aiBtn = document.getElementById('panel-ai-btn');
+  if (aiBtn && !HAS_AI_CONFIGURED) {
+    aiBtn.disabled = true;
+    aiBtn.title = 'No AI provider configured in Admin Panel (Settings → Admin Panel)';
+    aiBtn.classList.add('opacity-50', 'cursor-not-allowed', 'pointer-events-none');
   }
 
   // Render tabs
@@ -1460,7 +1753,7 @@ function renderVectorTab(t) {
 
 function triggerVectorSync(btn, force = false) {
   if (!currentCatId || !currentSchId || !currentTableId) {
-    alert('Table identifiers are not available for sync.');
+    showCatalogToast('Table identifiers are not available for sync.', 'error');
     return;
   }
   btn.disabled = true;
@@ -1507,7 +1800,7 @@ function triggerVectorSync(btn, force = false) {
       }
       currentTableData.vector_index.status = 'syncing';
       renderVectorTab(currentTableData);
-      alert(result.data.error || 'A vector sync is already in progress for this table.');
+      showCatalogToast(result.data.error || 'A vector sync is already in progress for this table.', 'warning');
     } else {
       if (!currentTableData.vector_index) {
         currentTableData.vector_index = {};
@@ -1515,12 +1808,12 @@ function triggerVectorSync(btn, force = false) {
       currentTableData.vector_index.status = 'error';
       currentTableData.vector_index.last_error = (result.data && result.data.error) || 'Unknown error';
       renderVectorTab(currentTableData);
-      alert('Vector sync failed: ' + ((result.data && result.data.error) || 'Unknown error'));
+      showCatalogToast('Vector sync failed: ' + ((result.data && result.data.error) || 'Unknown error'), 'error');
     }
   })
   .catch(err => {
     renderVectorTab(currentTableData);
-    alert('Network error: ' + err);
+    showCatalogToast('Network error: ' + err, 'error');
   });
 }
 
@@ -1562,12 +1855,12 @@ function updateSchemaSlugPreview() {
 
 async function generateSchemaDescriptionAi() {
   if (!HAS_AI_CONFIGURED) {
-    alert('No AI provider configured. Please configure an LLM in Settings → Admin Panel.');
+    showCatalogToast('No AI provider configured. Configure an LLM in Settings → Admin Panel.', 'warning');
     return;
   }
   const name = document.getElementById('create-schema-name-input').value;
   if (!name.trim()) {
-    alert('Please enter a schema name first.');
+    showCatalogToast('Please enter a schema name first.', 'warning');
     return;
   }
   const btn = document.getElementById('btn-ai-schema-desc');
@@ -1602,10 +1895,10 @@ async function generateSchemaDescriptionAi() {
     if (data.ok && data.description) {
       document.getElementById('create-schema-desc-input').value = data.description;
     } else {
-      alert(data.detail || data.error || 'Failed to generate description');
+      showCatalogToast(data.detail || data.error || 'Failed to generate description', 'error');
     }
   } catch (err) {
-    alert('Network error: ' + err);
+    showCatalogToast('Network error: ' + err, 'error');
   } finally {
     btn.disabled = false;
     btn.innerHTML = origText;
@@ -1801,11 +2094,11 @@ async function handleFileSelected(e) {
       hint.textContent = `Inferred ${data.columns.length} columns from ${file.name}`;
       document.getElementById('btn-submit-upload-table').disabled = false;
     } else {
-      alert(data.error || 'Failed to infer schema from file');
+      showCatalogToast(data.error || 'Failed to infer schema from file', 'error');
       resetUploadFile();
     }
   } catch (err) {
-    alert('Failed to preview file: ' + err);
+    showCatalogToast('Failed to preview file: ' + err, 'error');
     resetUploadFile();
   }
 }
@@ -1862,7 +2155,7 @@ async function submitCreateTableUpload() {
   const submitBtn = document.getElementById('btn-submit-upload-table');
 
   if (!catId || !schId || !tableName) {
-    alert('Please fill in Catalog, Schema, and Table Name.');
+    showCatalogToast('Please fill in Catalog, Schema, and Table Name.', 'warning');
     return;
   }
 
@@ -1960,12 +2253,12 @@ function onPromptCatChanged() {
 
 async function generateTableFromPromptAi() {
   if (!HAS_AI_CONFIGURED) {
-    alert('No AI provider configured. Please configure an LLM in Settings → Admin Panel.');
+    showCatalogToast('No AI provider configured. Configure an LLM in Settings → Admin Panel.', 'warning');
     return;
   }
   const prompt = document.getElementById('prompt-table-input').value.trim();
   if (!prompt) {
-    alert('Please enter a natural language prompt describing your table.');
+    showCatalogToast('Please enter a natural language prompt describing your table.', 'warning');
     return;
   }
 
@@ -2045,7 +2338,7 @@ function copyPromptToon() {
   const code = document.getElementById('prompt-toon-preview').textContent;
   if (!code) return;
   navigator.clipboard.writeText(code).then(() => {
-    alert('Copied TOON specification to clipboard!');
+    showCatalogToast('Copied TOON specification to clipboard', 'success');
   });
 }
 
@@ -2172,7 +2465,7 @@ function openCurrentTableToon() {
 
 async function enrichCurrentTableAi() {
   if (!HAS_AI_CONFIGURED) {
-    alert('No AI provider configured. Please configure an LLM in Settings → Admin Panel.');
+    showCatalogToast('No AI provider configured. Configure an LLM in Settings → Admin Panel.', 'warning');
     return;
   }
   if (!currentTableData) return;
@@ -2215,12 +2508,12 @@ async function enrichCurrentTableAi() {
       }
       renderColumnsTab(currentTableData);
       renderDetailsTab(currentTableData, currentCatIdent, currentSchIdent, currentTableIdent);
-      alert('Table enriched with AI semantic metadata!');
+      showCatalogToast('Table enriched with AI semantic metadata', 'success');
     } else {
-      alert(data.detail || data.error || 'Failed to enrich with AI');
+      showCatalogToast(data.detail || data.error || 'Failed to enrich with AI', 'error');
     }
   } catch (err) {
-    alert('Network error: ' + err);
+    showCatalogToast('Network error: ' + err, 'error');
   } finally {
     btn.disabled = false;
     btn.innerHTML = origHtml;
