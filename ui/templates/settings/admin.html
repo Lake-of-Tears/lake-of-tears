@@ -425,36 +425,39 @@
       </div>
 
       <!-- Pending Invitations -->
+      {% set pending_invites = invitations | selectattr('status', 'equalto', 'pending') | list if invitations else [] %}
       <div class="border-t border-white/[0.06] pt-6">
-        <h3 class="text-xs font-semibold text-gray-400 mb-3">Pending Invitations ({{ invitations | length }})</h3>
-        {% if invitations %}
+        <h3 class="text-xs font-semibold text-gray-400 mb-3">Pending Invitations ({{ pending_invites | length }})</h3>
+        {% if pending_invites %}
         <div class="space-y-2">
-          {% for inv in invitations %}
+          {% for inv in pending_invites %}
           <div class="p-3 rounded-lg bg-white/[0.02] border border-white/[0.04] flex items-center justify-between gap-3 flex-wrap sm:flex-nowrap">
             <div class="min-w-0">
               <div class="flex items-center gap-2">
                 <span class="text-xs font-medium text-gray-200 truncate">{{ inv.email }}</span>
                 <span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-400 border border-gray-700 capitalize">{{ inv.role }}</span>
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-yellow-950/50 text-yellow-300 border border-yellow-800/40">
+                  Pending
+                </span>
               </div>
               <div class="text-[11px] text-gray-500 mt-0.5">
-                Created: {{ inv.created_at[:10] }} &middot; Expires: {{ inv.expires_at[:10] }}
+                Invited {{ (inv.created_at | string)[:10] }}
+                {% if inv.invited_by_email %}&middot; by {{ inv.invited_by_email }}{% endif %}
+                {% if inv.workspace_access %}
+                  &middot; Workspaces:
+                  {% for w_slug, w_role in inv.workspace_access.items() %}
+                    <span class="text-gray-400">{{ w_slug }} ({{ w_role }})</span>{% if not loop.last %}, {% endif %}
+                  {% endfor %}
+                {% endif %}
               </div>
             </div>
-            <div class="flex items-center gap-2 shrink-0">
-              <input type="text" readonly value="{{ inv.invite_url }}"
-                class="bg-gray-900 border border-gray-700 text-gray-400 text-xs rounded px-2 py-1 font-mono w-40 truncate select-all" />
-              <button type="button" onclick="navigator.clipboard.writeText('{{ inv.invite_url }}'); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy', 1500);"
-                class="text-xs px-2.5 py-1 rounded border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500 transition-colors">
-                Copy
+            <form action="/settings/admin/invitations/{{ inv.id }}/revoke" method="post" class="shrink-0"
+              onsubmit="return confirm('Revoke invitation for {{ inv.email }}?')">
+              <button type="submit"
+                class="text-xs px-2.5 py-1 rounded border border-red-800/50 text-red-500 hover:text-red-300 transition-colors">
+                Revoke
               </button>
-              <form action="/settings/admin/invitations/{{ inv.id }}/revoke" method="post" class="shrink-0"
-                onsubmit="return confirm('Revoke this invitation?')">
-                <button type="submit"
-                  class="text-xs px-2.5 py-1 rounded border border-red-800/50 text-red-500 hover:text-red-300 transition-colors">
-                  Revoke
-                </button>
-              </form>
-            </div>
+            </form>
           </div>
           {% endfor %}
         </div>
