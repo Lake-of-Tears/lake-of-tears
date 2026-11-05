@@ -65,7 +65,7 @@
     </div>
     <div class="flex flex-col gap-2" id="catalog-list">
     {% for catalog in catalogs %}
-    <div class="card overflow-hidden" id="catalog-{{ catalog.id }}">
+    <div class="card" id="catalog-{{ catalog.id }}">
 
       <!-- Catalog row -->
       <div
@@ -158,53 +158,17 @@
 
               <div class="flex items-center gap-2 ml-auto" onclick="event.stopPropagation()">
                 {% if catalog.my_access in ('owner', 'write') or (request.state.user and request.state.user.role in ('superadmin', 'admin')) %}
-                <!-- Create Table Dropdown -->
-                <div class="relative inline-block text-left">
-                  <button type="button"
-                          onclick="toggleCreateDropdown(event, 'dropdown-schema-{{ schema.id }}')"
-                          class="btn-xs border border-emerald-500/30 hover:border-emerald-500/60 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 px-2 py-1 rounded text-xs flex items-center gap-1 transition-colors"
-                          title="Create Table in this schema">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
-                    <span>Table</span>
-                    <svg class="w-3 h-3 text-emerald-500/70" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
-                  </button>
-                  <div id="dropdown-schema-{{ schema.id }}" class="hidden absolute right-0 mt-1 w-56 bg-[#1f242d] border border-gray-700/80 rounded-lg shadow-2xl py-1 z-30 text-xs">
-                    <button type="button" onclick="openCreateTableUploadModal('{{ catalog.id }}', '{{ schema.id }}', '{{ catalog.slug|sql_ident }}', '{{ schema.slug|sql_ident }}')" class="w-full text-left px-3 py-2 hover:bg-white/[0.08] text-gray-200 flex items-center gap-2">
-                      <svg class="w-4 h-4 text-blue-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                      <div>
-                        <div class="font-medium text-gray-100">Upload File</div>
-                        <div class="text-[10px] text-gray-400">CSV, Parquet, JSON, NDJSON</div>
-                      </div>
-                    </button>
-                    <a href="/sql?q={{ ('CREATE TABLE \"' ~ (schema.slug|sql_ident) ~ '\".\"new_table\" (\n  id VARCHAR NOT NULL,\n  name VARCHAR,\n  created_at TIMESTAMP\n);') | urlencode }}" class="w-full text-left px-3 py-2 hover:bg-white/[0.08] text-gray-200 flex items-center gap-2">
-                      <svg class="w-4 h-4 text-purple-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
-                      <div>
-                        <div class="font-medium text-gray-100">SQL Editor</div>
-                        <div class="text-[10px] text-gray-400">CREATE TABLE statement</div>
-                      </div>
-                    </a>
-                    {% if has_ai %}
-                    <button type="button" onclick="openCreateTablePromptModal('{{ catalog.id }}', '{{ schema.id }}', '{{ catalog.slug|sql_ident }}', '{{ schema.slug|sql_ident }}')" class="w-full text-left px-3 py-2 hover:bg-white/[0.08] text-gray-200 flex items-center gap-2">
-                      <svg class="w-4 h-4 text-cyan-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-                      <div>
-                        <div class="font-medium text-gray-100">Prompt to Table</div>
-                        <div class="text-[10px] text-gray-400">Natural language & TOON</div>
-                      </div>
-                    </button>
-                    {% else %}
-                    <div class="w-full text-left px-3 py-2 text-gray-500 flex items-center justify-between cursor-not-allowed opacity-60" title="No AI provider configured in Admin Panel (Settings → Admin Panel)">
-                      <div class="flex items-center gap-2">
-                        <svg class="w-4 h-4 text-gray-500 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-                        <div>
-                          <div class="font-medium text-gray-400">Prompt to Table</div>
-                          <div class="text-[10px] text-gray-500">Requires AI Provider</div>
-                        </div>
-                      </div>
-                      <span class="text-[9px] bg-gray-800 text-gray-400 px-1 py-0.5 rounded font-mono">No LLM</span>
-                    </div>
-                    {% endif %}
-                  </div>
-                </div>
+                <!-- Create Table Button -->
+                <button type="button"
+                        id="btn-table-{{ schema.id }}"
+                        data-dropdown-btn="dropdown-schema-{{ schema.id }}"
+                        onclick="toggleCreateDropdown(event, 'dropdown-schema-{{ schema.id }}')"
+                        class="btn-xs border border-emerald-500/30 hover:border-emerald-500/60 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 px-2 py-1 rounded text-xs flex items-center gap-1 transition-colors"
+                        title="Create Table in this schema">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+                  <span>Table</span>
+                  <svg class="dropdown-chev w-3 h-3 text-emerald-500/70 transition-transform duration-150" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+                </button>
                 {% endif %}
 
                 <!-- Export Schema TOON -->
@@ -220,6 +184,67 @@
                 </span>
               </div>
             </div>
+
+            <!-- Inline Create Table Menu Tray (in-flow, pushes parent container to grow) -->
+            {% if catalog.my_access in ('owner', 'write') or (request.state.user and request.state.user.role in ('superadmin', 'admin')) %}
+            <div id="dropdown-schema-{{ schema.id }}" onclick="event.stopPropagation()" class="hidden border-y border-emerald-500/20 bg-[#161a23]/95 px-6 py-3 transition-all duration-150">
+              <div class="flex items-center justify-between gap-3 mb-2.5">
+                <div class="flex items-center gap-2 text-xs">
+                  <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+                  <span class="font-semibold text-emerald-300">Create Table</span>
+                  <span class="text-gray-500 font-mono text-[11px]">in schema <span class="text-gray-300 font-bold">{{ schema.slug|sql_ident }}</span></span>
+                </div>
+                <button type="button" onclick="closeAllDropdowns()" class="text-gray-500 hover:text-gray-300 text-xs px-2 py-0.5 rounded hover:bg-white/[0.06] transition-colors" title="Close">✕</button>
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                <!-- 1. File Upload -->
+                <button type="button" onclick="closeAllDropdowns(); openCreateTableUploadModal('{{ catalog.id }}', '{{ schema.id }}', '{{ catalog.slug|sql_ident }}', '{{ schema.slug|sql_ident }}')" class="flex items-start gap-2.5 p-2.5 rounded-lg bg-gray-900/90 hover:bg-gray-800/90 border border-gray-800 hover:border-blue-500/50 text-left transition-all group shadow-sm hover:shadow-md">
+                  <div class="w-8 h-8 rounded-md bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 shrink-0 mt-0.5 group-hover:scale-105 transition-transform">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                  </div>
+                  <div class="min-w-0">
+                    <div class="font-medium text-gray-200 group-hover:text-blue-300">Upload File</div>
+                    <div class="text-[10px] text-gray-500 truncate">CSV, Parquet, JSON, NDJSON</div>
+                  </div>
+                </button>
+                <!-- 2. SQL Editor -->
+                <a href="/sql?q={{ ('CREATE TABLE \"' ~ (schema.slug|sql_ident) ~ '\".\"new_table\" (\n  id VARCHAR NOT NULL,\n  name VARCHAR,\n  created_at TIMESTAMP\n);') | urlencode }}" class="flex items-start gap-2.5 p-2.5 rounded-lg bg-gray-900/90 hover:bg-gray-800/90 border border-gray-800 hover:border-purple-500/50 text-left transition-all group shadow-sm hover:shadow-md">
+                  <div class="w-8 h-8 rounded-md bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 shrink-0 mt-0.5 group-hover:scale-105 transition-transform">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+                  </div>
+                  <div class="min-w-0">
+                    <div class="font-medium text-gray-200 group-hover:text-purple-300">SQL Editor</div>
+                    <div class="text-[10px] text-gray-500 truncate">CREATE TABLE statement</div>
+                  </div>
+                </a>
+                <!-- 3. Prompt to Table -->
+                {% if has_ai %}
+                <button type="button" onclick="closeAllDropdowns(); openCreateTablePromptModal('{{ catalog.id }}', '{{ schema.id }}', '{{ catalog.slug|sql_ident }}', '{{ schema.slug|sql_ident }}')" class="flex items-start gap-2.5 p-2.5 rounded-lg bg-gray-900/90 hover:bg-gray-800/90 border border-gray-800 hover:border-cyan-500/50 text-left transition-all group shadow-sm hover:shadow-md">
+                  <div class="w-8 h-8 rounded-md bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 shrink-0 mt-0.5 group-hover:scale-105 transition-transform">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                  </div>
+                  <div class="min-w-0">
+                    <div class="font-medium text-gray-200 group-hover:text-cyan-300">Prompt to Table</div>
+                    <div class="text-[10px] text-gray-500 truncate">Natural language & TOON</div>
+                  </div>
+                </button>
+                {% else %}
+                <div class="flex items-start gap-2.5 p-2.5 rounded-lg bg-gray-900/50 border border-gray-800/60 opacity-60 cursor-not-allowed" title="No AI provider configured in Admin Panel (Settings → Admin Panel)">
+                  <div class="w-8 h-8 rounded-md bg-gray-800 border border-gray-700 flex items-center justify-center text-gray-500 shrink-0 mt-0.5">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center justify-between">
+                      <div class="font-medium text-gray-400">Prompt to Table</div>
+                      <span class="text-[9px] bg-gray-800 text-gray-400 px-1 py-0.5 rounded font-mono">No LLM</span>
+                    </div>
+                    <div class="text-[10px] text-gray-500 truncate">Requires AI Provider</div>
+                  </div>
+                </div>
+                {% endif %}
+              </div>
+            </div>
+            {% endif %}
 
             <!-- Tables -->
             <div id="tables-{{ schema.id }}" class="hidden bg-black/10">
@@ -1632,22 +1657,38 @@ async function submitCreateSchema(e) {
   }
 }
 
-// --- Dropdown Management ---
+// --- Dropdown / Inline Create Tray Management ---
 function toggleCreateDropdown(e, dropdownId) {
-  e.stopPropagation();
+  if (e) e.stopPropagation();
   const dd = document.getElementById(dropdownId);
+  if (!dd) return;
   const isHidden = dd.classList.contains('hidden');
   closeAllDropdowns();
   if (isHidden) {
     dd.classList.remove('hidden');
+    const btn = document.querySelector(`[data-dropdown-btn="${dropdownId}"]`);
+    if (btn) {
+      btn.classList.add('bg-emerald-500/20', 'border-emerald-500/60');
+      const chev = btn.querySelector('.dropdown-chev');
+      if (chev) chev.classList.add('rotate-180');
+    }
   }
 }
 
 function closeAllDropdowns() {
   document.querySelectorAll('[id^="dropdown-schema-"]').forEach(el => el.classList.add('hidden'));
+  document.querySelectorAll('[data-dropdown-btn]').forEach(btn => {
+    btn.classList.remove('bg-emerald-500/20', 'border-emerald-500/60');
+    const chev = btn.querySelector('.dropdown-chev');
+    if (chev) chev.classList.remove('rotate-180');
+  });
 }
 
-document.addEventListener('click', closeAllDropdowns);
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('[id^="dropdown-schema-"]')) {
+    closeAllDropdowns();
+  }
+});
 
 // --- Create Table via File Upload ---
 let uploadCurrentFile = null;
