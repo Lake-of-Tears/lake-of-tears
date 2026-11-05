@@ -2371,7 +2371,9 @@ async def settings_workspace_get(request: Request):
             _backend_get(f"/api/workspaces/{ws['id']}/access/requests/inbound", token) or []
         )
         secret_scopes = (
-            _backend_get(f"/api/v1/workspaces/{ws['id']}/secrets/scopes", token, workspace_id=ws["id"])
+            _backend_get(
+                f"/api/v1/workspaces/{ws['id']}/secrets/scopes", token, workspace_id=ws["id"]
+            )
             or []
         )
     return templates.TemplateResponse(
@@ -2391,7 +2393,6 @@ async def settings_workspace_get(request: Request):
             "saved": saved,
         },
     )
-
 
 
 @app.post("/settings/workspace/rename")
@@ -2596,9 +2597,7 @@ async def api_workspace_secret_keys_list(
 
 
 @app.post("/api/workspaces/{workspace_id}/secrets/scopes/{scope_identifier}/keys")
-async def api_workspace_secret_key_put(
-    request: Request, workspace_id: str, scope_identifier: str
-):
+async def api_workspace_secret_key_put(request: Request, workspace_id: str, scope_identifier: str):
     token = _get_request_token(request)
     if not token and AUTH_ENABLED:
         return JSONResponse({"detail": "Not authenticated"}, status_code=401)
@@ -2652,9 +2651,7 @@ async def api_workspace_secret_acls_list(
 
 
 @app.post("/api/workspaces/{workspace_id}/secrets/scopes/{scope_identifier}/acls")
-async def api_workspace_secret_acl_set(
-    request: Request, workspace_id: str, scope_identifier: str
-):
+async def api_workspace_secret_acl_set(request: Request, workspace_id: str, scope_identifier: str):
     token = _get_request_token(request)
     if not token and AUTH_ENABLED:
         return JSONResponse({"detail": "Not authenticated"}, status_code=401)
@@ -2691,7 +2688,6 @@ async def api_workspace_secret_acl_delete(
         workspace_id=workspace_id,
     )
     return JSONResponse({"status": "deleted" if ok else "failed"})
-
 
 
 # ── Settings: Admin ───────────────────────────────────────────────────────
@@ -2940,14 +2936,10 @@ async def settings_admin_vault_provider_save(request: Request, provider: str):
     form = await request.form()
     prefix = f"cfg__{provider}__"
     config = {
-        k[len(prefix) :]: str(v).strip()
-        for k, v in form.multi_items()
-        if k.startswith(prefix)
+        k[len(prefix) :]: str(v).strip() for k, v in form.multi_items() if k.startswith(prefix)
     }
     payload = {"config": config}
-    status_code, data = _backend_put(
-        f"/api/admin/vault-providers/{provider}", token or "", payload
-    )
+    status_code, data = _backend_put(f"/api/admin/vault-providers/{provider}", token or "", payload)
     if status_code in (200, 201):
         return RedirectResponse(url="/settings/admin?saved=vault#vault-settings", status_code=302)
     detail = data.get("detail") if isinstance(data, dict) else str(data)
@@ -2991,7 +2983,6 @@ async def settings_admin_vault_provider_test(request: Request, provider: str):
         return JSONResponse(
             {"success": False, "message": f"Connection error: {exc}"}, status_code=502
         )
-
 
 
 @app.post("/settings/admin/workspaces/{workspace_id}/mark-inactive")

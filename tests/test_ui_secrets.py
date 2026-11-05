@@ -54,7 +54,10 @@ def test_admin_settings_vault_panel_renders(test_tokens, mock_workspaces):
             "provider": "azure_keyvault",
             "display_name": "Azure Key Vault",
             "is_configured": True,
-            "config": {"vault_url": "https://vault-test.vault.azure.net/", "client_secret": "••••••••"},
+            "config": {
+                "vault_url": "https://vault-test.vault.azure.net/",
+                "client_secret": "••••••••",
+            },
         },
         {
             "provider": "aws_secrets_manager",
@@ -79,6 +82,7 @@ def test_admin_settings_vault_panel_renders(test_tokens, mock_workspaces):
         mock.patch("ui.main._fetch_workspaces", return_value=mock_workspaces),
         mock.patch("ui.main._backend_get") as mock_get,
     ):
+
         def fake_backend_get(path, token, workspace_id=None, workspace_slug=None):
             if path == "/api/admin/vault-providers":
                 return fake_providers
@@ -104,7 +108,10 @@ def test_admin_settings_vault_panel_renders(test_tokens, mock_workspaces):
         )
         assert resp.status_code == 200
         html = resp.text
-        assert "Secret Vaults &amp; Cloud Providers" in html or "Secret Vaults & Cloud Providers" in html
+        assert (
+            "Secret Vaults &amp; Cloud Providers" in html
+            or "Secret Vaults & Cloud Providers" in html
+        )
         assert "Azure Key Vault" in html
         assert "AWS Secrets Manager" in html
         assert "prod-secrets" in html
@@ -128,7 +135,9 @@ def test_admin_save_vault_provider_config(test_tokens, mock_workspaces):
     """Superadmin saving Azure Key Vault configuration puts config to backend and redirects with anchor."""
     with (
         mock.patch("ui.main._fetch_workspaces", return_value=mock_workspaces),
-        mock.patch("ui.main._backend_put", return_value=(200, {"provider": "azure_keyvault"})) as mock_put,
+        mock.patch(
+            "ui.main._backend_put", return_value=(200, {"provider": "azure_keyvault"})
+        ) as mock_put,
     ):
         client = TestClient(app)
         form_data = {
@@ -163,7 +172,10 @@ def test_admin_test_vault_provider_connection(test_tokens, mock_workspaces):
         mock_http_client = mock.MagicMock()
         mock_response = mock.MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {"success": True, "message": "Successfully connected to Azure Key Vault."}
+        mock_response.json.return_value = {
+            "success": True,
+            "message": "Successfully connected to Azure Key Vault.",
+        }
         mock_http_client.post.return_value = mock_response
         mock_client_cls.return_value.__enter__.return_value = mock_http_client
 
@@ -199,6 +211,7 @@ def test_workspace_secret_scopes_list_renders(test_tokens, mock_workspaces):
         mock.patch("ui.main._fetch_workspaces", return_value=mock_workspaces),
         mock.patch("ui.main._backend_get") as mock_get,
     ):
+
         def fake_backend_get(path, token, workspace_id=None, workspace_slug=None):
             if path.endswith("/secrets/scopes"):
                 return fake_scopes
@@ -229,7 +242,9 @@ def test_workspace_create_secret_scope(test_tokens, mock_workspaces):
     """Creating a new secret scope posts to backend and redirects with anchor."""
     with (
         mock.patch("ui.main._fetch_workspaces", return_value=mock_workspaces),
-        mock.patch("ui.main._backend_post_with_error", return_value=({"id": "new-scope"}, None)) as mock_post,
+        mock.patch(
+            "ui.main._backend_post_with_error", return_value=({"id": "new-scope"}, None)
+        ) as mock_post,
     ):
         client = TestClient(app)
         resp = client.post(
@@ -271,7 +286,10 @@ def test_workspace_keys_api_crud(test_tokens, mock_workspaces):
     with (
         mock.patch("ui.main._fetch_workspaces", return_value=mock_workspaces),
         mock.patch("ui.main._backend_get", return_value=fake_keys) as mock_get,
-        mock.patch("ui.main._backend_post_with_error", return_value=({"key": "api_token", "version": 1}, None)) as mock_post,
+        mock.patch(
+            "ui.main._backend_post_with_error",
+            return_value=({"key": "api_token", "version": 1}, None),
+        ) as mock_post,
         mock.patch("ui.main._backend_delete", return_value=True) as mock_delete,
     ):
         client = TestClient(app)
@@ -320,7 +338,10 @@ def test_workspace_acls_api_crud(test_tokens, mock_workspaces):
     with (
         mock.patch("ui.main._fetch_workspaces", return_value=mock_workspaces),
         mock.patch("ui.main._backend_get", return_value=fake_acls) as mock_get,
-        mock.patch("ui.main._backend_post_with_error", return_value=({"id": "acl-new", "permission": "WRITE"}, None)) as mock_post,
+        mock.patch(
+            "ui.main._backend_post_with_error",
+            return_value=({"id": "acl-new", "permission": "WRITE"}, None),
+        ) as mock_post,
         mock.patch("ui.main._backend_delete", return_value=True) as mock_delete,
     ):
         client = TestClient(app)

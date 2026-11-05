@@ -435,4 +435,3 @@ def test_cloud_backed_secret_scope_integration(client, db_session):
     scopes = res.json()
     assert isinstance(scopes, list)
     assert any(s["name"] == "aws-cloud-scope" for s in scopes)
-
