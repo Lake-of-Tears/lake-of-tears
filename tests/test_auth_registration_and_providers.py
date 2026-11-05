@@ -401,7 +401,10 @@ def test_ui_login_page_renders_bootstrap_active_when_zero_users():
             assert "Root Superadmin Account" in resp.text
             assert "Initialize Superadmin Account" in resp.text
             # Tabs container must NOT be hidden during Day-0 bootstrap even if AUTH_REGISTRATION_ENABLED is false!
-            assert 'id="auth-tabs" class="flex gap-1 mb-6 bg-black/45 border border-white/10 rounded-lg p-1 "' in resp.text
+            assert (
+                'id="auth-tabs" class="flex gap-1 mb-6 bg-black/45 border border-white/10 rounded-lg p-1 "'
+                in resp.text
+            )
 
 
 def test_ui_login_page_renders_normal_when_existing_users_and_registration_disabled():
@@ -417,7 +420,10 @@ def test_ui_login_page_renders_normal_when_existing_users_and_registration_disab
             # Bootstrap banner is hidden
             assert 'id="bootstrap-banner" class="hidden ' in resp.text
             # Tabs container is hidden when registration is disabled and existing users exist
-            assert 'id="auth-tabs" class="flex gap-1 mb-6 bg-black/45 border border-white/10 rounded-lg p-1 hidden"' in resp.text
+            assert (
+                'id="auth-tabs" class="flex gap-1 mb-6 bg-black/45 border border-white/10 rounded-lg p-1 hidden"'
+                in resp.text
+            )
 
 
 def test_ui_settings_admin_renders_auth_overview():
