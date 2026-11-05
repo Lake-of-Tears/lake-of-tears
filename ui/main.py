@@ -751,7 +751,9 @@ def _execute_sql_with_guardrails(
                     status_obj = data.get("status") or {}
                     if status_obj.get("state") == "SUCCEEDED":
                         manifest = data.get("manifest") or {}
-                        cols = [c["name"] for c in (manifest.get("schema") or {}).get("columns") or []]
+                        cols = [
+                            c["name"] for c in (manifest.get("schema") or {}).get("columns") or []
+                        ]
                         result_obj = data.get("result") or {}
                         rows = result_obj.get("data_array") or []
                         return {
@@ -763,7 +765,9 @@ def _execute_sql_with_guardrails(
                             "statement_id": data.get("statement_id"),
                         }
                     else:
-                        err_msg = (status_obj.get("error") or {}).get("message") or "Statement execution failed."
+                        err_msg = (status_obj.get("error") or {}).get(
+                            "message"
+                        ) or "Statement execution failed."
                         return {
                             "ok": False,
                             "error": err_msg,
@@ -786,7 +790,9 @@ def _execute_sql_with_guardrails(
                         "error_code": resp.status_code,
                         "error_info": {
                             "error_type": "READ_ONLY" if resp.status_code == 403 else "SQL",
-                            "title": "Policy Block" if resp.status_code == 403 else "Statement Execution Error",
+                            "title": "Policy Block"
+                            if resp.status_code == 403
+                            else "Statement Execution Error",
                             "message": detail,
                         },
                         "columns": [],
