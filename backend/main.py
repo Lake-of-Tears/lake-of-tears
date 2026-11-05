@@ -146,6 +146,7 @@ from sql_router import router as sql_router
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 from storage_router import router as storage_router
+from vault_admin_router import router as vault_admin_router
 from webhooks_router import router as webhooks_router
 
 logger = logging.getLogger("lakehouse.backend")
@@ -202,6 +203,7 @@ app.include_router(webhooks_router, prefix="/api/v1/ingest/webhooks", tags=["web
 app.include_router(webhooks_router, prefix="/api/ingest/webhooks", tags=["webhooks"])
 app.include_router(ai_gateway_router, prefix="/api/internal/ai", tags=["ai-internal"])
 app.include_router(ai_admin_router, prefix="/api/admin/ai-provider", tags=["ai-admin"])
+app.include_router(vault_admin_router, prefix="/api/admin/vault-providers", tags=["vault-admin"])
 app.include_router(secrets_router, prefix="/api/v1/secrets", tags=["secrets"])
 app.include_router(secrets_router, prefix="/api/secrets", tags=["secrets"])
 app.include_router(
