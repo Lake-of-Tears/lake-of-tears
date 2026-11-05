@@ -14,6 +14,7 @@ AUTO_GEN_SECRETS="false"
 FORCE="false"
 SKIP_HEALTH="false"
 TIMEOUT="10m"
+DRY_RUN=""
 
 usage() {
     cat << EOF
@@ -25,6 +26,7 @@ Options:
   -c, --config <path>          Path to .toon configuration file
   -n, --namespace <name>       Target Kubernetes namespace (default: lake-of-tears)
       --auto-generate-secrets  Automatically generate random credentials for changeme-* placeholders
+      --dry-run                Simulate Helm installation without making cluster changes
       --skip-health-check      Skip post-deployment /api/health verification
       --timeout <duration>     Helm install wait timeout (default: 10m)
   -f, --force                  Bypass interactive prompts and warnings
@@ -32,6 +34,7 @@ Options:
 
 Examples:
   $(basename "$0")
+  $(basename "$0") --dry-run
   $(basename "$0") --config /etc/lake-of-tears/lake-of-tears.toon
   $(basename "$0") --auto-generate-secrets --namespace lot-dev
 EOF
@@ -51,6 +54,11 @@ while [[ $# -gt 0 ]]; do
             ;;
         --auto-generate-secrets)
             AUTO_GEN_SECRETS="true"
+            shift
+            ;;
+        --dry-run)
+            DRY_RUN="--dry-run"
+            SKIP_HEALTH="true"
             shift
             ;;
         --skip-health-check)
@@ -100,6 +108,7 @@ log_info "Release: lake-of-tears | Namespace: ${NAMESPACE} | Timeout: ${TIMEOUT}
 helm upgrade --install lake-of-tears "${REPO_ROOT}/deploy/helm/lake-of-tears" \
     --namespace "${NAMESPACE}" \
     -f <("${LOT_PYTHON}" "${REPO_ROOT}/scripts/toon2helm.py" -i "${CONFIG_FILE}") \
+    ${DRY_RUN} \
     --wait --timeout "${TIMEOUT}"
 
 log_success "Helm release 'lake-of-tears' deployed successfully."

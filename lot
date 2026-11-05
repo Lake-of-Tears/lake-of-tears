@@ -57,7 +57,7 @@ case "${COMMAND}" in
         # Sourcing common for runtime resolution
         source "${SCRIPT_DIR}/deploy/scripts/common.sh"
         ensure_python_runtime
-        exec "${LOT_PYTHON}" "${SCRIPT_DIR}/scripts/lifecycle_helper.py" "$@"
+        exec "${LOT_PYTHON}" "${REPO_ROOT}/scripts/lifecycle_helper.py" "$@"
         ;;
     help|-h|--help)
         usage
