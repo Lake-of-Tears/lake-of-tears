@@ -1008,8 +1008,11 @@ def providers():
 @app.get("/api/auth/config")
 def auth_config(db: Session = Depends(get_db)):
     user_count = db.query(User).count()
+    bootstrap_active = user_count == 0
     return {
-        "registration_enabled": is_registration_enabled() or (user_count == 0),
+        "registration_enabled": is_registration_enabled() or bootstrap_active,
+        "bootstrap_active": bootstrap_active,
+        "user_count": user_count,
         "providers": enabled_providers(),
     }
 

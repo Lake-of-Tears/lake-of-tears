@@ -34,8 +34,9 @@ Access Endpoints (via Ingress):
 Default Credentials & Initial Setup:
 -------------------------------------------------------------------------------
   Lake UI / Shell:
-    • Register the first user at {{ $proto }}://{{ .Values.ingress.host }}/
-      (The first registered user is automatically granted the admin role)
+    • Initial Setup Mode: Visit {{ $proto }}://{{ .Values.ingress.host }}/ to register the first account.
+      (Day-0 Bootstrap is active when 0 users exist: the first account is automatically granted the Superadmin role,
+       even if public self-registration is disabled in backend.auth.registrationEnabled)
   Apache Airflow:
     • Username: admin
     • Password: {{ .Values.airflow.adminPassword | default "(managed via secret)" }}
