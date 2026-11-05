@@ -782,8 +782,10 @@
           </div>
 
           <div class="flex items-center justify-end gap-2 pt-2">
+            {% set az_has_cfg = az_conf.get('vault_url') %}
             <button type="button" id="vault-az-test-btn" onclick="testVaultProvider('azure_keyvault')"
-                    class="text-xs px-3 py-2 rounded-md border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition-colors">
+                    {% if not az_has_cfg %}disabled{% endif %}
+                    class="text-xs px-3 py-2 rounded-md border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
               Test Connection
             </button>
             <button type="submit" class="btn-primary text-xs">Save Azure Vault</button>
@@ -855,8 +857,10 @@
           </div>
 
           <div class="flex items-center justify-end gap-2 pt-2">
+            {% set aws_has_cfg = aws_conf.get('region_name') and (aws_conf.get('aws_access_key_id') or aws_conf.get('role_arn') or (aws_item and aws_item.is_configured)) %}
             <button type="button" id="vault-aws-test-btn" onclick="testVaultProvider('aws_secrets_manager')"
-                    class="text-xs px-3 py-2 rounded-md border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition-colors">
+                    {% if not aws_has_cfg %}disabled{% endif %}
+                    class="text-xs px-3 py-2 rounded-md border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
               Test Connection
             </button>
             <button type="submit" class="btn-primary text-xs">Save AWS Vault</button>
@@ -1050,10 +1054,35 @@
     } catch (err) {
       paint('bad', '✕ Could not reach server: ' + err);
     } finally {
-      btn.disabled = false;
       btn.textContent = 'Test Connection';
+      updateVaultTestButtons();
     }
   }
+
+  function updateVaultTestButtons() {
+    const azUrl = (document.getElementById('az-vault-url')?.value || '').trim();
+    const azBtn = document.getElementById('vault-az-test-btn');
+    if (azBtn) {
+      azBtn.disabled = !azUrl;
+    }
+
+    const awsRegion = (document.getElementById('aws-region')?.value || '').trim();
+    const awsKey = (document.getElementById('aws-access-key')?.value || '').trim();
+    const awsSecret = (document.getElementById('aws-secret-key')?.value || '').trim();
+    const awsRole = (document.getElementById('aws-role-arn')?.value || '').trim();
+    const awsHasStored = {{ 'true' if aws_conf.get('aws_secret_access_key') or (aws_item and aws_item.is_configured) else 'false' }};
+    const awsBtn = document.getElementById('vault-aws-test-btn');
+    if (awsBtn) {
+      const hasAuth = (awsKey && (awsSecret || awsHasStored)) || awsRole || awsHasStored;
+      awsBtn.disabled = !(awsRegion && hasAuth);
+    }
+  }
+
+  document.getElementById('vault-azure-form')?.addEventListener('input', updateVaultTestButtons);
+  document.getElementById('vault-azure-form')?.addEventListener('change', updateVaultTestButtons);
+  document.getElementById('vault-aws-form')?.addEventListener('input', updateVaultTestButtons);
+  document.getElementById('vault-aws-form')?.addEventListener('change', updateVaultTestButtons);
+  updateVaultTestButtons();
   </script>
 </div>
 

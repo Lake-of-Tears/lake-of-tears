@@ -890,21 +890,18 @@
   </div>
 
   <!-- Secret Scopes Card -->
-  <div id="secret-scopes" class="card p-6 mt-6">
-    <div class="flex items-center justify-between mb-4">
-      <div>
-        <h2 class="text-sm font-semibold text-gray-300">Secret Scopes ({{ secret_scopes | length }})</h2>
-        <p class="text-xs text-gray-500 mt-0.5">
-          Databricks-compatible secret management for notebooks and pipelines. Values are encrypted at rest and redacted from logs.
-        </p>
-      </div>
+  <div id="secret-scopes" class="card p-6 mb-6">
+    <div class="flex items-center justify-between mb-2">
+      <h2 class="text-sm font-semibold text-gray-300">Secret Scopes ({{ secret_scopes | length }})</h2>
       {% if is_admin %}
-      <button type="button" onclick="openCreateScopeModal()" class="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
-        New Scope
+      <button type="button" onclick="openCreateScopeModal()" class="btn-primary text-xs px-2.5 py-1.5 shrink-0">
+        + New scope
       </button>
       {% endif %}
     </div>
+    <p class="text-xs text-gray-500 mb-4">
+      Databricks-compatible secret management for notebooks and pipelines. Values are encrypted at rest and redacted from logs.
+    </p>
 
     {% if secret_scopes %}
     <div class="space-y-2">
@@ -966,7 +963,7 @@
     <div class="text-center py-6 border border-dashed border-white/[0.08] rounded-lg">
       <p class="text-xs text-gray-500">No secret scopes created yet.</p>
       {% if is_admin %}
-      <button type="button" onclick="openCreateScopeModal()" class="text-xs text-blue-400 hover:underline mt-1">
+      <button type="button" onclick="openCreateScopeModal()" class="text-xs text-blue-400 hover:underline mt-1 cursor-pointer">
         + Create your first secret scope
       </button>
       {% endif %}
@@ -1175,18 +1172,21 @@
   let _activeScopeId = null;
   let _activeScopeName = null;
   let _activePermission = null;
-  const _wsId = "{{ workspace.id }}";
+  var _activeWsId = "{{ workspace.id }}";
 
   function openCreateScopeModal() {
-    document.getElementById('create-scope-modal').classList.remove('hidden');
+    const el = document.getElementById('create-scope-modal');
+    if (el) el.classList.remove('hidden');
   }
 
   function closeCreateScopeModal() {
-    document.getElementById('create-scope-modal').classList.add('hidden');
+    const el = document.getElementById('create-scope-modal');
+    if (el) el.classList.add('hidden');
   }
 
   function toggleSecretVisibility(inputId, btn) {
     const el = document.getElementById(inputId);
+    if (!el) return;
     if (el.type === 'password') {
       el.type = 'text';
       btn.classList.add('text-blue-400');
@@ -1201,50 +1201,61 @@
     _activeScopeName = scopeName;
     _activePermission = permission;
 
-    document.getElementById('keys-modal-scope-name').textContent = scopeName;
+    const nameEl = document.getElementById('keys-modal-scope-name');
+    if (nameEl) nameEl.textContent = scopeName;
     const badge = document.getElementById('keys-modal-backend-badge');
-    if (backendType.includes('azure')) {
-      badge.textContent = 'Azure Key Vault';
-      badge.className = 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-sky-950/60 text-sky-300 border border-sky-800/40';
-    } else if (backendType.includes('aws')) {
-      badge.textContent = 'AWS Secrets Manager';
-      badge.className = 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-amber-950/60 text-amber-300 border border-amber-800/40';
-    } else {
-      badge.textContent = 'Internal DB';
-      badge.className = 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-gray-800 text-gray-300 border border-gray-700';
+    if (badge) {
+      if (backendType.includes('azure')) {
+        badge.textContent = 'Azure Key Vault';
+        badge.className = 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-sky-950/60 text-sky-300 border border-sky-800/40';
+      } else if (backendType.includes('aws')) {
+        badge.textContent = 'AWS Secrets Manager';
+        badge.className = 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-amber-950/60 text-amber-300 border border-amber-800/40';
+      } else {
+        badge.textContent = 'Internal DB';
+        badge.className = 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-gray-800 text-gray-300 border border-gray-700';
+      }
     }
 
     const addSection = document.getElementById('keys-modal-add-section');
-    if (permission === 'READ') {
-      addSection.classList.add('hidden');
-    } else {
-      addSection.classList.remove('hidden');
+    if (addSection) {
+      if (permission === 'READ') {
+        addSection.classList.add('hidden');
+      } else {
+        addSection.classList.remove('hidden');
+      }
     }
 
-    document.getElementById('new-key-name').value = '';
-    document.getElementById('new-key-value').value = '';
-    document.getElementById('new-key-error').classList.add('hidden');
+    const nameInput = document.getElementById('new-key-name');
+    const valInput = document.getElementById('new-key-value');
+    const errBox = document.getElementById('new-key-error');
+    if (nameInput) nameInput.value = '';
+    if (valInput) valInput.value = '';
+    if (errBox) errBox.classList.add('hidden');
 
-    document.getElementById('keys-modal').classList.remove('hidden');
+    const modal = document.getElementById('keys-modal');
+    if (modal) modal.classList.remove('hidden');
     await fetchKeys(scopeId);
   }
 
   function closeKeysModal() {
-    document.getElementById('keys-modal').classList.add('hidden');
+    const modal = document.getElementById('keys-modal');
+    if (modal) modal.classList.add('hidden');
   }
 
   async function fetchKeys(scopeId) {
     const container = document.getElementById('keys-list-container');
     const countLabel = document.getElementById('keys-count-label');
+    if (!container) return;
     try {
-      const resp = await fetch(`/api/workspaces/${_wsId}/secrets/scopes/${scopeId}/keys`);
+      const resp = await fetch(`/api/workspaces/${_activeWsId}/secrets/scopes/${scopeId}/keys`);
       if (!resp.ok) {
         container.innerHTML = '<p class="text-xs text-red-400 py-2">Failed to load keys.</p>';
-        countLabel.textContent = '0 keys';
+        if (countLabel) countLabel.textContent = '0 keys';
         return;
       }
       const keys = await resp.json();
-      countLabel.textContent = `${keys.length} key${keys.length === 1 ? '' : 's'}`;
+      if (countLabel) countLabel.textContent = `${keys.length} key${keys.length === 1 ? '' : 's'}`;
       if (!keys.length) {
         container.innerHTML = '<p class="text-xs text-gray-500 italic py-2">No keys stored in this scope yet.</p>';
         return;
@@ -1284,7 +1295,7 @@
     btn.textContent = 'Saving...';
 
     try {
-      const resp = await fetch(`/api/workspaces/${_wsId}/secrets/scopes/${_activeScopeId}/keys`, {
+      const resp = await fetch(`/api/workspaces/${_activeWsId}/secrets/scopes/${_activeScopeId}/keys`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: keyName, value: keyValue })
@@ -1312,7 +1323,7 @@
       return;
     }
     try {
-      const resp = await fetch(`/api/workspaces/${_wsId}/secrets/scopes/${_activeScopeId}/keys/${keyName}`, {
+      const resp = await fetch(`/api/workspaces/${_activeWsId}/secrets/scopes/${_activeScopeId}/keys/${keyName}`, {
         method: 'DELETE'
       });
       if (resp.ok) {
@@ -1334,20 +1345,25 @@
   async function openAclModal(scopeId, scopeName) {
     _activeScopeId = scopeId;
     _activeScopeName = scopeName;
-    document.getElementById('acl-modal-scope-name').textContent = scopeName;
-    document.getElementById('new-acl-error').classList.add('hidden');
-    document.getElementById('acl-modal').classList.remove('hidden');
+    const nameEl = document.getElementById('acl-modal-scope-name');
+    if (nameEl) nameEl.textContent = scopeName;
+    const errBox = document.getElementById('new-acl-error');
+    if (errBox) errBox.classList.add('hidden');
+    const modal = document.getElementById('acl-modal');
+    if (modal) modal.classList.remove('hidden');
     await fetchAcls(scopeId);
   }
 
   function closeAclModal() {
-    document.getElementById('acl-modal').classList.add('hidden');
+    const modal = document.getElementById('acl-modal');
+    if (modal) modal.classList.add('hidden');
   }
 
   async function fetchAcls(scopeId) {
     const container = document.getElementById('acl-list-container');
+    if (!container) return;
     try {
-      const resp = await fetch(`/api/workspaces/${_wsId}/secrets/scopes/${scopeId}/acls`);
+      const resp = await fetch(`/api/workspaces/${_activeWsId}/secrets/scopes/${scopeId}/acls`);
       if (!resp.ok) {
         container.innerHTML = '<p class="text-xs text-red-400 py-2">Failed to load permissions.</p>';
         return;
@@ -1400,7 +1416,7 @@
     btn.textContent = 'Granting...';
 
     try {
-      const resp = await fetch(`/api/workspaces/${_wsId}/secrets/scopes/${_activeScopeId}/acls`, {
+      const resp = await fetch(`/api/workspaces/${_activeWsId}/secrets/scopes/${_activeScopeId}/acls`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ principal_type: pType, principal_id: pId, permission: perm })
@@ -1424,7 +1440,7 @@
   async function deleteAcl(aclId) {
     if (!confirm('Revoke this scope permission?')) return;
     try {
-      const resp = await fetch(`/api/workspaces/${_wsId}/secrets/scopes/${_activeScopeId}/acls/${aclId}`, {
+      const resp = await fetch(`/api/workspaces/${_activeWsId}/secrets/scopes/${_activeScopeId}/acls/${aclId}`, {
         method: 'DELETE'
       });
       if (resp.ok) {
@@ -1436,6 +1452,28 @@
       alert('Error revoking permission: ' + e);
     }
   }
+
+  // Explicit window bindings to ensure inline onclick handlers always resolve
+  window.openCreateScopeModal = openCreateScopeModal;
+  window.closeCreateScopeModal = closeCreateScopeModal;
+  window.openKeysModal = openKeysModal;
+  window.closeKeysModal = closeKeysModal;
+  window.openAclModal = openAclModal;
+  window.closeAclModal = closeAclModal;
+  window.toggleSecretVisibility = toggleSecretVisibility;
+  window.submitNewKey = submitNewKey;
+  window.deleteKey = deleteKey;
+  window.aclPrincipalTypeChanged = aclPrincipalTypeChanged;
+  window.submitNewAcl = submitNewAcl;
+  window.deleteAcl = deleteAcl;
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+      closeCreateScopeModal();
+      closeKeysModal();
+      closeAclModal();
+    }
+  });
   </script>
 
 </div>
