@@ -141,6 +141,7 @@ from schemas import (
     WorkspaceShareResponse,
     WorkspaceShareReviewRequest,
 )
+from secrets_router import router as secrets_router
 from sql_router import router as sql_router
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
@@ -201,6 +202,14 @@ app.include_router(webhooks_router, prefix="/api/v1/ingest/webhooks", tags=["web
 app.include_router(webhooks_router, prefix="/api/ingest/webhooks", tags=["webhooks"])
 app.include_router(ai_gateway_router, prefix="/api/internal/ai", tags=["ai-internal"])
 app.include_router(ai_admin_router, prefix="/api/admin/ai-provider", tags=["ai-admin"])
+app.include_router(secrets_router, prefix="/api/v1/secrets", tags=["secrets"])
+app.include_router(secrets_router, prefix="/api/secrets", tags=["secrets"])
+app.include_router(
+    secrets_router, prefix="/api/v1/workspaces/{workspace_id}/secrets", tags=["secrets"]
+)
+app.include_router(
+    secrets_router, prefix="/api/workspaces/{workspace_id}/secrets", tags=["secrets"]
+)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

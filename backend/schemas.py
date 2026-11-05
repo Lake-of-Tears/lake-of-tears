@@ -985,3 +985,66 @@ class WebhookIngestResponse(BaseModel):
     event_id: str
     workspace_slug: str
     received_at: datetime
+
+
+class SecretScopeCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255, pattern=r"^[a-zA-Z0-9_\-\.]+$")
+    backend_type: str = Field(default="internal", max_length=64)
+    provider_config: dict[str, Any] | None = None
+
+
+class SecretScopeResponse(BaseModel):
+    id: uuid.UUID
+    workspace_id: uuid.UUID | None = None
+    name: str
+    backend_type: str
+    provider_config: dict[str, Any] | None = None
+    created_by: uuid.UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+    user_permission: str | None = None
+    key_count: int = 0
+
+    model_config = {"from_attributes": True}
+
+
+class SecretKeyCreate(BaseModel):
+    key: str = Field(..., min_length=1, max_length=255, pattern=r"^[a-zA-Z0-9_\-\.]+$")
+    value: str
+
+
+class SecretKeySummaryResponse(BaseModel):
+    key: str
+    version: int
+    created_at: datetime
+    updated_at: datetime
+    updated_by: uuid.UUID | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class SecretValueResponse(BaseModel):
+    key: str
+    value: str
+    version: int
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class SecretAclCreate(BaseModel):
+    principal_type: str = Field(..., pattern=r"^(user|role)$")
+    principal_id: str = Field(..., min_length=1, max_length=255)
+    permission: str = Field(..., pattern=r"^(READ|WRITE|MANAGE)$")
+
+
+class SecretAclResponse(BaseModel):
+    id: uuid.UUID
+    scope_id: uuid.UUID
+    principal_type: str
+    principal_id: str
+    permission: str
+    created_at: datetime
+    created_by: uuid.UUID | None = None
+
+    model_config = {"from_attributes": True}
