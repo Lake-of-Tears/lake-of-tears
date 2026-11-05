@@ -37,6 +37,7 @@
       - `POST /api/admin/services/{service_name}/start`: Scale deployment replicas to 1.
     - Helm RBAC template `deploy/helm/lake-of-tears/templates/rbac.yaml` creating Role and RoleBinding for backend ServiceAccount in `lake-of-tears` namespace.
     - Interactive Services UI with status badges, replica counters, uptime, limits, action buttons with loading spinners, confirmation modal for disruptive actions, and 10s auto-polling toggle.
+    - **Minimalist List View & Slide-Over Drawer**: Upgraded `#services` tab from a bulky 3-column card grid to a streamlined, responsive table list view. Clicking any service row opens a slide-over details drawer with full runtime pod specs (namespace, node, pod name, container image, port, resource limits, uptime, last restart) and lifecycle action buttons (Restart, Stop with core safeguards, Start). Drawer live-syncs with the 10s auto-poll loop and closes with `Escape` or backdrop click.
   - **Local Deployment:** Rebuilt images `lake-of-tears-backend:latest` and `lake-of-tears-ui:latest`; rolled out to local k8s deployments `lake-of-tears-backend` and `lake-of-tears-lakeui`. Verified live health check at `http://localhost/api/health` and live UI at `http://localhost/settings/admin#services`.
 
 - **Issue #50 & PR #389 (Clarify First-Time Bootstrap Flow & Resolve Day-0 Registration Lockout):**
