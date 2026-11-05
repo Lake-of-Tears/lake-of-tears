@@ -2729,6 +2729,12 @@ async def settings_admin_get(request: Request):
     }
     vault_providers = _backend_get("/api/admin/vault-providers", token) or []
     all_scopes = _backend_get("/api/admin/vault-providers/scopes", token) or []
+    services_overview = _backend_get("/api/admin/services", token) or {
+        "services": [],
+        "cluster_connected": False,
+        "total_services": 0,
+        "healthy_count": 0,
+    }
     return templates.TemplateResponse(
         request=request,
         name="settings/admin.html",
@@ -2747,6 +2753,7 @@ async def settings_admin_get(request: Request):
             "vault_providers": vault_providers,
             "all_scopes": all_scopes,
             "vault_error": request.query_params.get("vault_error"),
+            "services_overview": services_overview,
             "saved": request.query_params.get("saved"),
         },
     )
@@ -2998,6 +3005,82 @@ async def settings_admin_vault_provider_test(request: Request, provider: str):
         return JSONResponse(
             {"success": False, "message": f"Connection error: {exc}"}, status_code=502
         )
+
+
+@app.get("/settings/admin/services")
+async def settings_admin_services_list(request: Request):
+    """Proxy endpoint to retrieve platform services status."""
+    user = request.state.user
+    if not user or user.get("role") != "superadmin":
+        return JSONResponse({"error": "Superadmin access required"}, status_code=403)
+    token = request.cookies.get("lake_token")
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    try:
+        with httpx.Client(timeout=10) as client:
+            resp = client.get(f"{BACKEND_URL}/api/admin/services", headers=headers)
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc), "services": [], "cluster_connected": False}, status_code=502)
+
+
+@app.post("/settings/admin/services/{service_name}/restart")
+async def settings_admin_service_restart(request: Request, service_name: str):
+    """Proxy endpoint to restart a platform service."""
+    user = request.state.user
+    if not user or user.get("role") != "superadmin":
+        return JSONResponse({"error": "Superadmin access required"}, status_code=403)
+    token = request.cookies.get("lake_token")
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    try:
+        with httpx.Client(timeout=20) as client:
+            resp = client.post(f"{BACKEND_URL}/api/admin/services/{service_name}/restart", headers=headers)
+            try:
+                data = resp.json()
+            except Exception:
+                data = {"detail": resp.text}
+            return JSONResponse(data, status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=502)
+
+
+@app.post("/settings/admin/services/{service_name}/stop")
+async def settings_admin_service_stop(request: Request, service_name: str):
+    """Proxy endpoint to stop a platform service."""
+    user = request.state.user
+    if not user or user.get("role") != "superadmin":
+        return JSONResponse({"error": "Superadmin access required"}, status_code=403)
+    token = request.cookies.get("lake_token")
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    try:
+        with httpx.Client(timeout=20) as client:
+            resp = client.post(f"{BACKEND_URL}/api/admin/services/{service_name}/stop", headers=headers)
+            try:
+                data = resp.json()
+            except Exception:
+                data = {"detail": resp.text}
+            return JSONResponse(data, status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=502)
+
+
+@app.post("/settings/admin/services/{service_name}/start")
+async def settings_admin_service_start(request: Request, service_name: str):
+    """Proxy endpoint to start a platform service."""
+    user = request.state.user
+    if not user or user.get("role") != "superadmin":
+        return JSONResponse({"error": "Superadmin access required"}, status_code=403)
+    token = request.cookies.get("lake_token")
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    try:
+        with httpx.Client(timeout=20) as client:
+            resp = client.post(f"{BACKEND_URL}/api/admin/services/{service_name}/start", headers=headers)
+            try:
+                data = resp.json()
+            except Exception:
+                data = {"detail": resp.text}
+            return JSONResponse(data, status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=502)
 
 
 @app.post("/settings/admin/workspaces/{workspace_id}/mark-inactive")

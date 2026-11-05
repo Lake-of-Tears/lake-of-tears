@@ -2,10 +2,13 @@
 {% block title %}Admin Panel — Lake of Tears{% endblock %}
 
 {% block content %}
-<div class="max-w-3xl space-y-6">
-  <div>
-    <h1 class="text-xl font-semibold text-gray-100 mb-1">Admin Panel</h1>
-    <p class="text-sm text-gray-500">Manage users and workspaces across the entire instance.</p>
+<div class="max-w-6xl space-y-6">
+  <!-- Header -->
+  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div>
+      <h1 class="text-xl font-semibold text-gray-100 mb-1">Admin Panel</h1>
+      <p class="text-sm text-gray-500">Manage platform services, instance security, users, and workspaces.</p>
+    </div>
   </div>
 
   {% if saved == 'session_revoked' %}
@@ -22,377 +25,447 @@
   </div>
   {% endif %}
 
-  <!-- Users -->
-  <div class="card p-6">
-    <h2 class="text-sm font-semibold text-gray-300 mb-4">Users ({{ users | length }})</h2>
-    {% if users %}
-    <div class="space-y-1">
-      {% for u in users %}
-      <div class="flex items-center gap-3 py-2 border-b border-white/[0.04] last:border-0">
-        <div class="w-7 h-7 rounded-full {% if u.is_active %}bg-blue-600{% else %}bg-gray-700{% endif %} flex items-center justify-center text-xs font-bold text-white shrink-0">
-          {{ (u.display_name or u.email)[0] | upper }}
-        </div>
-        <div class="flex-1 min-w-0">
-          <div class="flex items-center gap-2">
-            <span class="text-sm text-gray-200 truncate">{{ u.display_name or u.email }}</span>
-            {% if not u.is_active %}<span class="badge-red text-[10px]">Disabled</span>{% endif %}
-            {% if u.auth_providers %}
-              {% for p in u.auth_providers %}
-                {% if p == 'google' %}
-                  <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-red-950/60 text-red-300 border border-red-800/40 font-medium">Google</span>
-                {% elif p == 'apple' %}
-                  <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-neutral-800 text-gray-200 border border-neutral-700 font-medium">Apple</span>
-                {% elif p == 'github' %}
-                  <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-purple-950/60 text-purple-300 border border-purple-800/40 font-medium">GitHub</span>
-                {% elif p == 'microsoft' %}
-                  <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-sky-950/60 text-sky-300 border border-sky-800/40 font-medium">Microsoft</span>
-                {% elif p == 'password' %}
-                  <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-gray-800/80 text-gray-400 border border-gray-700/60 font-medium">Password</span>
-                {% else %}
-                  <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-gray-800 text-gray-300 border border-gray-700 font-medium">{{ p | upper }}</span>
-                {% endif %}
-              {% endfor %}
-            {% else %}
-              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-gray-800/80 text-gray-400 border border-gray-700/60 font-medium">Password</span>
-            {% endif %}
-          </div>
-          <div class="text-[11px] text-gray-500 truncate">{{ u.email }}</div>
-        </div>
-        <!-- Role selector -->
-        {% if u.id != (request.state.user.sub | default('')) %}
-        <form action="/settings/admin/users/{{ u.id }}/role" method="post" class="shrink-0">
-          <select name="role" onchange="this.form.submit()" class="bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded px-2 py-1 focus:outline-none focus:border-blue-500">
-            <option value="user" {% if u.role == 'user' %}selected{% endif %}>User</option>
-            <option value="superadmin" {% if u.role == 'superadmin' %}selected{% endif %}>Superadmin</option>
-          </select>
-        </form>
-        <!-- Toggle active -->
-        <form action="/settings/admin/users/{{ u.id }}/toggle" method="post">
-          <button type="submit"
-            class="text-xs px-2.5 py-1 rounded border transition-colors {% if u.is_active %}border-gray-700 text-gray-500 hover:text-red-400 hover:border-red-600/50{% else %}border-emerald-700/50 text-emerald-500 hover:text-emerald-300{% endif %}">
-            {{ 'Disable' if u.is_active else 'Enable' }}
-          </button>
-        </form>
-        {% else %}
-        <span class="text-[11px] text-gray-500 capitalize shrink-0">{{ u.role }} (you)</span>
-        {% endif %}
-      </div>
-      {% endfor %}
-    </div>
-    {% else %}
-    <p class="text-sm text-gray-500">No users found.</p>
-    {% endif %}
+  <!-- Horizontal Navigation Tabs -->
+  <div class="border-b border-white/[0.08] flex items-center gap-1 overflow-x-auto no-scrollbar">
+    <a href="#services" onclick="switchAdminTab('services')" id="admin-tab-btn-services"
+      class="admin-tab-btn flex items-center gap-2 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap border-blue-500 text-blue-400">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/>
+      </svg>
+      Services & Infrastructure
+    </a>
+    <a href="#users" onclick="switchAdminTab('users')" id="admin-tab-btn-users"
+      class="admin-tab-btn flex items-center gap-2 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap border-transparent text-gray-400 hover:text-gray-200">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/>
+      </svg>
+      Users & Access
+      <span class="text-[10px] px-1.5 py-0.2 rounded bg-white/[0.06] text-gray-400">{{ users | length }}</span>
+    </a>
+    <a href="#workspaces" onclick="switchAdminTab('workspaces')" id="admin-tab-btn-workspaces"
+      class="admin-tab-btn flex items-center gap-2 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap border-transparent text-gray-400 hover:text-gray-200">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+      </svg>
+      Workspaces
+      <span class="text-[10px] px-1.5 py-0.2 rounded bg-white/[0.06] text-gray-400">{{ workspaces | length }}</span>
+    </a>
+    <a href="#vaults" onclick="switchAdminTab('vaults')" id="admin-tab-btn-vaults"
+      class="admin-tab-btn flex items-center gap-2 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap border-transparent text-gray-400 hover:text-gray-200">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+      </svg>
+      Vaults & Security
+      {% if all_scopes %}
+      <span class="text-[10px] px-1.5 py-0.2 rounded bg-blue-950/60 text-blue-300 border border-blue-800/40">{{ all_scopes | length }}</span>
+      {% endif %}
+    </a>
+    <a href="#platform" onclick="switchAdminTab('platform')" id="admin-tab-btn-platform"
+      class="admin-tab-btn flex items-center gap-2 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap border-transparent text-gray-400 hover:text-gray-200">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+      </svg>
+      Platform & Auth
+    </a>
   </div>
 
-  <!-- User Invitations -->
-  <div id="invitations" class="card p-6 space-y-6">
-    <div>
-      <h2 class="text-sm font-semibold text-gray-300 mb-1">Invite User</h2>
-      <p class="text-xs text-gray-500 mb-4">
-        Invited users can register or sign in via Google, Apple, or SSO even when open registration is disabled.
-      </p>
+  <!-- Global Action Feedback Toast -->
+  <div id="service-action-toast" class="hidden px-4 py-3 rounded-md text-sm transition-all duration-300"></div>
 
-      {% if invite_error %}
-      <div class="mb-4 px-3 py-2 rounded-md bg-red-900/40 border border-red-800/50 text-red-400 text-xs">
-        {{ invite_error }}
+  <!-- ========================================================================= -->
+  <!-- TAB 1: SERVICES & INFRASTRUCTURE                                         -->
+  <!-- ========================================================================= -->
+  <div id="admin-panel-services" class="admin-panel space-y-6">
+    <!-- Controls & Health Header -->
+    <div class="card p-6">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <div class="flex items-center gap-2.5 mb-1">
+            <h2 class="text-sm font-semibold text-gray-200">Platform Services & Observability</h2>
+            {% set total_srv = (services_overview.total_services | default(0)) if services_overview else 0 %}
+            {% set healthy_srv = (services_overview.healthy_count | default(0)) if services_overview else 0 %}
+            <span id="services-health-badge" class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium {% if healthy_srv == total_srv and total_srv > 0 %}bg-emerald-950/60 text-emerald-400 border border-emerald-800/60{% else %}bg-amber-950/60 text-amber-400 border border-amber-800/60{% endif %}">
+              <span class="w-1.5 h-1.5 rounded-full {% if healthy_srv == total_srv and total_srv > 0 %}bg-emerald-400{% else %}bg-amber-400{% endif %}"></span>
+              <span id="services-health-count">{{ healthy_srv }} / {{ total_srv }} Healthy</span>
+            </span>
+          </div>
+          <p class="text-xs text-gray-500">
+            Real-time Kubernetes container state, replica health, and lifecycle management for all platform components.
+          </p>
+        </div>
+
+        <div class="flex items-center gap-3">
+          <!-- 10s Auto-Poll Toggle -->
+          <label class="flex items-center gap-2 text-xs text-gray-400 cursor-pointer select-none">
+            <input type="checkbox" id="services-autopoll-toggle" checked onchange="toggleAutoPoll(this.checked)"
+              class="rounded bg-gray-900 border-gray-700 text-blue-600 focus:ring-0 focus:ring-offset-0 w-3.5 h-3.5" />
+            <span class="flex items-center gap-1">
+              <span id="autopoll-pulse-dot" class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
+              Auto-poll (10s)
+            </span>
+          </label>
+
+          <!-- Refresh Button -->
+          <button type="button" onclick="refreshServices(true)" id="services-refresh-btn"
+            class="text-xs px-3 py-1.5 rounded-md border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition-colors flex items-center gap-1.5">
+            <svg id="services-refresh-spinner" class="w-3.5 h-3.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            <span>Refresh</span>
+          </button>
+        </div>
       </div>
-      {% endif %}
 
-      <form action="/settings/admin/invitations" method="post" class="space-y-4">
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs text-gray-400 font-medium mb-1">Email Address</label>
-            <input type="email" name="email" required placeholder="colleague@example.com"
-              class="w-full input-dark text-sm px-3 py-1.5 rounded bg-gray-900 border border-gray-700 text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500" />
-          </div>
-          <div>
-            <label class="block text-xs text-gray-400 font-medium mb-1">Instance Role</label>
-            <select name="role" id="invite-role" onchange="toggleInviteRole(this.value)"
-              class="w-full bg-gray-900 border border-gray-700 text-gray-300 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
-              <option value="user" selected>User</option>
-              <option value="superadmin">Superadmin</option>
-            </select>
-          </div>
+      <!-- Cluster Environment Info or Fallback Banner -->
+      <div class="mt-4 pt-4 border-t border-white/[0.06] flex items-center justify-between text-xs text-gray-500 flex-wrap gap-2">
+        <div class="flex items-center gap-2">
+          <span class="text-gray-400">Environment:</span>
+          {% if services_overview and services_overview.cluster_connected %}
+          <span class="px-2 py-0.5 rounded bg-emerald-950/40 text-emerald-400 border border-emerald-800/40 font-mono text-[11px]">
+            Kubernetes ({{ services_overview.namespace | default('lake-of-tears') }})
+          </span>
+          <span class="text-[11px] text-gray-500 font-mono">mode: {{ services_overview.mode | default('in_cluster') }}</span>
+          {% else %}
+          <span class="px-2 py-0.5 rounded bg-amber-950/40 text-amber-400 border border-amber-800/40 font-mono text-[11px]">
+            Cluster API Unreachable / Local Standalone
+          </span>
+          {% endif %}
         </div>
-
-        <!-- Workspace permissions (relevant when role is User) -->
-        <div id="invite-workspace-section" class="space-y-3 pt-2 border-t border-white/[0.04]">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-semibold text-gray-300">Workspace Access</span>
-            <span class="text-[11px] text-gray-500">Configure access for the new user</span>
-          </div>
-
-          <!-- Default Workspace row -->
-          <div class="p-3 rounded-lg bg-white/[0.02] border border-white/[0.06] flex items-center justify-between gap-3">
-            <div>
-              <div class="flex items-center gap-2">
-                <span class="text-xs font-medium text-gray-200">Default</span>
-                <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/40 border border-blue-700/40 text-blue-400 font-medium">Required</span>
-              </div>
-              <div class="text-[11px] text-gray-500">Instance default workspace</div>
-            </div>
-            <div class="flex items-center gap-2">
-              <label class="text-[11px] text-gray-400">Role:</label>
-              <select name="default_role"
-                class="bg-gray-900 border border-gray-700 text-gray-200 text-xs rounded px-2.5 py-1 focus:outline-none focus:border-blue-500">
-                <option value="read" selected>Read</option>
-                <option value="write">Write</option>
-              </select>
-            </div>
-          </div>
-
-          <!-- Additional Workspaces Dynamic List -->
-          <div>
-            <div class="text-xs font-medium text-gray-400 mb-2">Additional Workspaces</div>
-
-            <!-- Added Workspaces Container -->
-            <div id="additional-workspaces-list" class="space-y-2 mb-3">
-              <p id="additional-workspaces-empty" class="text-xs text-gray-600 italic py-1">
-                No additional workspaces added. User will only have access to Default.
-              </p>
-            </div>
-
-            <!-- Workspace Picker / Add Row -->
-            <div id="additional-workspaces-picker" class="flex items-center gap-2">
-              <select id="extra-ws-select"
-                class="flex-1 bg-gray-900 border border-gray-700 text-gray-300 text-xs rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
-                <option value="" disabled selected>Select a workspace to add…</option>
-              </select>
-              <select id="extra-ws-role"
-                class="bg-gray-900 border border-gray-700 text-gray-300 text-xs rounded px-2.5 py-1.5 focus:outline-none focus:border-blue-500">
-                <option value="read" selected>Read</option>
-                <option value="write">Write</option>
-              </select>
-              <button type="button" onclick="addWorkspaceAccess()"
-                id="extra-ws-add-btn"
-                class="text-xs px-3 py-1.5 rounded border border-gray-700 bg-white/[0.04] text-gray-300 hover:text-white hover:bg-white/[0.08] hover:border-gray-500 transition-colors">
-                + Add
-              </button>
-            </div>
-            <p id="no-more-workspaces" class="text-xs text-gray-600 hidden py-1">
-              All available workspaces have been added.
-            </p>
-          </div>
+        <div class="text-[11px] text-gray-500" id="services-last-updated">
+          Updated: Just now
         </div>
-
-        <button type="submit" class="btn-primary text-xs py-1.5 px-4 font-medium">Send Invitation</button>
-      </form>
+      </div>
     </div>
 
-    <!-- Pending Invitations -->
-    {% set pending_invites = invitations | selectattr('status', 'equalto', 'pending') | list if invitations else [] %}
-    <div class="pt-4 border-t border-white/[0.06]">
-      <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
-        Pending Invitations ({{ pending_invites | length }})
-      </h3>
-      {% if pending_invites %}
-      <div class="space-y-2">
-        {% for inv in pending_invites %}
-        <div class="flex items-center justify-between gap-3 py-2 px-3 rounded-lg bg-white/[0.02] border border-white/[0.04]">
-          <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-2 flex-wrap">
-              <span class="text-sm font-medium text-gray-200 truncate">{{ inv.email }}</span>
-              <span class="px-1.5 py-0.5 rounded text-[10px] font-medium {% if inv.role == 'superadmin' %}bg-amber-950/60 text-amber-300 border border-amber-800/40{% else %}bg-blue-950/60 text-blue-300 border border-blue-800/40{% endif %}">
-                {{ inv.role | title }}
-              </span>
-              <span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-yellow-950/50 text-yellow-300 border border-yellow-800/40">
-                Pending
-              </span>
+    <!-- Services Cards Grid -->
+    <div id="services-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {% if services_overview and services_overview.services %}
+      {% for s in services_overview.services %}
+      <div class="card p-5 flex flex-col justify-between border border-white/[0.06] hover:border-white/[0.12] transition-colors relative overflow-hidden" id="service-card-{{ s.id }}">
+        <div>
+          <!-- Service Card Top Row -->
+          <div class="flex items-start justify-between gap-3 mb-2">
+            <div class="flex items-center gap-2.5 min-w-0">
+              <div class="w-8 h-8 rounded-lg bg-blue-900/30 border border-blue-700/40 flex items-center justify-center text-blue-400 shrink-0 font-bold text-xs">
+                {{ s.display_name[0] }}
+              </div>
+              <div class="min-w-0">
+                <h3 class="text-sm font-semibold text-gray-100 truncate flex items-center gap-1.5">
+                  {{ s.display_name }}
+                  {% if s.is_core %}
+                  <span class="text-[9px] px-1.5 py-0.2 rounded bg-purple-900/40 border border-purple-700/50 text-purple-300 font-normal">Core</span>
+                  {% endif %}
+                </h3>
+                <span class="text-[11px] text-gray-500 font-mono truncate block">{{ s.name }}</span>
+              </div>
             </div>
-            <div class="text-[11px] text-gray-500 mt-0.5">
-              Invited {{ (inv.created_at | string)[:10] }}
-              {% if inv.invited_by_email %}&middot; by {{ inv.invited_by_email }}{% endif %}
-              {% if inv.workspace_access %}
-                &middot; Workspaces:
-                {% for w_slug, w_role in inv.workspace_access.items() %}
-                  <span class="text-gray-400">{{ w_slug }} ({{ w_role }})</span>{% if not loop.last %}, {% endif %}
-                {% endfor %}
+
+            <!-- Status Pill Badge -->
+            <div id="service-badge-{{ s.id }}">
+              {% if s.status == 'running' %}
+              <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-950/60 text-emerald-400 border border-emerald-800/60">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                Running
+              </span>
+              {% elif s.status == 'stopped' %}
+              <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium bg-gray-900 text-gray-400 border border-gray-700">
+                <span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>
+                Stopped
+              </span>
+              {% elif s.status == 'restarting' %}
+              <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium bg-amber-950/60 text-amber-400 border border-amber-800/60">
+                <span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
+                Restarting
+              </span>
+              {% else %}
+              <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium bg-red-950/60 text-red-400 border border-red-800/60">
+                <span class="w-1.5 h-1.5 rounded-full bg-red-400"></span>
+                {{ s.status | capitalize }}
+              </span>
               {% endif %}
             </div>
           </div>
-          <form action="/settings/admin/invitations/{{ inv.id }}/revoke" method="post" class="shrink-0"
-            onsubmit="return confirm('Revoke invitation for {{ inv.email }}?')">
-            <button type="submit" class="text-xs px-2.5 py-1 rounded border border-red-800/50 text-red-400 hover:text-red-300 hover:border-red-700 transition-colors">
-              Revoke
+
+          <!-- Description -->
+          <p class="text-xs text-gray-400 mt-2 mb-4 line-clamp-2 leading-relaxed">
+            {{ s.description }}
+          </p>
+
+          <!-- Metrics / Specs Subcard -->
+          <div class="grid grid-cols-2 gap-2 text-[11px] p-2.5 rounded-lg bg-black/20 border border-white/[0.04] mb-4">
+            <div>
+              <span class="text-gray-500 block text-[10px] uppercase tracking-wider font-semibold">Replicas</span>
+              <span class="text-gray-200 font-medium font-mono" id="service-replicas-{{ s.id }}">{{ s.ready_replicas }} / {{ s.desired_replicas }}</span>
+            </div>
+            <div>
+              <span class="text-gray-500 block text-[10px] uppercase tracking-wider font-semibold">Restarts</span>
+              <span class="text-gray-200 font-medium font-mono" id="service-restarts-{{ s.id }}">{{ s.restarts }}</span>
+            </div>
+            <div>
+              <span class="text-gray-500 block text-[10px] uppercase tracking-wider font-semibold">Uptime</span>
+              <span class="text-gray-200 font-medium" id="service-uptime-{{ s.id }}">{{ s.uptime or '—' }}</span>
+            </div>
+            <div>
+              <span class="text-gray-500 block text-[10px] uppercase tracking-wider font-semibold">Limits</span>
+              <span class="text-gray-200 font-mono text-[10px]" id="service-limits-{{ s.id }}">
+                {{ s.cpu_limit or '—' }} / {{ s.memory_limit or '—' }}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Action Controls Footer -->
+        <div class="pt-3 border-t border-white/[0.06] flex items-center justify-between gap-2 mt-auto" id="service-actions-{{ s.id }}">
+          {% if s.status == 'stopped' %}
+          <button type="button" onclick="promptServiceAction('{{ s.id }}', '{{ s.display_name }}', 'start')"
+            class="w-full text-xs px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium transition-colors flex items-center justify-center gap-1.5">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/></svg>
+            Start Service
+          </button>
+          {% else %}
+          <button type="button" onclick="promptServiceAction('{{ s.id }}', '{{ s.display_name }}', 'restart')"
+            class="flex-1 text-xs px-2.5 py-1.5 rounded border border-gray-700 hover:border-gray-500 text-gray-300 hover:text-white transition-colors flex items-center justify-center gap-1.5">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+            Restart
+          </button>
+          {% if s.is_core %}
+          <button type="button" disabled title="Core services cannot be stopped to prevent instance lock-out"
+            class="text-xs px-2.5 py-1.5 rounded border border-gray-800 text-gray-600 cursor-not-allowed flex items-center gap-1">
+            Stop
+          </button>
+          {% else %}
+          <button type="button" onclick="promptServiceAction('{{ s.id }}', '{{ s.display_name }}', 'stop')"
+            class="text-xs px-2.5 py-1.5 rounded border border-red-900/60 text-red-400 hover:text-red-300 hover:border-red-700/80 transition-colors flex items-center gap-1">
+            Stop
+          </button>
+          {% endif %}
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+      {% else %}
+      <div class="col-span-full card p-8 text-center text-gray-500">
+        No platform services detected in the cluster.
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- TAB 2: USERS & ACCESS                                                    -->
+  <!-- ========================================================================= -->
+  <div id="admin-panel-users" class="admin-panel hidden space-y-6">
+    <!-- Users -->
+    <div class="card p-6">
+      <h2 class="text-sm font-semibold text-gray-300 mb-4">Users ({{ users | length }})</h2>
+      {% if users %}
+      <div class="space-y-1">
+        {% for u in users %}
+        <div class="flex items-center gap-3 py-2 border-b border-white/[0.04] last:border-0">
+          <div class="w-7 h-7 rounded-full {% if u.is_active %}bg-blue-600{% else %}bg-gray-700{% endif %} flex items-center justify-center text-xs font-bold text-white shrink-0">
+            {{ (u.display_name or u.email)[0] | upper }}
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2">
+              <span class="text-sm text-gray-200 truncate">{{ u.display_name or u.email }}</span>
+              {% if not u.is_active %}<span class="badge-red text-[10px]">Disabled</span>{% endif %}
+              {% if u.auth_providers %}
+                {% for p in u.auth_providers %}
+                  {% if p == 'google' %}
+                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-red-950/60 text-red-300 border border-red-800/40 font-medium">Google</span>
+                  {% elif p == 'apple' %}
+                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-neutral-800 text-gray-200 border border-neutral-700 font-medium">Apple</span>
+                  {% elif p == 'github' %}
+                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-purple-950/60 text-purple-300 border border-purple-800/40 font-medium">GitHub</span>
+                  {% elif p == 'microsoft' %}
+                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-sky-950/60 text-sky-300 border border-sky-800/40 font-medium">Microsoft</span>
+                  {% elif p == 'password' %}
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-gray-800/80 text-gray-400 border border-gray-700/60 font-medium">Password</span>
+                  {% else %}
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-gray-800 text-gray-300 border border-gray-700 font-medium">{{ p | upper }}</span>
+                  {% endif %}
+                {% endfor %}
+              {% else %}
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-gray-800/80 text-gray-400 border border-gray-700/60 font-medium">Password</span>
+              {% endif %}
+            </div>
+            <div class="text-[11px] text-gray-500 truncate">{{ u.email }}</div>
+          </div>
+          <!-- Role selector -->
+          {% if u.id != (request.state.user.sub | default('')) %}
+          <form action="/settings/admin/users/{{ u.id }}/role" method="post" class="shrink-0">
+            <select name="role" onchange="this.form.submit()" class="bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded px-2 py-1 focus:outline-none focus:border-blue-500">
+              <option value="user" {% if u.role == 'user' %}selected{% endif %}>User</option>
+              <option value="superadmin" {% if u.role == 'superadmin' %}selected{% endif %}>Superadmin</option>
+            </select>
+          </form>
+          <!-- Toggle active -->
+          <form action="/settings/admin/users/{{ u.id }}/toggle" method="post">
+            <button type="submit"
+              class="text-xs px-2.5 py-1 rounded border transition-colors {% if u.is_active %}border-gray-700 text-gray-500 hover:text-red-400 hover:border-red-600/50{% else %}border-emerald-700/50 text-emerald-500 hover:text-emerald-300{% endif %}">
+              {{ 'Disable' if u.is_active else 'Enable' }}
             </button>
           </form>
+          {% else %}
+          <span class="text-[11px] text-gray-500 capitalize shrink-0">{{ u.role }} (you)</span>
+          {% endif %}
         </div>
         {% endfor %}
       </div>
       {% else %}
-      <p class="text-xs text-gray-500 italic">No pending invitations.</p>
+      <p class="text-sm text-gray-500">No users found.</p>
       {% endif %}
     </div>
-  </div>
 
-  <!-- Workspaces -->
-  <div class="card p-6">
-    <h2 class="text-sm font-semibold text-gray-300 mb-4">Workspaces ({{ workspaces | length }})</h2>
-    {% if workspaces %}
-    <div class="space-y-1 mb-6">
-      {% for ws in workspaces %}
-      <div class="flex items-center gap-3 py-2 border-b border-white/[0.04] last:border-0">
-        <span class="w-7 h-7 rounded {% if ws.status == 'inactive' %}bg-amber-900/40{% else %}bg-blue-600/50{% endif %} shrink-0 flex items-center justify-center text-[11px] font-bold {% if ws.status == 'inactive' %}text-amber-500{% else %}text-blue-300{% endif %}">{{ ws.name[0] | upper }}</span>
-        <div class="flex-1 min-w-0">
-          <div class="flex items-center gap-2 flex-wrap">
-            <span class="text-sm {% if ws.status == 'inactive' %}text-gray-500{% else %}text-gray-200{% endif %} truncate">{{ ws.name }}</span>
-            {% if ws.is_system %}
-            <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/40 border border-blue-700/40 text-blue-400 shrink-0">System</span>
-            {% endif %}
-            {% if ws.status == 'inactive' %}
-            <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/40 border border-amber-700/40 text-amber-500 shrink-0">Inactive</span>
-            {% endif %}
-          </div>
-          <div class="text-[11px] text-gray-500">
-            slug: {{ ws.slug }}
-            &middot; {{ ws.member_count }} member{{ 's' if ws.member_count != 1 else '' }}
-            &middot; {{ ws.owned_catalog_count }} catalog{{ 's' if ws.owned_catalog_count != 1 else '' }}
-            {% if ws.status == 'inactive' and ws.scheduled_purge_at %}
-            &middot; <span class="text-amber-600">Permanent deletion: {{ ws.scheduled_purge_at[:10] }}</span>
-            {% endif %}
-          </div>
-        </div>
-        <!-- Actions -->
-        {% if ws.is_system %}
-        <span class="text-[11px] text-gray-600 shrink-0 italic">protected</span>
-        {% elif ws.status == 'inactive' %}
-        <div class="flex items-center gap-2 shrink-0">
-          <form action="/settings/admin/workspaces/{{ ws.id }}/restore" method="post">
-            <button type="submit" class="text-xs px-2.5 py-1 rounded border border-emerald-700/50 text-emerald-500 hover:text-emerald-300 transition-colors">Restore</button>
-          </form>
-          <button onclick="openDeleteModal('{{ ws.id }}', '{{ ws.name | replace("'", "\\'") }}')"
-            class="text-xs px-2.5 py-1 rounded border border-red-800/50 text-red-500 hover:text-red-300 transition-colors">
-            Delete now
-          </button>
-        </div>
-        {% else %}
-        <div class="flex items-center gap-2 shrink-0">
-          {% if admin_settings.workspace_inactive_grace_period_days > 0 %}
-          <form action="/settings/admin/workspaces/{{ ws.id }}/mark-inactive" method="post"
-            onsubmit="return confirm('Mark workspace \'{{ ws.name | replace("'", "\\'") }}\' as inactive?\n\nIt and its catalogs will be permanently deleted in {{ admin_settings.workspace_inactive_grace_period_days }} day{{ 's' if admin_settings.workspace_inactive_grace_period_days != 1 else '' }}. You can restore it before then.')">
-            <button type="submit" class="text-xs px-2.5 py-1 rounded border border-gray-700 text-gray-500 hover:text-amber-400 hover:border-amber-600/50 transition-colors">Mark inactive</button>
-          </form>
-          {% endif %}
-          <button onclick="openDeleteModal('{{ ws.id }}', '{{ ws.name | replace("'", "\\'") }}')"
-            class="text-xs px-2.5 py-1 rounded border border-red-800/50 text-red-500 hover:text-red-300 transition-colors">
-            Delete now
-          </button>
+    <!-- User Invitations -->
+    <div id="invitations" class="card p-6 space-y-6">
+      <div>
+        <h2 class="text-sm font-semibold text-gray-300 mb-1">Invite User</h2>
+        <p class="text-xs text-gray-500 mb-4">
+          Invited users can register or sign in via Google, Apple, or SSO even when open registration is disabled.
+        </p>
+
+        {% if invite_error %}
+        <div class="mb-4 px-3 py-2 rounded-md bg-red-900/40 border border-red-800/50 text-red-400 text-xs">
+          {{ invite_error }}
         </div>
         {% endif %}
+
+        <form action="/settings/admin/invitations" method="post" class="space-y-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs text-gray-400 font-medium mb-1">Email Address</label>
+              <input type="email" name="email" required placeholder="colleague@example.com"
+                class="w-full input-dark text-sm px-3 py-1.5 rounded bg-gray-900 border border-gray-700 text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500" />
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 font-medium mb-1">Instance Role</label>
+              <select name="role" id="invite-role" onchange="toggleInviteRole(this.value)"
+                class="w-full bg-gray-900 border border-gray-700 text-gray-300 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
+                <option value="user" selected>User</option>
+                <option value="superadmin">Superadmin</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Workspace permissions (relevant when role is User) -->
+          <div id="invite-workspace-section" class="space-y-3 pt-2 border-t border-white/[0.04]">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-semibold text-gray-300">Workspace Access</span>
+              <span class="text-[11px] text-gray-500">Configure access for the new user</span>
+            </div>
+
+            <!-- Default Workspace row -->
+            <div class="p-3 rounded-lg bg-white/[0.02] border border-white/[0.06] flex items-center justify-between gap-3">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-medium text-gray-200">Default</span>
+                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/40 border border-blue-700/40 text-blue-400 font-medium">Required</span>
+                </div>
+                <div class="text-[11px] text-gray-500">Instance default workspace</div>
+              </div>
+              <div class="flex items-center gap-2">
+                <label class="text-[11px] text-gray-400">Role:</label>
+                <select name="default_role"
+                  class="bg-gray-900 border border-gray-700 text-gray-200 text-xs rounded px-2.5 py-1 focus:outline-none focus:border-blue-500">
+                  <option value="read" selected>Read</option>
+                  <option value="write">Write</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Additional Workspaces Dynamic List -->
+            <div>
+              <div class="text-xs font-medium text-gray-400 mb-2">Additional Workspaces</div>
+
+              <!-- Added Workspaces Container -->
+              <div id="additional-workspaces-list" class="space-y-2 mb-3">
+                <p id="additional-workspaces-empty" class="text-xs text-gray-600 italic py-1">
+                  No additional workspaces selected. User will only have access to Default.
+                </p>
+              </div>
+
+              <!-- Workspace Picker / Add Row -->
+              <div id="workspace-picker-row" class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-2 border-t border-white/[0.04]">
+                <div class="flex-1">
+                  <select id="additional-ws-select"
+                    class="w-full bg-gray-900 border border-gray-700 text-gray-300 text-xs rounded px-2.5 py-1.5 focus:outline-none focus:border-blue-500">
+                    <option value="" disabled selected>Select a workspace to add...</option>
+                    {% for ws in workspaces %}
+                      {% if not ws.is_system and ws.status != 'inactive' %}
+                      <option value="{{ ws.slug }}" data-name="{{ ws.name }}">{{ ws.name }} ({{ ws.slug }})</option>
+                      {% endif %}
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="flex items-center gap-2">
+                  <select id="additional-ws-role"
+                    class="bg-gray-900 border border-gray-700 text-gray-200 text-xs rounded px-2.5 py-1.5 focus:outline-none focus:border-blue-500">
+                    <option value="read" selected>Read</option>
+                    <option value="write">Write</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                  <button type="button" onclick="addWorkspaceAccess()"
+                    class="text-xs px-3 py-1.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition-colors shrink-0">
+                    + Add
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Hidden input for dynamic JSON payload -->
+          <input type="hidden" name="workspace_grants" id="workspace-grants-payload" value="{}" />
+
+          <div class="flex justify-end pt-2">
+            <button type="submit" class="btn-primary">Generate Invitation</button>
+          </div>
+        </form>
       </div>
-      {% endfor %}
-    </div>
-    {% else %}
-    <p class="text-sm text-gray-500 mb-4">No workspaces yet.</p>
-    {% endif %}
 
-    <!-- Create workspace -->
-    <h3 class="text-xs font-semibold text-gray-400 mb-3">Create workspace</h3>
-    <form action="/settings/admin/workspaces/create" method="post" class="space-y-3">
-      <div class="flex gap-2">
-        <input type="text" name="name" required placeholder="Workspace name"
-          class="flex-1 input-dark text-sm" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
-        <button type="submit" class="btn-primary shrink-0">Create</button>
+      <!-- Pending Invitations -->
+      <div class="border-t border-white/[0.06] pt-6">
+        <h3 class="text-xs font-semibold text-gray-400 mb-3">Pending Invitations ({{ invitations | length }})</h3>
+        {% if invitations %}
+        <div class="space-y-2">
+          {% for inv in invitations %}
+          <div class="p-3 rounded-lg bg-white/[0.02] border border-white/[0.04] flex items-center justify-between gap-3 flex-wrap sm:flex-nowrap">
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-medium text-gray-200 truncate">{{ inv.email }}</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-400 border border-gray-700 capitalize">{{ inv.role }}</span>
+              </div>
+              <div class="text-[11px] text-gray-500 mt-0.5">
+                Created: {{ inv.created_at[:10] }} &middot; Expires: {{ inv.expires_at[:10] }}
+              </div>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <input type="text" readonly value="{{ inv.invite_url }}"
+                class="bg-gray-900 border border-gray-700 text-gray-400 text-xs rounded px-2 py-1 font-mono w-40 truncate select-all" />
+              <button type="button" onclick="navigator.clipboard.writeText('{{ inv.invite_url }}'); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy', 1500);"
+                class="text-xs px-2.5 py-1 rounded border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500 transition-colors">
+                Copy
+              </button>
+              <form action="/settings/admin/invitations/{{ inv.id }}/revoke" method="post" class="shrink-0"
+                onsubmit="return confirm('Revoke this invitation?')">
+                <button type="submit"
+                  class="text-xs px-2.5 py-1 rounded border border-red-800/50 text-red-500 hover:text-red-300 transition-colors">
+                  Revoke
+                </button>
+              </form>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-xs text-gray-500 italic">No pending invitations.</p>
+        {% endif %}
       </div>
-      <input type="text" name="description" placeholder="Description (optional)"
-        class="w-full input-dark text-sm" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
-    </form>
-  </div>
-
-  <!-- Settings -->
-  <div class="card p-6 space-y-6">
-    <div>
-      <h2 class="text-sm font-semibold text-gray-300 mb-1">Catalog Settings</h2>
-      <p class="text-xs text-gray-500 mb-5">Configure how catalog deletions behave across all workspaces.</p>
-      <form action="/settings/admin/catalog-settings" method="post" class="space-y-4">
-        <div>
-          <label class="block text-xs text-gray-400 font-medium mb-1">Soft Delete Grace Period (days)</label>
-          <p class="text-[11px] text-gray-600 mb-2">When a workspace admin deletes a catalog it enters a grace period before permanent deletion. Set to <code class="text-gray-500">0</code> to disable soft delete — deletions will be permanent immediately.</p>
-          <div class="flex items-center gap-3">
-            <input type="number" name="catalog_soft_delete_days" min="0" max="365" required
-                   value="{{ admin_settings.catalog_soft_delete_days | default(30) }}"
-                   class="w-24 input-dark text-sm" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
-            <span class="text-xs text-gray-500">days (0–365)</span>
-          </div>
-          {% if admin_settings.catalog_soft_delete_days == 0 %}
-          <p class="text-xs text-yellow-600 mt-2">⚠ Soft delete is disabled — catalog deletions are permanent immediately.</p>
-          {% endif %}
-        </div>
-        <div class="flex justify-end">
-          <button type="submit" class="btn-primary">Save</button>
-        </div>
-      </form>
-    </div>
-
-    <div class="border-t border-white/[0.06] pt-6">
-      <h2 class="text-sm font-semibold text-gray-300 mb-1">Workspace Lifecycle</h2>
-      <p class="text-xs text-gray-500 mb-5">Configure how workspace deletions behave.</p>
-      <form action="/settings/admin/workspace-settings" method="post" class="space-y-4">
-        <div>
-          <label class="block text-xs text-gray-400 font-medium mb-1">Inactive Grace Period (days)</label>
-          <p class="text-[11px] text-gray-600 mb-2">How long an inactive workspace is kept before permanent deletion. Set to <code class="text-gray-500">0</code> to require immediate deletion — the Mark inactive option will be hidden.</p>
-          <div class="flex items-center gap-3">
-            <input type="number" name="workspace_inactive_grace_period_days" min="0" max="365" required
-                   value="{{ admin_settings.workspace_inactive_grace_period_days | default(30) }}"
-                   class="w-24 input-dark text-sm" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
-            <span class="text-xs text-gray-500">days (0–365)</span>
-          </div>
-          {% if admin_settings.workspace_inactive_grace_period_days == 0 %}
-          <p class="text-xs text-yellow-600 mt-2">⚠ Grace period is disabled — workspace deletions are permanent immediately.</p>
-          {% endif %}
-        </div>
-        <div class="flex justify-end">
-          <button type="submit" class="btn-primary">Save</button>
-        </div>
-      </form>
-    </div>
-
-    <div class="border-t border-white/[0.06] pt-6">
-      <h2 class="text-sm font-semibold text-gray-300 mb-1">Session Security</h2>
-      <p class="text-xs text-gray-500 mb-5">Control how long users stay signed in and when idle sessions are terminated.</p>
-      <form action="/settings/admin/session-settings" method="post" class="space-y-5">
-        <div>
-          <label class="block text-xs text-gray-400 font-medium mb-1">Inactivity Timeout</label>
-          <p class="text-[11px] text-gray-600 mb-2">
-            Sign out users who have been idle for this long. Set to <code class="text-gray-500">0</code> to disable — sessions will only expire after the max session length. Must be 0 or between 15 and 480 minutes.
-          </p>
-          <div class="flex items-center gap-3">
-            <input type="number" name="session_inactivity_timeout_minutes" min="0" max="480" required
-                   value="{{ admin_settings.session_inactivity_timeout_minutes | default(0) }}"
-                   class="w-24 input-dark text-sm" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);"
-                   oninput="updateInactivityHint(this.value)" />
-            <span class="text-xs text-gray-500">minutes (0 = disabled, 15–480)</span>
-          </div>
-          <p id="inactivity-hint" class="text-xs text-gray-500 mt-2 hidden"></p>
-          {% if admin_settings.session_inactivity_timeout_minutes == 0 %}
-          <p class="text-xs text-gray-600 mt-2">Inactivity timeout is disabled.</p>
-          {% else %}
-          <p class="text-xs text-blue-500 mt-2">
-            Users idle for more than {{ admin_settings.session_inactivity_timeout_minutes }} minute{{ 's' if admin_settings.session_inactivity_timeout_minutes != 1 else '' }} will be warned, then signed out.
-          </p>
-          {% endif %}
-        </div>
-        <div>
-          <label class="block text-xs text-gray-400 font-medium mb-1">Max Session Length</label>
-          <p class="text-[11px] text-gray-600 mb-2">
-            Force re-authentication after this many hours, even for continuously active users. Must be 1–168 hours (7 days).
-          </p>
-          <div class="flex items-center gap-3">
-            <input type="number" name="session_max_hours" min="1" max="168" required
-                   value="{{ admin_settings.session_max_hours | default(24) }}"
-                   class="w-24 input-dark text-sm" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
-            <span class="text-xs text-gray-500">hours (1–168)</span>
-          </div>
-          <p class="text-[11px] text-gray-600 mt-2">Changes take effect for new sessions — existing sessions are not immediately terminated.</p>
-        </div>
-        <div class="flex justify-end">
-          <button type="submit" class="btn-primary">Save session settings</button>
-        </div>
-      </form>
     </div>
 
     <!-- Active User Sessions -->
-    <div class="border-t border-white/[0.06] pt-6" id="active-sessions">
+    <div class="card p-6" id="active-sessions">
       <div class="flex items-center justify-between mb-4">
         <div>
           <h2 class="text-sm font-semibold text-gray-300">Active Sessions ({{ active_sessions | length }})</h2>
@@ -453,9 +526,410 @@
       <p class="text-xs text-gray-500 py-3">No active sessions found.</p>
       {% endif %}
     </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- TAB 3: WORKSPACES                                                        -->
+  <!-- ========================================================================= -->
+  <div id="admin-panel-workspaces" class="admin-panel hidden space-y-6">
+    <!-- Workspaces -->
+    <div class="card p-6">
+      <h2 class="text-sm font-semibold text-gray-300 mb-4">Workspaces ({{ workspaces | length }})</h2>
+      {% if workspaces %}
+      <div class="space-y-1 mb-6">
+        {% for ws in workspaces %}
+        <div class="flex items-center gap-3 py-2 border-b border-white/[0.04] last:border-0">
+          <span class="w-7 h-7 rounded {% if ws.status == 'inactive' %}bg-amber-900/40{% else %}bg-blue-600/50{% endif %} shrink-0 flex items-center justify-center text-[11px] font-bold {% if ws.status == 'inactive' %}text-amber-500{% else %}text-blue-300{% endif %}">{{ ws.name[0] | upper }}</span>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-sm {% if ws.status == 'inactive' %}text-gray-500{% else %}text-gray-200{% endif %} truncate">{{ ws.name }}</span>
+              {% if ws.is_system %}
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/40 border border-blue-700/40 text-blue-400 shrink-0">System</span>
+              {% endif %}
+              {% if ws.status == 'inactive' %}
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/40 border border-amber-700/40 text-amber-500 shrink-0">Inactive</span>
+              {% endif %}
+            </div>
+            <div class="text-[11px] text-gray-500">
+              slug: {{ ws.slug }}
+              &middot; {{ ws.member_count }} member{{ 's' if ws.member_count != 1 else '' }}
+              &middot; {{ ws.owned_catalog_count }} catalog{{ 's' if ws.owned_catalog_count != 1 else '' }}
+              {% if ws.status == 'inactive' and ws.scheduled_purge_at %}
+              &middot; <span class="text-amber-600">Permanent deletion: {{ ws.scheduled_purge_at[:10] }}</span>
+              {% endif %}
+            </div>
+          </div>
+          <!-- Actions -->
+          {% if ws.is_system %}
+          <span class="text-[11px] text-gray-600 shrink-0 italic">protected</span>
+          {% elif ws.status == 'inactive' %}
+          <div class="flex items-center gap-2 shrink-0">
+            <form action="/settings/admin/workspaces/{{ ws.id }}/restore" method="post">
+              <button type="submit" class="text-xs px-2.5 py-1 rounded border border-emerald-700/50 text-emerald-500 hover:text-emerald-300 transition-colors">Restore</button>
+            </form>
+            <button onclick="openDeleteModal('{{ ws.id }}', '{{ ws.name | replace("'", "\\'") }}')"
+              class="text-xs px-2.5 py-1 rounded border border-red-800/50 text-red-500 hover:text-red-300 transition-colors">
+              Delete now
+            </button>
+          </div>
+          {% else %}
+          <div class="flex items-center gap-2 shrink-0">
+            {% if admin_settings.workspace_inactive_grace_period_days > 0 %}
+            <form action="/settings/admin/workspaces/{{ ws.id }}/mark-inactive" method="post"
+              onsubmit="return confirm('Mark workspace \'{{ ws.name | replace("'", "\\'") }}\' as inactive?\n\nIt and its catalogs will be permanently deleted in {{ admin_settings.workspace_inactive_grace_period_days }} day{{ 's' if admin_settings.workspace_inactive_grace_period_days != 1 else '' }}. You can restore it before then.')">
+              <button type="submit" class="text-xs px-2.5 py-1 rounded border border-gray-700 text-gray-500 hover:text-amber-400 hover:border-amber-600/50 transition-colors">Mark inactive</button>
+            </form>
+            {% endif %}
+            <button onclick="openDeleteModal('{{ ws.id }}', '{{ ws.name | replace("'", "\\'") }}')"
+              class="text-xs px-2.5 py-1 rounded border border-red-800/50 text-red-500 hover:text-red-300 transition-colors">
+              Delete now
+            </button>
+          </div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="text-sm text-gray-500 mb-4">No workspaces yet.</p>
+      {% endif %}
+
+      <!-- Create workspace -->
+      <h3 class="text-xs font-semibold text-gray-400 mb-3">Create workspace</h3>
+      <form action="/settings/admin/workspaces/create" method="post" class="space-y-3">
+        <div class="flex gap-2">
+          <input type="text" name="name" required placeholder="Workspace name"
+            class="flex-1 input-dark text-sm" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+          <button type="submit" class="btn-primary shrink-0">Create</button>
+        </div>
+        <input type="text" name="description" placeholder="Description (optional)"
+          class="w-full input-dark text-sm" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- TAB 4: VAULTS & SECURITY                                                 -->
+  <!-- ========================================================================= -->
+  <div id="admin-panel-vaults" class="admin-panel hidden space-y-6">
+    <!-- Secret Vaults & Cloud Providers -->
+    <div id="vault-settings" class="card p-6 space-y-6">
+      <div class="flex items-start justify-between">
+        <div>
+          <h2 class="text-sm font-semibold text-gray-300 mb-1">Secret Vaults & Cloud Providers</h2>
+          <p class="text-xs text-gray-500">
+            Configure external cloud vaults (Azure Key Vault, AWS Secrets Manager) and review all workspace secret scopes across Lake of Tears.
+          </p>
+        </div>
+        <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-950/60 text-emerald-400 border border-emerald-800/60">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+          Envelope Encryption Active
+        </span>
+      </div>
+
+      {% if vault_error %}
+      <div class="p-3 rounded-md bg-red-950/40 border border-red-800/60 text-red-300 text-xs">
+        {{ vault_error }}
+      </div>
+      {% endif %}
+
+      <!-- Provider Selection Pill / Tabs -->
+      <div class="space-y-4">
+        <div class="flex border-b border-white/[0.08] gap-4 text-xs font-medium">
+          <button type="button" onclick="switchVaultTab('internal')" id="tab-btn-internal" class="vault-tab-btn pb-2 border-b-2 border-blue-500 text-blue-400">
+            Internal Vault
+          </button>
+          <button type="button" onclick="switchVaultTab('azure')" id="tab-btn-azure" class="vault-tab-btn pb-2 border-b-2 border-transparent text-gray-400 hover:text-gray-200">
+            Azure Key Vault
+          </button>
+          <button type="button" onclick="switchVaultTab('aws')" id="tab-btn-aws" class="vault-tab-btn pb-2 border-b-2 border-transparent text-gray-400 hover:text-gray-200">
+            AWS Secrets Manager
+          </button>
+        </div>
+
+        <!-- Tab: Internal DB Vault -->
+        <div id="vault-tab-internal" class="vault-tab-panel space-y-3">
+          <div class="p-4 rounded-lg bg-white/[0.02] border border-white/[0.06] space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-medium text-gray-200">Internal Encrypted Database</span>
+              <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-emerald-950/60 text-emerald-300 border border-emerald-800/40 font-medium">Default & Ready</span>
+            </div>
+            <p class="text-xs text-gray-400">
+              Workspaces can immediately create and manage secrets without external cloud configuration. Secret values are envelope-encrypted using <strong>AES-256-GCM</strong> with <strong>HMAC-SHA256</strong> integrity tags and stored securely in Postgres.
+            </p>
+            <div class="text-[11px] text-gray-500 pt-1">
+              Master encryption key: derived from <code class="text-gray-400 font-mono">SECRET_KEY</code> or auto-generated runtime instance key.
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab: Azure Key Vault -->
+        {% set az = vault_providers | selectattr('provider', 'equalto', 'azure_keyvault') | first %}
+        {% set az_cfg = az.config if az else {} %}
+        <div id="vault-tab-azure" class="vault-tab-panel hidden space-y-4">
+          <form action="/settings/admin/vault-providers/azure_keyvault" method="post" id="vault-azure-form" class="space-y-4">
+            <div class="p-4 rounded-lg bg-white/[0.02] border border-white/[0.06] space-y-4">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h4 class="text-xs font-semibold text-gray-200">Azure Key Vault Integration</h4>
+                  <p class="text-[11px] text-gray-500">Allow workspaces to map secret scopes backed by an Azure Key Vault instance.</p>
+                </div>
+                <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+                  <input type="checkbox" name="enabled" value="true" {% if az and az.enabled %}checked{% endif %} class="rounded bg-gray-900 border-gray-700 text-blue-600 focus:ring-0" />
+                  <span>Enable Azure Key Vault</span>
+                </label>
+              </div>
+
+              <div class="space-y-3 pt-2">
+                <div>
+                  <label class="block text-xs text-gray-400 font-medium mb-1">Vault URL <span class="text-red-400">*</span></label>
+                  <input type="url" name="vault_url" value="{{ az_cfg.vault_url or '' }}" placeholder="https://my-keyvault.vault.azure.net/"
+                    class="w-full input-dark text-xs font-mono" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+                  <p class="text-[11px] text-gray-600 mt-1">The primary DNS endpoint of your Azure Key Vault.</p>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label class="block text-xs text-gray-400 font-medium mb-1">Tenant ID</label>
+                    <input type="text" name="tenant_id" value="{{ az_cfg.tenant_id or '' }}" placeholder="00000000-0000-0000-0000-000000000000"
+                      class="w-full input-dark text-xs font-mono" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+                  </div>
+                  <div>
+                    <label class="block text-xs text-gray-400 font-medium mb-1">Client ID (App ID)</label>
+                    <input type="text" name="client_id" value="{{ az_cfg.client_id or '' }}" placeholder="00000000-0000-0000-0000-000000000000"
+                      class="w-full input-dark text-xs font-mono" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+                  </div>
+                  <div>
+                    <label class="block text-xs text-gray-400 font-medium mb-1">Client Secret</label>
+                    <input type="password" name="client_secret" autocomplete="off"
+                      placeholder="{% if az_cfg.client_secret_configured %}Masked ({{ az_cfg.client_secret_masked }}){% else %}Optional if using Managed Identity{% endif %}"
+                      class="w-full input-dark text-xs font-mono" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+                    {% if az_cfg.client_secret_configured %}
+                    <p class="text-[10px] text-gray-500 mt-0.5">Leave blank to retain stored secret.</p>
+                    {% endif %}
+                  </div>
+                </div>
+
+                <div class="text-[11px] text-gray-500 p-2.5 rounded bg-blue-950/20 border border-blue-900/40 text-blue-300">
+                  <span class="font-medium text-blue-200">Authentication Note:</span> If Client ID and Secret are left blank, Lake of Tears will automatically authenticate via <code class="font-mono text-blue-200">DefaultAzureCredential</code> (AKS Workload Identity or Azure VM Managed Identity).
+                </div>
+              </div>
+
+              <div class="flex items-center justify-end gap-2 pt-3 border-t border-white/[0.04]">
+                <button type="button" onclick="testVaultProvider('azure_keyvault')" id="btn-test-azure"
+                  class="text-xs px-3 py-1.5 rounded-md border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition-colors">
+                  Test Connection
+                </button>
+                <button type="submit" class="btn-primary text-xs px-3 py-1.5">
+                  Save Azure Settings
+                </button>
+              </div>
+
+              <div id="vault-test-status-azure_keyvault" class="hidden text-xs p-3 rounded-md border" role="status"></div>
+            </div>
+          </form>
+        </div>
+
+        <!-- Tab: AWS Secrets Manager -->
+        {% set aws = vault_providers | selectattr('provider', 'equalto', 'aws_secrets_manager') | first %}
+        {% set aws_cfg = aws.config if aws else {} %}
+        <div id="vault-tab-aws" class="vault-tab-panel hidden space-y-4">
+          <form action="/settings/admin/vault-providers/aws_secrets_manager" method="post" id="vault-aws-form" class="space-y-4">
+            <div class="p-4 rounded-lg bg-white/[0.02] border border-white/[0.06] space-y-4">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h4 class="text-xs font-semibold text-gray-200">AWS Secrets Manager Integration</h4>
+                  <p class="text-[11px] text-gray-500">Allow workspaces to map secret scopes backed by AWS Secrets Manager.</p>
+                </div>
+                <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+                  <input type="checkbox" name="enabled" value="true" {% if aws and aws.enabled %}checked{% endif %} class="rounded bg-gray-900 border-gray-700 text-blue-600 focus:ring-0" />
+                  <span>Enable AWS Secrets Manager</span>
+                </label>
+              </div>
+
+              <div class="space-y-3 pt-2">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-xs text-gray-400 font-medium mb-1">AWS Region <span class="text-red-400">*</span></label>
+                    <input type="text" name="region_name" value="{{ aws_cfg.region_name or 'us-east-1' }}" placeholder="us-east-1"
+                      class="w-full input-dark text-xs font-mono" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+                  </div>
+                  <div>
+                    <label class="block text-xs text-gray-400 font-medium mb-1">Assume Role ARN (Optional)</label>
+                    <input type="text" name="role_arn" value="{{ aws_cfg.role_arn or '' }}" placeholder="arn:aws:iam::123456789012:role/LakeVaultReader"
+                      class="w-full input-dark text-xs font-mono" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-xs text-gray-400 font-medium mb-1">AWS Access Key ID</label>
+                    <input type="text" name="aws_access_key_id" value="{{ aws_cfg.aws_access_key_id or '' }}" placeholder="AKIA..."
+                      class="w-full input-dark text-xs font-mono" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+                  </div>
+                  <div>
+                    <label class="block text-xs text-gray-400 font-medium mb-1">AWS Secret Access Key</label>
+                    <input type="password" name="aws_secret_access_key" autocomplete="off"
+                      placeholder="{% if aws_cfg.aws_secret_access_key_configured %}Masked ({{ aws_cfg.aws_secret_access_key_masked }}){% else %}Optional if using EKS IRSA / IAM Roles{% endif %}"
+                      class="w-full input-dark text-xs font-mono" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+                    {% if aws_cfg.aws_secret_access_key_configured %}
+                    <p class="text-[10px] text-gray-500 mt-0.5">Leave blank to retain stored secret.</p>
+                    {% endif %}
+                  </div>
+                </div>
+
+                <div class="text-[11px] text-gray-500 p-2.5 rounded bg-blue-950/20 border border-blue-900/40 text-blue-300">
+                  <span class="font-medium text-blue-200">IAM Role & IRSA Note:</span> If static Access Keys are left blank, Lake of Tears defaults to AWS environment variables or Kubernetes EKS IAM Roles for Service Accounts (IRSA).
+                </div>
+              </div>
+
+              <div class="flex items-center justify-end gap-2 pt-3 border-t border-white/[0.04]">
+                <button type="button" onclick="testVaultProvider('aws_secrets_manager')" id="btn-test-aws"
+                  class="text-xs px-3 py-1.5 rounded-md border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition-colors">
+                  Test Connection
+                </button>
+                <button type="submit" class="btn-primary text-xs px-3 py-1.5">
+                  Save AWS Settings
+                </button>
+              </div>
+
+              <div id="vault-test-status-aws_secrets_manager" class="hidden text-xs p-3 rounded-md border" role="status"></div>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cross-Workspace Scopes Audit Inventory Table -->
+    <div class="card p-6 space-y-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <h3 class="text-sm font-semibold text-gray-300">Global Secret Scopes Inventory</h3>
+          <p class="text-xs text-gray-500">Audit of all secret scopes registered across all instance workspaces.</p>
+        </div>
+        <span class="text-xs text-gray-500 font-mono">{{ all_scopes | length }} Scopes Registered</span>
+      </div>
+
+      {% if all_scopes %}
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs border border-white/[0.06] rounded-lg overflow-hidden">
+          <thead class="bg-white/[0.04] text-gray-400 font-medium">
+            <tr>
+              <th class="px-3 py-2">Workspace</th>
+              <th class="px-3 py-2">Scope Name</th>
+              <th class="px-3 py-2">Backend Vault</th>
+              <th class="px-3 py-2 text-center">Keys</th>
+              <th class="px-3 py-2">Created</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/[0.04]">
+            {% for s in all_scopes %}
+            <tr class="hover:bg-white/[0.02]">
+              <td class="px-3 py-2 text-gray-300 font-medium">{{ s.workspace_name or 'Global' }}</td>
+              <td class="px-3 py-2 font-mono text-blue-300">{{ s.name }}</td>
+              <td class="px-3 py-2">
+                {% if s.backend_type == 'azure_kv' or s.backend_type == 'azure_keyvault' %}
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-sky-950/60 text-sky-300 border border-sky-800/40">Azure Key Vault</span>
+                {% elif s.backend_type == 'aws_sm' or s.backend_type == 'aws_secrets_manager' %}
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-amber-950/60 text-amber-300 border border-amber-800/40">AWS Secrets Manager</span>
+                {% else %}
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-gray-800 text-gray-300 border border-gray-700">Internal DB</span>
+                {% endif %}
+              </td>
+              <td class="px-3 py-2 text-center text-gray-400 font-mono">{{ s.key_count }}</td>
+              <td class="px-3 py-2 text-gray-500">{{ s.created_at[:10] if s.created_at else '-' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-xs text-gray-500 italic">No secret scopes created in any workspace yet.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- TAB 5: PLATFORM SETTINGS & AUTH                                          -->
+  <!-- ========================================================================= -->
+  <div id="admin-panel-platform" class="admin-panel hidden space-y-6">
+    <!-- Platform & Retention Settings -->
+    <div class="card p-6 space-y-6">
+      <div>
+        <h2 class="text-sm font-semibold text-gray-300 mb-1">Catalog Settings</h2>
+        <p class="text-xs text-gray-500 mb-5">Configure how catalog deletions behave across all workspaces.</p>
+        <form action="/settings/admin/catalog-settings" method="post" class="space-y-4">
+          <div>
+            <label class="block text-xs text-gray-400 font-medium mb-1">Soft Delete Grace Period (days)</label>
+            <p class="text-[11px] text-gray-600 mb-2">When a workspace admin deletes a catalog it enters a grace period before permanent deletion. Set to <code class="text-gray-500">0</code> to disable soft delete — deletions will be permanent immediately.</p>
+            <div class="flex items-center gap-3">
+              <input type="number" name="catalog_soft_delete_days" min="0" max="365" required
+                     value="{{ admin_settings.catalog_soft_delete_days }}"
+                     class="w-24 input-dark text-sm" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+              <span class="text-xs text-gray-500">days (0 = permanent deletion immediately)</span>
+            </div>
+          </div>
+          <div class="flex justify-end">
+            <button type="submit" class="btn-primary">Save catalog settings</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="border-t border-white/[0.06] pt-6">
+        <h2 class="text-sm font-semibold text-gray-300 mb-1">Workspace Retention Settings</h2>
+        <p class="text-xs text-gray-500 mb-5">Configure the grace period before an inactive workspace and its catalogs are permanently purged.</p>
+        <form action="/settings/admin/workspace-settings" method="post" class="space-y-4">
+          <div>
+            <label class="block text-xs text-gray-400 font-medium mb-1">Inactive Grace Period (days)</label>
+            <p class="text-[11px] text-gray-600 mb-2">When a workspace is marked inactive it enters a grace period. After this period it and all its catalogs are permanently purged. Set to <code class="text-gray-500">0</code> to disable workspace deactivation (requires immediate hard delete).</p>
+            <div class="flex items-center gap-3">
+              <input type="number" name="workspace_inactive_grace_period_days" min="0" max="365" required
+                     value="{{ admin_settings.workspace_inactive_grace_period_days }}"
+                     class="w-24 input-dark text-sm" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+              <span class="text-xs text-gray-500">days (0 = disable inactive state)</span>
+            </div>
+          </div>
+          <div class="flex justify-end">
+            <button type="submit" class="btn-primary">Save workspace settings</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="border-t border-white/[0.06] pt-6">
+        <h2 class="text-sm font-semibold text-gray-300 mb-1">Session Inactivity & Expiration</h2>
+        <p class="text-xs text-gray-500 mb-5">Configure automatic session termination and sliding idle timeouts for all platform users.</p>
+        <form action="/settings/admin/session-settings" method="post" class="space-y-5">
+          <div>
+            <label class="block text-xs text-gray-400 font-medium mb-1">Idle Inactivity Timeout</label>
+            <p class="text-[11px] text-gray-600 mb-2">Automatically logs a user out if no requests are received within this period. Set to <code class="text-gray-500">0</code> to disable idle logout (sessions will remain active until max lifetime).</p>
+            <div class="flex items-center gap-3">
+              <input type="number" name="session_inactivity_timeout_minutes" min="0" max="1440" required
+                     value="{{ admin_settings.session_inactivity_timeout_minutes | default(60) }}"
+                     oninput="updateInactivityHint(this.value)"
+                     class="w-24 input-dark text-sm" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+              <span class="text-xs text-gray-500">minutes (0 = disabled, max 1440)</span>
+            </div>
+            <p id="inactivity-hint" class="text-[11px] text-amber-500/80 mt-1.5 hidden"></p>
+          </div>
+          <div>
+            <label class="block text-xs text-gray-400 font-medium mb-1">Absolute Session Lifetime</label>
+            <p class="text-[11px] text-gray-600 mb-2">Maximum duration any session can exist before requiring re-authentication, regardless of activity.</p>
+            <div class="flex items-center gap-3">
+              <input type="number" name="session_max_hours" min="1" max="168" required
+                     value="{{ admin_settings.session_max_hours | default(24) }}"
+                     class="w-24 input-dark text-sm" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+              <span class="text-xs text-gray-500">hours (1–168)</span>
+            </div>
+            <p class="text-[11px] text-gray-600 mt-2">Changes take effect for new sessions — existing sessions are not immediately terminated.</p>
+          </div>
+          <div class="flex justify-end">
+            <button type="submit" class="btn-primary">Save session settings</button>
+          </div>
+        </form>
+      </div>
+    </div>
 
     <!-- Authentication & Identity Providers -->
-    <div class="border-t border-white/[0.06] pt-6" id="auth-settings">
+    <div class="card p-6 space-y-6" id="auth-settings">
       <div class="flex items-center justify-between gap-3 mb-1">
         <h2 class="text-sm font-semibold text-gray-300">Authentication & SSO</h2>
         {% if auth_overview %}
@@ -472,31 +946,22 @@
           {% endif %}
         {% endif %}
       </div>
-      <p class="text-xs text-gray-500 mb-5">
-        Overview of instance authentication status and connected Single Sign-On (SSO) identity providers configured via deployment settings (<code class="text-gray-400">AUTH_REGISTRATION_ENABLED</code> and provider environment variables).
+      <p class="text-xs text-gray-500 mb-4">
+        Lake of Tears supports Single Sign-On via Google, Apple, GitHub, and Microsoft. Providers are configured via environment variables and Helm values.
       </p>
 
-      {% if not auth_overview %}
-      <div class="text-xs px-3 py-2 rounded-md border border-amber-800/50 bg-amber-900/20 text-amber-300">
-        Authentication configuration could not be loaded from the backend.
-      </div>
-      {% else %}
+      {% if auth_overview %}
       <!-- Registration status explanation -->
-      <div class="mb-5 p-3 rounded-md bg-white/[0.02] border border-white/[0.06] text-xs">
+      <div class="p-3 rounded-lg bg-white/[0.02] border border-white/[0.06] text-xs space-y-1.5 mb-4">
         <div class="flex items-center justify-between">
-          <span class="text-gray-400">Public User Self-Registration:</span>
-          <span class="font-medium {% if auth_overview.registration_enabled %}text-emerald-400{% else %}text-amber-400{% endif %}">
-            {{ 'Enabled (Open)' if auth_overview.registration_enabled else 'Disabled (Restricted)' }}
-          </span>
+          <span class="text-gray-300 font-medium">User Self-Registration</span>
+          <span class="font-mono text-gray-400">{{ 'ENABLED' if auth_overview.registration_enabled else 'DISABLED' }}</span>
         </div>
-        <p class="text-[11px] text-gray-500 mt-1">
+        <p class="text-gray-500 text-[11px]">
           {% if auth_overview.registration_enabled %}
-          Anyone can sign up with an email and password or authenticate through configured SSO providers. To restrict access, set <code class="text-gray-400">AUTH_REGISTRATION_ENABLED=false</code> in your deployment environment.
+          Anyone can sign up and receive a personal workspace. Toggle with <code class="text-gray-400 font-mono">AUTH_REGISTRATION_ENABLED=false</code> in Helm values or backend environment.
           {% else %}
-          Open self-registration and new SSO account creation are disabled. Only existing accounts can sign in.
-          {% if auth_overview.user_count == 0 %}
-          <span class="text-amber-400">(First superadmin bootstrap is active because 0 users currently exist).</span>
-          {% endif %}
+          Only users explicitly invited by an administrator above can register or sign in via OAuth/SSO. Set <code class="text-gray-400 font-mono">AUTH_REGISTRATION_ENABLED=true</code> to reopen registration.
           {% endif %}
         </p>
       </div>
@@ -507,20 +972,29 @@
           <div class="text-[11px] font-medium text-gray-400 mb-0.5">OAuth 2.0 / OIDC Redirect (Callback) URI</div>
           <code id="auth-callback-url" class="text-xs text-blue-400 font-mono select-all truncate block">{{ auth_overview.base_url | default('http://localhost') }}/api/auth/oauth/{provider}/callback</code>
         </div>
-        <button type="button" onclick="navigator.clipboard.writeText('{{ auth_overview.base_url | default('http://localhost') }}/api/auth/oauth/{provider}/callback'); this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy', 1500);"
-          class="shrink-0 text-xs px-2.5 py-1 rounded bg-white/[0.08] hover:bg-white/[0.14] border border-white/10 text-gray-300 transition-colors">
+        <button type="button" onclick="navigator.clipboard.writeText(document.getElementById('auth-callback-url').textContent.trim()); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy', 1500);"
+          class="text-xs px-2.5 py-1.5 rounded border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500 transition-colors shrink-0">
           Copy
         </button>
       </div>
 
       <!-- Providers Grid -->
-      <h3 class="text-xs font-semibold text-gray-400 mb-3">Identity Providers</h3>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-2">
-        {% for p in auth_overview.providers | default([]) %}
-        <div class="p-3.5 rounded-lg bg-black/20 border border-white/[0.06] flex flex-col justify-between">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {% for p in auth_overview.providers %}
+        <div class="p-3.5 rounded-lg border {% if p.configured %}bg-white/[0.02] border-white/[0.08]{% else %}bg-black/20 border-white/[0.03]{% endif %} flex flex-col justify-between">
           <div>
-            <div class="flex items-center justify-between gap-2 mb-2">
-              <span class="text-xs font-semibold text-gray-200">{{ p.name }}</span>
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center gap-2">
+                <span class="w-6 h-6 rounded flex items-center justify-center font-bold text-xs
+                  {% if p.key == 'google' %}bg-red-950/80 text-red-300 border border-red-800/50
+                  {% elif p.key == 'apple' %}bg-neutral-800 text-gray-200 border border-neutral-700
+                  {% elif p.key == 'github' %}bg-purple-950/80 text-purple-300 border border-purple-800/50
+                  {% elif p.key == 'microsoft' %}bg-sky-950/80 text-sky-300 border border-sky-800/50
+                  {% else %}bg-gray-800 text-gray-300 border border-gray-700{% endif %}">
+                  {{ (p.name or p.key or 'P')[0] }}
+                </span>
+                <span class="text-xs font-semibold text-gray-200">{{ p.name }}</span>
+              </div>
               {% if p.configured %}
               <span class="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-900/40 border border-emerald-700/50 text-emerald-400">
                 <span class="w-1 h-1 rounded-full bg-emerald-400"></span>
@@ -538,31 +1012,38 @@
               {% if p.client_id_masked %}
               <div>Client ID: <span class="text-gray-300">{{ p.client_id_masked }}</span></div>
               {% endif %}
+              {% if p.details %}
               {% for k, v in p.details.items() %}
               <div>{{ k | capitalize }}: <span class="text-gray-300">{{ v }}</span></div>
               {% endfor %}
+              {% endif %}
             </div>
             {% endif %}
           </div>
 
+          {% if p.env_vars %}
           <div class="text-[10px] text-gray-500 border-t border-white/[0.04] pt-2 mt-1">
-            Env: <code class="text-gray-400">{{ p.env_vars | join(', ') }}</code>
+            Required: {% for ev in p.env_vars %}<code class="text-gray-400">{{ ev }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
           </div>
+          {% endif %}
         </div>
         {% endfor %}
       </div>
+      {% else %}
+      <p class="text-xs text-gray-500 italic">Auth configuration details unavailable.</p>
       {% endif %}
     </div>
 
-    <div class="border-t border-white/[0.06] pt-6" id="ai-settings">
+    <!-- AI Provider Configuration -->
+    <div class="card p-6 space-y-6" id="ai-settings">
       <div class="flex items-center justify-between gap-3 mb-1">
-        <h2 class="text-sm font-semibold text-gray-300">AI Provider</h2>
+        <h2 class="text-sm font-semibold text-gray-300">AI Provider Configuration</h2>
         {% if ai_provider %}
-        {% set active = ai_provider.providers | selectattr('name', 'equalto', ai_provider.active) | first %}
-        {% if active and active.configured %}
+        {% set active_p = (ai_provider.providers | selectattr('name', 'equalto', ai_provider.active) | list | first) if ai_provider.providers else None %}
+        {% if active_p and active_p.configured %}
         <span class="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-900/40 border border-emerald-700/50 text-emerald-400">
           <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-          {{ active.label }} configured
+          Active: {{ active_p.label }}
         </span>
         {% else %}
         <span class="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-900/40 border border-amber-700/50 text-amber-400">
@@ -573,7 +1054,7 @@
         {% endif %}
       </div>
       <p class="text-xs text-gray-500 mb-5">
-        Choose the model provider used across SQL AI Functions (<code class="text-gray-400">ai_query</code>, <code class="text-gray-400">ai_summarize</code>, <code class="text-gray-400">ai_classify</code>, <code class="text-gray-400">ai_extract</code>), the SQL Editor Assistant, Genie, semantic search and the embedding pipelines. Changes apply immediately, with no restart. Secrets are stored encrypted and are never shown again.
+        Choose the model provider used across SQL AI Functions (<code class="text-gray-400">ai_query</code>, <code class="text-gray-400">ai_summarize</code>, <code class="text-gray-400">ai_classify</code>, <code class="text-gray-400">ai_extract</code>), the SQL Editor Assistant, Genie, semantic search and the embedding pipelines.
       </p>
 
       {% if ai_error %}
@@ -663,577 +1144,701 @@
       {% endif %}
     </div>
   </div>
-
-  <!-- Secret Vaults & Cloud Providers -->
-  <div id="vault-settings" class="card p-6 space-y-6">
-    <div class="flex items-start justify-between">
-      <div>
-        <h2 class="text-sm font-semibold text-gray-300 mb-1">Secret Vaults & Cloud Providers</h2>
-        <p class="text-xs text-gray-500">
-          Configure external cloud vaults (Azure Key Vault, AWS Secrets Manager) and review all workspace secret scopes across Lake of Tears.
-        </p>
-      </div>
-      <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-950/60 text-emerald-400 border border-emerald-800/60">
-        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-        Envelope Encryption Active
-      </span>
-    </div>
-
-    {% if vault_error %}
-    <div class="p-3 rounded-md bg-red-950/40 border border-red-800/60 text-red-300 text-xs">
-      {{ vault_error }}
-    </div>
-    {% endif %}
-
-    <!-- Provider Selection Pill / Tabs -->
-    <div class="space-y-4">
-      <div class="flex border-b border-white/[0.08] gap-4 text-xs font-medium">
-        <button type="button" onclick="switchVaultTab('internal')" id="tab-btn-internal" class="vault-tab-btn pb-2 border-b-2 border-blue-500 text-blue-400">
-          Internal Vault
-        </button>
-        <button type="button" onclick="switchVaultTab('azure')" id="tab-btn-azure" class="vault-tab-btn pb-2 border-b-2 border-transparent text-gray-400 hover:text-gray-200">
-          Azure Key Vault
-        </button>
-        <button type="button" onclick="switchVaultTab('aws')" id="tab-btn-aws" class="vault-tab-btn pb-2 border-b-2 border-transparent text-gray-400 hover:text-gray-200">
-          AWS Secrets Manager
-        </button>
-      </div>
-
-      <!-- Tab: Internal DB Vault -->
-      <div id="vault-tab-internal" class="vault-tab-panel space-y-3">
-        <div class="p-4 rounded-lg bg-white/[0.02] border border-white/[0.06] space-y-2">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-medium text-gray-200">Internal Encrypted Database</span>
-            <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-emerald-950/60 text-emerald-300 border border-emerald-800/40 font-medium">Default & Ready</span>
-          </div>
-          <p class="text-xs text-gray-400">
-            Workspaces can immediately create and manage secrets without external cloud configuration. Secret values are envelope-encrypted using <strong>AES-256-GCM</strong> with <strong>HMAC-SHA256</strong> integrity tags and stored securely in Postgres.
-          </p>
-          <div class="text-[11px] text-gray-500 flex items-center gap-2 pt-1 font-mono">
-            <span>Algorithm: AES-256-GCM</span>
-            <span>·</span>
-            <span>Authentication: HMAC-SHA256</span>
-            <span>·</span>
-            <span>Redaction: Real-time dynamic masking</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Tab: Azure Key Vault -->
-      {% set az_item = (vault_providers | selectattr('provider', 'equalto', 'azure_keyvault') | first) if vault_providers else none %}
-      {% set az_conf = az_item.config if az_item else {} %}
-      <div id="vault-tab-azure" class="vault-tab-panel hidden space-y-4">
-        <form action="/settings/admin/vault-providers/azure_keyvault" method="post" id="vault-azure-form" class="space-y-4">
-          <p class="text-xs text-gray-400">
-            Connect to an Azure Key Vault resource. Workspace scopes configured with <code>azure_kv</code> will fetch and store secrets directly in this vault using Azure REST APIs.
-          </p>
-          <div class="space-y-3">
-            <div>
-              <label for="az-vault-url" class="block text-xs text-gray-400 font-medium mb-1">
-                Vault URI <span class="text-red-400">*</span>
-              </label>
-              <input id="az-vault-url" type="url" name="cfg__azure_keyvault__vault_url"
-                     value="{{ az_conf.get('vault_url') or '' }}"
-                     placeholder="https://my-keyvault.vault.azure.net/"
-                     class="w-full input-dark text-sm font-mono"
-                     style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
-            </div>
-
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label for="az-auth-mode" class="block text-xs text-gray-400 font-medium mb-1">Authentication Mode</label>
-                <select id="az-auth-mode" name="cfg__azure_keyvault__auth_mode"
-                        class="w-full bg-gray-800 border border-gray-700 text-gray-300 text-sm rounded-md px-3 py-2 focus:outline-none focus:border-blue-500">
-                  <option value="service_principal" {% if az_conf.get('auth_mode') == 'service_principal' or az_conf.get('client_id') %}selected{% endif %}>Service Principal (Client Secret)</option>
-                  <option value="default" {% if az_conf.get('auth_mode') == 'default' and not az_conf.get('client_id') %}selected{% endif %}>DefaultAzureCredential (Workload Identity / Managed Identity)</option>
-                </select>
-              </div>
-              <div>
-                <label for="az-tenant-id" class="block text-xs text-gray-400 font-medium mb-1">Tenant ID</label>
-                <input id="az-tenant-id" type="text" name="cfg__azure_keyvault__tenant_id"
-                       value="{{ az_conf.get('tenant_id') or '' }}"
-                       placeholder="00000000-0000-0000-0000-000000000000"
-                       class="w-full input-dark text-sm font-mono"
-                       style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
-              </div>
-            </div>
-
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label for="az-client-id" class="block text-xs text-gray-400 font-medium mb-1">Client ID (App ID)</label>
-                <input id="az-client-id" type="text" name="cfg__azure_keyvault__client_id"
-                       value="{{ az_conf.get('client_id') or '' }}"
-                       placeholder="00000000-0000-0000-0000-000000000000"
-                       class="w-full input-dark text-sm font-mono"
-                       style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
-              </div>
-              <div>
-                <label for="az-client-secret" class="block text-xs text-gray-400 font-medium mb-1">Client Secret</label>
-                <input id="az-client-secret" type="password" name="cfg__azure_keyvault__client_secret"
-                       autocomplete="off"
-                       placeholder="{% if az_conf.get('client_secret') %}•••••••• (leave blank to keep){% else %}Client secret key{% endif %}"
-                       class="w-full input-dark text-sm font-mono"
-                       style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
-                {% if az_conf.get('client_secret') %}
-                <p class="text-[11px] text-gray-500 mt-1">Stored: <code class="text-gray-300">{{ az_conf.get('client_secret') }}</code></p>
-                {% endif %}
-              </div>
-            </div>
-          </div>
-
-          <div class="flex items-center justify-end gap-2 pt-2">
-            {% set az_has_cfg = az_conf.get('vault_url') %}
-            <button type="button" id="vault-az-test-btn" onclick="testVaultProvider('azure_keyvault')"
-                    {% if not az_has_cfg %}disabled{% endif %}
-                    class="text-xs px-3 py-2 rounded-md border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-              Test Connection
-            </button>
-            <button type="submit" class="btn-primary text-xs">Save Azure Vault</button>
-          </div>
-        </form>
-        <div id="vault-azure-test-status" class="hidden mt-3 text-xs px-3 py-2 rounded-md border" role="status"></div>
-      </div>
-
-      <!-- Tab: AWS Secrets Manager -->
-      {% set aws_item = (vault_providers | selectattr('provider', 'equalto', 'aws_secrets_manager') | first) if vault_providers else none %}
-      {% set aws_conf = aws_item.config if aws_item else {} %}
-      <div id="vault-tab-aws" class="vault-tab-panel hidden space-y-4">
-        <form action="/settings/admin/vault-providers/aws_secrets_manager" method="post" id="vault-aws-form" class="space-y-4">
-          <p class="text-xs text-gray-400">
-            Connect to AWS Secrets Manager. Workspace scopes configured with <code>aws_sm</code> will read and write secrets within AWS using IAM credentials or IRSA.
-          </p>
-          <div class="space-y-3">
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label for="aws-region" class="block text-xs text-gray-400 font-medium mb-1">
-                  AWS Region <span class="text-red-400">*</span>
-                </label>
-                <input id="aws-region" type="text" name="cfg__aws_secrets_manager__region_name"
-                       value="{{ aws_conf.get('region_name') or 'us-east-1' }}"
-                       placeholder="us-east-1"
-                       class="w-full input-dark text-sm font-mono"
-                       style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
-              </div>
-              <div>
-                <label for="aws-prefix" class="block text-xs text-gray-400 font-medium mb-1">Secret Key Prefix</label>
-                <input id="aws-prefix" type="text" name="cfg__aws_secrets_manager__prefix"
-                       value="{{ aws_conf.get('prefix') or '' }}"
-                       placeholder="e.g. lake-of-tears/ (optional)"
-                       class="w-full input-dark text-sm font-mono"
-                       style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
-              </div>
-            </div>
-
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label for="aws-access-key" class="block text-xs text-gray-400 font-medium mb-1">AWS Access Key ID</label>
-                <input id="aws-access-key" type="text" name="cfg__aws_secrets_manager__aws_access_key_id"
-                       value="{{ aws_conf.get('aws_access_key_id') or '' }}"
-                       placeholder="AKIAIOSFODNN7EXAMPLE"
-                       class="w-full input-dark text-sm font-mono"
-                       style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
-              </div>
-              <div>
-                <label for="aws-secret-key" class="block text-xs text-gray-400 font-medium mb-1">AWS Secret Access Key</label>
-                <input id="aws-secret-key" type="password" name="cfg__aws_secrets_manager__aws_secret_access_key"
-                       autocomplete="off"
-                       placeholder="{% if aws_conf.get('aws_secret_access_key') %}•••••••• (leave blank to keep){% else %}Secret access key{% endif %}"
-                       class="w-full input-dark text-sm font-mono"
-                       style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
-                {% if aws_conf.get('aws_secret_access_key') %}
-                <p class="text-[11px] text-gray-500 mt-1">Stored: <code class="text-gray-300">{{ aws_conf.get('aws_secret_access_key') }}</code></p>
-                {% endif %}
-              </div>
-            </div>
-
-            <div>
-              <label for="aws-role-arn" class="block text-xs text-gray-400 font-medium mb-1">IAM Role ARN (Optional AssumeRole)</label>
-              <input id="aws-role-arn" type="text" name="cfg__aws_secrets_manager__role_arn"
-                     value="{{ aws_conf.get('role_arn') or '' }}"
-                     placeholder="arn:aws:iam::123456789012:role/LakeOfTearsSecretsRole"
-                     class="w-full input-dark text-sm font-mono"
-                     style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
-            </div>
-          </div>
-
-          <div class="flex items-center justify-end gap-2 pt-2">
-            {% set aws_has_cfg = aws_conf.get('region_name') and (aws_conf.get('aws_access_key_id') or aws_conf.get('role_arn') or (aws_item and aws_item.is_configured)) %}
-            <button type="button" id="vault-aws-test-btn" onclick="testVaultProvider('aws_secrets_manager')"
-                    {% if not aws_has_cfg %}disabled{% endif %}
-                    class="text-xs px-3 py-2 rounded-md border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-              Test Connection
-            </button>
-            <button type="submit" class="btn-primary text-xs">Save AWS Vault</button>
-          </div>
-        </form>
-        <div id="vault-aws-test-status" class="hidden mt-3 text-xs px-3 py-2 rounded-md border" role="status"></div>
-      </div>
-    </div>
-
-    <!-- Cross-Workspace Scopes Audit Inventory Table -->
-    <div class="pt-4 border-t border-white/[0.06]">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="text-xs font-semibold text-gray-300 uppercase tracking-wider">Cross-Workspace Secret Scopes Audit</h3>
-        <span class="text-xs text-gray-500">{{ all_scopes | length }} active scope{% if (all_scopes | length) != 1 %}s{% endif %}</span>
-      </div>
-      {% if all_scopes %}
-      <div class="overflow-x-auto">
-        <table class="w-full text-left text-xs border border-white/[0.06] rounded-lg overflow-hidden">
-          <thead class="bg-white/[0.04] text-gray-400 font-medium">
-            <tr>
-              <th class="px-3 py-2">Workspace</th>
-              <th class="px-3 py-2">Scope Name</th>
-              <th class="px-3 py-2">Backend Vault</th>
-              <th class="px-3 py-2 text-center">Keys</th>
-              <th class="px-3 py-2">Created</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-white/[0.04]">
-            {% for s in all_scopes %}
-            <tr class="hover:bg-white/[0.02]">
-              <td class="px-3 py-2 text-gray-300 font-medium">{{ s.workspace_name or 'Global' }}</td>
-              <td class="px-3 py-2 font-mono text-blue-300">{{ s.name }}</td>
-              <td class="px-3 py-2">
-                {% if s.backend_type == 'azure_kv' or s.backend_type == 'azure_keyvault' %}
-                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-sky-950/60 text-sky-300 border border-sky-800/40">Azure Key Vault</span>
-                {% elif s.backend_type == 'aws_sm' or s.backend_type == 'aws_secrets_manager' %}
-                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-amber-950/60 text-amber-300 border border-amber-800/40">AWS Secrets Manager</span>
-                {% else %}
-                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-gray-800 text-gray-300 border border-gray-700">Internal DB</span>
-                {% endif %}
-              </td>
-              <td class="px-3 py-2 text-center text-gray-400 font-mono">{{ s.key_count }}</td>
-              <td class="px-3 py-2 text-gray-500">{{ s.created_at[:10] if s.created_at else '-' }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      {% else %}
-      <p class="text-xs text-gray-500 italic">No secret scopes created in any workspace yet.</p>
-      {% endif %}
-    </div>
-  </div>
-
-
-  <script>
-  function updateInactivityHint(val) {
-    const hint = document.getElementById('inactivity-hint');
-    const n = parseInt(val, 10);
-    if (isNaN(n) || n === 0) { hint.classList.add('hidden'); return; }
-    hint.classList.remove('hidden');
-    if (n < 15 || n > 480) {
-      hint.textContent = 'Must be 0 (disabled) or between 15 and 480 minutes.';
-      hint.className = 'text-xs text-red-400 mt-2';
-    } else {
-      const h = Math.floor(n / 60), m = n % 60;
-      const label = h > 0 ? (h + 'h' + (m > 0 ? ' ' + m + 'm' : '')) : m + 'm';
-      hint.textContent = 'Warning shown 5 minutes before sign-out. Idle users signed out after ' + label + '.';
-      hint.className = 'text-xs text-blue-500 mt-2';
-    }
-  }
-
-  function aiProviderChanged() {
-    const chosen = document.getElementById('ai-provider-select').value;
-    document.querySelectorAll('.ai-provider-fields').forEach(function (box) {
-      const on = box.dataset.provider === chosen;
-      box.classList.toggle('hidden', !on);
-      box.disabled = !on;
-    });
-    document.getElementById('ai-test-status').classList.add('hidden');
-  }
-
-  async function testAiProvider() {
-    const chosen = document.getElementById('ai-provider-select').value;
-    const btn = document.getElementById('ai-test-btn');
-    const box = document.getElementById('ai-test-status');
-    const prefix = 'cfg__' + chosen + '__';
-    const config = {};
-    document.querySelectorAll('.ai-provider-fields[data-provider="' + chosen + '"] [name^="' + prefix + '"]').forEach(function (el) {
-      config[el.name.slice(prefix.length)] = el.value;
-    });
-    const paint = function (kind, text) {
-      const colours = {
-        info: 'border-blue-800/50 bg-blue-900/20 text-blue-300',
-        ok: 'border-emerald-800/50 bg-emerald-900/20 text-emerald-300',
-        bad: 'border-red-800/50 bg-red-900/20 text-red-300'
-      };
-      box.className = 'mt-3 text-xs px-3 py-2 rounded-md border ' + colours[kind];
-      box.textContent = text;
-    };
-    btn.disabled = true;
-    btn.textContent = 'Testing...';
-    paint('info', 'Testing the entered settings (nothing is saved)...');
-    try {
-      const resp = await fetch('/settings/admin/ai-provider/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider: chosen, config: config })
-      });
-      const data = await resp.json();
-      const lines = [(data.ok ? '✓ ' : '✕ ') + (data.message || (data.ok ? 'Connected.' : 'Connection failed.'))];
-      if (data.chat) {
-        lines.push('Chat: ' + (data.chat.ok ? 'OK' : 'failed') + ' · ' + data.chat.model +
-          (data.chat.latency_ms != null ? ' · ' + data.chat.latency_ms + ' ms' : ''));
-      }
-      if (data.embedding) {
-        lines.push('Embeddings: ' + (data.embedding.ok ? 'OK' : 'failed') + ' · ' + data.embedding.model +
-          (data.embedding.dimension ? ' · ' + data.embedding.dimension + ' dimensions' : '') +
-          (data.embedding.latency_ms != null ? ' · ' + data.embedding.latency_ms + ' ms' : ''));
-      }
-      paint(data.ok ? 'ok' : 'bad', lines.join('\n'));
-      box.style.whiteSpace = 'pre-line';
-    } catch (err) {
-      paint('bad', '✕ Could not run the test: ' + err);
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Test Connection';
-    }
-  }
-
-  function switchVaultTab(tab) {
-    document.querySelectorAll('.vault-tab-btn').forEach(btn => {
-      btn.classList.remove('border-blue-500', 'text-blue-400');
-      btn.classList.add('border-transparent', 'text-gray-400');
-    });
-    document.querySelectorAll('.vault-tab-panel').forEach(panel => {
-      panel.classList.add('hidden');
-    });
-    const activeBtn = document.getElementById('tab-btn-' + tab);
-    const activePanel = document.getElementById('vault-tab-' + tab);
-    if (activeBtn) {
-      activeBtn.classList.add('border-blue-500', 'text-blue-400');
-      activeBtn.classList.remove('border-transparent', 'text-gray-400');
-    }
-    if (activePanel) {
-      activePanel.classList.remove('hidden');
-    }
-  }
-
-  async function testVaultProvider(provider) {
-    const isAzure = provider === 'azure_keyvault';
-    const btn = document.getElementById(isAzure ? 'vault-az-test-btn' : 'vault-aws-test-btn');
-    const box = document.getElementById(isAzure ? 'vault-azure-test-status' : 'vault-aws-test-status');
-    const prefix = 'cfg__' + provider + '__';
-    const config = {};
-    const form = document.getElementById(isAzure ? 'vault-azure-form' : 'vault-aws-form');
-    if (form) {
-      const inputs = form.querySelectorAll('[name^="' + prefix + '"]');
-      inputs.forEach(el => {
-        config[el.name.slice(prefix.length)] = el.value.trim();
-      });
-    }
-
-    const paint = function(kind, text) {
-      const colours = {
-        info: 'border-blue-800/50 bg-blue-900/20 text-blue-300',
-        ok: 'border-emerald-800/50 bg-emerald-900/20 text-emerald-300',
-        bad: 'border-red-800/50 bg-red-900/20 text-red-300'
-      };
-      box.className = 'mt-3 text-xs px-3 py-2 rounded-md border ' + colours[kind];
-      box.textContent = text;
-      box.classList.remove('hidden');
-    };
-
-    btn.disabled = true;
-    btn.textContent = 'Testing...';
-    paint('info', 'Testing connection to ' + (isAzure ? 'Azure Key Vault' : 'AWS Secrets Manager') + '...');
-
-    try {
-      const resp = await fetch('/settings/admin/vault-providers/' + provider + '/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ config: config })
-      });
-      const data = await resp.json();
-      if (data.success) {
-        paint('ok', '✓ ' + (data.message || 'Connected successfully.'));
-      } else {
-        paint('bad', '✕ ' + (data.message || 'Connection test failed.'));
-      }
-    } catch (err) {
-      paint('bad', '✕ Could not reach server: ' + err);
-    } finally {
-      btn.textContent = 'Test Connection';
-      updateVaultTestButtons();
-    }
-  }
-
-  function updateVaultTestButtons() {
-    const azUrl = (document.getElementById('az-vault-url')?.value || '').trim();
-    const azBtn = document.getElementById('vault-az-test-btn');
-    if (azBtn) {
-      azBtn.disabled = !azUrl;
-    }
-
-    const awsRegion = (document.getElementById('aws-region')?.value || '').trim();
-    const awsKey = (document.getElementById('aws-access-key')?.value || '').trim();
-    const awsSecret = (document.getElementById('aws-secret-key')?.value || '').trim();
-    const awsRole = (document.getElementById('aws-role-arn')?.value || '').trim();
-    const awsHasStored = {{ 'true' if aws_conf.get('aws_secret_access_key') or (aws_item and aws_item.is_configured) else 'false' }};
-    const awsBtn = document.getElementById('vault-aws-test-btn');
-    if (awsBtn) {
-      const hasAuth = (awsKey && (awsSecret || awsHasStored)) || awsRole || awsHasStored;
-      awsBtn.disabled = !(awsRegion && hasAuth);
-    }
-  }
-
-  document.getElementById('vault-azure-form')?.addEventListener('input', updateVaultTestButtons);
-  document.getElementById('vault-azure-form')?.addEventListener('change', updateVaultTestButtons);
-  document.getElementById('vault-aws-form')?.addEventListener('input', updateVaultTestButtons);
-  document.getElementById('vault-aws-form')?.addEventListener('change', updateVaultTestButtons);
-  updateVaultTestButtons();
-  </script>
 </div>
 
-<!-- Hard-delete confirmation modal -->
-<div id="ws-delete-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70">
-  <div class="bg-[#1a1a1a] border border-white/10 rounded-xl shadow-2xl w-full max-w-md p-6">
-    <h2 class="text-base font-semibold text-gray-200 mb-1">Delete workspace "<span id="ws-delete-name"></span>"?</h2>
-    <div class="flex items-start gap-2 mt-3 mb-4 p-3 rounded-md bg-red-900/20 border border-red-800/40">
-      <svg class="w-4 h-4 text-red-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
-      <div class="text-xs text-red-400">
-        <span class="font-semibold">This action is permanent and cannot be undone.</span>
-        All catalogs owned by this workspace will be deleted.
+<!-- ========================================================================= -->
+<!-- SERVICE ACTION CONFIRMATION MODAL                                         -->
+<!-- ========================================================================= -->
+<div id="service-confirm-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+  <div class="bg-gray-900 border border-gray-700 rounded-xl max-w-md w-full p-6 shadow-2xl space-y-4">
+    <div class="flex items-start gap-3">
+      <div id="service-confirm-icon-box" class="w-10 h-10 rounded-full flex items-center justify-center shrink-0">
+        <svg id="service-confirm-icon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"></svg>
+      </div>
+      <div>
+        <h3 id="service-confirm-title" class="text-base font-semibold text-gray-100">Confirm Action</h3>
+        <p id="service-confirm-msg" class="text-xs text-gray-400 mt-1 leading-relaxed">
+          Are you sure you want to proceed with this service lifecycle action?
+        </p>
       </div>
     </div>
-    <p class="text-xs text-gray-400 mb-2">Type the workspace name to confirm:</p>
-    <input id="ws-delete-confirm-input" type="text" autocomplete="off" placeholder=""
-      oninput="checkDeleteConfirm()"
-      class="w-full input-dark text-sm mb-4" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
-    <form id="ws-delete-form" method="post" action="">
-      <input type="hidden" name="confirm_name" id="ws-delete-hidden-name" />
-      <div class="flex justify-end gap-3">
-        <button type="button" onclick="closeDeleteModal()" class="text-sm px-4 py-2 rounded-md border border-gray-700 text-gray-400 hover:text-gray-200 transition-colors">Cancel</button>
-        <button type="submit" id="ws-delete-submit" disabled
-          class="text-sm px-4 py-2 rounded-md bg-red-700/50 border border-red-600/50 text-red-300 cursor-not-allowed transition-colors">
-          Delete permanently
-        </button>
+
+    <div class="p-3 rounded-lg bg-black/30 border border-white/[0.04] text-xs space-y-1">
+      <div class="flex items-center justify-between">
+        <span class="text-gray-500">Target Service:</span>
+        <span id="service-confirm-target" class="text-gray-200 font-medium"></span>
       </div>
+      <div class="flex items-center justify-between">
+        <span class="text-gray-500">Operation:</span>
+        <span id="service-confirm-action" class="font-mono uppercase text-blue-400 font-semibold"></span>
+      </div>
+    </div>
+
+    <div class="flex justify-end gap-2 pt-2">
+      <button type="button" onclick="closeServiceConfirmModal()"
+        class="text-xs px-3 py-2 rounded-md border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500 transition-colors">
+        Cancel
+      </button>
+      <button type="button" id="service-confirm-submit-btn" onclick="executeConfirmedServiceAction()"
+        class="text-xs px-4 py-2 rounded-md font-medium text-white transition-colors flex items-center gap-1.5">
+        <svg id="service-confirm-btn-spinner" class="hidden w-3.5 h-3.5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+        </svg>
+        <span id="service-confirm-btn-label">Confirm</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================================================= -->
+<!-- HARD-DELETE CONFIRMATION MODAL                                           -->
+<!-- ========================================================================= -->
+<div id="ws-delete-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+  <div class="bg-gray-900 border border-gray-700 rounded-xl max-w-md w-full p-6 shadow-2xl space-y-4">
+    <div class="flex items-start gap-3">
+      <div class="w-10 h-10 rounded-full bg-red-950/60 border border-red-800/60 flex items-center justify-center text-red-400 shrink-0">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+        </svg>
+      </div>
+      <div>
+        <h3 class="text-base font-semibold text-gray-100">Permanently delete workspace?</h3>
+        <p class="text-xs text-gray-400 mt-1 leading-relaxed">
+          This will permanently delete the workspace and <strong class="text-red-400">all catalogs, schemas, tables, and data</strong> belonging to it. This cannot be undone.
+        </p>
+      </div>
+    </div>
+
+    <div class="p-3 rounded-lg bg-red-950/20 border border-red-900/40 text-xs text-red-300/80">
+      To confirm, type the workspace name exactly: <strong id="ws-delete-name" class="text-white font-mono block mt-1 select-all"></strong>
+    </div>
+
+    <div>
+      <input type="text" id="ws-delete-confirm-input" placeholder="Type workspace name to confirm"
+        oninput="checkDeleteConfirm()"
+        class="w-full input-dark text-sm px-3 py-2 rounded bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-red-500 font-mono" />
+    </div>
+
+    <form id="ws-delete-form" method="post" class="flex justify-end gap-2 pt-2">
+      <input type="hidden" name="confirmed_name" id="ws-delete-hidden-name" value="" />
+      <button type="button" onclick="closeDeleteModal()"
+        class="text-sm px-4 py-2 rounded-md border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500 transition-colors">
+        Cancel
+      </button>
+      <button type="submit" id="ws-delete-submit" disabled
+        class="text-sm px-4 py-2 rounded-md bg-red-700/20 border border-red-800/40 text-red-600 cursor-not-allowed transition-colors">
+        Permanently delete
+      </button>
     </form>
   </div>
 </div>
 
 <script>
-let _wsDeleteExpected = '';
+// =============================================================================
+// TAB NAVIGATION SYSTEM
+// =============================================================================
+const ADMIN_TABS = ['services', 'users', 'workspaces', 'vaults', 'platform'];
 
-const ALL_ADDITIONAL_WORKSPACES = [
+function switchAdminTab(tabName) {
+  if (!ADMIN_TABS.includes(tabName)) {
+    tabName = 'services';
+  }
+
+  // Update Buttons
+  ADMIN_TABS.forEach(t => {
+    const btn = document.getElementById('admin-tab-btn-' + t);
+    const panel = document.getElementById('admin-panel-' + t);
+    if (!btn || !panel) return;
+
+    if (t === tabName) {
+      btn.className = 'admin-tab-btn flex items-center gap-2 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap border-blue-500 text-blue-400';
+      panel.classList.remove('hidden');
+    } else {
+      btn.className = 'admin-tab-btn flex items-center gap-2 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap border-transparent text-gray-400 hover:text-gray-200';
+      panel.classList.add('hidden');
+    }
+  });
+
+  // URL Hash Sync
+  if (window.location.hash !== '#' + tabName) {
+    history.replaceState(null, '', '#' + tabName);
+  }
+
+  // Handle polling lifecycle
+  if (tabName === 'services') {
+    startAutoPoll();
+  } else {
+    stopAutoPoll();
+  }
+}
+
+// Initial Tab Routing on load
+window.addEventListener('DOMContentLoaded', () => {
+  const hash = (window.location.hash || '').replace('#', '');
+  const urlParam = new URLSearchParams(window.location.search).get('tab');
+  const target = urlParam || hash;
+
+  if (target === 'invitations' || target === 'active-sessions' || target === 'users') {
+    switchAdminTab('users');
+  } else if (target === 'workspaces') {
+    switchAdminTab('workspaces');
+  } else if (target === 'vault-settings' || target === 'vaults') {
+    switchAdminTab('vaults');
+  } else if (target === 'platform' || target === 'settings' || target === 'auth-settings' || target === 'ai-settings') {
+    switchAdminTab('platform');
+  } else {
+    switchAdminTab('services');
+  }
+});
+
+// =============================================================================
+// SERVICES REAL-TIME OBSERVABILITY & LIFECYCLE MANAGEMENT
+// =============================================================================
+let _autoPollTimer = null;
+let _pendingServiceAction = null;
+
+function toggleAutoPoll(enabled) {
+  const dot = document.getElementById('autopoll-pulse-dot');
+  if (enabled) {
+    if (dot) dot.className = 'w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse';
+    startAutoPoll();
+  } else {
+    if (dot) dot.className = 'w-1.5 h-1.5 rounded-full bg-gray-600';
+    stopAutoPoll();
+  }
+}
+
+function startAutoPoll() {
+  stopAutoPoll();
+  const toggle = document.getElementById('services-autopoll-toggle');
+  if (!toggle || !toggle.checked) return;
+
+  _autoPollTimer = setInterval(() => {
+    // Only poll if tab is services and document is visible
+    if (!document.hidden && !document.getElementById('admin-panel-services').classList.contains('hidden')) {
+      refreshServices(false);
+    }
+  }, 10000);
+}
+
+function stopAutoPoll() {
+  if (_autoPollTimer) {
+    clearInterval(_autoPollTimer);
+    _autoPollTimer = null;
+  }
+}
+
+async function refreshServices(manual = false) {
+  const spinner = document.getElementById('services-refresh-spinner');
+  if (manual && spinner) {
+    spinner.classList.add('animate-spin');
+  }
+
+  try {
+    const res = await fetch('/settings/admin/services');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    renderServicesOverview(data);
+  } catch (err) {
+    console.error('Failed to refresh services:', err);
+  } finally {
+    if (manual && spinner) {
+      setTimeout(() => spinner.classList.remove('animate-spin'), 400);
+    }
+  }
+}
+
+function renderServicesOverview(data) {
+  if (!data) return;
+
+  // Update Health Badge Count
+  const countEl = document.getElementById('services-health-count');
+  const badgeEl = document.getElementById('services-health-badge');
+  if (countEl && badgeEl) {
+    const healthy = data.healthy_count || 0;
+    const total = data.total_services || 0;
+    countEl.textContent = healthy + ' / ' + total + ' Healthy';
+    if (healthy === total && total > 0) {
+      badgeEl.className = 'inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-950/60 text-emerald-400 border border-emerald-800/60';
+    } else {
+      badgeEl.className = 'inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium bg-amber-950/60 text-amber-400 border border-amber-800/60';
+    }
+  }
+
+  // Update Last Updated Timestamp
+  const updatedEl = document.getElementById('services-last-updated');
+  if (updatedEl) {
+    const now = new Date();
+    updatedEl.textContent = 'Updated: ' + now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
+  // Update Individual Service Cards
+  const services = data.services || [];
+  services.forEach(s => {
+    // Status Badge
+    const badgeContainer = document.getElementById('service-badge-' + s.id);
+    if (badgeContainer) {
+      badgeContainer.innerHTML = getStatusBadgeHtml(s.status);
+    }
+
+    // Metrics
+    const replicasEl = document.getElementById('service-replicas-' + s.id);
+    if (replicasEl) replicasEl.textContent = s.ready_replicas + ' / ' + s.desired_replicas;
+
+    const restartsEl = document.getElementById('service-restarts-' + s.id);
+    if (restartsEl) restartsEl.textContent = s.restarts;
+
+    const uptimeEl = document.getElementById('service-uptime-' + s.id);
+    if (uptimeEl) uptimeEl.textContent = s.uptime || '—';
+
+    const limitsEl = document.getElementById('service-limits-' + s.id);
+    if (limitsEl) limitsEl.textContent = (s.cpu_limit || '—') + ' / ' + (s.memory_limit || '—');
+
+    // Action Controls
+    const actionsContainer = document.getElementById('service-actions-' + s.id);
+    if (actionsContainer) {
+      actionsContainer.innerHTML = getServiceActionsHtml(s);
+    }
+  });
+}
+
+function getStatusBadgeHtml(status) {
+  if (status === 'running') {
+    return `<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-950/60 text-emerald-400 border border-emerald-800/60">
+      <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+      Running
+    </span>`;
+  } else if (status === 'stopped') {
+    return `<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium bg-gray-900 text-gray-400 border border-gray-700">
+      <span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>
+      Stopped
+    </span>`;
+  } else if (status === 'restarting') {
+    return `<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium bg-amber-950/60 text-amber-400 border border-amber-800/60">
+      <span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
+      Restarting
+    </span>`;
+  } else {
+    return `<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium bg-red-950/60 text-red-400 border border-red-800/60">
+      <span class="w-1.5 h-1.5 rounded-full bg-red-400"></span>
+      ${status.charAt(0).toUpperCase() + status.slice(1)}
+    </span>`;
+  }
+}
+
+function getServiceActionsHtml(s) {
+  if (s.status === 'stopped') {
+    return `<button type="button" onclick="promptServiceAction('${s.id}', '${s.display_name}', 'start')"
+      class="w-full text-xs px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium transition-colors flex items-center justify-center gap-1.5">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/></svg>
+      Start Service
+    </button>`;
+  } else {
+    const stopButtonHtml = s.is_core
+      ? `<button type="button" disabled title="Core services cannot be stopped to prevent instance lock-out"
+          class="text-xs px-2.5 py-1.5 rounded border border-gray-800 text-gray-600 cursor-not-allowed flex items-center gap-1">
+          Stop
+        </button>`
+      : `<button type="button" onclick="promptServiceAction('${s.id}', '${s.display_name}', 'stop')"
+          class="text-xs px-2.5 py-1.5 rounded border border-red-900/60 text-red-400 hover:text-red-300 hover:border-red-700/80 transition-colors flex items-center gap-1">
+          Stop
+        </button>`;
+
+    return `<button type="button" onclick="promptServiceAction('${s.id}', '${s.display_name}', 'restart')"
+      class="flex-1 text-xs px-2.5 py-1.5 rounded border border-gray-700 hover:border-gray-500 text-gray-300 hover:text-white transition-colors flex items-center justify-center gap-1.5">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+      Restart
+    </button>
+    ${stopButtonHtml}`;
+  }
+}
+
+// Confirmation Dialog Modal
+function promptServiceAction(serviceId, displayName, action) {
+  _pendingServiceAction = { serviceId, displayName, action };
+
+  const modal = document.getElementById('service-confirm-modal');
+  const title = document.getElementById('service-confirm-title');
+  const msg = document.getElementById('service-confirm-msg');
+  const target = document.getElementById('service-confirm-target');
+  const op = document.getElementById('service-confirm-action');
+  const submitBtn = document.getElementById('service-confirm-submit-btn');
+  const label = document.getElementById('service-confirm-btn-label');
+  const iconBox = document.getElementById('service-confirm-icon-box');
+  const icon = document.getElementById('service-confirm-icon');
+
+  target.textContent = displayName + ' (' + serviceId + ')';
+  op.textContent = action;
+
+  if (action === 'restart') {
+    title.textContent = 'Restart Platform Service';
+    msg.textContent = 'A rolling restart will be triggered for ' + displayName + '. Active tasks or queries may be briefly interrupted.';
+    submitBtn.className = 'text-xs px-4 py-2 rounded-md font-medium text-white transition-colors flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500';
+    label.textContent = 'Restart Service';
+    iconBox.className = 'w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-blue-950/60 border border-blue-800/60 text-blue-400';
+    icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>';
+  } else if (action === 'stop') {
+    title.textContent = 'Stop Platform Service';
+    msg.textContent = 'This will scale ' + displayName + ' down to 0 replicas. The service will be completely unavailable until manually started.';
+    submitBtn.className = 'text-xs px-4 py-2 rounded-md font-medium text-white transition-colors flex items-center gap-1.5 bg-red-600 hover:bg-red-500';
+    label.textContent = 'Stop Service';
+    iconBox.className = 'w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-red-950/60 border border-red-800/60 text-red-400';
+    icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/>';
+  } else if (action === 'start') {
+    title.textContent = 'Start Platform Service';
+    msg.textContent = 'This will scale ' + displayName + ' up to 1 replica.';
+    submitBtn.className = 'text-xs px-4 py-2 rounded-md font-medium text-white transition-colors flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500';
+    label.textContent = 'Start Service';
+    iconBox.className = 'w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-emerald-950/60 border border-emerald-800/60 text-emerald-400';
+    icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>';
+  }
+
+  modal.classList.remove('hidden');
+}
+
+function closeServiceConfirmModal() {
+  const modal = document.getElementById('service-confirm-modal');
+  if (modal) modal.classList.add('hidden');
+  _pendingServiceAction = null;
+}
+
+async function executeConfirmedServiceAction() {
+  if (!_pendingServiceAction) return;
+  const { serviceId, displayName, action } = _pendingServiceAction;
+
+  const spinner = document.getElementById('service-confirm-btn-spinner');
+  const label = document.getElementById('service-confirm-btn-label');
+  const submitBtn = document.getElementById('service-confirm-submit-btn');
+
+  if (spinner) spinner.classList.remove('hidden');
+  if (label) label.textContent = 'Executing...';
+  if (submitBtn) submitBtn.disabled = true;
+
+  try {
+    const res = await fetch(`/settings/admin/services/${serviceId}/${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const result = await res.json();
+
+    closeServiceConfirmModal();
+
+    if (res.ok) {
+      showToast('success', result.message || `Successfully executed ${action} on ${displayName}.`);
+      // Instant refresh of services status
+      setTimeout(() => refreshServices(true), 1000);
+    } else {
+      showToast('error', result.detail || result.error || `Failed to ${action} ${displayName}.`);
+    }
+  } catch (err) {
+    closeServiceConfirmModal();
+    showToast('error', `Network error during ${action}: ` + err.message);
+  } finally {
+    if (spinner) spinner.classList.add('hidden');
+    if (submitBtn) submitBtn.disabled = false;
+  }
+}
+
+function showToast(type, message) {
+  const toast = document.getElementById('service-action-toast');
+  if (!toast) return;
+
+  toast.textContent = message;
+  toast.classList.remove('hidden');
+  if (type === 'success') {
+    toast.className = 'px-4 py-3 rounded-md text-sm bg-emerald-950/60 border border-emerald-800/80 text-emerald-300';
+  } else {
+    toast.className = 'px-4 py-3 rounded-md text-sm bg-red-950/60 border border-red-800/80 text-red-300';
+  }
+
+  setTimeout(() => {
+    toast.classList.add('hidden');
+  }, 5000);
+}
+
+// =============================================================================
+// PLATFORM & SETTINGS SCRIPTS
+// =============================================================================
+function updateInactivityHint(val) {
+  const hint = document.getElementById('inactivity-hint');
+  const n = parseInt(val, 10);
+  if (isNaN(n) || n === 0) { hint.classList.add('hidden'); return; }
+  hint.classList.remove('hidden');
+  if (n < 15 || n > 480) {
+    hint.textContent = 'Typical values are 15–480 minutes (8 hours). Values outside this range may disrupt user sessions or reduce security.';
+  } else {
+    hint.textContent = 'Users will be logged out after ' + n + ' minutes of inactivity.';
+  }
+}
+
+function aiProviderChanged() {
+  const chosen = document.getElementById('ai-provider-select').value;
+  document.querySelectorAll('.ai-provider-fields').forEach(function (box) {
+    const isThis = box.getAttribute('data-provider') === chosen;
+    box.classList.toggle('hidden', !isThis);
+    box.disabled = !isThis;
+  });
+  const statusBox = document.getElementById('ai-test-status');
+  if (statusBox) statusBox.classList.add('hidden');
+}
+
+async function testAiProvider() {
+  const btn = document.getElementById('ai-test-btn');
+  const statusBox = document.getElementById('ai-test-status');
+  const chosen = document.getElementById('ai-provider-select').value;
+  const config = {};
+  const prefix = 'cfg__' + chosen + '__';
+  document.querySelectorAll('.ai-provider-fields[data-provider="' + chosen + '"] [name^="' + prefix + '"]').forEach(function (el) {
+    config[el.name.substring(prefix.length)] = el.value;
+  });
+  const paint = function (kind, text) {
+    statusBox.classList.remove('hidden', 'bg-emerald-900/20', 'border-emerald-800/50', 'text-emerald-300', 'bg-red-900/20', 'border-red-800/50', 'text-red-300', 'bg-blue-900/20', 'border-blue-800/50', 'text-blue-300');
+    if (kind === 'ok') {
+      statusBox.classList.add('bg-emerald-900/20', 'border-emerald-800/50', 'text-emerald-300');
+    } else if (kind === 'err') {
+      statusBox.classList.add('bg-red-900/20', 'border-red-800/50', 'text-red-300');
+    } else {
+      statusBox.classList.add('bg-blue-900/20', 'border-blue-800/50', 'text-blue-300');
+    }
+    statusBox.textContent = text;
+  };
+  btn.disabled = true;
+  paint('info', 'Connecting to ' + chosen + '...');
+  try {
+    const resp = await fetch('/settings/admin/ai-provider/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: chosen, config: config }),
+    });
+    const body = await resp.json().catch(function () { return { ok: false, error: 'Invalid response from server' }; });
+    if (resp.ok && body.ok) {
+      paint('ok', 'Connection succeeded! ' + (body.model ? '(' + body.model + ')' : '') + (body.latency_ms ? ' in ' + body.latency_ms + 'ms' : ''));
+    } else {
+      paint('err', 'Connection failed: ' + (body.error || 'Unknown error'));
+    }
+  } catch (e) {
+    paint('err', 'Network error while testing provider: ' + e);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// =============================================================================
+// VAULT PROVIDERS SCRIPTS
+// =============================================================================
+function switchVaultTab(tab) {
+  document.querySelectorAll('.vault-tab-btn').forEach(btn => {
+    btn.className = 'vault-tab-btn pb-2 border-b-2 border-transparent text-gray-400 hover:text-gray-200';
+  });
+  document.querySelectorAll('.vault-tab-panel').forEach(panel => {
+    panel.classList.add('hidden');
+  });
+  const activeBtn = document.getElementById('tab-btn-' + tab);
+  const activePanel = document.getElementById('vault-tab-' + tab);
+  if (activeBtn) activeBtn.className = 'vault-tab-btn pb-2 border-b-2 border-blue-500 text-blue-400';
+  if (activePanel) activePanel.classList.remove('hidden');
+}
+
+async function testVaultProvider(provider) {
+  const btn = document.getElementById(provider === 'azure_keyvault' ? 'btn-test-azure' : 'btn-test-aws');
+  const statusBox = document.getElementById('vault-test-status-' + provider);
+  const form = document.getElementById(provider === 'azure_keyvault' ? 'vault-azure-form' : 'vault-aws-form');
+  
+  const formData = new FormData(form);
+  const config = {};
+  for (let [k, v] of formData.entries()) {
+    if (k !== 'enabled') config[k] = v;
+  }
+
+  const paint = (kind, text) => {
+    statusBox.classList.remove('hidden', 'bg-emerald-900/20', 'border-emerald-800/50', 'text-emerald-300', 'bg-red-900/20', 'border-red-800/50', 'text-red-300', 'bg-blue-900/20', 'border-blue-800/50', 'text-blue-300');
+    if (kind === 'ok') statusBox.classList.add('bg-emerald-900/20', 'border-emerald-800/50', 'text-emerald-300');
+    else if (kind === 'err') statusBox.classList.add('bg-red-900/20', 'border-red-800/50', 'text-red-300');
+    else statusBox.classList.add('bg-blue-900/20', 'border-blue-800/50', 'text-blue-300');
+    statusBox.textContent = text;
+  };
+
+  btn.disabled = true;
+  paint('info', 'Connecting to ' + (provider === 'azure_keyvault' ? 'Azure Key Vault' : 'AWS Secrets Manager') + '...');
+
+  try {
+    const resp = await fetch('/settings/admin/vault-providers/' + provider + '/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config }),
+    });
+    const body = await resp.json().catch(() => ({ success: false, message: 'Invalid response from server' }));
+    if (resp.ok && body.success) {
+      paint('ok', 'Connection verified successfully! ' + (body.latency_ms ? '(' + body.latency_ms + 'ms)' : ''));
+    } else {
+      paint('err', 'Connection failed: ' + (body.message || 'Unknown error'));
+    }
+  } catch (e) {
+    paint('err', 'Network error while testing vault: ' + e);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function updateVaultTestButtons() {
+  const azForm = document.getElementById('vault-azure-form');
+  const btnAz = document.getElementById('btn-test-azure');
+  if (azForm && btnAz) {
+    const url = azForm.querySelector('input[name="vault_url"]')?.value?.trim();
+    btnAz.disabled = !url;
+    btnAz.className = url
+      ? 'text-xs px-3 py-1.5 rounded-md border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition-colors'
+      : 'text-xs px-3 py-1.5 rounded-md border border-gray-800 text-gray-600 cursor-not-allowed transition-colors';
+  }
+
+  const awsForm = document.getElementById('vault-aws-form');
+  const btnAws = document.getElementById('btn-test-aws');
+  if (awsForm && btnAws) {
+    const reg = awsForm.querySelector('input[name="region_name"]')?.value?.trim();
+    btnAws.disabled = !reg;
+    btnAws.className = reg
+      ? 'text-xs px-3 py-1.5 rounded-md border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition-colors'
+      : 'text-xs px-3 py-1.5 rounded-md border border-gray-800 text-gray-600 cursor-not-allowed transition-colors';
+  }
+}
+
+document.querySelectorAll('#vault-azure-form input, #vault-aws-form input').forEach(inp => {
+  inp.addEventListener('input', updateVaultTestButtons);
+});
+updateVaultTestButtons();
+
+// =============================================================================
+// INVITATION & WORKSPACE PICKER
+// =============================================================================
+const ALL_AVAILABLE_WORKSPACES = [
   {% for ws in workspaces %}
-    {% if ws.slug != 'default' and ws.status == 'active' %}
-      { slug: {{ ws.slug | tojson }}, name: {{ ws.name | tojson }} },
+    {% if not ws.is_system and ws.status != 'inactive' %}
+    { slug: "{{ ws.slug }}", name: "{{ ws.name }}" },
     {% endif %}
   {% endfor %}
 ];
 
-const selectedWorkspaces = new Map(); // slug -> { name, role }
+let selectedWorkspaces = {};
 
 function renderWorkspacePicker() {
-  const select = document.getElementById('extra-ws-select');
-  const picker = document.getElementById('additional-workspaces-picker');
-  const noMore = document.getElementById('no-more-workspaces');
+  const select = document.getElementById('additional-ws-select');
   if (!select) return;
 
-  const available = ALL_ADDITIONAL_WORKSPACES.filter(w => !selectedWorkspaces.has(w.slug));
-  select.innerHTML = '<option value="" disabled selected>Select a workspace to add…</option>';
+  const currentVal = select.value;
+  select.innerHTML = '';
 
-  available.forEach(w => {
-    const opt = document.createElement('option');
-    opt.value = w.slug;
-    opt.textContent = `${w.name} (${w.slug})`;
-    select.appendChild(opt);
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.disabled = true;
+  placeholder.textContent = 'Select a workspace to add...';
+  select.appendChild(placeholder);
+
+  let availableCount = 0;
+  ALL_AVAILABLE_WORKSPACES.forEach(ws => {
+    if (!selectedWorkspaces[ws.slug]) {
+      const opt = document.createElement('option');
+      opt.value = ws.slug;
+      opt.dataset.name = ws.name;
+      opt.textContent = `${ws.name} (${ws.slug})`;
+      select.appendChild(opt);
+      availableCount++;
+    }
   });
 
-  if (ALL_ADDITIONAL_WORKSPACES.length === 0) {
-    if (picker) picker.classList.add('hidden');
-    if (noMore) {
-      noMore.textContent = 'No other active workspaces exist.';
-      noMore.classList.remove('hidden');
-    }
-  } else if (available.length === 0) {
-    if (picker) picker.classList.add('hidden');
-    if (noMore) {
-      noMore.textContent = 'All available workspaces have been added.';
-      noMore.classList.remove('hidden');
-    }
-  } else {
-    if (picker) picker.classList.remove('hidden');
-    if (noMore) noMore.classList.add('hidden');
+  const pickerRow = document.getElementById('workspace-picker-row');
+  if (pickerRow) {
+    pickerRow.style.display = availableCount === 0 ? 'none' : 'flex';
+  }
+
+  if (availableCount > 0) {
+    select.value = '';
   }
 }
 
 function renderSelectedWorkspaces() {
   const container = document.getElementById('additional-workspaces-list');
+  const emptyMsg = document.getElementById('additional-workspaces-empty');
   if (!container) return;
-  container.innerHTML = '';
 
-  if (selectedWorkspaces.size === 0) {
-    container.innerHTML = `
-      <p id="additional-workspaces-empty" class="text-xs text-gray-600 italic py-1">
-        No additional workspaces added. User will only have access to Default.
-      </p>
-    `;
-    return;
+  const slugs = Object.keys(selectedWorkspaces);
+  if (emptyMsg) {
+    emptyMsg.style.display = slugs.length === 0 ? 'block' : 'none';
   }
 
-  selectedWorkspaces.forEach((info, slug) => {
+  container.querySelectorAll('.dynamic-ws-item').forEach(el => el.remove());
+
+  slugs.forEach(slug => {
+    const item = selectedWorkspaces[slug];
     const row = document.createElement('div');
-    row.className = 'flex items-center justify-between gap-3 p-2.5 rounded-lg bg-white/[0.02] border border-white/[0.04] text-xs';
+    row.className = 'dynamic-ws-item p-2.5 rounded-lg bg-white/[0.02] border border-white/[0.06] flex items-center justify-between gap-3';
     row.innerHTML = `
-      <div class="min-w-0 flex-1 flex items-center gap-2">
-        <span class="font-medium text-gray-200 truncate">${info.name}</span>
-        <span class="text-[11px] text-gray-500 font-mono">(${slug})</span>
+      <div>
+        <div class="text-xs font-medium text-gray-200">${item.name}</div>
+        <div class="text-[11px] text-gray-500 font-mono">${slug}</div>
       </div>
-      <div class="flex items-center gap-2 shrink-0">
+      <div class="flex items-center gap-2">
         <select onchange="updateWorkspaceRole('${slug}', this.value)"
-          class="bg-gray-900 border border-gray-700 text-gray-300 text-xs rounded px-2 py-1 focus:outline-none focus:border-blue-500">
-          <option value="read" ${info.role === 'read' ? 'selected' : ''}>Read</option>
-          <option value="write" ${info.role === 'write' ? 'selected' : ''}>Write</option>
+          class="bg-gray-900 border border-gray-700 text-gray-200 text-xs rounded px-2 py-1 focus:outline-none focus:border-blue-500">
+          <option value="read" ${item.role === 'read' ? 'selected' : ''}>Read</option>
+          <option value="write" ${item.role === 'write' ? 'selected' : ''}>Write</option>
+          <option value="admin" ${item.role === 'admin' ? 'selected' : ''}>Admin</option>
         </select>
         <button type="button" onclick="removeWorkspaceAccess('${slug}')"
-          class="text-xs px-2 py-1 rounded text-red-400 hover:text-red-300 hover:bg-red-950/30 transition-colors">
-          &times; Remove
+          class="text-gray-500 hover:text-red-400 p-1 transition-colors text-xs" title="Remove workspace">
+          &times;
         </button>
-        <input type="hidden" name="ws_role_${slug}" id="input_ws_role_${slug}" value="${info.role}" />
       </div>
     `;
     container.appendChild(row);
   });
+
+  const payloadInput = document.getElementById('workspace-grants-payload');
+  if (payloadInput) {
+    payloadInput.value = JSON.stringify(selectedWorkspaces);
+  }
 }
 
 function addWorkspaceAccess() {
-  const select = document.getElementById('extra-ws-select');
-  const roleSelect = document.getElementById('extra-ws-role');
-  const slug = select ? select.value : '';
-  const role = roleSelect ? roleSelect.value : 'read';
+  const select = document.getElementById('additional-ws-select');
+  const roleSelect = document.getElementById('additional-ws-role');
+  if (!select || !roleSelect) return;
 
+  const slug = select.value;
   if (!slug) return;
-  const ws = ALL_ADDITIONAL_WORKSPACES.find(w => w.slug === slug);
-  if (!ws) return;
 
-  selectedWorkspaces.set(slug, { name: ws.name, role: role });
+  const opt = select.querySelector(`option[value="${slug}"]`);
+  const name = opt ? (opt.dataset.name || slug) : slug;
+  const role = roleSelect.value || 'read';
+
+  selectedWorkspaces[slug] = { name: name, role: role };
   renderSelectedWorkspaces();
   renderWorkspacePicker();
 }
 
 function removeWorkspaceAccess(slug) {
-  selectedWorkspaces.delete(slug);
+  delete selectedWorkspaces[slug];
   renderSelectedWorkspaces();
   renderWorkspacePicker();
 }
 
 function updateWorkspaceRole(slug, newRole) {
-  const info = selectedWorkspaces.get(slug);
-  if (info) {
-    info.role = newRole;
-    const input = document.getElementById(`input_ws_role_${slug}`);
-    if (input) input.value = newRole;
+  if (selectedWorkspaces[slug]) {
+    selectedWorkspaces[slug].role = newRole;
+    const payloadInput = document.getElementById('workspace-grants-payload');
+    if (payloadInput) {
+      payloadInput.value = JSON.stringify(selectedWorkspaces);
+    }
   }
 }
 
 function toggleInviteRole(role) {
-  const wsSec = document.getElementById('invite-workspace-section');
-  if (wsSec) {
-    wsSec.style.display = (role === 'superadmin') ? 'none' : 'block';
+  const section = document.getElementById('invite-workspace-section');
+  if (!section) return;
+  if (role === 'superadmin') {
+    section.classList.add('opacity-40', 'pointer-events-none');
+  } else {
+    section.classList.remove('opacity-40', 'pointer-events-none');
   }
 }
 
@@ -1241,6 +1846,11 @@ document.addEventListener('DOMContentLoaded', function() {
   renderWorkspacePicker();
 });
 renderWorkspacePicker();
+
+// =============================================================================
+// DELETE WORKSPACE MODAL
+// =============================================================================
+let _wsDeleteExpected = '';
 
 function openDeleteModal(wsId, wsName) {
   _wsDeleteExpected = wsName;
@@ -1270,7 +1880,10 @@ function checkDeleteConfirm() {
 }
 
 document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape') closeDeleteModal();
+  if (e.key === 'Escape') {
+    closeDeleteModal();
+    closeServiceConfirmModal();
+  }
 });
 </script>
 {% endblock %}
