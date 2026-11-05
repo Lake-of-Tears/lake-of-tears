@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 # Regular expression matching placeholder passwords/tokens
-PLACEHOLDER_REGEX = re.compile(r'changeme-[a-zA-Z0-9_-]+')
+PLACEHOLDER_REGEX = re.compile(r"changeme-[a-zA-Z0-9_-]+")
 
 
 def get_repo_root() -> Path:
@@ -22,7 +22,9 @@ def get_repo_root() -> Path:
     return Path(__file__).resolve().parent.parent.parent
 
 
-def find_toon_config(explicit_path: str | Path | None = None, repo_root: Path | None = None) -> Path | None:
+def find_toon_config(
+    explicit_path: str | Path | None = None, repo_root: Path | None = None
+) -> Path | None:
     """Resolve the TOON configuration file path following Lake of Tears precedence order.
 
     Precedence:
@@ -180,9 +182,7 @@ def check_platform_updates(
 
         if train == "stable":
             # Sort tags using git's version:refname order
-            sorted_tags_output = _run_git_cmd(
-                ["tag", "-l", "v*", "--sort=-version:refname"], root
-            )
+            sorted_tags_output = _run_git_cmd(["tag", "-l", "v*", "--sort=-version:refname"], root)
             sorted_tags = [t.strip() for t in sorted_tags_output.splitlines() if t.strip()]
 
             if sorted_tags:
@@ -202,7 +202,9 @@ def check_platform_updates(
                             line.strip() for line in log_output.splitlines() if line.strip()
                         ]
                     except Exception:
-                        result["changelog"] = [f"Upgrade available from {current_tag} to {latest_tag}"]
+                        result["changelog"] = [
+                            f"Upgrade available from {current_tag} to {latest_tag}"
+                        ]
                 else:
                     result["status"] = "UNAVAILABLE"
                     result["latest_version"] = current_tag

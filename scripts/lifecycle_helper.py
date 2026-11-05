@@ -106,15 +106,25 @@ def cmd_extract_urls(args: argparse.Namespace) -> int:
 
     lake_host = ingress.get("host") or "localhost"
     lake_port = lakeui.get("service", {}).get("port", 3000)
-    lake_url = f"{proto}://{lake_host}" if enabled and ingress.get("host") else f"http://localhost:{lake_port}"
+    lake_url = (
+        f"{proto}://{lake_host}"
+        if enabled and ingress.get("host")
+        else f"http://localhost:{lake_port}"
+    )
 
     minio_host = ingress.get("minioConsoleHost")
     minio_port = minio.get("service", {}).get("consolePort", 9001)
-    minio_url = f"{proto}://{minio_host}" if enabled and minio_host else f"http://localhost:{minio_port}"
+    minio_url = (
+        f"{proto}://{minio_host}" if enabled and minio_host else f"http://localhost:{minio_port}"
+    )
 
     superset_host = ingress.get("supersetHost")
     superset_port = superset.get("service", {}).get("port", 8088)
-    superset_url = f"{proto}://{superset_host}" if enabled and superset_host else f"http://localhost:{superset_port}"
+    superset_url = (
+        f"{proto}://{superset_host}"
+        if enabled and superset_host
+        else f"http://localhost:{superset_port}"
+    )
 
     pipelines_url = f"{lake_url}/airflow/"
 
@@ -158,7 +168,9 @@ def main() -> None:
     p_gen.set_defaults(func=cmd_generate_secrets)
 
     # check-updates
-    p_upd = subparsers.add_parser("check-updates", help="Check for platform updates (TrueNAS-style)")
+    p_upd = subparsers.add_parser(
+        "check-updates", help="Check for platform updates (TrueNAS-style)"
+    )
     p_upd.add_argument("--train", default="stable", choices=["stable", "edge"], help="Update train")
     p_upd.add_argument("--json", action="store_true", help="Output JSON format")
     p_upd.add_argument("--no-fetch", action="store_true", help="Do not fetch remote Git repository")
