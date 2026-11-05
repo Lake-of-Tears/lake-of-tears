@@ -96,7 +96,9 @@ def preview_uploaded_file(
 
         # Inferred columns & types
         desc_rows = con.execute(f"DESCRIBE SELECT * FROM {read_sql}").fetchall()
-        columns = [{"name": r[0], "type": r[1]} for r in desc_rows]
+        columns = [
+            {"name": r[0], "type": r[1], "nullable": True, "description": ""} for r in desc_rows
+        ]
 
         # Preview sample rows
         preview_data = con.execute(f"SELECT * FROM {read_sql} LIMIT {max_preview_rows}").fetchall()
@@ -131,7 +133,8 @@ def preview_uploaded_file(
 def convert_to_parquet_file(
     content: bytes,
     filename: str,
-) -> tuple[str, list[dict[str, str]], int]:
+    column_overrides: list[dict[str, Any]] | None = None,
+) -> tuple[str, list[dict[str, Any]], int]:
     """Convert input file content to a local temporary Parquet file and return (parquet_path, columns, row_count)."""
     fmt = detect_file_format(filename)
     suffix = Path(filename).suffix or f".{fmt}"
@@ -159,21 +162,72 @@ def convert_to_parquet_file(
         else:
             raise ValueError(f"Unsupported format: {fmt}")
 
-        # Inferred schema
-        desc_rows = con.execute(f"DESCRIBE SELECT * FROM {read_sql}").fetchall()
-        columns = [{"name": r[0], "type": r[1]} for r in desc_rows]
+        if column_overrides:
+            select_items: list[str] = []
+            final_columns: list[dict[str, Any]] = []
+            for col in column_overrides:
+                if not col.get("include", True):
+                    continue
+                src = str(col.get("source_name") or col.get("name") or "").replace('"', '""')
+                target = str(col.get("name") or src).replace('"', '""')
+                c_type = str(col.get("type") or "").strip().upper()
+                c_desc = str(col.get("description") or "").strip()
+                nullable = bool(col.get("nullable", True))
+                if c_type and c_type != "JSON":
+                    select_items.append(f'CAST("{src}" AS {c_type}) AS "{target}"')
+                else:
+                    select_items.append(f'"{src}" AS "{target}"')
+                final_columns.append(
+                    {
+                        "name": target,
+                        "type": c_type or "VARCHAR",
+                        "description": c_desc,
+                        "nullable": nullable,
+                    }
+                )
+            query = (
+                f"SELECT {', '.join(select_items)} FROM {read_sql}"
+                if select_items
+                else f"SELECT * FROM {read_sql}"
+            )
+        else:
+            desc_rows = con.execute(f"DESCRIBE SELECT * FROM {read_sql}").fetchall()
+            final_columns = [
+                {"name": r[0], "type": r[1], "nullable": True, "description": ""} for r in desc_rows
+            ]
+            query = f"SELECT * FROM {read_sql}"
 
         # Convert and write Parquet
-        con.execute(f"COPY (SELECT * FROM {read_sql}) TO '{escaped_out}' (FORMAT PARQUET)")
+        con.execute(f"COPY ({query}) TO '{escaped_out}' (FORMAT PARQUET)")
         row_count = con.execute(f"SELECT count(*) FROM read_parquet('{escaped_out}')").fetchone()[0]
 
-        return out_tmp_path, columns, row_count
+        return out_tmp_path, final_columns, row_count
     finally:
         if os.path.exists(in_tmp_path):
             try:
                 os.remove(in_tmp_path)
             except OSError:
                 pass
+
+
+def create_empty_parquet_file(columns: list[dict[str, Any]]) -> str:
+    """Create an empty typed Parquet file from a list of column definitions and return temp path."""
+    out_tmp_fd, out_tmp_path = tempfile.mkstemp(suffix=".parquet")
+    os.close(out_tmp_fd)
+    con = duckdb.connect()
+    escaped_out = out_tmp_path.replace("'", "''")
+    if not columns:
+        columns = [{"name": "id", "type": "VARCHAR"}]
+    select_items = []
+    for c in columns:
+        c_name = re.sub(r"[^\w-]", "", str(c.get("name", "col"))).strip() or "col"
+        c_type = str(c.get("type", "VARCHAR")).upper()
+        if c_type == "JSON":
+            c_type = "VARCHAR"
+        select_items.append(f'CAST(NULL AS {c_type}) AS "{c_name}"')
+    query = f"SELECT {', '.join(select_items)} WHERE 1=0"
+    con.execute(f"COPY ({query}) TO '{escaped_out}' (FORMAT PARQUET)")
+    return out_tmp_path
 
 
 def build_managed_hive_path(

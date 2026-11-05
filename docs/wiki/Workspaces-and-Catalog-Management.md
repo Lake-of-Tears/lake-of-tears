@@ -276,6 +276,53 @@ sequenceDiagram
 - **Zero Replication:** Data is read directly from the owner's MinIO prefix. The SQL guardrail engine automatically whitelists the owner's Parquet path patterns for the consumer workspace.
 - **Revocation:** Either workspace admin can remove the grant at any time via `DELETE /api/workspaces/{workspace_id}/catalogs/{catalog_id}/shared`.
 
+### Creating Schemas & Tables via Catalog Explorer UI
+
+The Lake of Tears Catalog Explorer (`/catalog`) provides Databricks-parity asset creation workflows directly within the browser interface:
+
+```mermaid
+flowchart TD
+    Catalog["Catalog Explorer (/catalog)"] -->|"'+ Schema' Button"| CreateSchema["Create Schema Modal<br/>(Name, S3 Prefix, AI Description)"]
+    Catalog -->|"'+ Table' Dropdown"| TableOptions{"Table Creation Path"}
+    TableOptions -->|"1. File Upload"| UploadWizard["File Upload Wizard<br/>(CSV, Parquet, JSON, NDJSON)<br/>Interactive Column Schema Preview"]
+    TableOptions -->|"2. SQL Editor"| SQLEditor["Lake SQL Editor<br/>(Pre-populated DDL Template)"]
+    TableOptions -->|"3. AI Prompt"| PromptToTable["AI Prompt to Table<br/>(Natural Language -> TOON -> DDL)"]
+    UploadWizard --> Ingest["Parquet Storage & DuckDB View"]
+    PromptToTable --> Ingest
+```
+
+#### 1. "Create Schema" in Catalog Explorer
+- **UI Trigger:** `+ Schema` button located in the header of each catalog card.
+- **Form Controls:**
+  - **Catalog Selector:** Pre-selected to current catalog.
+  - **Schema Name:** User-defined identifier automatically converted into a valid SQL slug.
+  - **Storage Prefix Preview:** Automatically displays the jailed path `workspaces/<ws_slug>/.../<schema_slug>/` enforcing workspace isolation.
+  - **AI Generate Description:** 1-click button invoking the workspace LLM to draft concise, professional business descriptions based on the schema's domain name.
+
+#### 2. "Create Table" in Catalog Explorer
+Located on each schema row, the `+ Table` dropdown offers three distinct ingestion and definition workflows:
+
+- **A. File Upload Wizard (`CSV`, `TSV`, `JSON`, `NDJSON`, `Parquet`):**
+  - **Drag-and-Drop Zone:** Drop any structured dataset to trigger automatic DuckDB schema inference and row sampling.
+  - **Interactive Column Preview Grid:** Review inferred columns, edit target column names, choose data types from a dropdown (`VARCHAR`, `BIGINT`, `INTEGER`, `DOUBLE`, `BOOLEAN`, `TIMESTAMP`, `DATE`, `JSON`), toggle column inclusion, and configure nullability (`NOT NULL`).
+  - **Managed Ingestion:** Converts data into optimized Parquet files inside `workspaces/<ws>/<catalog>/<schema>/<table>/` and registers the DuckDB view instantly.
+- **B. Create in SQL Editor:**
+  - Opens the Lake SQL Editor pre-populated with a starter `CREATE TABLE "<schema>"."<table_name>" (...)` DDL template targeted at the active catalog and schema.
+- **C. AI-Powered Prompt to Table (Natural Language / TOON):**
+  - Enter dataset specifications in plain English (e.g. *"Create a silver customer orders table with order_id, customer_id, line_items JSON, total_amount, and status"*).
+  - Generates compact **TOON** specification, presents side-by-side syntax-highlighted TOON and interactive column preview cards, and initializes the table with a single click.
+
+### AI-First TOON Integration (Token-Oriented Object Notation)
+
+To minimize token consumption when injecting lakehouse schemas into autonomous LLM agents or Lake Asset Bundles (LABs), Lake of Tears provides built-in TOON serialization:
+
+- **1-Click Export to TOON:**
+  - **Schema Level:** Click `TOON` on any schema row to export the schema definition and its child tables in compact `schema.toon` format.
+  - **Table Level:** Click `Export TOON` in the Table Details slide-over drawer to export table columns, types, nullability, and comments as `table.toon`.
+  - **Modal Actions:** Copy directly to clipboard or download `.toon` file. Reduces LLM prompt overhead by **30–60%** compared to verbose JSON/YAML schemas.
+- **Enrich with AI:**
+  - 1-click action in Table Details drawer to automatically generate semantic business summaries and per-column documentation for existing datasets.
+
 ---
 
 ## 6. UI Asset Isolation & the "Hide Shared Assets" Toggle
