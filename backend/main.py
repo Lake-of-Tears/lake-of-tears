@@ -71,6 +71,11 @@ from fastapi import (
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
+try:
+    from pipeline.shared.toon_catalog import schema_to_toon, table_to_toon
+except ImportError:
+    from toon_catalog import schema_to_toon, table_to_toon
 from models import (
     Catalog,
     CatalogAccess,
@@ -2668,6 +2673,44 @@ def delete_schema(
     return {"ok": True}
 
 
+@app.get("/api/catalogs/{catalog_id}/schemas/{schema_id}/toon")
+def export_schema_toon(
+    catalog_id: str,
+    schema_id: str,
+    format: str | None = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    ws_ctx: tuple[Workspace, str] | None = Depends(get_catalog_workspace_and_role),
+):
+    """Export schema definition and child tables in standard compact TOON notation."""
+    ws = _extract_ws(ws_ctx)
+    cat_uuid = _as_uuid(catalog_id)
+    sch_uuid = _as_uuid(schema_id)
+    catalog = db.query(Catalog).filter(Catalog.id == cat_uuid).first() if cat_uuid else None
+    if not catalog:
+        raise HTTPException(404, "Catalog not found")
+    _assert_catalog_access(db, catalog, current_user, "read", ws=ws)
+    schema = (
+        db.query(CatalogSchema).filter_by(id=sch_uuid, catalog_id=cat_uuid).first()
+        if sch_uuid and cat_uuid
+        else None
+    )
+    if not schema:
+        raise HTTPException(404, "Schema not found")
+
+    toon_text = schema_to_toon(schema, catalog_name=catalog.name or catalog.slug)
+    if (format or "").strip().lower() in ("raw", "toon", "text"):
+        return PlainTextResponse(toon_text, media_type="text/plain")
+
+    return {
+        "ok": True,
+        "toon": toon_text,
+        "schema": schema.slug,
+        "catalog": catalog.slug,
+        "filename": f"{schema.slug}.toon",
+    }
+
+
 # ── Table CRUD ────────────────────────────────────────────────────────────────
 
 
@@ -2770,6 +2813,51 @@ def get_table(
     if not table:
         raise HTTPException(404, "Table not found")
     return CatalogTableResponse.model_validate(table)
+
+
+@app.get("/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}/toon")
+def export_table_toon(
+    catalog_id: str,
+    schema_id: str,
+    table_id: str,
+    format: str | None = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    ws_ctx: tuple[Workspace, str] | None = Depends(get_catalog_workspace_and_role),
+):
+    """Export table definition, columns, and metadata in standard compact TOON notation."""
+    ws = _extract_ws(ws_ctx)
+    cat_uuid = _as_uuid(catalog_id)
+    sch_uuid = _as_uuid(schema_id)
+    tbl_uuid = _as_uuid(table_id)
+    catalog = db.query(Catalog).filter(Catalog.id == cat_uuid).first() if cat_uuid else None
+    if not catalog:
+        raise HTTPException(404, "Catalog not found")
+    _assert_catalog_access(db, catalog, current_user, "read", ws=ws)
+    table = (
+        db.query(CatalogTable).filter_by(id=tbl_uuid, schema_id=sch_uuid).first()
+        if (tbl_uuid and sch_uuid)
+        else None
+    )
+    if not table:
+        raise HTTPException(404, "Table not found")
+
+    schema = table.schema or (
+        db.query(CatalogSchema).filter_by(id=sch_uuid).first() if sch_uuid else None
+    )
+    sch_name = schema.slug if schema else ""
+    toon_text = table_to_toon(table, catalog_name=catalog.name or catalog.slug, schema_name=sch_name)
+    if (format or "").strip().lower() in ("raw", "toon", "text"):
+        return PlainTextResponse(toon_text, media_type="text/plain")
+
+    return {
+        "ok": True,
+        "toon": toon_text,
+        "table": table.slug,
+        "schema": sch_name,
+        "catalog": catalog.slug,
+        "filename": f"{table.slug}.toon",
+    }
 
 
 @app.patch(

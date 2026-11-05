@@ -1252,6 +1252,262 @@ def explain_sql_query(
         return {"ok": False, "error": str(exc)}
 
 
+def _heuristic_table_from_prompt(
+    prompt: str,
+    catalog: str | None = None,
+    schema: str | None = None,
+) -> dict[str, Any]:
+    """Fallback deterministic table & column inference when LLM key is unavailable or fails."""
+    try:
+        from pipeline.shared.toon_catalog import table_to_toon, toon_to_sql_ddl
+    except ImportError:
+        from toon_catalog import table_to_toon, toon_to_sql_ddl
+
+    cat_slug = (catalog or "main").strip().lower()
+    sch_slug = (schema or "bronze").strip().lower()
+
+    # Detect table name candidate
+    clean_prompt = prompt.strip()
+    tbl_name = "dataset"
+    before_table = re.search(r"\b([a-zA-Z0-9_]+(?:\s+[a-zA-Z0-9_]+)?)\s+table\b", clean_prompt, re.I)
+    if before_table:
+        cand = before_table.group(1).lower().strip()
+        cand = re.sub(r"^(?:a|an|the|new|silver|gold|bronze)\s+", "", cand).strip()
+        if cand:
+            tbl_name = cand
+    else:
+        after_verb = re.search(r"\b(?:create|table|for|dataset)\s+(?:a|an|the|new|silver|gold|bronze\s+)?([a-zA-Z0-9_]+)\b", clean_prompt, re.I)
+        if after_verb:
+            cand = after_verb.group(1).lower().strip()
+            if cand not in ("a", "an", "the", "new", "table", "dataset", "silver", "gold", "bronze"):
+                tbl_name = cand
+        else:
+            first_word = re.findall(r"\b[a-zA-Z0-9_]{3,}\b", clean_prompt)
+            if first_word:
+                tbl_name = first_word[0].lower()
+
+    slug = re.sub(r"[^\w\s-]", "", tbl_name).strip().lower()
+    slug = re.sub(r"[-\s]+", "_", slug) or "table"
+    display_name = slug.replace("_", " ").title()
+
+    # Detect column candidates from prompt
+    raw_col_candidates: list[str] = []
+    if "with" in clean_prompt.lower():
+        after_with = clean_prompt.lower().split("with", 1)[1]
+        for part in re.split(r"[,;]+|\band\b", after_with):
+            p = part.strip()
+            if p:
+                raw_col_candidates.append(p)
+
+    cols: list[dict[str, Any]] = []
+    if raw_col_candidates:
+        for idx, item in enumerate(raw_col_candidates):
+            words = item.split()
+            if not words:
+                continue
+            col_name = re.sub(r"[^\w-]", "", words[0]).strip().lower()
+            if not col_name or col_name in ("a", "an", "the", "some", "and"):
+                continue
+
+            # Inferred type
+            item_lower = item.lower()
+            if "json" in item_lower or "metadata" in item_lower or "payload" in item_lower:
+                c_type = "JSON"
+            elif any(w in col_name for w in ("amount", "price", "rate", "cost", "total", "pct", "score")):
+                c_type = "DOUBLE"
+            elif any(w in col_name for w in ("count", "qty", "quantity", "num", "idx", "index")):
+                c_type = "BIGINT"
+            elif any(w in col_name for w in ("date", "time", "at", "timestamp")):
+                c_type = "TIMESTAMP"
+            elif col_name.startswith("is_") or col_name.startswith("has_"):
+                c_type = "BOOLEAN"
+            else:
+                c_type = "VARCHAR"
+
+            nullable = not (col_name.endswith("_id") or col_name == "id" or idx == 0)
+            cols.append({
+                "name": col_name,
+                "type": c_type,
+                "description": f"{col_name.replace('_', ' ').title()} attribute",
+                "nullable": nullable,
+            })
+
+    if not cols:
+        cols = [
+            {"name": f"{slug}_id", "type": "VARCHAR", "description": f"Unique {display_name} identifier", "nullable": False},
+            {"name": "name", "type": "VARCHAR", "description": f"{display_name} name or label", "nullable": True},
+            {"name": "status", "type": "VARCHAR", "description": "Operational lifecycle status", "nullable": True},
+            {"name": "created_at", "type": "TIMESTAMP", "description": "Record ingestion timestamp", "nullable": True},
+        ]
+
+    spec = {
+        "table": slug,
+        "name": display_name,
+        "catalog": cat_slug,
+        "schema": sch_slug,
+        "description": f"Managed {sch_slug} table for {display_name} data.",
+        "columns": cols,
+    }
+
+    toon_str = table_to_toon(spec, catalog_name=cat_slug, schema_name=sch_slug)
+    ddl_str = toon_to_sql_ddl(spec)
+
+    return {
+        "ok": True,
+        "toon": toon_str,
+        "table_name": slug,
+        "display_name": display_name,
+        "description": spec["description"],
+        "columns": cols,
+        "sql_ddl": ddl_str,
+        "error": None,
+    }
+
+
+def generate_table_from_prompt(
+    prompt: str,
+    catalog: str | None = None,
+    schema: str | None = None,
+    model: str | None = None,
+    api_key: str | None = None,
+) -> dict[str, Any]:
+    """Generate structured TOON table definition and DDL from a natural language prompt."""
+    try:
+        from pipeline.shared.toon_catalog import (
+            table_to_toon,
+            toon_to_sql_ddl,
+            toon_to_table_spec,
+        )
+    except ImportError:
+        from toon_catalog import table_to_toon, toon_to_sql_ddl, toon_to_table_spec
+
+    cat_slug = (catalog or "main").strip().lower()
+    sch_slug = (schema or "bronze").strip().lower()
+    effective_key = _resolve_api_key(api_key)
+
+    if effective_key:
+        system_prompt = (
+            "You are an expert Lakehouse Data Architect for Lake of Tears.\n"
+            "Convert the user's natural language request into a valid TOON (Token-Oriented Object Notation) table specification.\n"
+            "Follow this exact TOON specification format:\n\n"
+            "table: <table_slug>\n"
+            "name: <Human Readable Table Name>\n"
+            f"catalog: {cat_slug}\n"
+            f"schema: {sch_slug}\n"
+            "description: <Comprehensive 1-2 sentence semantic business description of the table>\n"
+            "columns[N]{name,type,description,nullable}:\n"
+            "  col1,type1,description1,false\n"
+            "  col2,type2,description2,true\n\n"
+            "Guidelines:\n"
+            "- Types should be standard SQL types: VARCHAR, BIGINT, INTEGER, DOUBLE, BOOLEAN, TIMESTAMP, DATE, JSON.\n"
+            "- Primary/surrogate keys must be nullable: false.\n"
+            "- Generate meaningful descriptions for every column.\n"
+            "- Output ONLY valid TOON text. Do not wrap in markdown or backticks."
+        )
+
+        try:
+            full_prompt = f"Create table specification for: {prompt}"
+            raw = _call_gemini_text(full_prompt, model=model, api_key=effective_key)
+            cleaned = _strip_code_fences(raw).strip()
+            spec = toon_to_table_spec(cleaned)
+            if spec.get("columns"):
+                if not spec.get("catalog"):
+                    spec["catalog"] = cat_slug
+                if not spec.get("schema"):
+                    spec["schema"] = sch_slug
+                canonical_toon = table_to_toon(spec, catalog_name=spec["catalog"], schema_name=spec["schema"])
+                sql_ddl = toon_to_sql_ddl(spec)
+                return {
+                    "ok": True,
+                    "toon": canonical_toon,
+                    "table_name": spec["table"],
+                    "display_name": spec["name"],
+                    "description": spec["description"],
+                    "columns": spec["columns"],
+                    "sql_ddl": sql_ddl,
+                    "error": None,
+                }
+        except Exception as exc:
+            logger.warning("LLM table-from-prompt call failed: %s", exc)
+
+    return _heuristic_table_from_prompt(prompt, catalog=cat_slug, schema=sch_slug)
+
+
+def generate_semantic_description(
+    asset_type: str,
+    name: str,
+    catalog_name: str | None = None,
+    schema_name: str | None = None,
+    columns: list[dict[str, Any]] | None = None,
+    model: str | None = None,
+    api_key: str | None = None,
+) -> dict[str, Any]:
+    """Generate business semantic descriptions and column comments for schemas or tables."""
+    effective_key = _resolve_api_key(api_key)
+    clean_name = name.strip()
+    human_name = clean_name.replace("_", " ").title()
+
+    if effective_key:
+        col_ctx = ""
+        if columns:
+            col_ctx = "Columns: " + ", ".join(f"{c.get('name')} ({c.get('type')})" for c in columns if isinstance(c, dict))
+
+        prompt = (
+            f"You are a semantic metadata curator for Lake of Tears.\n"
+            f"Generate a professional, concise business description (1-2 sentences) for {asset_type} '{clean_name}'.\n"
+            f"Catalog: {catalog_name or 'main'}, Schema: {schema_name or 'default'}.\n"
+            f"{col_ctx}\n"
+            "If this is a table with columns, also generate a concise 1-sentence comment for each column.\n"
+            "Respond ONLY with a valid JSON object matching:\n"
+            '{"description": "...", "column_descriptions": {"column_name": "comment", ...}}'
+        )
+
+        try:
+            raw = _call_gemini_text(prompt, model=model, api_key=effective_key)
+            parsed = _parse_json_response(raw)
+            desc = str(parsed.get("description") or f"Semantic dataset for {human_name} operations.").strip()
+            col_descs = parsed.get("column_descriptions")
+            if not isinstance(col_descs, dict):
+                col_descs = {}
+            return {
+                "ok": True,
+                "description": desc,
+                "column_descriptions": {str(k): str(v) for k, v in col_descs.items()},
+                "error": None,
+            }
+        except Exception as exc:
+            logger.warning("LLM generate-description call failed: %s", exc)
+
+    # Heuristic fallback
+    col_dict: dict[str, str] = {}
+    if columns:
+        for c in columns:
+            if isinstance(c, dict) and c.get("name"):
+                c_name = c["name"]
+                if c_name.endswith("_id") or c_name == "id":
+                    col_dict[c_name] = f"Unique {c_name.replace('_id', '').replace('_', ' ').title()} identifier"
+                elif any(w in c_name for w in ("date", "time", "at")):
+                    col_dict[c_name] = f"Timestamp of the {c_name.replace('_', ' ')} event"
+                elif any(w in c_name for w in ("amount", "price", "total", "cost")):
+                    col_dict[c_name] = f"Calculated {c_name.replace('_', ' ')} value"
+                elif c_name.startswith("is_") or c_name.startswith("has_"):
+                    col_dict[c_name] = f"Flag indicating whether {c_name[3:].replace('_', ' ')}"
+                else:
+                    col_dict[c_name] = f"{c_name.replace('_', ' ').title()} attribute value"
+
+    if asset_type == "schema":
+        schema_desc = f"Curated collection of analytical datasets and tables for {human_name} domain operations."
+    else:
+        schema_desc = f"Managed lakehouse table storing verified {human_name} records."
+
+    return {
+        "ok": True,
+        "description": schema_desc,
+        "column_descriptions": col_dict,
+        "error": None,
+    }
+
+
 def infer_chart_config(
     columns: list[str],
     rows: list[list[Any]],

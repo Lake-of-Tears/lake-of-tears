@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any, Literal, Self
 
 import email_validator
-from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 # Allow internal/private self-hosted domains (e.g. .local, .localhost) for Lake of Tears deployments
 for _domain in ("local", "localhost"):
@@ -470,6 +470,7 @@ class ColumnDef(BaseModel):
     name: str
     type: str
     description: str | None = None
+    nullable: bool = True
     deprecated: bool = False
 
 
@@ -827,6 +828,42 @@ class SqlExplainResponse(BaseModel):
     steps: list[str] = []
     tables_referenced: list[str] = []
     ai_functions_used: list[str] = []
+    error: str | None = None
+
+
+class TableFromPromptRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    prompt: str
+    catalog: str | None = None
+    schema_name: str | None = Field(default=None, alias="schema")
+    model: str | None = None
+
+
+class TableFromPromptResponse(BaseModel):
+    ok: bool
+    toon: str = ""
+    table_name: str = ""
+    display_name: str = ""
+    description: str | None = None
+    columns: list[dict[str, Any]] = Field(default_factory=list)
+    sql_ddl: str = ""
+    error: str | None = None
+
+
+class GenerateDescriptionRequest(BaseModel):
+    asset_type: str = "table"  # "schema" | "table"
+    name: str
+    catalog_name: str | None = None
+    schema_name: str | None = None
+    columns: list[dict[str, Any]] | None = None
+    model: str | None = None
+
+
+class GenerateDescriptionResponse(BaseModel):
+    ok: bool
+    description: str = ""
+    column_descriptions: dict[str, str] = Field(default_factory=dict)
     error: str | None = None
 
 

@@ -72,6 +72,29 @@ except ImportError:
             sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
             from pipeline.shared.connector_registry import registry as connector_registry
 
+try:
+    from pipeline.shared.toon_catalog import (
+        schema_to_toon,
+        table_to_toon,
+        toon_to_sql_ddl,
+        toon_to_table_spec,
+    )
+except ImportError:
+    try:
+        from toon_catalog import (
+            schema_to_toon,
+            table_to_toon,
+            toon_to_sql_ddl,
+            toon_to_table_spec,
+        )
+    except ImportError:
+        from ui.toon_catalog import (
+            schema_to_toon,
+            table_to_toon,
+            toon_to_sql_ddl,
+            toon_to_table_spec,
+        )
+
 logger = logging.getLogger("lake.ui")
 
 _env_path = Path(__file__).parent.parent / ".env"
@@ -1490,6 +1513,7 @@ async def ingest(request: Request):
 
 
 @app.post("/api/ingest/preview-file")
+@app.post("/ingest/preview-file")
 async def api_ingest_preview_file(
     request: Request,
     file: UploadFile = File(...),
@@ -1508,6 +1532,9 @@ async def api_ingest_preview_file(
 
 
 @app.post("/api/ingest/create-table-from-file")
+@app.post("/ingest/create-table-from-file")
+@app.post("/api/catalog/create-table-from-file")
+@app.post("/catalog/create-table-from-file")
 async def api_ingest_create_table_from_file(
     request: Request,
     file: UploadFile = File(...),
@@ -1517,6 +1544,7 @@ async def api_ingest_create_table_from_file(
     table_name: str = Form(...),
     mode: str = Form("create_new"),
     description: str | None = Form(None),
+    columns_json: str | None = Form(None),
 ):
     token = _get_request_token(request)
     if not token and AUTH_ENABLED:
@@ -1543,9 +1571,20 @@ async def api_ingest_create_table_from_file(
     if not clean_table_name:
         return JSONResponse({"ok": False, "error": "Invalid table name"}, status_code=400)
 
+    column_overrides = None
+    if columns_json:
+        try:
+            parsed = json.loads(columns_json)
+            if isinstance(parsed, list) and parsed:
+                column_overrides = parsed
+        except Exception:
+            pass
+
     try:
         content = await file.read()
-        parquet_path, columns, row_count = ingest_service.convert_to_parquet_file(content, filename)
+        parquet_path, columns, row_count = ingest_service.convert_to_parquet_file(
+            content, filename, column_overrides=column_overrides
+        )
     except Exception as exc:
         return JSONResponse(
             {"ok": False, "error": f"File conversion failed: {exc}"}, status_code=400
@@ -1699,6 +1738,253 @@ async def api_ingest_create_table_from_file(
                 os.remove(parquet_path)
             except OSError:
                 pass
+
+
+@app.post("/api/catalog/{catalog_id}/schemas")
+async def api_catalog_create_schema(request: Request, catalog_id: str):
+    token = _get_request_token(request)
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"ok": False, "error": "Not authenticated"}, status_code=401)
+    ws = getattr(request.state, "workspace", None) or {}
+    ws_slug = (ws.get("slug") if isinstance(ws, dict) else getattr(ws, "slug", None)) or "default"
+    ws_id = str(ws.get("id")) if isinstance(ws, dict) and ws.get("id") else None
+
+    body = await request.json()
+    name = (body.get("name") or "").strip()
+    if not name:
+        return JSONResponse({"ok": False, "error": "Schema name is required"}, status_code=400)
+    description = body.get("description")
+
+    res = _backend_post(
+        f"/api/catalogs/{catalog_id}/schemas",
+        token,
+        {"name": name, "description": description},
+        workspace_id=ws_id,
+        workspace_slug=ws_slug,
+    )
+    if not res or not res.get("id"):
+        err_msg = "Failed to create schema"
+        if isinstance(res, dict) and res.get("detail"):
+            err_msg = res["detail"]
+        return JSONResponse({"ok": False, "error": err_msg}, status_code=400)
+    return JSONResponse({"ok": True, "schema": res})
+
+
+@app.post("/api/catalog/create-table-from-toon")
+@app.post("/catalog/create-table-from-toon")
+async def api_catalog_create_table_from_toon(
+    request: Request,
+    catalog_id: str = Form(...),
+    schema_id: str = Form(...),
+    table_name: str = Form(...),
+    description: str | None = Form(None),
+    toon: str | None = Form(None),
+    columns_json: str | None = Form(None),
+):
+    token = _get_request_token(request)
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"ok": False, "error": "Not authenticated"}, status_code=401)
+
+    user = getattr(request.state, "user", None) or {}
+    ws = getattr(request.state, "workspace", None) or {}
+    ws_slug = (ws.get("slug") if isinstance(ws, dict) else getattr(ws, "slug", None)) or "default"
+    ws_id = str(ws.get("id")) if isinstance(ws, dict) and ws.get("id") else None
+
+    is_superadmin = user.get("role") in ("superadmin", "admin")
+    my_role = user.get("role") if is_superadmin else (ws.get("my_role") or ws.get("role") or "read")
+    if my_role not in ("admin", "write", "superadmin", "owner"):
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "Write or Admin workspace permissions required to create tables",
+            },
+            status_code=403,
+        )
+
+    clean_table_name = ingest_service.slugify(table_name)
+    if not clean_table_name:
+        return JSONResponse({"ok": False, "error": "Invalid table name"}, status_code=400)
+
+    # Resolve columns
+    columns: list[dict[str, Any]] = []
+    if columns_json:
+        try:
+            parsed = json.loads(columns_json)
+            if isinstance(parsed, list):
+                columns = parsed
+        except Exception:
+            pass
+
+    if not columns and toon:
+        spec = toon_to_table_spec(toon)
+        columns = spec.get("columns", [])
+        if not description and spec.get("description"):
+            description = spec["description"]
+
+    if not columns:
+        columns = [
+            {"name": "id", "type": "VARCHAR", "description": "Primary key", "nullable": False},
+            {"name": "created_at", "type": "TIMESTAMP", "description": "Creation timestamp", "nullable": True},
+        ]
+
+    # Verify target catalog and schema
+    catalogs = _resolve_ui_catalogs(request)
+    target_catalog = next((c for c in catalogs if str(c.get("id")) == str(catalog_id)), None)
+    if not target_catalog:
+        return JSONResponse(
+            {"ok": False, "error": "Target catalog not found or access denied"}, status_code=404
+        )
+
+    cat_slug = target_catalog.get("slug") or target_catalog.get("name") or "default"
+    target_schema = next(
+        (s for s in target_catalog.get("schemas", []) if str(s.get("id")) == str(schema_id)),
+        None,
+    )
+    if not target_schema:
+        return JSONResponse({"ok": False, "error": "Target schema not found"}, status_code=404)
+
+    sch_slug = target_schema.get("slug") or target_schema.get("name") or "bronze"
+
+    # Build Hive path
+    s3_key, s3_path_pattern = ingest_service.build_managed_hive_path(
+        workspace_slug=ws_slug,
+        catalog_slug=cat_slug,
+        schema_slug=sch_slug,
+        table_slug=clean_table_name,
+        mode="create_new",
+    )
+
+    parquet_path = ingest_service.create_empty_parquet_file(columns)
+    try:
+        s3 = _s3_client()
+        s3.upload_file(parquet_path, MINIO_BUCKET, s3_key)
+    finally:
+        if os.path.exists(parquet_path):
+            try:
+                os.remove(parquet_path)
+            except OSError:
+                pass
+
+    # Register table in catalog backend
+    res_table = _backend_post(
+        f"/api/catalogs/{catalog_id}/schemas/{schema_id}/tables",
+        token,
+        {
+            "name": clean_table_name,
+            "description": description or f"Managed table {clean_table_name}",
+            "s3_path_pattern": s3_path_pattern,
+            "column_defs": columns,
+        },
+        workspace_id=ws_id,
+        workspace_slug=ws_slug,
+    )
+    if not res_table or not res_table.get("id"):
+        return JSONResponse(
+            {"ok": False, "error": "Failed to register table metadata"}, status_code=500
+        )
+
+    table_id = str(res_table["id"])
+
+    # Register DuckDB view
+    try:
+        with duckdb_pool_instance.acquire() as con:
+            con.execute(f'CREATE SCHEMA IF NOT EXISTS "{sch_slug}"')
+            con.execute(
+                f'CREATE OR REPLACE VIEW "{sch_slug}"."{clean_table_name}" AS '
+                f"SELECT * FROM read_parquet('{s3_path_pattern}')"
+            )
+    except Exception as v_exc:
+        logger.warning(
+            "Could not register local DuckDB view for %s.%s: %s", sch_slug, clean_table_name, v_exc
+        )
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "table_id": table_id,
+            "catalog_slug": cat_slug,
+            "schema_slug": sch_slug,
+            "table_name": clean_table_name,
+            "s3_path_pattern": s3_path_pattern,
+            "columns": columns,
+            "row_count": 0,
+            "sql_view": f"{sch_slug}.{clean_table_name}",
+            "sql_url": f'/sql?query=SELECT * FROM "{sch_slug}"."{clean_table_name}" LIMIT 10',
+            "catalog_url": f"/catalog#{cat_slug}",
+        }
+    )
+
+
+@app.post("/api/catalog/ai/prompt-to-table")
+async def api_catalog_ai_prompt_to_table(request: Request):
+    token = _get_request_token(request)
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"ok": False, "error": "Not authenticated"}, status_code=401)
+    body = await request.json()
+    res = _backend_post("/api/ai/table-from-prompt", token, body)
+    if not res:
+        try:
+            import ai_service
+
+            res = ai_service.generate_table_from_prompt(
+                prompt=body.get("prompt", ""),
+                catalog=body.get("catalog"),
+                schema=body.get("schema"),
+                model=body.get("model"),
+            )
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+    return JSONResponse(res)
+
+
+@app.post("/api/catalog/ai/generate-description")
+async def api_catalog_ai_generate_description(request: Request):
+    token = _get_request_token(request)
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"ok": False, "error": "Not authenticated"}, status_code=401)
+    body = await request.json()
+    res = _backend_post("/api/ai/generate-description", token, body)
+    if not res:
+        try:
+            import ai_service
+
+            res = ai_service.generate_semantic_description(
+                asset_type=body.get("asset_type", "table"),
+                name=body.get("name", ""),
+                catalog_name=body.get("catalog_name"),
+                schema_name=body.get("schema_name"),
+                columns=body.get("columns"),
+                model=body.get("model"),
+            )
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+    return JSONResponse(res)
+
+
+@app.get("/api/catalog/{catalog_id}/schemas/{schema_id}/toon")
+async def api_catalog_schema_toon(request: Request, catalog_id: str, schema_id: str):
+    token = _get_request_token(request)
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"ok": False, "error": "Not authenticated"}, status_code=401)
+    res = _backend_get(f"/api/catalogs/{catalog_id}/schemas/{schema_id}/toon", token)
+    if not res:
+        return JSONResponse({"ok": False, "error": "Failed to fetch schema TOON"}, status_code=404)
+    return JSONResponse(res)
+
+
+@app.get("/api/catalog/{catalog_id}/schemas/{schema_id}/tables/{table_id}/toon")
+async def api_catalog_table_toon(
+    request: Request, catalog_id: str, schema_id: str, table_id: str
+):
+    token = _get_request_token(request)
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"ok": False, "error": "Not authenticated"}, status_code=401)
+    res = _backend_get(
+        f"/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}/toon", token
+    )
+    if not res:
+        return JSONResponse({"ok": False, "error": "Failed to fetch table TOON"}, status_code=404)
+    return JSONResponse(res)
 
 
 @app.post("/api/ingest/register-s3-path")

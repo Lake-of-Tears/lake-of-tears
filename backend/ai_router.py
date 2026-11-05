@@ -13,6 +13,8 @@ from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query, Re
 from fastapi.responses import StreamingResponse
 from models import User, Workspace
 from schemas import (
+    GenerateDescriptionRequest,
+    GenerateDescriptionResponse,
     GenieChatRequest,
     GenieChatResponse,
     SqlExecuteRequest,
@@ -23,6 +25,8 @@ from schemas import (
     SqlFixResponse,
     SqlGenerateRequest,
     SqlGenerateResponse,
+    TableFromPromptRequest,
+    TableFromPromptResponse,
 )
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -153,6 +157,38 @@ def explain_sql(
         model=req.model,
     )
     return SqlExplainResponse(**result)
+
+
+@router.post("/table-from-prompt", response_model=TableFromPromptResponse)
+def table_from_prompt(
+    req: TableFromPromptRequest,
+    ctx: tuple[Workspace, str, User] = Depends(_resolve_ai_context),
+) -> TableFromPromptResponse:
+    """Generate structured TOON table definition, column metadata, and DDL from a natural language prompt."""
+    result = ai_service.generate_table_from_prompt(
+        prompt=req.prompt,
+        catalog=req.catalog,
+        schema=req.schema_name,
+        model=req.model,
+    )
+    return TableFromPromptResponse(**result)
+
+
+@router.post("/generate-description", response_model=GenerateDescriptionResponse)
+def generate_description(
+    req: GenerateDescriptionRequest,
+    ctx: tuple[Workspace, str, User] = Depends(_resolve_ai_context),
+) -> GenerateDescriptionResponse:
+    """Auto-generate semantic business descriptions and column comments for catalog assets."""
+    result = ai_service.generate_semantic_description(
+        asset_type=req.asset_type,
+        name=req.name,
+        catalog_name=req.catalog_name,
+        schema_name=req.schema_name,
+        columns=req.columns,
+        model=req.model,
+    )
+    return GenerateDescriptionResponse(**result)
 
 
 @router.post("/chat", response_model=GenieChatResponse)

@@ -22,6 +22,30 @@
      ```
 
 ## Current Project State & Next Steps (as of Nov 5, 2026)
+- **Issue #235 & PR (Create Schemas & Tables via UI with File Upload, SQL DDL, and AI-First TOON Support):**
+  - **Status:** **COMPLETED, VERIFIED & ALL 824 TESTS PASSING**
+  - **Kanban Board:** Lake of Tears (Main) Project #3 (Issue item `PVTI_lADOFEJxWM4Bmf-gzhBrMGA`).
+  - **Test Suite:** 824 tests passing (`tests/test_catalog_toon_and_creation.py`).
+  - **Changes:**
+    - **AI-First TOON Specification & Serialization (`pipeline/shared/toon_catalog.py`, `backend/toon_catalog.py`, `ui/toon_catalog.py`):**
+      - Standardized compact TOON schemas for catalog tables and schemas (`table_to_toon()`, `schema_to_toon()`, `toon_to_table_spec()`, `toon_to_sql_ddl()`).
+      - Supported column attributes: `name`, `type`, `description`, `nullable`.
+      - 1-click Export to TOON modal in Catalog Explorer for both schemas and tables with copy and file download, reducing LLM token consumption by 30-60%.
+    - **"Create Schema" in Catalog Explorer UI (`/catalog`):**
+      - `+ Schema` button on each catalog card opening a modal with catalog selector, schema name input, storage prefix preview, and 1-click "Generate with AI" semantic description button.
+      - Proxied through UI to `POST /api/catalogs/{catalog_id}/schemas`.
+    - **"Create Table" in Catalog Explorer via 3 Pathways (`+ Table` dropdown):**
+      - **1. File Upload Wizard (`CSV`, `TSV`, `JSON`, `NDJSON`, `Parquet`):** Drag-and-drop file upload, automatic schema inference, interactive column preview grid (editable names, type select, nullability toggle, column inclusion checkbox, per-column comments), Parquet conversion, and DuckDB managed table registration inside the workspace MinIO jail (`workspaces/{ws}/{catalog}/{schema}/{table}/`).
+      - **2. Create in SQL Editor:** Quick action deep-linking to Lake SQL Editor (`/sql?q=CREATE TABLE...`) pre-populated with a starter DDL template targeted at the active catalog and schema.
+      - **3. AI Prompt to Table:** Natural language prompt input converting user descriptions into compact TOON schemas via workspace LLMs (or intelligent heuristic fallback), side-by-side syntax-highlighted TOON preview and interactive column cards, and 1-click table creation.
+    - **"Enrich with AI" in Table Details Drawer:**
+      - 1-click action in slide-over drawer to generate semantic table descriptions and per-column descriptions dynamically.
+    - **Ingress & Routing:**
+      - Added `/api/catalog` and `/api/ingest` routes in `deploy/helm/lake-of-tears/templates/ingress.yaml` to ensure clean UI proxying and backend communication.
+    - **Documentation:**
+      - Added Section 5.1 & 5.2 in `docs/wiki/Workspaces-and-Catalog-Management.md` with full Mermaid flowcharts and step-by-step user guides.
+  - **Local Deployment:** Rebuilt images `lake-of-tears-backend:latest` and `lake-of-tears-ui:latest`; rolled out to local k8s deployments `lake-of-tears-backend` and `lake-of-tears-lakeui`. Verified live at `http://localhost/catalog`.
+
 - **Issue #296 & PR #391 (Helm Lifecycle Scripts: install, update, and destroy with TOON configuration):**
   - **Status:** **COMPLETED, MERGED & ALL 814 TESTS PASSING**
   - **Pull Request:** Merged via PR #391 into `main` (`b265ba6`).

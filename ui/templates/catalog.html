@@ -67,9 +67,9 @@
     <div class="card overflow-hidden" id="catalog-{{ catalog.id }}">
 
       <!-- Catalog row -->
-      <button
+      <div
         onclick="toggleCatalog('{{ catalog.id }}')"
-        class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-white/[0.03] transition-colors">
+        class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-white/[0.03] transition-colors cursor-pointer select-none">
 
         <svg id="chev-cat-{{ catalog.id }}" class="w-4 h-4 text-gray-600 shrink-0 transition-transform duration-150 -rotate-90"
              fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -89,6 +89,10 @@
           {% endif %}
         </span>
 
+        {% if catalog.description %}
+        <span class="text-xs text-gray-600 truncate max-w-[220px] hidden md:block">{{ catalog.description }}</span>
+        {% endif %}
+
         {% if catalog.my_access == 'owner' %}
         <span class="text-[10px] px-2 py-0.5 rounded-full border border-blue-700/50 text-blue-400 bg-blue-900/20 font-medium shrink-0">owned</span>
         {% elif catalog.my_access == 'write' %}
@@ -97,10 +101,16 @@
         <span class="text-[10px] px-2 py-0.5 rounded-full border border-gray-700 text-gray-400 bg-gray-800/30 font-medium shrink-0">read</span>
         {% endif %}
 
-        {% if catalog.description %}
-        <span class="text-xs text-gray-600 truncate max-w-[220px] hidden md:block">{{ catalog.description }}</span>
+        {% if catalog.my_access in ('owner', 'write') or (request.state.user and request.state.user.role in ('superadmin', 'admin')) %}
+        <button type="button"
+                onclick="event.stopPropagation(); openCreateSchemaModal('{{ catalog.id }}', '{{ catalog.name }}')"
+                class="btn-xs border border-blue-500/30 hover:border-blue-500/60 text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 px-2 py-1 rounded text-xs flex items-center gap-1 transition-colors ml-1 shrink-0"
+                title="Create Schema in this catalog">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+          <span>Schema</span>
+        </button>
         {% endif %}
-      </button>
+      </div>
 
       <!-- Schemas -->
       <div id="schemas-{{ catalog.id }}" class="hidden border-t border-white/[0.05]">
@@ -109,9 +119,9 @@
           <div class="border-b border-white/[0.04] last:border-0">
 
             <!-- Schema row -->
-            <button
+            <div
               onclick="toggleSchema('{{ schema.id }}')"
-              class="w-full flex items-center gap-3 pl-10 pr-4 py-2.5 text-left hover:bg-white/[0.03] transition-colors
+              class="w-full flex items-center gap-3 pl-10 pr-4 py-2.5 text-left hover:bg-white/[0.03] transition-colors cursor-pointer select-none
                 {% if schema.tier == 'bronze' %}border-l-2 border-[#cd7f32]
                 {% elif schema.tier == 'silver' %}border-l-2 border-[#a8a9ad]
                 {% elif schema.tier == 'gold' %}border-l-2 border-[#ffd700]
@@ -145,10 +155,57 @@
               <span class="text-xs text-gray-500 font-sans shrink-0">({{ schema.name }})</span>
               {% endif %}
 
-              <span class="ml-auto text-[11px] text-gray-600">
-                {{ schema.tables | length }} table{{ 's' if schema.tables | length != 1 }}
-              </span>
-            </button>
+              <div class="flex items-center gap-2 ml-auto" onclick="event.stopPropagation()">
+                {% if catalog.my_access in ('owner', 'write') or (request.state.user and request.state.user.role in ('superadmin', 'admin')) %}
+                <!-- Create Table Dropdown -->
+                <div class="relative inline-block text-left">
+                  <button type="button"
+                          onclick="toggleCreateDropdown(event, 'dropdown-schema-{{ schema.id }}')"
+                          class="btn-xs border border-emerald-500/30 hover:border-emerald-500/60 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 px-2 py-1 rounded text-xs flex items-center gap-1 transition-colors"
+                          title="Create Table in this schema">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+                    <span>Table</span>
+                    <svg class="w-3 h-3 text-emerald-500/70" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+                  </button>
+                  <div id="dropdown-schema-{{ schema.id }}" class="hidden absolute right-0 mt-1 w-56 bg-[#1f242d] border border-gray-700/80 rounded-lg shadow-2xl py-1 z-30 text-xs">
+                    <button type="button" onclick="openCreateTableUploadModal('{{ catalog.id }}', '{{ schema.id }}', '{{ catalog.slug|sql_ident }}', '{{ schema.slug|sql_ident }}')" class="w-full text-left px-3 py-2 hover:bg-white/[0.08] text-gray-200 flex items-center gap-2">
+                      <svg class="w-4 h-4 text-blue-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                      <div>
+                        <div class="font-medium text-gray-100">Upload File</div>
+                        <div class="text-[10px] text-gray-400">CSV, Parquet, JSON, NDJSON</div>
+                      </div>
+                    </button>
+                    <a href="/sql?q={{ ('CREATE TABLE \"' ~ (schema.slug|sql_ident) ~ '\".\"new_table\" (\n  id VARCHAR NOT NULL,\n  name VARCHAR,\n  created_at TIMESTAMP\n);') | urlencode }}" class="w-full text-left px-3 py-2 hover:bg-white/[0.08] text-gray-200 flex items-center gap-2">
+                      <svg class="w-4 h-4 text-purple-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+                      <div>
+                        <div class="font-medium text-gray-100">SQL Editor</div>
+                        <div class="text-[10px] text-gray-400">CREATE TABLE statement</div>
+                      </div>
+                    </a>
+                    <button type="button" onclick="openCreateTablePromptModal('{{ catalog.id }}', '{{ schema.id }}', '{{ catalog.slug|sql_ident }}', '{{ schema.slug|sql_ident }}')" class="w-full text-left px-3 py-2 hover:bg-white/[0.08] text-gray-200 flex items-center gap-2">
+                      <svg class="w-4 h-4 text-cyan-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                      <div>
+                        <div class="font-medium text-gray-100">Prompt to Table</div>
+                        <div class="text-[10px] text-gray-400">Natural language & TOON</div>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+                {% endif %}
+
+                <!-- Export Schema TOON -->
+                <button type="button"
+                        onclick="openExportToonModal('schema', '{{ catalog.id }}', '{{ schema.id }}', '{{ schema.slug|sql_ident }}')"
+                        class="btn-xs border border-gray-700 hover:border-gray-600 text-gray-400 hover:text-cyan-300 px-1.5 py-1 rounded text-[11px] font-mono transition-colors"
+                        title="Export Schema definition as TOON">
+                  TOON
+                </button>
+
+                <span class="text-[11px] text-gray-600">
+                  {{ schema.tables | length }} table{{ 's' if schema.tables | length != 1 }}
+                </span>
+              </div>
+            </div>
 
             <!-- Tables -->
             <div id="tables-{{ schema.id }}" class="hidden bg-black/10">
@@ -401,12 +458,20 @@
     </div>
 
     <!-- Quick action links -->
-    <div class="flex items-center gap-2 pt-1" id="panel-actions">
+    <div class="flex items-center gap-2 pt-1 flex-wrap" id="panel-actions">
       <a id="panel-query-btn" href="#" class="btn-primary text-xs py-1.5 flex items-center gap-1.5">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
         Query in SQL Editor
       </a>
       <a id="panel-parquet-btn" href="#" class="btn-ghost text-xs py-1.5 text-gray-400 hover:text-gray-200">Raw Parquet</a>
+      <button type="button" id="panel-toon-btn" onclick="openCurrentTableToon()" class="btn-ghost text-xs py-1.5 text-cyan-400 hover:text-cyan-300 border border-cyan-800/40 flex items-center gap-1.5" title="Export table as TOON">
+        <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+        Export TOON
+      </button>
+      <button type="button" id="panel-ai-btn" onclick="enrichCurrentTableAi()" class="btn-ghost text-xs py-1.5 text-purple-400 hover:text-purple-300 border border-purple-800/40 flex items-center gap-1.5" title="Auto-generate semantic descriptions & column comments">
+        <svg class="w-3.5 h-3.5 text-purple-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        Enrich with AI
+      </button>
     </div>
 
     <!-- Tabs bar -->
@@ -482,6 +547,286 @@
         <button type="submit" class="btn-primary" {% if not request.state.workspace %}disabled{% endif %}>Create</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- Create Schema Modal -->
+<div id="create-schema-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+  <div class="bg-[#1a1a1a] border border-white/[0.08] rounded-xl shadow-2xl w-full max-w-lg p-6">
+    <div class="flex items-center justify-between mb-4 pb-3 border-b border-white/[0.06]">
+      <div class="flex items-center gap-2">
+        <div class="w-7 h-7 rounded-lg bg-blue-950/50 border border-blue-800/40 flex items-center justify-center text-blue-400">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+        </div>
+        <h2 class="text-base font-semibold text-gray-100">Create Schema</h2>
+      </div>
+      <button type="button" onclick="closeCreateSchemaModal()" class="text-gray-500 hover:text-gray-300 p-1 rounded">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <form id="create-schema-form" onsubmit="submitCreateSchema(event)" class="flex flex-col gap-4">
+      <div>
+        <label class="block text-xs font-medium text-gray-400 mb-1">Target Catalog</label>
+        <select id="create-schema-catalog-select" class="input-dark w-full text-sm">
+          {% for cat in catalogs %}
+          <option value="{{ cat.id }}">{{ cat.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-400 mb-1">Schema Name</label>
+        <input id="create-schema-name-input" type="text" required placeholder="e.g. analytics, telemetry, finance" class="input-dark w-full text-sm" oninput="updateSchemaSlugPreview()"/>
+        <p class="text-[11px] text-gray-500 mt-1">Storage prefix: <span class="font-mono text-gray-400" id="schema-prefix-preview">workspaces/{{ request.state.workspace.slug if request.state.workspace else 'default' }}/...</span></p>
+      </div>
+      <div>
+        <div class="flex items-center justify-between mb-1">
+          <label class="block text-xs font-medium text-gray-400">Description <span class="text-gray-600">(optional)</span></label>
+          <button type="button" onclick="generateSchemaDescriptionAi()" id="btn-ai-schema-desc" class="text-[11px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1 transition-colors">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            Generate with AI
+          </button>
+        </div>
+        <textarea id="create-schema-desc-input" rows="2" placeholder="What domain data lives in this schema?" class="input-dark w-full text-sm"></textarea>
+      </div>
+      <div id="create-schema-error" class="hidden text-xs text-rose-400 bg-rose-950/30 border border-rose-800/40 p-2.5 rounded"></div>
+      <div class="flex gap-2 justify-end pt-2 border-t border-white/[0.06]">
+        <button type="button" onclick="closeCreateSchemaModal()" class="btn-ghost text-xs">Cancel</button>
+        <button type="submit" id="btn-submit-schema" class="btn-primary text-xs flex items-center gap-1.5">
+          <span>Create Schema</span>
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Create Table via File Upload Modal -->
+<div id="create-table-upload-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+  <div class="bg-[#1a1a1a] border border-white/[0.08] rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
+    <!-- Header -->
+    <div class="flex items-center justify-between p-5 border-b border-white/[0.06] shrink-0">
+      <div class="flex items-center gap-2">
+        <div class="w-7 h-7 rounded-lg bg-blue-950/50 border border-blue-800/40 flex items-center justify-center text-blue-400">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+        </div>
+        <div>
+          <h2 class="text-base font-semibold text-gray-100">Create Table from File</h2>
+          <p class="text-xs text-gray-500">Upload CSV, Parquet, or JSON to ingest into a managed lakehouse table</p>
+        </div>
+      </div>
+      <button type="button" onclick="closeCreateTableUploadModal()" class="text-gray-500 hover:text-gray-300 p-1 rounded">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <!-- Scrollable Body -->
+    <div class="flex-1 overflow-y-auto p-5 space-y-4">
+      <!-- Target Placement -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div>
+          <label class="block text-xs font-medium text-gray-400 mb-1">Catalog</label>
+          <select id="upload-table-cat-select" class="input-dark w-full text-xs" onchange="onUploadCatChanged()">
+            {% for cat in catalogs %}
+            <option value="{{ cat.id }}">{{ cat.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-400 mb-1">Schema</label>
+          <select id="upload-table-sch-select" class="input-dark w-full text-xs"></select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-400 mb-1">Table Name</label>
+          <input id="upload-table-name-input" type="text" placeholder="e.g. orders_raw" class="input-dark w-full text-xs" required/>
+        </div>
+      </div>
+
+      <!-- File Dropzone -->
+      <div>
+        <label class="block text-xs font-medium text-gray-400 mb-1">Source File</label>
+        <div id="upload-dropzone" onclick="document.getElementById('upload-file-input').click()"
+             class="border-2 border-dashed border-gray-700 hover:border-blue-500/60 bg-white/[0.02] hover:bg-white/[0.04] transition-colors rounded-xl p-6 text-center cursor-pointer flex flex-col items-center justify-center gap-2">
+          <input type="file" id="upload-file-input" class="hidden" accept=".csv,.tsv,.json,.ndjson,.jsonl,.parquet,.pq" onchange="handleFileSelected(event)"/>
+          <svg class="w-8 h-8 text-blue-400/80" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+          <div class="text-xs text-gray-300 font-medium">Click to upload or drag and drop</div>
+          <div class="text-[11px] text-gray-500">Supports CSV, TSV, JSON, NDJSON, and Parquet</div>
+        </div>
+        <div id="upload-file-info" class="hidden mt-2 p-2.5 rounded-lg bg-blue-950/30 border border-blue-800/40 flex items-center justify-between text-xs">
+          <div class="flex items-center gap-2">
+            <span id="upload-format-badge" class="px-1.5 py-0.5 rounded bg-blue-900/40 text-blue-300 font-mono text-[10px] uppercase"></span>
+            <span id="upload-file-name" class="font-medium text-gray-200"></span>
+            <span id="upload-file-size" class="text-gray-500"></span>
+          </div>
+          <button type="button" onclick="resetUploadFile()" class="text-gray-500 hover:text-gray-300 text-xs">Change file</button>
+        </div>
+      </div>
+
+      <!-- Interactive Schema Preview Grid -->
+      <div id="upload-columns-section" class="hidden space-y-2">
+        <div class="flex items-center justify-between">
+          <label class="block text-xs font-semibold text-gray-300">Inferred Column Schema & Overrides</label>
+          <span id="upload-col-count" class="text-[11px] text-gray-500"></span>
+        </div>
+        <div class="border border-white/[0.08] rounded-lg overflow-hidden bg-black/20">
+          <div class="max-h-60 overflow-y-auto">
+            <table class="w-full text-left text-xs">
+              <thead class="bg-white/[0.04] text-gray-400 font-medium border-b border-white/[0.06] sticky top-0">
+                <tr>
+                  <th class="p-2 w-8 text-center"><input type="checkbox" id="upload-check-all" checked onchange="toggleAllUploadCols(this.checked)"/></th>
+                  <th class="p-2">Column Name</th>
+                  <th class="p-2 w-36">Data Type</th>
+                  <th class="p-2 w-24 text-center">Nullable</th>
+                  <th class="p-2">Description</th>
+                </tr>
+              </thead>
+              <tbody id="upload-cols-tbody" class="divide-y divide-white/[0.04]"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div id="upload-error" class="hidden text-xs text-rose-400 bg-rose-950/30 border border-rose-800/40 p-2.5 rounded"></div>
+    </div>
+
+    <!-- Footer -->
+    <div class="p-4 border-t border-white/[0.06] flex items-center justify-between shrink-0 bg-white/[0.01]">
+      <span class="text-xs text-gray-500" id="upload-status-hint">Select a file to preview schema</span>
+      <div class="flex gap-2">
+        <button type="button" onclick="closeCreateTableUploadModal()" class="btn-ghost text-xs">Cancel</button>
+        <button type="button" id="btn-submit-upload-table" onclick="submitCreateTableUpload()" class="btn-primary text-xs flex items-center gap-1.5" disabled>
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+          <span>Create Table</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Create Table via AI Prompt Modal -->
+<div id="create-table-prompt-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+  <div class="bg-[#1a1a1a] border border-white/[0.08] rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
+    <!-- Header -->
+    <div class="flex items-center justify-between p-5 border-b border-white/[0.06] shrink-0">
+      <div class="flex items-center gap-2">
+        <div class="w-7 h-7 rounded-lg bg-cyan-950/50 border border-cyan-800/40 flex items-center justify-center text-cyan-400">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        </div>
+        <div>
+          <h2 class="text-base font-semibold text-gray-100">AI-First Prompt to Table</h2>
+          <p class="text-xs text-gray-500">Describe dataset in natural language to generate TOON specification and table</p>
+        </div>
+      </div>
+      <button type="button" onclick="closeCreateTablePromptModal()" class="text-gray-500 hover:text-gray-300 p-1 rounded">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <!-- Body -->
+    <div class="flex-1 overflow-y-auto p-5 space-y-4">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-medium text-gray-400 mb-1">Target Catalog</label>
+          <select id="prompt-table-cat-select" class="input-dark w-full text-xs" onchange="onPromptCatChanged()">
+            {% for cat in catalogs %}
+            <option value="{{ cat.id }}">{{ cat.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-400 mb-1">Target Schema</label>
+          <select id="prompt-table-sch-select" class="input-dark w-full text-xs"></select>
+        </div>
+      </div>
+
+      <!-- Prompt Input -->
+      <div>
+        <label class="block text-xs font-medium text-gray-400 mb-1">Describe Table Requirements</label>
+        <div class="relative">
+          <textarea id="prompt-table-input" rows="3" class="input-dark w-full text-xs pr-24"
+                    placeholder="e.g. Create a silver customer orders table with order_id, customer_id, line_items JSON, total_amount, order_status, and created_at"></textarea>
+          <button type="button" id="btn-generate-toon" onclick="generateTableFromPromptAi()"
+                  class="absolute right-2 bottom-2 px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-medium flex items-center gap-1.5 transition-colors">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            <span>Generate</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Dual Preview Section -->
+      <div id="prompt-preview-container" class="hidden space-y-3">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <!-- Left: TOON Specification -->
+          <div class="border border-white/[0.08] rounded-xl bg-black/30 p-3 flex flex-col">
+            <div class="flex items-center justify-between pb-2 border-b border-white/[0.06] mb-2">
+              <span class="text-xs font-semibold text-cyan-400 font-mono">table.toon (TOON Specification)</span>
+              <button type="button" onclick="copyPromptToon()" class="text-[11px] text-gray-400 hover:text-gray-200">Copy</button>
+            </div>
+            <pre id="prompt-toon-preview" class="text-xs font-mono text-gray-300 overflow-x-auto whitespace-pre p-2 bg-black/40 rounded flex-1 max-h-64"></pre>
+          </div>
+
+          <!-- Right: Interactive Column Cards -->
+          <div class="border border-white/[0.08] rounded-xl bg-black/30 p-3 flex flex-col">
+            <div class="flex items-center justify-between pb-2 border-b border-white/[0.06] mb-2">
+              <span class="text-xs font-semibold text-gray-300">Inferred Columns & DDL</span>
+              <span id="prompt-col-count" class="text-[11px] text-gray-500"></span>
+            </div>
+            <div id="prompt-cols-preview" class="space-y-1.5 overflow-y-auto max-h-64 p-1"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="prompt-error" class="hidden text-xs text-rose-400 bg-rose-950/30 border border-rose-800/40 p-2.5 rounded"></div>
+    </div>
+
+    <!-- Footer -->
+    <div class="p-4 border-t border-white/[0.06] flex items-center justify-between shrink-0 bg-white/[0.01]">
+      <span class="text-xs text-gray-500" id="prompt-status-hint">Enter prompt and click Generate</span>
+      <div class="flex gap-2">
+        <button type="button" onclick="closeCreateTablePromptModal()" class="btn-ghost text-xs">Cancel</button>
+        <button type="button" id="btn-submit-prompt-table" onclick="submitCreateTableFromToon()" class="btn-primary text-xs flex items-center gap-1.5" disabled>
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+          <span>Apply TOON & Create Table</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Export TOON Modal -->
+<div id="export-toon-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+  <div class="bg-[#1a1a1a] border border-white/[0.08] rounded-xl shadow-2xl w-full max-w-xl p-6 flex flex-col">
+    <div class="flex items-center justify-between pb-3 border-b border-white/[0.06] mb-4">
+      <div class="flex items-center gap-2">
+        <div class="w-7 h-7 rounded-lg bg-cyan-950/50 border border-cyan-800/40 flex items-center justify-center text-cyan-400 font-mono text-xs font-bold">
+          TN
+        </div>
+        <div>
+          <h2 class="text-base font-semibold text-gray-100 flex items-center gap-1.5">
+            <span>Export to TOON</span>
+            <span id="export-toon-target" class="text-xs font-mono text-cyan-400 bg-cyan-950/40 px-2 py-0.5 rounded border border-cyan-800/40"></span>
+          </h2>
+          <p class="text-[11px] text-gray-500">Token-Oriented Object Notation format for LLMs & Lake Asset Bundles (LABs)</p>
+        </div>
+      </div>
+      <button type="button" onclick="closeExportToonModal()" class="text-gray-500 hover:text-gray-300 p-1 rounded">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <pre id="export-toon-code" class="text-xs font-mono text-gray-300 bg-black/40 border border-white/[0.06] rounded-lg p-4 overflow-x-auto max-h-80 whitespace-pre mb-4"></pre>
+
+    <div class="flex items-center justify-between pt-3 border-t border-white/[0.06]">
+      <span class="text-[11px] text-emerald-400 font-mono" id="export-toon-savings-badge">Compact context: ~40% fewer tokens</span>
+      <div class="flex gap-2">
+        <button type="button" id="btn-copy-toon" onclick="copyExportToonContent()" class="btn-ghost text-xs flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+          <span id="copy-toon-btn-text">Copy to Clipboard</span>
+        </button>
+        <button type="button" id="btn-download-toon" onclick="downloadExportToonFile()" class="btn-primary text-xs flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+          <span>Download .toon</span>
+        </button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1134,6 +1479,605 @@ function triggerVectorSync(btn, force = false) {
 function saveVectorConfig() {
   const btn = document.getElementById('btn-vector-sync');
   if (btn) triggerVectorSync(btn);
+}
+
+// Global catalog metadata cache for modal dropdowns
+const LOT_CATALOGS_DATA = {{ catalogs | tojson }};
+
+// --- Schema Creation ---
+function openCreateSchemaModal(catId, catName) {
+  const modal = document.getElementById('create-schema-modal');
+  const catSelect = document.getElementById('create-schema-catalog-select');
+  if (catSelect && catId) {
+    catSelect.value = catId;
+  }
+  document.getElementById('create-schema-name-input').value = '';
+  document.getElementById('create-schema-desc-input').value = '';
+  document.getElementById('create-schema-error').classList.add('hidden');
+  updateSchemaSlugPreview();
+  modal.classList.remove('hidden');
+}
+
+function closeCreateSchemaModal() {
+  document.getElementById('create-schema-modal').classList.add('hidden');
+}
+
+function updateSchemaSlugPreview() {
+  const name = document.getElementById('create-schema-name-input').value;
+  const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'schema';
+  const prefix = document.getElementById('schema-prefix-preview');
+  if (prefix) {
+    const ws = "{{ request.state.workspace.slug if request.state.workspace else 'default' }}";
+    prefix.textContent = `workspaces/${ws}/.../${slug}/`;
+  }
+}
+
+async function generateSchemaDescriptionAi() {
+  const name = document.getElementById('create-schema-name-input').value;
+  if (!name.trim()) {
+    alert('Please enter a schema name first.');
+    return;
+  }
+  const btn = document.getElementById('btn-ai-schema-desc');
+  const origText = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="animate-spin">⏳</span> Generating...';
+
+  try {
+    const catSelect = document.getElementById('create-schema-catalog-select');
+    const catName = catSelect ? catSelect.options[catSelect.selectedIndex].text : 'main';
+    const resp = await fetch('/api/catalog/ai/generate-description', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        asset_type: 'schema',
+        name: name,
+        catalog_name: catName
+      })
+    });
+    const data = await resp.json();
+    if (data.ok && data.description) {
+      document.getElementById('create-schema-desc-input').value = data.description;
+    } else {
+      alert(data.error || 'Failed to generate description');
+    }
+  } catch (err) {
+    alert('Network error: ' + err);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = origText;
+  }
+}
+
+async function submitCreateSchema(e) {
+  e.preventDefault();
+  const catId = document.getElementById('create-schema-catalog-select').value;
+  const name = document.getElementById('create-schema-name-input').value.trim();
+  const desc = document.getElementById('create-schema-desc-input').value.trim();
+  const errDiv = document.getElementById('create-schema-error');
+  const submitBtn = document.getElementById('btn-submit-schema');
+
+  errDiv.classList.add('hidden');
+  submitBtn.disabled = true;
+  submitBtn.innerHTML = '<span>Creating...</span>';
+
+  try {
+    const resp = await fetch(`/api/catalog/${catId}/schemas`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name, description: desc || null })
+    });
+    const data = await resp.json();
+    if (resp.ok && data.ok) {
+      closeCreateSchemaModal();
+      window.location.reload();
+    } else {
+      errDiv.textContent = data.error || 'Failed to create schema';
+      errDiv.classList.remove('hidden');
+    }
+  } catch (err) {
+    errDiv.textContent = 'Network error: ' + err;
+    errDiv.classList.remove('hidden');
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = '<span>Create Schema</span>';
+  }
+}
+
+// --- Dropdown Management ---
+function toggleCreateDropdown(e, dropdownId) {
+  e.stopPropagation();
+  const dd = document.getElementById(dropdownId);
+  const isHidden = dd.classList.contains('hidden');
+  closeAllDropdowns();
+  if (isHidden) {
+    dd.classList.remove('hidden');
+  }
+}
+
+function closeAllDropdowns() {
+  document.querySelectorAll('[id^="dropdown-schema-"]').forEach(el => el.classList.add('hidden'));
+}
+
+document.addEventListener('click', closeAllDropdowns);
+
+// --- Create Table via File Upload ---
+let uploadCurrentFile = null;
+let uploadInferredColumns = [];
+
+function populateSchemaOptions(catSelectId, schSelectId, selectedCatId, selectedSchId) {
+  const catSelect = document.getElementById(catSelectId);
+  const schSelect = document.getElementById(schSelectId);
+  if (!catSelect || !schSelect) return;
+
+  const currentCatId = selectedCatId || catSelect.value;
+  const cat = LOT_CATALOGS_DATA.find(c => String(c.id) === String(currentCatId));
+  schSelect.innerHTML = '';
+
+  if (cat && cat.schemas && cat.schemas.length > 0) {
+    cat.schemas.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.id;
+      opt.textContent = `${s.slug} (${s.name || s.tier || 'custom'})`;
+      if (selectedSchId && String(s.id) === String(selectedSchId)) {
+        opt.selected = true;
+      }
+      schSelect.appendChild(opt);
+    });
+  } else {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'No schemas available';
+    schSelect.appendChild(opt);
+  }
+}
+
+function openCreateTableUploadModal(catId, schId, catSlug, schSlug) {
+  closeAllDropdowns();
+  const modal = document.getElementById('create-table-upload-modal');
+  const catSelect = document.getElementById('upload-table-cat-select');
+  if (catSelect && catId) {
+    catSelect.value = catId;
+  }
+  populateSchemaOptions('upload-table-cat-select', 'upload-table-sch-select', catId, schId);
+
+  resetUploadFile();
+  document.getElementById('upload-table-name-input').value = '';
+  document.getElementById('upload-error').classList.add('hidden');
+  modal.classList.remove('hidden');
+}
+
+function closeCreateTableUploadModal() {
+  document.getElementById('create-table-upload-modal').classList.add('hidden');
+}
+
+function onUploadCatChanged() {
+  populateSchemaOptions('upload-table-cat-select', 'upload-table-sch-select');
+}
+
+function resetUploadFile() {
+  uploadCurrentFile = null;
+  uploadInferredColumns = [];
+  document.getElementById('upload-file-input').value = '';
+  document.getElementById('upload-dropzone').classList.remove('hidden');
+  document.getElementById('upload-file-info').classList.add('hidden');
+  document.getElementById('upload-columns-section').classList.add('hidden');
+  document.getElementById('btn-submit-upload-table').disabled = true;
+  document.getElementById('upload-status-hint').textContent = 'Select a file to preview schema';
+}
+
+async function handleFileSelected(e) {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  uploadCurrentFile = file;
+
+  // Show file info pill
+  document.getElementById('upload-file-name').textContent = file.name;
+  document.getElementById('upload-file-size').textContent = (file.size / 1024).toFixed(1) + ' KB';
+  const ext = file.name.split('.').pop().toUpperCase();
+  document.getElementById('upload-format-badge').textContent = ext;
+  document.getElementById('upload-dropzone').classList.add('hidden');
+  document.getElementById('upload-file-info').classList.remove('hidden');
+
+  // Auto-fill table name if empty
+  const nameInput = document.getElementById('upload-table-name-input');
+  if (!nameInput.value.trim()) {
+    nameInput.value = file.name.split('.')[0].toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  }
+
+  // Preview file schema
+  const hint = document.getElementById('upload-status-hint');
+  hint.textContent = 'Parsing schema and sampling rows...';
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const resp = await fetch('/api/ingest/preview-file', {
+      method: 'POST',
+      body: formData
+    });
+    const data = await resp.json();
+    if (data.ok && data.columns) {
+      uploadInferredColumns = data.columns;
+      renderUploadColumnsGrid(data.columns, data.rows || []);
+      hint.textContent = `Inferred ${data.columns.length} columns from ${file.name}`;
+      document.getElementById('btn-submit-upload-table').disabled = false;
+    } else {
+      alert(data.error || 'Failed to infer schema from file');
+      resetUploadFile();
+    }
+  } catch (err) {
+    alert('Failed to preview file: ' + err);
+    resetUploadFile();
+  }
+}
+
+const SUPPORTED_SQL_TYPES = ['VARCHAR', 'BIGINT', 'INTEGER', 'DOUBLE', 'BOOLEAN', 'TIMESTAMP', 'DATE', 'JSON'];
+
+function renderUploadColumnsGrid(columns, sampleRows) {
+  const tbody = document.getElementById('upload-cols-tbody');
+  tbody.innerHTML = '';
+  document.getElementById('upload-col-count').textContent = `${columns.length} columns inferred`;
+
+  columns.forEach((col, idx) => {
+    const tr = document.createElement('tr');
+    tr.className = 'hover:bg-white/[0.02] transition-colors';
+
+    const colTypeUpper = (col.type || 'VARCHAR').toUpperCase();
+
+    tr.innerHTML = `
+      <td class="p-2 text-center">
+        <input type="checkbox" class="col-include-cb" data-idx="${idx}" checked/>
+      </td>
+      <td class="p-2">
+        <input type="text" class="input-dark w-full text-xs py-1 px-2 font-mono col-name-input" data-idx="${idx}" value="${col.name || 'col_' + idx}" data-orig="${col.name || ''}"/>
+      </td>
+      <td class="p-2">
+        <select class="input-dark w-full text-xs py-1 px-1.5 font-mono col-type-select" data-idx="${idx}">
+          ${SUPPORTED_SQL_TYPES.map(t => `<option value="${t}" ${t === colTypeUpper || (colTypeUpper.startsWith(t)) ? 'selected' : ''}>${t}</option>`).join('')}
+        </select>
+      </td>
+      <td class="p-2 text-center">
+        <input type="checkbox" class="col-null-cb" data-idx="${idx}" ${col.nullable !== false ? 'checked' : ''}/>
+      </td>
+      <td class="p-2">
+        <input type="text" class="input-dark w-full text-xs py-1 px-2 col-desc-input" data-idx="${idx}" placeholder="column description" value="${col.description || ''}"/>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  document.getElementById('upload-columns-section').classList.remove('hidden');
+}
+
+function toggleAllUploadCols(checked) {
+  document.querySelectorAll('.col-include-cb').forEach(cb => cb.checked = checked);
+}
+
+async function submitCreateTableUpload() {
+  if (!uploadCurrentFile) return;
+
+  const catId = document.getElementById('upload-table-cat-select').value;
+  const schId = document.getElementById('upload-table-sch-select').value;
+  const tableName = document.getElementById('upload-table-name-input').value.trim();
+  const errDiv = document.getElementById('upload-error');
+  const submitBtn = document.getElementById('btn-submit-upload-table');
+
+  if (!catId || !schId || !tableName) {
+    alert('Please fill in Catalog, Schema, and Table Name.');
+    return;
+  }
+
+  // Collect configured columns
+  const columnOverrides = [];
+  const rows = document.querySelectorAll('#upload-cols-tbody tr');
+  rows.forEach((tr, idx) => {
+    const include = tr.querySelector('.col-include-cb').checked;
+    const nameInput = tr.querySelector('.col-name-input');
+    const typeSelect = tr.querySelector('.col-type-select');
+    const nullCb = tr.querySelector('.col-null-cb');
+    const descInput = tr.querySelector('.col-desc-input');
+
+    columnOverrides.push({
+      include: include,
+      source_name: nameInput.getAttribute('data-orig') || nameInput.value,
+      name: nameInput.value.trim() || 'col_' + idx,
+      type: typeSelect.value,
+      nullable: nullCb.checked,
+      description: descInput.value.trim() || null
+    });
+  });
+
+  errDiv.classList.add('hidden');
+  submitBtn.disabled = true;
+  submitBtn.innerHTML = '<span class="animate-spin">⏳</span> Ingesting...';
+
+  const formData = new FormData();
+  formData.append('file', uploadCurrentFile);
+  formData.append('catalog_id', catId);
+  formData.append('schema_id', schId);
+  formData.append('table_name', tableName);
+  formData.append('mode', 'create_new');
+  formData.append('description', `Managed table ingested from ${uploadCurrentFile.name}`);
+  formData.append('columns_json', JSON.stringify(columnOverrides));
+
+  try {
+    const resp = await fetch('/api/ingest/create-table-from-file', {
+      method: 'POST',
+      body: formData
+    });
+    const data = await resp.json();
+    if (resp.ok && data.ok) {
+      closeCreateTableUploadModal();
+      window.location.reload();
+    } else {
+      errDiv.textContent = data.error || 'Failed to create table from file';
+      errDiv.classList.remove('hidden');
+    }
+  } catch (err) {
+    errDiv.textContent = 'Network error: ' + err;
+    errDiv.classList.remove('hidden');
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = '<span>Create Table</span>';
+  }
+}
+
+// --- Create Table via AI Prompt & TOON ---
+let promptGeneratedSpec = null;
+
+function openCreateTablePromptModal(catId, schId, catSlug, schSlug) {
+  closeAllDropdowns();
+  const modal = document.getElementById('create-table-prompt-modal');
+  const catSelect = document.getElementById('prompt-table-cat-select');
+  if (catSelect && catId) {
+    catSelect.value = catId;
+  }
+  populateSchemaOptions('prompt-table-cat-select', 'prompt-table-sch-select', catId, schId);
+
+  promptGeneratedSpec = null;
+  document.getElementById('prompt-table-input').value = '';
+  document.getElementById('prompt-preview-container').classList.add('hidden');
+  document.getElementById('prompt-error').classList.add('hidden');
+  document.getElementById('btn-submit-prompt-table').disabled = true;
+  document.getElementById('prompt-status-hint').textContent = 'Enter prompt and click Generate';
+  modal.classList.remove('hidden');
+}
+
+function closeCreateTablePromptModal() {
+  document.getElementById('create-table-prompt-modal').classList.add('hidden');
+}
+
+function onPromptCatChanged() {
+  populateSchemaOptions('prompt-table-cat-select', 'prompt-table-sch-select');
+}
+
+async function generateTableFromPromptAi() {
+  const prompt = document.getElementById('prompt-table-input').value.trim();
+  if (!prompt) {
+    alert('Please enter a natural language prompt describing your table.');
+    return;
+  }
+
+  const catSelect = document.getElementById('prompt-table-cat-select');
+  const schSelect = document.getElementById('prompt-table-sch-select');
+  const catName = catSelect ? catSelect.options[catSelect.selectedIndex].text : 'main';
+  const schName = schSelect && schSelect.selectedIndex >= 0 ? schSelect.options[schSelect.selectedIndex].text.split(' ')[0] : 'bronze';
+
+  const btn = document.getElementById('btn-generate-toon');
+  const origHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="animate-spin">⏳</span> AI...';
+
+  const errDiv = document.getElementById('prompt-error');
+  errDiv.classList.add('hidden');
+
+  try {
+    const resp = await fetch('/api/catalog/ai/prompt-to-table', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: prompt,
+        catalog: catName,
+        schema: schName
+      })
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      promptGeneratedSpec = data;
+      document.getElementById('prompt-toon-preview').textContent = data.toon;
+
+      // Render column cards
+      const colCards = document.getElementById('prompt-cols-preview');
+      colCards.innerHTML = '';
+      (data.columns || []).forEach(c => {
+        const item = document.createElement('div');
+        item.className = 'p-2 rounded bg-white/[0.03] border border-white/[0.04] flex items-center justify-between text-xs';
+        item.innerHTML = `
+          <div class="flex items-center gap-2">
+            <span class="font-mono text-cyan-400 font-medium">${c.name}</span>
+            <span class="px-1.5 py-0.5 rounded bg-blue-950/40 text-blue-400 font-mono text-[10px]">${c.type}</span>
+            ${c.nullable === false ? '<span class="text-[10px] text-amber-400 font-mono">NOT NULL</span>' : ''}
+          </div>
+          <span class="text-[11px] text-gray-500 truncate max-w-[200px]">${c.description || ''}</span>
+        `;
+        colCards.appendChild(item);
+      });
+
+      document.getElementById('prompt-col-count').textContent = `${(data.columns || []).length} columns`;
+      document.getElementById('prompt-preview-container').classList.remove('hidden');
+      document.getElementById('btn-submit-prompt-table').disabled = false;
+      document.getElementById('prompt-status-hint').textContent = `Ready to create table "${data.table_name}"`;
+    } else {
+      errDiv.textContent = data.error || 'Failed to generate table specification';
+      errDiv.classList.remove('hidden');
+    }
+  } catch (err) {
+    errDiv.textContent = 'Network error: ' + err;
+    errDiv.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = origHtml;
+  }
+}
+
+function copyPromptToon() {
+  const code = document.getElementById('prompt-toon-preview').textContent;
+  if (!code) return;
+  navigator.clipboard.writeText(code).then(() => {
+    alert('Copied TOON specification to clipboard!');
+  });
+}
+
+async function submitCreateTableFromToon() {
+  if (!promptGeneratedSpec) return;
+
+  const catId = document.getElementById('prompt-table-cat-select').value;
+  const schId = document.getElementById('prompt-table-sch-select').value;
+  const errDiv = document.getElementById('prompt-error');
+  const submitBtn = document.getElementById('btn-submit-prompt-table');
+
+  errDiv.classList.add('hidden');
+  submitBtn.disabled = true;
+  submitBtn.innerHTML = '<span class="animate-spin">⏳</span> Creating Table...';
+
+  const formData = new FormData();
+  formData.append('catalog_id', catId);
+  formData.append('schema_id', schId);
+  formData.append('table_name', promptGeneratedSpec.table_name);
+  formData.append('description', promptGeneratedSpec.description || `Managed table ${promptGeneratedSpec.table_name}`);
+  formData.append('toon', promptGeneratedSpec.toon);
+  formData.append('columns_json', JSON.stringify(promptGeneratedSpec.columns));
+
+  try {
+    const resp = await fetch('/api/catalog/create-table-from-toon', {
+      method: 'POST',
+      body: formData
+    });
+    const data = await resp.json();
+    if (resp.ok && data.ok) {
+      closeCreateTablePromptModal();
+      window.location.reload();
+    } else {
+      errDiv.textContent = data.error || 'Failed to create table from TOON';
+      errDiv.classList.remove('hidden');
+    }
+  } catch (err) {
+    errDiv.textContent = 'Network error: ' + err;
+    errDiv.classList.remove('hidden');
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = '<span>Apply TOON & Create Table</span>';
+  }
+}
+
+// --- Export TOON Modal ---
+let exportCurrentToonText = '';
+let exportCurrentFilename = 'asset.toon';
+
+async function openExportToonModal(assetType, catId, schId, name, tableId) {
+  closeAllDropdowns();
+  const modal = document.getElementById('export-toon-modal');
+  const targetBadge = document.getElementById('export-toon-target');
+  const codeBlock = document.getElementById('export-toon-code');
+
+  targetBadge.textContent = `${assetType}: ${name}`;
+  codeBlock.textContent = '# Fetching TOON specification...';
+  modal.classList.remove('hidden');
+
+  const endpoint = assetType === 'schema'
+    ? `/api/catalog/${catId}/schemas/${schId}/toon`
+    : `/api/catalog/${catId}/schemas/${schId}/tables/${tableId || currentTableId}/toon`;
+
+  try {
+    const resp = await fetch(endpoint);
+    const data = await resp.json();
+    if (data.ok && data.toon) {
+      exportCurrentToonText = data.toon;
+      exportCurrentFilename = data.filename || `${name}.toon`;
+      codeBlock.textContent = data.toon;
+    } else {
+      codeBlock.textContent = '# Error: ' + (data.error || 'Failed to generate TOON');
+    }
+  } catch (err) {
+    codeBlock.textContent = '# Network error: ' + err;
+  }
+}
+
+function closeExportToonModal() {
+  document.getElementById('export-toon-modal').classList.add('hidden');
+}
+
+function copyExportToonContent() {
+  if (!exportCurrentToonText) return;
+  navigator.clipboard.writeText(exportCurrentToonText).then(() => {
+    const btnText = document.getElementById('copy-toon-btn-text');
+    const orig = btnText.textContent;
+    btnText.textContent = 'Copied!';
+    setTimeout(() => { btnText.textContent = orig; }, 2000);
+  });
+}
+
+function downloadExportToonFile() {
+  if (!exportCurrentToonText) return;
+  const blob = new Blob([exportCurrentToonText], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = exportCurrentFilename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function openCurrentTableToon() {
+  if (!currentTableData) return;
+  openExportToonModal('table', currentCatId, currentSchId, currentTableIdent, currentTableId);
+}
+
+async function enrichCurrentTableAi() {
+  if (!currentTableData) return;
+  const btn = document.getElementById('panel-ai-btn');
+  const origHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="animate-spin">⏳</span> AI...';
+
+  try {
+    const resp = await fetch('/api/catalog/ai/generate-description', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        asset_type: 'table',
+        name: currentTableIdent,
+        catalog_name: currentCatIdent,
+        schema_name: currentSchIdent,
+        columns: currentTableData.column_defs || []
+      })
+    });
+    const data = await resp.json();
+    if (data.ok && data.description) {
+      currentTableData.description = data.description;
+      if (data.column_descriptions && currentTableData.column_defs) {
+        currentTableData.column_defs.forEach(c => {
+          if (data.column_descriptions[c.name]) {
+            c.description = data.column_descriptions[c.name];
+          }
+        });
+      }
+      renderColumnsTab(currentTableData);
+      renderDetailsTab(currentTableData, currentCatIdent, currentSchIdent, currentTableIdent);
+      alert('Table enriched with AI semantic metadata!');
+    } else {
+      alert(data.error || 'Failed to enrich with AI');
+    }
+  } catch (err) {
+    alert('Network error: ' + err);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = origHtml;
+  }
 }
 
 window.navigateCatalogTo = function(item) {
