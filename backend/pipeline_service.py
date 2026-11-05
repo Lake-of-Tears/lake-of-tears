@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from croniter import croniter
 from fastapi import HTTPException
+from secrets_manager.redaction import redact_secrets
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -760,7 +761,7 @@ async def get_task_log(
                 "run_id": run_id,
                 "task_id": task_id,
                 "try_number": actual_try,
-                "content": content,
+                "content": redact_secrets(content),
             }
     except HTTPException:
         raise
