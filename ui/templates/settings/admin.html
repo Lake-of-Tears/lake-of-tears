@@ -12,6 +12,10 @@
   <div class="px-4 py-3 rounded-md bg-emerald-900/30 border border-emerald-800/50 text-emerald-400 text-sm">
     Session terminated successfully.
   </div>
+  {% elif saved == 'vault' %}
+  <div class="px-4 py-3 rounded-md bg-emerald-900/30 border border-emerald-800/50 text-emerald-400 text-sm">
+    Vault configuration saved successfully.
+  </div>
   {% elif saved %}
   <div class="px-4 py-3 rounded-md bg-emerald-900/30 border border-emerald-800/50 text-emerald-400 text-sm">
     Changes saved.
@@ -660,6 +664,254 @@
     </div>
   </div>
 
+  <!-- Secret Vaults & Cloud Providers -->
+  <div id="vault-settings" class="card p-6 space-y-6">
+    <div class="flex items-start justify-between">
+      <div>
+        <h2 class="text-sm font-semibold text-gray-300 mb-1">Secret Vaults & Cloud Providers</h2>
+        <p class="text-xs text-gray-500">
+          Configure external cloud vaults (Azure Key Vault, AWS Secrets Manager) and review all workspace secret scopes across Lake of Tears.
+        </p>
+      </div>
+      <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-950/60 text-emerald-400 border border-emerald-800/60">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+        Envelope Encryption Active
+      </span>
+    </div>
+
+    {% if vault_error %}
+    <div class="p-3 rounded-md bg-red-950/40 border border-red-800/60 text-red-300 text-xs">
+      {{ vault_error }}
+    </div>
+    {% endif %}
+
+    <!-- Provider Selection Pill / Tabs -->
+    <div class="space-y-4">
+      <div class="flex border-b border-white/[0.08] gap-4 text-xs font-medium">
+        <button type="button" onclick="switchVaultTab('internal')" id="tab-btn-internal" class="vault-tab-btn pb-2 border-b-2 border-blue-500 text-blue-400">
+          Internal Vault
+        </button>
+        <button type="button" onclick="switchVaultTab('azure')" id="tab-btn-azure" class="vault-tab-btn pb-2 border-b-2 border-transparent text-gray-400 hover:text-gray-200">
+          Azure Key Vault
+        </button>
+        <button type="button" onclick="switchVaultTab('aws')" id="tab-btn-aws" class="vault-tab-btn pb-2 border-b-2 border-transparent text-gray-400 hover:text-gray-200">
+          AWS Secrets Manager
+        </button>
+      </div>
+
+      <!-- Tab: Internal DB Vault -->
+      <div id="vault-tab-internal" class="vault-tab-panel space-y-3">
+        <div class="p-4 rounded-lg bg-white/[0.02] border border-white/[0.06] space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-medium text-gray-200">Internal Encrypted Database</span>
+            <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-emerald-950/60 text-emerald-300 border border-emerald-800/40 font-medium">Default & Ready</span>
+          </div>
+          <p class="text-xs text-gray-400">
+            Workspaces can immediately create and manage secrets without external cloud configuration. Secret values are envelope-encrypted using <strong>AES-256-GCM</strong> with <strong>HMAC-SHA256</strong> integrity tags and stored securely in Postgres.
+          </p>
+          <div class="text-[11px] text-gray-500 flex items-center gap-2 pt-1 font-mono">
+            <span>Algorithm: AES-256-GCM</span>
+            <span>·</span>
+            <span>Authentication: HMAC-SHA256</span>
+            <span>·</span>
+            <span>Redaction: Real-time dynamic masking</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Azure Key Vault -->
+      {% set az_item = (vault_providers | selectattr('provider', 'equalto', 'azure_keyvault') | first) if vault_providers else none %}
+      {% set az_conf = az_item.config if az_item else {} %}
+      <div id="vault-tab-azure" class="vault-tab-panel hidden space-y-4">
+        <form action="/settings/admin/vault-providers/azure_keyvault" method="post" id="vault-azure-form" class="space-y-4">
+          <p class="text-xs text-gray-400">
+            Connect to an Azure Key Vault resource. Workspace scopes configured with <code>azure_kv</code> will fetch and store secrets directly in this vault using Azure REST APIs.
+          </p>
+          <div class="space-y-3">
+            <div>
+              <label for="az-vault-url" class="block text-xs text-gray-400 font-medium mb-1">
+                Vault URI <span class="text-red-400">*</span>
+              </label>
+              <input id="az-vault-url" type="url" name="cfg__azure_keyvault__vault_url"
+                     value="{{ az_conf.get('vault_url') or '' }}"
+                     placeholder="https://my-keyvault.vault.azure.net/"
+                     class="w-full input-dark text-sm font-mono"
+                     style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label for="az-auth-mode" class="block text-xs text-gray-400 font-medium mb-1">Authentication Mode</label>
+                <select id="az-auth-mode" name="cfg__azure_keyvault__auth_mode"
+                        class="w-full bg-gray-800 border border-gray-700 text-gray-300 text-sm rounded-md px-3 py-2 focus:outline-none focus:border-blue-500">
+                  <option value="service_principal" {% if az_conf.get('auth_mode') == 'service_principal' or az_conf.get('client_id') %}selected{% endif %}>Service Principal (Client Secret)</option>
+                  <option value="default" {% if az_conf.get('auth_mode') == 'default' and not az_conf.get('client_id') %}selected{% endif %}>DefaultAzureCredential (Workload Identity / Managed Identity)</option>
+                </select>
+              </div>
+              <div>
+                <label for="az-tenant-id" class="block text-xs text-gray-400 font-medium mb-1">Tenant ID</label>
+                <input id="az-tenant-id" type="text" name="cfg__azure_keyvault__tenant_id"
+                       value="{{ az_conf.get('tenant_id') or '' }}"
+                       placeholder="00000000-0000-0000-0000-000000000000"
+                       class="w-full input-dark text-sm font-mono"
+                       style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label for="az-client-id" class="block text-xs text-gray-400 font-medium mb-1">Client ID (App ID)</label>
+                <input id="az-client-id" type="text" name="cfg__azure_keyvault__client_id"
+                       value="{{ az_conf.get('client_id') or '' }}"
+                       placeholder="00000000-0000-0000-0000-000000000000"
+                       class="w-full input-dark text-sm font-mono"
+                       style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+              </div>
+              <div>
+                <label for="az-client-secret" class="block text-xs text-gray-400 font-medium mb-1">Client Secret</label>
+                <input id="az-client-secret" type="password" name="cfg__azure_keyvault__client_secret"
+                       autocomplete="off"
+                       placeholder="{% if az_conf.get('client_secret') %}•••••••• (leave blank to keep){% else %}Client secret key{% endif %}"
+                       class="w-full input-dark text-sm font-mono"
+                       style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+                {% if az_conf.get('client_secret') %}
+                <p class="text-[11px] text-gray-500 mt-1">Stored: <code class="text-gray-300">{{ az_conf.get('client_secret') }}</code></p>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-end gap-2 pt-2">
+            <button type="button" id="vault-az-test-btn" onclick="testVaultProvider('azure_keyvault')"
+                    class="text-xs px-3 py-2 rounded-md border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition-colors">
+              Test Connection
+            </button>
+            <button type="submit" class="btn-primary text-xs">Save Azure Vault</button>
+          </div>
+        </form>
+        <div id="vault-azure-test-status" class="hidden mt-3 text-xs px-3 py-2 rounded-md border" role="status"></div>
+      </div>
+
+      <!-- Tab: AWS Secrets Manager -->
+      {% set aws_item = (vault_providers | selectattr('provider', 'equalto', 'aws_secrets_manager') | first) if vault_providers else none %}
+      {% set aws_conf = aws_item.config if aws_item else {} %}
+      <div id="vault-tab-aws" class="vault-tab-panel hidden space-y-4">
+        <form action="/settings/admin/vault-providers/aws_secrets_manager" method="post" id="vault-aws-form" class="space-y-4">
+          <p class="text-xs text-gray-400">
+            Connect to AWS Secrets Manager. Workspace scopes configured with <code>aws_sm</code> will read and write secrets within AWS using IAM credentials or IRSA.
+          </p>
+          <div class="space-y-3">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label for="aws-region" class="block text-xs text-gray-400 font-medium mb-1">
+                  AWS Region <span class="text-red-400">*</span>
+                </label>
+                <input id="aws-region" type="text" name="cfg__aws_secrets_manager__region_name"
+                       value="{{ aws_conf.get('region_name') or 'us-east-1' }}"
+                       placeholder="us-east-1"
+                       class="w-full input-dark text-sm font-mono"
+                       style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+              </div>
+              <div>
+                <label for="aws-prefix" class="block text-xs text-gray-400 font-medium mb-1">Secret Key Prefix</label>
+                <input id="aws-prefix" type="text" name="cfg__aws_secrets_manager__prefix"
+                       value="{{ aws_conf.get('prefix') or '' }}"
+                       placeholder="e.g. lake-of-tears/ (optional)"
+                       class="w-full input-dark text-sm font-mono"
+                       style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label for="aws-access-key" class="block text-xs text-gray-400 font-medium mb-1">AWS Access Key ID</label>
+                <input id="aws-access-key" type="text" name="cfg__aws_secrets_manager__aws_access_key_id"
+                       value="{{ aws_conf.get('aws_access_key_id') or '' }}"
+                       placeholder="AKIAIOSFODNN7EXAMPLE"
+                       class="w-full input-dark text-sm font-mono"
+                       style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+              </div>
+              <div>
+                <label for="aws-secret-key" class="block text-xs text-gray-400 font-medium mb-1">AWS Secret Access Key</label>
+                <input id="aws-secret-key" type="password" name="cfg__aws_secrets_manager__aws_secret_access_key"
+                       autocomplete="off"
+                       placeholder="{% if aws_conf.get('aws_secret_access_key') %}•••••••• (leave blank to keep){% else %}Secret access key{% endif %}"
+                       class="w-full input-dark text-sm font-mono"
+                       style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+                {% if aws_conf.get('aws_secret_access_key') %}
+                <p class="text-[11px] text-gray-500 mt-1">Stored: <code class="text-gray-300">{{ aws_conf.get('aws_secret_access_key') }}</code></p>
+                {% endif %}
+              </div>
+            </div>
+
+            <div>
+              <label for="aws-role-arn" class="block text-xs text-gray-400 font-medium mb-1">IAM Role ARN (Optional AssumeRole)</label>
+              <input id="aws-role-arn" type="text" name="cfg__aws_secrets_manager__role_arn"
+                     value="{{ aws_conf.get('role_arn') or '' }}"
+                     placeholder="arn:aws:iam::123456789012:role/LakeOfTearsSecretsRole"
+                     class="w-full input-dark text-sm font-mono"
+                     style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+            </div>
+          </div>
+
+          <div class="flex items-center justify-end gap-2 pt-2">
+            <button type="button" id="vault-aws-test-btn" onclick="testVaultProvider('aws_secrets_manager')"
+                    class="text-xs px-3 py-2 rounded-md border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition-colors">
+              Test Connection
+            </button>
+            <button type="submit" class="btn-primary text-xs">Save AWS Vault</button>
+          </div>
+        </form>
+        <div id="vault-aws-test-status" class="hidden mt-3 text-xs px-3 py-2 rounded-md border" role="status"></div>
+      </div>
+    </div>
+
+    <!-- Cross-Workspace Scopes Audit Inventory Table -->
+    <div class="pt-4 border-t border-white/[0.06]">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-xs font-semibold text-gray-300 uppercase tracking-wider">Cross-Workspace Secret Scopes Audit</h3>
+        <span class="text-xs text-gray-500">{{ all_scopes | length }} active scope{% if (all_scopes | length) != 1 %}s{% endif %}</span>
+      </div>
+      {% if all_scopes %}
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs border border-white/[0.06] rounded-lg overflow-hidden">
+          <thead class="bg-white/[0.04] text-gray-400 font-medium">
+            <tr>
+              <th class="px-3 py-2">Workspace</th>
+              <th class="px-3 py-2">Scope Name</th>
+              <th class="px-3 py-2">Backend Vault</th>
+              <th class="px-3 py-2 text-center">Keys</th>
+              <th class="px-3 py-2">Created</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/[0.04]">
+            {% for s in all_scopes %}
+            <tr class="hover:bg-white/[0.02]">
+              <td class="px-3 py-2 text-gray-300 font-medium">{{ s.workspace_name or 'Global' }}</td>
+              <td class="px-3 py-2 font-mono text-blue-300">{{ s.name }}</td>
+              <td class="px-3 py-2">
+                {% if s.backend_type == 'azure_kv' or s.backend_type == 'azure_keyvault' %}
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-sky-950/60 text-sky-300 border border-sky-800/40">Azure Key Vault</span>
+                {% elif s.backend_type == 'aws_sm' or s.backend_type == 'aws_secrets_manager' %}
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-amber-950/60 text-amber-300 border border-amber-800/40">AWS Secrets Manager</span>
+                {% else %}
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-gray-800 text-gray-300 border border-gray-700">Internal DB</span>
+                {% endif %}
+              </td>
+              <td class="px-3 py-2 text-center text-gray-400 font-mono">{{ s.key_count }}</td>
+              <td class="px-3 py-2 text-gray-500">{{ s.created_at[:10] if s.created_at else '-' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-xs text-gray-500 italic">No secret scopes created in any workspace yet.</p>
+      {% endif %}
+    </div>
+  </div>
+
+
   <script>
   function updateInactivityHint(val) {
     const hint = document.getElementById('inactivity-hint');
@@ -729,6 +981,74 @@
       box.style.whiteSpace = 'pre-line';
     } catch (err) {
       paint('bad', '✕ Could not run the test: ' + err);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Test Connection';
+    }
+  }
+
+  function switchVaultTab(tab) {
+    document.querySelectorAll('.vault-tab-btn').forEach(btn => {
+      btn.classList.remove('border-blue-500', 'text-blue-400');
+      btn.classList.add('border-transparent', 'text-gray-400');
+    });
+    document.querySelectorAll('.vault-tab-panel').forEach(panel => {
+      panel.classList.add('hidden');
+    });
+    const activeBtn = document.getElementById('tab-btn-' + tab);
+    const activePanel = document.getElementById('vault-tab-' + tab);
+    if (activeBtn) {
+      activeBtn.classList.add('border-blue-500', 'text-blue-400');
+      activeBtn.classList.remove('border-transparent', 'text-gray-400');
+    }
+    if (activePanel) {
+      activePanel.classList.remove('hidden');
+    }
+  }
+
+  async function testVaultProvider(provider) {
+    const isAzure = provider === 'azure_keyvault';
+    const btn = document.getElementById(isAzure ? 'vault-az-test-btn' : 'vault-aws-test-btn');
+    const box = document.getElementById(isAzure ? 'vault-azure-test-status' : 'vault-aws-test-status');
+    const prefix = 'cfg__' + provider + '__';
+    const config = {};
+    const form = document.getElementById(isAzure ? 'vault-azure-form' : 'vault-aws-form');
+    if (form) {
+      const inputs = form.querySelectorAll('[name^="' + prefix + '"]');
+      inputs.forEach(el => {
+        config[el.name.slice(prefix.length)] = el.value.trim();
+      });
+    }
+
+    const paint = function(kind, text) {
+      const colours = {
+        info: 'border-blue-800/50 bg-blue-900/20 text-blue-300',
+        ok: 'border-emerald-800/50 bg-emerald-900/20 text-emerald-300',
+        bad: 'border-red-800/50 bg-red-900/20 text-red-300'
+      };
+      box.className = 'mt-3 text-xs px-3 py-2 rounded-md border ' + colours[kind];
+      box.textContent = text;
+      box.classList.remove('hidden');
+    };
+
+    btn.disabled = true;
+    btn.textContent = 'Testing...';
+    paint('info', 'Testing connection to ' + (isAzure ? 'Azure Key Vault' : 'AWS Secrets Manager') + '...');
+
+    try {
+      const resp = await fetch('/settings/admin/vault-providers/' + provider + '/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ config: config })
+      });
+      const data = await resp.json();
+      if (data.success) {
+        paint('ok', '✓ ' + (data.message || 'Connected successfully.'));
+      } else {
+        paint('bad', '✕ ' + (data.message || 'Connection test failed.'));
+      }
+    } catch (err) {
+      paint('bad', '✕ Could not reach server: ' + err);
     } finally {
       btn.disabled = false;
       btn.textContent = 'Test Connection';

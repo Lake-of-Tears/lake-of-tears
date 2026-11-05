@@ -369,7 +369,9 @@ def test_admin_vault_providers_api(client, db_session):
 
 
 def test_cloud_backed_secret_scope_integration(client, db_session):
-    admin_user, admin_token = create_user_and_token(db_session, "cloudadmin@example.com")
+    admin_user, admin_token = create_user_and_token(
+        db_session, "cloudadmin@example.com", role="superadmin"
+    )
     ws = create_workspace(db_session, "Cloud Project", "cloud-proj", admin_user)
     headers = {"Authorization": f"Bearer {admin_token}", "X-Workspace-Id": str(ws.id)}
 
@@ -426,3 +428,10 @@ def test_cloud_backed_secret_scope_integration(client, db_session):
         )
         assert res.status_code == 200
         assert res.json()["status"] == "deleted"
+
+    # 5. Audit all scopes endpoint
+    res = client.get("/api/admin/vault-providers/scopes", headers=headers)
+    assert res.status_code == 200
+    scopes = res.json()
+    assert isinstance(scopes, list)
+    assert any(s["name"] == "aws-cloud-scope" for s in scopes)
