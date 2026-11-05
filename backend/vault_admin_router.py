@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from auth import require_superadmin
 from database import get_db
@@ -52,6 +53,29 @@ def _normalize_provider(provider: str) -> str:
         status_code=status.HTTP_404_NOT_FOUND,
         detail=f"Unknown vault provider '{provider}'. Supported: internal, azure_keyvault, aws_secrets_manager",
     )
+
+
+@router.get("/scopes")
+def list_all_scopes(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superadmin),
+) -> list[dict[str, Any]]:
+    """List all secret scopes across all workspaces for administrative audit."""
+    from models import SecretScope
+
+    scopes = db.query(SecretScope).order_by(SecretScope.name.asc()).all()
+    return [
+        {
+            "id": str(s.id),
+            "name": s.name,
+            "workspace_id": str(s.workspace_id) if s.workspace_id else None,
+            "workspace_name": s.workspace.name if s.workspace else "Global",
+            "backend_type": s.backend_type,
+            "key_count": len(s.keys),
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+        }
+        for s in scopes
+    ]
 
 
 @router.get("", response_model=list[VaultProviderStatusResponse])

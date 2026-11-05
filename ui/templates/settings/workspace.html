@@ -20,9 +20,22 @@
     {% if workspace.my_role %}<span class="ml-1 text-[11px] text-gray-600">(your role: {{ workspace.my_role }})</span>{% endif %}
   </p>
 
-  {% if saved %}
+  {% if saved == 'scope_created' %}
+  <div class="mb-4 px-4 py-3 rounded-md bg-emerald-900/30 border border-emerald-800/50 text-emerald-400 text-sm">
+    Secret scope created successfully.
+  </div>
+  {% elif saved == 'scope_deleted' %}
+  <div class="mb-4 px-4 py-3 rounded-md bg-emerald-900/30 border border-emerald-800/50 text-emerald-400 text-sm">
+    Secret scope deleted successfully.
+  </div>
+  {% elif saved %}
   <div class="mb-4 px-4 py-3 rounded-md bg-emerald-900/30 border border-emerald-800/50 text-emerald-400 text-sm">
     Changes saved.
+  </div>
+  {% endif %}
+  {% if secret_error %}
+  <div class="mb-4 px-4 py-3 rounded-md bg-red-900/30 border border-red-800/50 text-red-400 text-sm">
+    {{ secret_error }}
   </div>
   {% endif %}
   {% if error %}
@@ -875,6 +888,556 @@
     </script>
     {% endif %}
   </div>
+
+  <!-- Secret Scopes Card -->
+  <div id="secret-scopes" class="card p-6 mt-6">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h2 class="text-sm font-semibold text-gray-300">Secret Scopes ({{ secret_scopes | length }})</h2>
+        <p class="text-xs text-gray-500 mt-0.5">
+          Databricks-compatible secret management for notebooks and pipelines. Values are encrypted at rest and redacted from logs.
+        </p>
+      </div>
+      {% if is_admin %}
+      <button type="button" onclick="openCreateScopeModal()" class="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+        New Scope
+      </button>
+      {% endif %}
+    </div>
+
+    {% if secret_scopes %}
+    <div class="space-y-2">
+      {% for s in secret_scopes %}
+      <div class="flex items-center justify-between p-3 rounded-lg bg-white/[0.02] border border-white/[0.04] hover:border-white/[0.08] transition-colors">
+        <div class="flex items-center gap-3 min-w-0">
+          <div class="w-8 h-8 rounded-lg bg-gray-800 border border-gray-700/60 flex items-center justify-center text-gray-400 shrink-0">
+            <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/>
+            </svg>
+          </div>
+          <div class="min-w-0">
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-mono font-medium text-gray-200 truncate">{{ s.name }}</span>
+              {% if s.backend_type == 'azure_kv' or s.backend_type == 'azure_keyvault' %}
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-sky-950/60 text-sky-300 border border-sky-800/40">Azure Key Vault</span>
+              {% elif s.backend_type == 'aws_sm' or s.backend_type == 'aws_secrets_manager' %}
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-amber-950/60 text-amber-300 border border-amber-800/40">AWS Secrets Manager</span>
+              {% else %}
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-gray-800 text-gray-300 border border-gray-700">Internal DB</span>
+              {% endif %}
+              <span class="text-[11px] text-gray-500 font-mono">{{ s.key_count }} key{% if s.key_count != 1 %}s{% endif %}</span>
+            </div>
+            <div class="text-[11px] text-gray-500 mt-0.5 flex items-center gap-2">
+              <span>Your access:</span>
+              {% if s.user_permission == 'MANAGE' %}
+              <span class="text-emerald-400 font-medium font-mono text-[10px] bg-emerald-950/40 px-1 rounded border border-emerald-800/40">MANAGE</span>
+              {% elif s.user_permission == 'WRITE' %}
+              <span class="text-blue-400 font-medium font-mono text-[10px] bg-blue-950/40 px-1 rounded border border-blue-800/40">WRITE</span>
+              {% else %}
+              <span class="text-gray-400 font-medium font-mono text-[10px] bg-gray-800 px-1 rounded border border-gray-700">READ</span>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2 shrink-0">
+          <button type="button" onclick="openKeysModal('{{ s.id }}', '{{ s.name }}', '{{ s.backend_type }}', '{{ s.user_permission }}')"
+                  class="text-xs px-2.5 py-1.5 rounded border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition-colors">
+            Manage Keys
+          </button>
+          {% if s.user_permission == 'MANAGE' %}
+          <button type="button" onclick="openAclModal('{{ s.id }}', '{{ s.name }}')"
+                  class="text-xs px-2.5 py-1.5 rounded border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition-colors">
+            Permissions
+          </button>
+          <form action="/settings/workspace/secrets/scopes/{{ s.id }}/delete" method="post"
+                onsubmit="return confirm('Delete secret scope \'{{ s.name }}\' and all stored secrets in it? This cannot be undone.');">
+            <button type="submit" class="p-1.5 text-gray-500 hover:text-red-400 transition-colors" title="Delete Scope">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>
+            </button>
+          </form>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="text-center py-6 border border-dashed border-white/[0.08] rounded-lg">
+      <p class="text-xs text-gray-500">No secret scopes created yet.</p>
+      {% if is_admin %}
+      <button type="button" onclick="openCreateScopeModal()" class="text-xs text-blue-400 hover:underline mt-1">
+        + Create your first secret scope
+      </button>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Create Scope Modal -->
+  <div id="create-scope-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+    <div class="bg-[#1a1a1a] border border-white/10 rounded-xl shadow-2xl w-full max-w-md p-6">
+      <h2 class="text-base font-semibold text-gray-200 mb-1">Create Secret Scope</h2>
+      <p class="text-xs text-gray-500 mb-4">
+        A scope isolates a collection of secret keys and access control rules.
+      </p>
+
+      <form action="/settings/workspace/secrets/scopes/create" method="post" class="space-y-4">
+        <div>
+          <label class="block text-xs text-gray-400 font-medium mb-1">Scope Name <span class="text-red-400">*</span></label>
+          <input type="text" name="name" required pattern="[A-Za-z0-9_-]+" autocomplete="off"
+                 placeholder="e.g. production-credentials"
+                 class="w-full input-dark text-sm font-mono"
+                 style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+          <p class="text-[11px] text-gray-500 mt-1">Letters, numbers, underscores, and hyphens.</p>
+        </div>
+
+        <div>
+          <label class="block text-xs text-gray-400 font-medium mb-1">Backend Vault Provider</label>
+          <select name="backend_type"
+                  class="w-full bg-gray-800 border border-gray-700 text-gray-300 text-sm rounded-md px-3 py-2 focus:outline-none focus:border-blue-500">
+            <option value="internal">Internal Encrypted Database (AES-256-GCM)</option>
+            <option value="azure_kv">Azure Key Vault (External Cloud)</option>
+            <option value="aws_sm">AWS Secrets Manager (External Cloud)</option>
+          </select>
+        </div>
+
+        <p class="text-[11px] text-gray-500">
+          Notebooks & Pipelines can access keys via <code>lake_of_tears.secrets.get('scope', 'key')</code> or <code>{{ '{{' }}secrets/scope/key{{ '}}' }}</code>.
+        </p>
+
+        <div class="flex justify-end gap-2 pt-2">
+          <button type="button" onclick="closeCreateScopeModal()" class="text-xs px-3 py-2 rounded-md border border-gray-700 text-gray-400 hover:text-gray-200 transition-colors">
+            Cancel
+          </button>
+          <button type="submit" class="btn-primary text-xs">
+            Create Scope
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Manage Keys Modal / Slide-over -->
+  <div id="keys-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+    <div class="bg-[#1a1a1a] border border-white/10 rounded-xl shadow-2xl w-full max-w-xl p-6 max-h-[90vh] flex flex-col">
+      <div class="flex items-start justify-between pb-3 border-b border-white/[0.08]">
+        <div>
+          <h2 class="text-base font-semibold text-gray-200">
+            Secret Scope: <span id="keys-modal-scope-name" class="font-mono text-blue-300"></span>
+          </h2>
+          <div class="flex items-center gap-2 mt-1">
+            <span id="keys-modal-backend-badge" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-gray-800 text-gray-300 border border-gray-700"></span>
+            <span class="text-[11px] text-gray-500">Write-only store (stored values cannot be revealed)</span>
+          </div>
+        </div>
+        <button type="button" onclick="closeKeysModal()" class="text-gray-400 hover:text-gray-200">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <div class="flex-1 overflow-y-auto py-4 space-y-4">
+        <!-- Add Key Form -->
+        <div id="keys-modal-add-section" class="p-4 rounded-lg bg-white/[0.02] border border-white/[0.06] space-y-3">
+          <h3 class="text-xs font-semibold text-gray-300 uppercase tracking-wider">Add or Rotate Secret Key</h3>
+          <form id="keys-modal-add-form" onsubmit="submitNewKey(event)" class="space-y-3">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs text-gray-400 font-medium mb-1">Key Name <span class="text-red-400">*</span></label>
+                <input id="new-key-name" type="text" required pattern="[A-Za-z0-9_.-]+" autocomplete="off"
+                       placeholder="e.g. api_token"
+                       class="w-full input-dark text-xs font-mono"
+                       style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+              </div>
+              <div>
+                <label class="block text-xs text-gray-400 font-medium mb-1">Secret Value <span class="text-red-400">*</span></label>
+                <div class="relative">
+                  <input id="new-key-value" type="password" required autocomplete="off"
+                         placeholder="Secret payload"
+                         class="w-full input-dark text-xs font-mono pr-8"
+                         style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+                  <button type="button" onclick="toggleSecretVisibility('new-key-value', this)"
+                          class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div id="new-key-error" class="hidden text-xs text-red-400"></div>
+            <div class="flex justify-end">
+              <button type="submit" id="new-key-btn" class="btn-primary text-xs py-1.5 px-3">
+                Save Secret
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Keys List Table -->
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="text-xs font-semibold text-gray-300 uppercase tracking-wider">Stored Keys</h3>
+            <span id="keys-count-label" class="text-xs text-gray-500">Loading...</span>
+          </div>
+          <div id="keys-list-container" class="space-y-1">
+            <div class="text-xs text-gray-500 italic py-2">Loading keys...</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pt-3 border-t border-white/[0.08] flex justify-end">
+        <button type="button" onclick="closeKeysModal()" class="text-xs px-3 py-1.5 rounded-md border border-gray-700 text-gray-300 hover:text-white transition-colors">
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scope ACLs Modal -->
+  <div id="acl-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+    <div class="bg-[#1a1a1a] border border-white/10 rounded-xl shadow-2xl w-full max-w-lg p-6 max-h-[90vh] flex flex-col">
+      <div class="flex items-start justify-between pb-3 border-b border-white/[0.08]">
+        <div>
+          <h2 class="text-base font-semibold text-gray-200">
+            Scope Permissions: <span id="acl-modal-scope-name" class="font-mono text-blue-300"></span>
+          </h2>
+          <p class="text-xs text-gray-500 mt-0.5">Control who can READ, WRITE, or MANAGE secrets in this scope.</p>
+        </div>
+        <button type="button" onclick="closeAclModal()" class="text-gray-400 hover:text-gray-200">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <div class="flex-1 overflow-y-auto py-4 space-y-4">
+        <!-- Grant Permission Form -->
+        <div class="p-4 rounded-lg bg-white/[0.02] border border-white/[0.06] space-y-3">
+          <h3 class="text-xs font-semibold text-gray-300 uppercase tracking-wider">Grant Permission</h3>
+          <form id="acl-grant-form" onsubmit="submitNewAcl(event)" class="space-y-3">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+              <div>
+                <label class="block text-xs text-gray-400 font-medium mb-1">Target</label>
+                <select id="acl-principal-type" onchange="aclPrincipalTypeChanged()"
+                        class="w-full bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-md px-2 py-1.5 focus:outline-none focus:border-blue-500">
+                  <option value="user">Workspace Member</option>
+                  <option value="role">Workspace Role</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs text-gray-400 font-medium mb-1">Principal</label>
+                <select id="acl-principal-id-user"
+                        class="w-full bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-md px-2 py-1.5 focus:outline-none focus:border-blue-500">
+                  {% for m in members %}
+                  <option value="{{ m.user_id }}">{{ m.display_name or m.email }}</option>
+                  {% endfor %}
+                </select>
+                <select id="acl-principal-id-role" class="hidden w-full bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-md px-2 py-1.5 focus:outline-none focus:border-blue-500">
+                  <option value="admin">Admins</option>
+                  <option value="write">Write Members</option>
+                  <option value="read">Read Members</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs text-gray-400 font-medium mb-1">Permission</label>
+                <select id="acl-permission"
+                        class="w-full bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-md px-2 py-1.5 focus:outline-none focus:border-blue-500">
+                  <option value="READ">READ (Get values)</option>
+                  <option value="WRITE">WRITE (Put / Delete keys)</option>
+                  <option value="MANAGE">MANAGE (Full Admin & ACLs)</option>
+                </select>
+              </div>
+            </div>
+            <div id="new-acl-error" class="hidden text-xs text-red-400"></div>
+            <div class="flex justify-end">
+              <button type="submit" id="new-acl-btn" class="btn-primary text-xs py-1.5 px-3">
+                Grant Access
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- ACL List -->
+        <div>
+          <h3 class="text-xs font-semibold text-gray-300 uppercase tracking-wider mb-2">Assigned Permissions</h3>
+          <div id="acl-list-container" class="space-y-1">
+            <div class="text-xs text-gray-500 italic py-2">Loading permissions...</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pt-3 border-t border-white/[0.08] flex justify-end">
+        <button type="button" onclick="closeAclModal()" class="text-xs px-3 py-1.5 rounded-md border border-gray-700 text-gray-300 hover:text-white transition-colors">
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  let _activeScopeId = null;
+  let _activeScopeName = null;
+  let _activePermission = null;
+  const _wsId = "{{ workspace.id }}";
+
+  function openCreateScopeModal() {
+    document.getElementById('create-scope-modal').classList.remove('hidden');
+  }
+
+  function closeCreateScopeModal() {
+    document.getElementById('create-scope-modal').classList.add('hidden');
+  }
+
+  function toggleSecretVisibility(inputId, btn) {
+    const el = document.getElementById(inputId);
+    if (el.type === 'password') {
+      el.type = 'text';
+      btn.classList.add('text-blue-400');
+    } else {
+      el.type = 'password';
+      btn.classList.remove('text-blue-400');
+    }
+  }
+
+  async function openKeysModal(scopeId, scopeName, backendType, permission) {
+    _activeScopeId = scopeId;
+    _activeScopeName = scopeName;
+    _activePermission = permission;
+
+    document.getElementById('keys-modal-scope-name').textContent = scopeName;
+    const badge = document.getElementById('keys-modal-backend-badge');
+    if (backendType.includes('azure')) {
+      badge.textContent = 'Azure Key Vault';
+      badge.className = 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-sky-950/60 text-sky-300 border border-sky-800/40';
+    } else if (backendType.includes('aws')) {
+      badge.textContent = 'AWS Secrets Manager';
+      badge.className = 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-amber-950/60 text-amber-300 border border-amber-800/40';
+    } else {
+      badge.textContent = 'Internal DB';
+      badge.className = 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-gray-800 text-gray-300 border border-gray-700';
+    }
+
+    const addSection = document.getElementById('keys-modal-add-section');
+    if (permission === 'READ') {
+      addSection.classList.add('hidden');
+    } else {
+      addSection.classList.remove('hidden');
+    }
+
+    document.getElementById('new-key-name').value = '';
+    document.getElementById('new-key-value').value = '';
+    document.getElementById('new-key-error').classList.add('hidden');
+
+    document.getElementById('keys-modal').classList.remove('hidden');
+    await fetchKeys(scopeId);
+  }
+
+  function closeKeysModal() {
+    document.getElementById('keys-modal').classList.add('hidden');
+  }
+
+  async function fetchKeys(scopeId) {
+    const container = document.getElementById('keys-list-container');
+    const countLabel = document.getElementById('keys-count-label');
+    try {
+      const resp = await fetch(`/api/workspaces/${_wsId}/secrets/scopes/${scopeId}/keys`);
+      if (!resp.ok) {
+        container.innerHTML = '<p class="text-xs text-red-400 py-2">Failed to load keys.</p>';
+        countLabel.textContent = '0 keys';
+        return;
+      }
+      const keys = await resp.json();
+      countLabel.textContent = `${keys.length} key${keys.length === 1 ? '' : 's'}`;
+      if (!keys.length) {
+        container.innerHTML = '<p class="text-xs text-gray-500 italic py-2">No keys stored in this scope yet.</p>';
+        return;
+      }
+
+      container.innerHTML = keys.map(k => {
+        const canWrite = _activePermission === 'WRITE' || _activePermission === 'MANAGE';
+        const dateStr = k.updated_at ? k.updated_at.slice(0, 10) : '';
+        return `
+          <div class="flex items-center justify-between p-2.5 rounded bg-white/[0.02] border border-white/[0.04]">
+            <div class="min-w-0">
+              <span class="font-mono text-xs text-gray-200">${k.key}</span>
+              <div class="text-[10px] text-gray-500">Version: ${k.version || 1} ${dateStr ? '· Updated: ' + dateStr : ''}</div>
+            </div>
+            ${canWrite ? `
+              <button type="button" onclick="deleteKey('${k.key}')" class="text-xs text-gray-500 hover:text-red-400 transition-colors p-1" title="Delete Key">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>
+              </button>
+            ` : ''}
+          </div>
+        `;
+      }).join('');
+    } catch (e) {
+      container.innerHTML = `<p class="text-xs text-red-400 py-2">Connection error: ${e}</p>`;
+    }
+  }
+
+  async function submitNewKey(event) {
+    event.preventDefault();
+    const keyName = document.getElementById('new-key-name').value.trim();
+    const keyValue = document.getElementById('new-key-value').value;
+    const btn = document.getElementById('new-key-btn');
+    const errBox = document.getElementById('new-key-error');
+
+    errBox.classList.add('hidden');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+
+    try {
+      const resp = await fetch(`/api/workspaces/${_wsId}/secrets/scopes/${_activeScopeId}/keys`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: keyName, value: keyValue })
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        errBox.textContent = data.detail || 'Failed to save secret';
+        errBox.classList.remove('hidden');
+      } else {
+        document.getElementById('new-key-name').value = '';
+        document.getElementById('new-key-value').value = '';
+        await fetchKeys(_activeScopeId);
+      }
+    } catch (e) {
+      errBox.textContent = 'Could not reach server: ' + e;
+      errBox.classList.remove('hidden');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Save Secret';
+    }
+  }
+
+  async function deleteKey(keyName) {
+    if (!confirm(`Delete secret key '${keyName}'? Applications referencing this key will fail to resolve it.`)) {
+      return;
+    }
+    try {
+      const resp = await fetch(`/api/workspaces/${_wsId}/secrets/scopes/${_activeScopeId}/keys/${keyName}`, {
+        method: 'DELETE'
+      });
+      if (resp.ok) {
+        await fetchKeys(_activeScopeId);
+      } else {
+        alert('Failed to delete key.');
+      }
+    } catch (e) {
+      alert('Error deleting key: ' + e);
+    }
+  }
+
+  function aclPrincipalTypeChanged() {
+    const isUser = document.getElementById('acl-principal-type').value === 'user';
+    document.getElementById('acl-principal-id-user').classList.toggle('hidden', !isUser);
+    document.getElementById('acl-principal-id-role').classList.toggle('hidden', isUser);
+  }
+
+  async function openAclModal(scopeId, scopeName) {
+    _activeScopeId = scopeId;
+    _activeScopeName = scopeName;
+    document.getElementById('acl-modal-scope-name').textContent = scopeName;
+    document.getElementById('new-acl-error').classList.add('hidden');
+    document.getElementById('acl-modal').classList.remove('hidden');
+    await fetchAcls(scopeId);
+  }
+
+  function closeAclModal() {
+    document.getElementById('acl-modal').classList.add('hidden');
+  }
+
+  async function fetchAcls(scopeId) {
+    const container = document.getElementById('acl-list-container');
+    try {
+      const resp = await fetch(`/api/workspaces/${_wsId}/secrets/scopes/${scopeId}/acls`);
+      if (!resp.ok) {
+        container.innerHTML = '<p class="text-xs text-red-400 py-2">Failed to load permissions.</p>';
+        return;
+      }
+      const acls = await resp.json();
+      if (!acls.length) {
+        container.innerHTML = '<p class="text-xs text-gray-500 italic py-2">No custom permissions granted yet. Scope creator and Superadmins retain full access.</p>';
+        return;
+      }
+
+      container.innerHTML = acls.map(a => {
+        let permClass = 'text-gray-400 bg-gray-800 border-gray-700';
+        if (a.permission === 'MANAGE') permClass = 'text-emerald-400 bg-emerald-950/40 border-emerald-800/40';
+        else if (a.permission === 'WRITE') permClass = 'text-blue-400 bg-blue-950/40 border-blue-800/40';
+
+        return `
+          <div class="flex items-center justify-between p-2.5 rounded bg-white/[0.02] border border-white/[0.04]">
+            <div class="min-w-0">
+              <div class="flex items-center gap-1.5">
+                <span class="text-[10px] font-mono text-gray-500 uppercase">${a.principal_type}:</span>
+                <span class="text-xs text-gray-200 font-medium">${a.principal_id}</span>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-[10px] font-mono font-medium px-1.5 py-0.5 rounded border ${permClass}">${a.permission}</span>
+              <button type="button" onclick="deleteAcl('${a.id}')" class="text-xs text-gray-500 hover:text-red-400 transition-colors p-1" title="Revoke Access">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    } catch (e) {
+      container.innerHTML = `<p class="text-xs text-red-400 py-2">Connection error: ${e}</p>`;
+    }
+  }
+
+  async function submitNewAcl(event) {
+    event.preventDefault();
+    const pType = document.getElementById('acl-principal-type').value;
+    const pId = pType === 'user'
+      ? document.getElementById('acl-principal-id-user').value
+      : document.getElementById('acl-principal-id-role').value;
+    const perm = document.getElementById('acl-permission').value;
+    const btn = document.getElementById('new-acl-btn');
+    const errBox = document.getElementById('new-acl-error');
+
+    errBox.classList.add('hidden');
+    btn.disabled = true;
+    btn.textContent = 'Granting...';
+
+    try {
+      const resp = await fetch(`/api/workspaces/${_wsId}/secrets/scopes/${_activeScopeId}/acls`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ principal_type: pType, principal_id: pId, permission: perm })
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        errBox.textContent = data.detail || 'Failed to grant permission';
+        errBox.classList.remove('hidden');
+      } else {
+        await fetchAcls(_activeScopeId);
+      }
+    } catch (e) {
+      errBox.textContent = 'Could not reach server: ' + e;
+      errBox.classList.remove('hidden');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Grant Access';
+    }
+  }
+
+  async function deleteAcl(aclId) {
+    if (!confirm('Revoke this scope permission?')) return;
+    try {
+      const resp = await fetch(`/api/workspaces/${_wsId}/secrets/scopes/${_activeScopeId}/acls/${aclId}`, {
+        method: 'DELETE'
+      });
+      if (resp.ok) {
+        await fetchAcls(_activeScopeId);
+      } else {
+        alert('Failed to revoke permission.');
+      }
+    } catch (e) {
+      alert('Error revoking permission: ' + e);
+    }
+  }
+  </script>
+
 </div>
 {% endif %}
 {% endblock %}

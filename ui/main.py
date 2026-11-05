@@ -2086,6 +2086,33 @@ def _backend_delete(
     return False
 
 
+def _backend_delete_with_error(
+    path: str,
+    token: str,
+    workspace_id: str | None = None,
+    workspace_slug: str | None = None,
+    timeout: float = 5.0,
+) -> tuple[dict | None, str | None]:
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.delete(
+                f"{BACKEND_URL}{path}",
+                headers=_build_backend_headers(token, workspace_id, workspace_slug),
+            )
+        if resp.status_code in (200, 204):
+            try:
+                return resp.json(), None
+            except Exception:
+                return {"status": "ok"}, None
+        try:
+            err = resp.json().get("detail")
+            return None, str(err or resp.text)
+        except Exception:
+            return None, resp.text or f"Error {resp.status_code}"
+    except Exception as exc:
+        return None, str(exc)
+
+
 # ── Settings: Account ─────────────────────────────────────────────────────
 
 
@@ -2334,6 +2361,7 @@ async def settings_workspace_get(request: Request):
     error = request.query_params.get("error")
     saved = request.query_params.get("saved")
     inbound_requests = []
+    secret_scopes = []
     if ws and token:
         members = _backend_get(f"/api/workspaces/{ws['id']}/members", token) or []
         catalog_settings = (
@@ -2341,6 +2369,10 @@ async def settings_workspace_get(request: Request):
         )
         inbound_requests = (
             _backend_get(f"/api/workspaces/{ws['id']}/access/requests/inbound", token) or []
+        )
+        secret_scopes = (
+            _backend_get(f"/api/v1/workspaces/{ws['id']}/secrets/scopes", token, workspace_id=ws["id"])
+            or []
         )
     return templates.TemplateResponse(
         request=request,
@@ -2352,11 +2384,14 @@ async def settings_workspace_get(request: Request):
             "workspace": ws,
             "catalog_settings": catalog_settings,
             "inbound_requests": inbound_requests,
+            "secret_scopes": secret_scopes,
+            "secret_error": request.query_params.get("secret_error"),
             "error": error,
             "catalog_error": request.query_params.get("catalog_error"),
             "saved": saved,
         },
     )
+
 
 
 @app.post("/settings/workspace/rename")
@@ -2500,6 +2535,165 @@ async def ui_regenerate_workspace_webhook_secret(workspace_id: str, request: Req
         return JSONResponse({"detail": str(exc)}, status_code=502)
 
 
+# ── Settings: Workspace Secret Scopes & Keys ─────────────────────────────
+
+
+@app.post("/settings/workspace/secrets/scopes/create")
+async def settings_workspace_secret_scope_create(
+    request: Request,
+    name: str = Form(...),
+    backend_type: str = Form("internal"),
+):
+    ws = request.state.workspace
+    token = _get_request_token(request)
+    if not ws or not token:
+        return RedirectResponse(url="/settings/workspace", status_code=302)
+    payload = {"name": name.strip(), "backend_type": backend_type.strip()}
+    res, err = _backend_post_with_error(
+        f"/api/v1/workspaces/{ws['id']}/secrets/scopes",
+        token,
+        payload,
+        workspace_id=str(ws["id"]),
+    )
+    if err:
+        msg = urllib.parse.quote(err)
+        return RedirectResponse(
+            url=f"/settings/workspace?secret_error={msg}#secret-scopes", status_code=302
+        )
+    return RedirectResponse(
+        url="/settings/workspace?saved=scope_created#secret-scopes", status_code=302
+    )
+
+
+@app.post("/settings/workspace/secrets/scopes/{scope_id}/delete")
+async def settings_workspace_secret_scope_delete(request: Request, scope_id: str):
+    ws = request.state.workspace
+    token = _get_request_token(request)
+    if ws and token:
+        _backend_delete(
+            f"/api/v1/workspaces/{ws['id']}/secrets/scopes/{scope_id}",
+            token,
+            workspace_id=str(ws["id"]),
+        )
+    return RedirectResponse(
+        url="/settings/workspace?saved=scope_deleted#secret-scopes", status_code=302
+    )
+
+
+@app.get("/api/workspaces/{workspace_id}/secrets/scopes/{scope_identifier}/keys")
+async def api_workspace_secret_keys_list(
+    request: Request, workspace_id: str, scope_identifier: str
+):
+    token = _get_request_token(request)
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+    keys = _backend_get(
+        f"/api/v1/workspaces/{workspace_id}/secrets/scopes/{scope_identifier}/keys",
+        token or "",
+        workspace_id=workspace_id,
+    )
+    return JSONResponse(keys if keys is not None else [])
+
+
+@app.post("/api/workspaces/{workspace_id}/secrets/scopes/{scope_identifier}/keys")
+async def api_workspace_secret_key_put(
+    request: Request, workspace_id: str, scope_identifier: str
+):
+    token = _get_request_token(request)
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    key = str(body.get("key") or "").strip()
+    value = str(body.get("value") or "")
+    if not key:
+        return JSONResponse({"detail": "Secret key name is required"}, status_code=400)
+    data, err = _backend_post_with_error(
+        f"/api/v1/workspaces/{workspace_id}/secrets/scopes/{scope_identifier}/keys",
+        token or "",
+        {"key": key, "value": value},
+        workspace_id=workspace_id,
+    )
+    if err:
+        return JSONResponse({"detail": err}, status_code=400)
+    return JSONResponse(data or {"status": "ok"})
+
+
+@app.delete("/api/workspaces/{workspace_id}/secrets/scopes/{scope_identifier}/keys/{key}")
+async def api_workspace_secret_key_delete(
+    request: Request, workspace_id: str, scope_identifier: str, key: str
+):
+    token = _get_request_token(request)
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+    ok = _backend_delete(
+        f"/api/v1/workspaces/{workspace_id}/secrets/scopes/{scope_identifier}/keys/{key}",
+        token or "",
+        workspace_id=workspace_id,
+    )
+    return JSONResponse({"status": "deleted" if ok else "failed"})
+
+
+@app.get("/api/workspaces/{workspace_id}/secrets/scopes/{scope_identifier}/acls")
+async def api_workspace_secret_acls_list(
+    request: Request, workspace_id: str, scope_identifier: str
+):
+    token = _get_request_token(request)
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+    acls = _backend_get(
+        f"/api/v1/workspaces/{workspace_id}/secrets/scopes/{scope_identifier}/acls",
+        token or "",
+        workspace_id=workspace_id,
+    )
+    return JSONResponse(acls if acls is not None else [])
+
+
+@app.post("/api/workspaces/{workspace_id}/secrets/scopes/{scope_identifier}/acls")
+async def api_workspace_secret_acl_set(
+    request: Request, workspace_id: str, scope_identifier: str
+):
+    token = _get_request_token(request)
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    p_type = str(body.get("principal_type") or "user").strip()
+    p_id = str(body.get("principal_id") or "").strip()
+    perm = str(body.get("permission") or "READ").strip().upper()
+    if not p_id:
+        return JSONResponse({"detail": "Principal ID is required"}, status_code=400)
+    data, err = _backend_post_with_error(
+        f"/api/v1/workspaces/{workspace_id}/secrets/scopes/{scope_identifier}/acls",
+        token or "",
+        {"principal_type": p_type, "principal_id": p_id, "permission": perm},
+        workspace_id=workspace_id,
+    )
+    if err:
+        return JSONResponse({"detail": err}, status_code=400)
+    return JSONResponse(data or {"status": "ok"})
+
+
+@app.delete("/api/workspaces/{workspace_id}/secrets/scopes/{scope_identifier}/acls/{acl_id}")
+async def api_workspace_secret_acl_delete(
+    request: Request, workspace_id: str, scope_identifier: str, acl_id: str
+):
+    token = _get_request_token(request)
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+    ok = _backend_delete(
+        f"/api/v1/workspaces/{workspace_id}/secrets/scopes/{scope_identifier}/acls/{acl_id}",
+        token or "",
+        workspace_id=workspace_id,
+    )
+    return JSONResponse({"status": "deleted" if ok else "failed"})
+
+
+
 # ── Settings: Admin ───────────────────────────────────────────────────────
 
 
@@ -2522,6 +2716,8 @@ async def settings_admin_get(request: Request):
         "gemini_api_key_masked": None,
         "gemini_default_model": duckdb_ai.DEFAULT_GEMINI_MODEL,
     }
+    vault_providers = _backend_get("/api/admin/vault-providers", token) or []
+    all_scopes = _backend_get("/api/admin/vault-providers/scopes", token) or []
     return templates.TemplateResponse(
         request=request,
         name="settings/admin.html",
@@ -2537,6 +2733,9 @@ async def settings_admin_get(request: Request):
             "auth_overview": _backend_get("/api/admin/auth-overview", token),
             "ai_provider": _backend_get("/api/admin/ai-provider", token),
             "ai_error": request.query_params.get("ai_error"),
+            "vault_providers": vault_providers,
+            "all_scopes": all_scopes,
+            "vault_error": request.query_params.get("vault_error"),
             "saved": request.query_params.get("saved"),
         },
     )
@@ -2729,6 +2928,70 @@ async def settings_admin_ai_provider_test(request: Request):
         return JSONResponse({"ok": False, "message": str(detail)}, status_code=resp.status_code)
     except Exception as exc:
         return JSONResponse({"ok": False, "message": f"Connection error: {exc}"}, status_code=502)
+
+
+@app.post("/settings/admin/vault-providers/{provider}")
+async def settings_admin_vault_provider_save(request: Request, provider: str):
+    """Save vault configuration for a provider (e.g. azure_keyvault, aws_secrets_manager)."""
+    user = request.state.user
+    if not user or user.get("role") != "superadmin":
+        return RedirectResponse(url="/", status_code=302)
+    token = request.cookies.get("lake_token")
+    form = await request.form()
+    prefix = f"cfg__{provider}__"
+    config = {
+        k[len(prefix) :]: str(v).strip()
+        for k, v in form.multi_items()
+        if k.startswith(prefix)
+    }
+    payload = {"config": config}
+    status_code, data = _backend_put(
+        f"/api/admin/vault-providers/{provider}", token or "", payload
+    )
+    if status_code in (200, 201):
+        return RedirectResponse(url="/settings/admin?saved=vault#vault-settings", status_code=302)
+    detail = data.get("detail") if isinstance(data, dict) else str(data)
+    message = urllib.parse.quote(str(detail or f"Backend error ({status_code})"))
+    return RedirectResponse(
+        url=f"/settings/admin?vault_error={message}#vault-settings", status_code=302
+    )
+
+
+@app.post("/settings/admin/vault-providers/{provider}/test")
+async def settings_admin_vault_provider_test(request: Request, provider: str):
+    """Test connectivity to an external cloud vault with entered (or stored) credentials."""
+    user = request.state.user
+    if not user or user.get("role") != "superadmin":
+        return JSONResponse(
+            {"success": False, "message": "Superadmin access required."}, status_code=403
+        )
+    token = request.cookies.get("lake_token")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    payload = {"config": body.get("config") or {}}
+    try:
+        with httpx.Client(timeout=30) as client:
+            resp = client.post(
+                f"{BACKEND_URL}/api/admin/vault-providers/{provider}/test",
+                headers={"Authorization": f"Bearer {token}"} if token else {},
+                json=payload,
+            )
+        if resp.status_code == 200:
+            return JSONResponse(resp.json())
+        try:
+            detail = resp.json().get("detail") or resp.text
+        except Exception:
+            detail = resp.text
+        return JSONResponse(
+            {"success": False, "message": str(detail)}, status_code=resp.status_code
+        )
+    except Exception as exc:
+        return JSONResponse(
+            {"success": False, "message": f"Connection error: {exc}"}, status_code=502
+        )
+
 
 
 @app.post("/settings/admin/workspaces/{workspace_id}/mark-inactive")
