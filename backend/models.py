@@ -208,6 +208,9 @@ class Workspace(Base):
     shares: Mapped[list["WorkspaceShare"]] = relationship(
         back_populates="workspace", cascade="all, delete-orphan"
     )
+    secret_scopes: Mapped[list["SecretScope"]] = relationship(
+        back_populates="workspace", cascade="all, delete-orphan"
+    )
 
 
 class WorkspaceMember(Base):
@@ -462,4 +465,110 @@ class WorkspaceDashboard(Base):
     )
 
     workspace: Mapped["Workspace"] = relationship(foreign_keys=[workspace_id])
+    creator: Mapped["User | None"] = relationship(foreign_keys=[created_by])
+
+
+class SecretScope(Base):
+    __tablename__ = "secret_scopes"
+    __table_args__ = (UniqueConstraint("workspace_id", "name", name="uq_workspace_scope_name"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    backend_type: Mapped[str] = mapped_column(String(64), nullable=False, default="internal")
+    provider_config: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    workspace: Mapped["Workspace | None"] = relationship(
+        foreign_keys=[workspace_id], back_populates="secret_scopes"
+    )
+    creator: Mapped["User | None"] = relationship(foreign_keys=[created_by])
+    keys: Mapped[list["SecretKey"]] = relationship(
+        back_populates="scope", cascade="all, delete-orphan"
+    )
+    acls: Mapped[list["SecretAcl"]] = relationship(
+        back_populates="scope", cascade="all, delete-orphan"
+    )
+
+
+class SecretKey(Base):
+    __tablename__ = "secret_keys"
+    __table_args__ = (UniqueConstraint("scope_id", "key", name="uq_scope_secret_key"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scope_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("secret_scopes.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    key: Mapped[str] = mapped_column(String(255), nullable=False)
+    encrypted_value: Mapped[str] = mapped_column(Text, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    scope: Mapped["SecretScope"] = relationship(back_populates="keys")
+    creator: Mapped["User | None"] = relationship(foreign_keys=[created_by])
+    updater: Mapped["User | None"] = relationship(foreign_keys=[updated_by])
+
+
+class SecretAcl(Base):
+    __tablename__ = "secret_acls"
+    __table_args__ = (
+        UniqueConstraint(
+            "scope_id", "principal_type", "principal_id", name="uq_scope_acl_principal"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scope_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("secret_scopes.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    principal_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    principal_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    permission: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    scope: Mapped["SecretScope"] = relationship(back_populates="acls")
     creator: Mapped["User | None"] = relationship(foreign_keys=[created_by])
