@@ -1,6 +1,36 @@
-# Lake of Tears Helm Chart & TOON Deployment Guide
+# Lake of Tears Helm Chart & Lifecycle Management Guide
 
-This directory contains the production-ready Helm chart (`./lake-of-tears`) and configuration templates for orchestrating the complete Lake of Tears data lakehouse platform on Kubernetes (k3s, managed K8s, EKS, GKE, AKS).
+This directory contains the production-ready Helm chart (`./lake-of-tears`), lifecycle automation suite (`./lot`), and configuration templates for orchestrating the complete Lake of Tears data lakehouse platform on Kubernetes (k3s, managed K8s, EKS, GKE, AKS).
+
+---
+
+## Quickstart: Unified CLI Lifecycle Manager (`./lot`)
+
+Lake of Tears includes an automated lifecycle management suite (`./lot` and `deploy/scripts/`) driven natively by **Token-Oriented Object Notation (TOON)**:
+
+```bash
+# 1. Install or upgrade platform with auto-generated secure credentials
+./lot install --auto-generate-secrets
+
+# 2. Inspect cluster workload status and active endpoints
+./lot status
+
+# 3. Check for platform updates (TrueNAS-style release trains)
+./lot update --check-only
+
+# 4. Apply rolling updates atomically with automatic rollback on failure
+./lot update
+
+# 5. Teardown release while preserving PersistentVolumeClaims (PVCs)
+./lot destroy --keep-data
+```
+
+### Direct Script Usage
+Each command is also directly executable for CI/CD runners or automated shell scripts:
+- `deploy/scripts/install.sh`: Prerequisite checks, secret auto-generation, dynamic Helm deployment, and live `/api/health` validation.
+- `deploy/scripts/update.sh`: TrueNAS-style trains (`--train stable` or `--train edge`), `--check-only`, `--json` output, and atomic rollback upgrades.
+- `deploy/scripts/destroy.sh`: Safe-by-default uninstallation with PVC retention and explicit namespace typing safeguards for complete purges.
+- `deploy/scripts/status.sh`: Pod phases, Helm release metadata, and service endpoint inspection.
 
 ---
 

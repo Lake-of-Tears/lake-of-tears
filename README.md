@@ -94,14 +94,17 @@ docker build -t lake-of-tears-ui:latest ./ui
 docker build -t lake-of-tears-airflow:latest ./deploy/airflow
 
 # 2. Deploy locally via Helm into the lake-of-tears namespace
-# Option A: Direct unified TOON deployment (Recommended)
-cp lake-of-tears.example.toon lake-of-tears.local.toon
-helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
-  --namespace lake-of-tears \
-  --create-namespace \
-  -f <(python scripts/toon2helm.py -i lake-of-tears.local.toon)
+# Option A: One-Command Lifecycle CLI (Recommended)
+./lot install --auto-generate-secrets
 
-# Option B: Standard Helm values override
+# Option B: Direct TOON process substitution
+# cp lake-of-tears.example.toon lake-of-tears.local.toon
+# helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
+#   --namespace lake-of-tears \
+#   --create-namespace \
+#   -f <(python scripts/toon2helm.py -i lake-of-tears.local.toon)
+
+# Option C: Standard Helm values override
 # helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
 #   --namespace lake-of-tears \
 #   --create-namespace \

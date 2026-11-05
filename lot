@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# =============================================================================
+# Lake of Tears (LOT) — Unified Platform CLI Runner
+# =============================================================================
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+usage() {
+    cat << EOF
+Lake of Tears (LOT) — Unified Platform Lifecycle Manager
+
+Usage:
+  ./lot <command> [options]
+
+Commands:
+  install     Deploy or upgrade Lake of Tears on Kubernetes using Helm & TOON
+  update      Check for or apply TrueNAS-style platform updates
+  destroy     Teardown release and manage persistent volume data retention
+  status      Inspect Kubernetes pods, Helm status, and service URLs
+  config      Inspect, validate, or generate secrets in TOON configuration
+  help        Show this help message
+
+Run './lot <command> --help' for options specific to any command.
+
+Examples:
+  ./lot install --auto-generate-secrets
+  ./lot update --check-only
+  ./lot update --train edge
+  ./lot status
+  ./lot destroy --keep-data
+EOF
+    exit 0
+}
+
+if [[ $# -eq 0 ]]; then
+    usage
+fi
+
+COMMAND="$1"
+shift
+
+case "${COMMAND}" in
+    install)
+        exec "${SCRIPT_DIR}/deploy/scripts/install.sh" "$@"
+        ;;
+    update)
+        exec "${SCRIPT_DIR}/deploy/scripts/update.sh" "$@"
+        ;;
+    destroy)
+        exec "${SCRIPT_DIR}/deploy/scripts/destroy.sh" "$@"
+        ;;
+    status)
+        exec "${SCRIPT_DIR}/deploy/scripts/status.sh" "$@"
+        ;;
+    config)
+        # Sourcing common for runtime resolution
+        source "${SCRIPT_DIR}/deploy/scripts/common.sh"
+        ensure_python_runtime
+        exec "${LOT_PYTHON}" "${SCRIPT_DIR}/scripts/lifecycle_helper.py" "$@"
+        ;;
+    help|-h|--help)
+        usage
+        ;;
+    *)
+        echo -e "\033[0;31m[ERROR]\033[0m Unknown command: '${COMMAND}'. See './lot help'." >&2
+        exit 1
+        ;;
+esac
