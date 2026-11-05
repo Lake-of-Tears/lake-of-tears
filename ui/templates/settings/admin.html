@@ -138,114 +138,96 @@
       </div>
     </div>
 
-    <!-- Services Cards Grid -->
-    <div id="services-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <!-- Services List View (Minimalist & Responsive) -->
+    <div class="card overflow-hidden" id="services-list-container">
       {% if services_overview and services_overview.services %}
-      {% for s in services_overview.services %}
-      <div class="card p-5 flex flex-col justify-between border border-white/[0.06] hover:border-white/[0.12] transition-colors relative overflow-hidden" id="service-card-{{ s.id }}">
-        <div>
-          <!-- Service Card Top Row -->
-          <div class="flex items-start justify-between gap-3 mb-2">
-            <div class="flex items-center gap-2.5 min-w-0">
-              <div class="w-8 h-8 rounded-lg bg-blue-900/30 border border-blue-700/40 flex items-center justify-center text-blue-400 shrink-0 font-bold text-xs">
-                {{ s.display_name[0] }}
-              </div>
-              <div class="min-w-0">
-                <h3 class="text-sm font-semibold text-gray-100 truncate flex items-center gap-1.5">
-                  {{ s.display_name }}
-                  {% if s.is_core %}
-                  <span class="text-[9px] px-1.5 py-0.2 rounded bg-purple-900/40 border border-purple-700/50 text-purple-300 font-normal">Core</span>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse text-xs">
+          <thead>
+            <tr class="border-b border-white/[0.08] text-[11px] font-semibold text-gray-400 bg-white/[0.01]">
+              <th class="py-3 px-4 font-medium">Service</th>
+              <th class="py-3 px-4 font-medium hidden sm:table-cell">Category</th>
+              <th class="py-3 px-4 font-medium">Status</th>
+              <th class="py-3 px-4 font-medium hidden md:table-cell">Replicas</th>
+              <th class="py-3 px-4 font-medium hidden lg:table-cell">Restarts</th>
+              <th class="py-3 px-4 font-medium hidden sm:table-cell">Uptime</th>
+              <th class="py-3 px-4 font-medium text-right">Details</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/[0.04]" id="services-table-body">
+            {% for s in services_overview.services %}
+            <tr class="hover:bg-white/[0.02] cursor-pointer transition-colors group select-none"
+                id="service-row-{{ s.id }}"
+                onclick="openServiceDrawer('{{ s.id }}')">
+              <td class="py-3 px-4">
+                <div class="flex items-center gap-3">
+                  <div class="w-7 h-7 rounded-lg bg-blue-900/30 border border-blue-700/40 flex items-center justify-center text-blue-400 shrink-0 font-bold text-xs">
+                    {{ s.display_name[0] }}
+                  </div>
+                  <div class="min-w-0">
+                    <div class="font-semibold text-gray-200 group-hover:text-blue-400 transition-colors flex items-center gap-1.5 truncate">
+                      {{ s.display_name }}
+                      {% if s.is_core %}
+                      <span class="text-[9px] px-1.5 py-0.2 rounded bg-purple-900/40 border border-purple-700/50 text-purple-300 font-normal">Core</span>
+                      {% endif %}
+                    </div>
+                    <div class="text-[11px] text-gray-500 font-mono truncate">{{ s.name }}</div>
+                  </div>
+                </div>
+              </td>
+              <td class="py-3 px-4 hidden sm:table-cell">
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] bg-white/[0.03] text-gray-300 border border-white/[0.06]">
+                  {{ s.category }}
+                </span>
+              </td>
+              <td class="py-3 px-4">
+                <div id="service-badge-{{ s.id }}">
+                  {% if s.status == 'running' %}
+                  <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-950/60 text-emerald-400 border border-emerald-800/60">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    Running
+                  </span>
+                  {% elif s.status == 'stopped' %}
+                  <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium bg-gray-900 text-gray-400 border border-gray-700">
+                    <span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>
+                    Stopped
+                  </span>
+                  {% elif s.status == 'restarting' %}
+                  <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium bg-amber-950/60 text-amber-400 border border-amber-800/60">
+                    <span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
+                    Restarting
+                  </span>
+                  {% else %}
+                  <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium bg-red-950/60 text-red-400 border border-red-800/60">
+                    <span class="w-1.5 h-1.5 rounded-full bg-red-400"></span>
+                    {{ s.status | capitalize }}
+                  </span>
                   {% endif %}
-                </h3>
-                <span class="text-[11px] text-gray-500 font-mono truncate block">{{ s.name }}</span>
-              </div>
-            </div>
-
-            <!-- Status Pill Badge -->
-            <div id="service-badge-{{ s.id }}">
-              {% if s.status == 'running' %}
-              <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-950/60 text-emerald-400 border border-emerald-800/60">
-                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                Running
-              </span>
-              {% elif s.status == 'stopped' %}
-              <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium bg-gray-900 text-gray-400 border border-gray-700">
-                <span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>
-                Stopped
-              </span>
-              {% elif s.status == 'restarting' %}
-              <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium bg-amber-950/60 text-amber-400 border border-amber-800/60">
-                <span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
-                Restarting
-              </span>
-              {% else %}
-              <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium bg-red-950/60 text-red-400 border border-red-800/60">
-                <span class="w-1.5 h-1.5 rounded-full bg-red-400"></span>
-                {{ s.status | capitalize }}
-              </span>
-              {% endif %}
-            </div>
-          </div>
-
-          <!-- Description -->
-          <p class="text-xs text-gray-400 mt-2 mb-4 line-clamp-2 leading-relaxed">
-            {{ s.description }}
-          </p>
-
-          <!-- Metrics / Specs Subcard -->
-          <div class="grid grid-cols-2 gap-2 text-[11px] p-2.5 rounded-lg bg-black/20 border border-white/[0.04] mb-4">
-            <div>
-              <span class="text-gray-500 block text-[10px] uppercase tracking-wider font-semibold">Replicas</span>
-              <span class="text-gray-200 font-medium font-mono" id="service-replicas-{{ s.id }}">{{ s.ready_replicas }} / {{ s.desired_replicas }}</span>
-            </div>
-            <div>
-              <span class="text-gray-500 block text-[10px] uppercase tracking-wider font-semibold">Restarts</span>
-              <span class="text-gray-200 font-medium font-mono" id="service-restarts-{{ s.id }}">{{ s.restarts }}</span>
-            </div>
-            <div>
-              <span class="text-gray-500 block text-[10px] uppercase tracking-wider font-semibold">Uptime</span>
-              <span class="text-gray-200 font-medium" id="service-uptime-{{ s.id }}">{{ s.uptime or '—' }}</span>
-            </div>
-            <div>
-              <span class="text-gray-500 block text-[10px] uppercase tracking-wider font-semibold">Limits</span>
-              <span class="text-gray-200 font-mono text-[10px]" id="service-limits-{{ s.id }}">
-                {{ s.cpu_limit or '—' }} / {{ s.memory_limit or '—' }}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Action Controls Footer -->
-        <div class="pt-3 border-t border-white/[0.06] flex items-center justify-between gap-2 mt-auto" id="service-actions-{{ s.id }}">
-          {% if s.status == 'stopped' %}
-          <button type="button" onclick="promptServiceAction('{{ s.id }}', '{{ s.display_name }}', 'start')"
-            class="w-full text-xs px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium transition-colors flex items-center justify-center gap-1.5">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/></svg>
-            Start Service
-          </button>
-          {% else %}
-          <button type="button" onclick="promptServiceAction('{{ s.id }}', '{{ s.display_name }}', 'restart')"
-            class="flex-1 text-xs px-2.5 py-1.5 rounded border border-gray-700 hover:border-gray-500 text-gray-300 hover:text-white transition-colors flex items-center justify-center gap-1.5">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-            Restart
-          </button>
-          {% if s.is_core %}
-          <button type="button" disabled title="Core services cannot be stopped to prevent instance lock-out"
-            class="text-xs px-2.5 py-1.5 rounded border border-gray-800 text-gray-600 cursor-not-allowed flex items-center gap-1">
-            Stop
-          </button>
-          {% else %}
-          <button type="button" onclick="promptServiceAction('{{ s.id }}', '{{ s.display_name }}', 'stop')"
-            class="text-xs px-2.5 py-1.5 rounded border border-red-900/60 text-red-400 hover:text-red-300 hover:border-red-700/80 transition-colors flex items-center gap-1">
-            Stop
-          </button>
-          {% endif %}
-          {% endif %}
-        </div>
+                </div>
+              </td>
+              <td class="py-3 px-4 hidden md:table-cell font-mono text-gray-300 text-xs" id="service-replicas-{{ s.id }}">
+                {{ s.ready_replicas }} / {{ s.desired_replicas }}
+              </td>
+              <td class="py-3 px-4 hidden lg:table-cell font-mono text-gray-400 text-xs" id="service-restarts-{{ s.id }}">
+                {{ s.restarts }}
+              </td>
+              <td class="py-3 px-4 hidden sm:table-cell text-gray-300 text-xs" id="service-uptime-{{ s.id }}">
+                {{ s.uptime or '—' }}
+              </td>
+              <td class="py-3 px-4 text-right">
+                <div class="flex items-center justify-end gap-1.5">
+                  <button type="button" class="p-1 rounded text-gray-400 group-hover:text-blue-400 hover:bg-white/[0.06] transition-colors" title="View service details">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                  </button>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
-      {% endfor %}
       {% else %}
-      <div class="col-span-full card p-8 text-center text-gray-500">
+      <div class="p-8 text-center text-gray-500">
         No platform services detected in the cluster.
       </div>
       {% endif %}
@@ -1150,9 +1132,139 @@
 </div>
 
 <!-- ========================================================================= -->
+<!-- SERVICE DETAILS DRAWER (Slide-Over Panel)                                 -->
+<!-- ========================================================================= -->
+<div id="service-drawer-overlay" class="hidden fixed inset-0 z-40 bg-black/60 backdrop-blur-[2px] transition-opacity" onclick="closeServiceDrawer()"></div>
+
+<div id="service-drawer" class="fixed inset-y-0 right-0 w-[540px] max-w-[95vw] bg-[#161616] border-l border-white/[0.08] shadow-2xl z-50 hidden flex-col transition-all duration-200" style="display:none;flex-direction:column">
+  <!-- Drawer Header -->
+  <div class="px-5 py-4 border-b border-white/[0.08] flex items-center justify-between shrink-0 bg-[#1a1a1a]">
+    <div class="flex items-center gap-3 min-w-0">
+      <div id="drawer-service-avatar" class="w-9 h-9 rounded-lg bg-blue-900/30 border border-blue-700/40 flex items-center justify-center text-blue-400 shrink-0 font-bold text-sm">
+        S
+      </div>
+      <div class="min-w-0">
+        <div class="flex items-center gap-2">
+          <h3 id="drawer-service-title" class="font-semibold text-gray-100 text-sm truncate">Service Details</h3>
+          <span id="drawer-service-core-badge" class="hidden text-[9px] px-1.5 py-0.2 rounded bg-purple-900/40 border border-purple-700/50 text-purple-300 font-normal">Core</span>
+        </div>
+        <div class="flex items-center gap-2 mt-0.5">
+          <span id="drawer-service-subname" class="text-xs text-gray-400 font-mono truncate">service-deployment-name</span>
+          <span id="drawer-service-category" class="text-[10px] px-1.5 py-0.2 rounded bg-white/[0.04] text-gray-300 border border-white/[0.06]">Category</span>
+        </div>
+      </div>
+    </div>
+    <div class="flex items-center gap-1 shrink-0">
+      <button type="button" onclick="closeServiceDrawer()" class="text-gray-400 hover:text-gray-200 p-1.5 rounded-lg hover:bg-white/[0.04] transition-colors" title="Close drawer (Esc)">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Drawer Body -->
+  <div class="flex-1 overflow-y-auto p-5 space-y-5 text-xs text-gray-300" id="drawer-service-body">
+    <!-- Status & Health Summary -->
+    <div class="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-3">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-semibold text-gray-300">Operational Status</span>
+        <div id="drawer-service-badge"></div>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 border-t border-white/[0.04] text-[11px]">
+        <div>
+          <span class="text-gray-500 block text-[10px] uppercase font-semibold">Replicas</span>
+          <span id="drawer-service-replicas" class="text-gray-200 font-mono font-medium">1 / 1</span>
+        </div>
+        <div>
+          <span class="text-gray-500 block text-[10px] uppercase font-semibold">Uptime</span>
+          <span id="drawer-service-uptime" class="text-gray-200 font-medium">5d 3h</span>
+        </div>
+        <div>
+          <span class="text-gray-500 block text-[10px] uppercase font-semibold">Restarts</span>
+          <span id="drawer-service-restarts" class="text-gray-200 font-mono font-medium">0</span>
+        </div>
+        <div>
+          <span class="text-gray-500 block text-[10px] uppercase font-semibold">Last Rollout</span>
+          <span id="drawer-service-last-restart" class="text-gray-200">Just now</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Description -->
+    <div class="space-y-1.5">
+      <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Overview</h4>
+      <p id="drawer-service-desc" class="text-xs text-gray-300 leading-relaxed bg-black/20 p-3 rounded-lg border border-white/[0.04]">
+        Service description.
+      </p>
+    </div>
+
+    <!-- Runtime Specifications & Container -->
+    <div class="space-y-2">
+      <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Kubernetes Pod & Container</h4>
+      <div class="rounded-lg bg-black/30 border border-white/[0.06] divide-y divide-white/[0.04] text-[11px] font-mono">
+        <div class="flex items-center justify-between p-2.5">
+          <span class="text-gray-500 font-sans">Deployment</span>
+          <span id="drawer-service-dep-name" class="text-blue-400 truncate max-w-[280px]">lake-of-tears-...</span>
+        </div>
+        <div class="flex items-center justify-between p-2.5">
+          <span class="text-gray-500 font-sans">Namespace</span>
+          <span id="drawer-service-namespace" class="text-gray-300">lake-of-tears</span>
+        </div>
+        <div class="flex items-center justify-between p-2.5">
+          <span class="text-gray-500 font-sans">Active Pod</span>
+          <span id="drawer-service-pod-name" class="text-gray-300 truncate max-w-[280px]">—</span>
+        </div>
+        <div class="flex items-center justify-between p-2.5">
+          <span class="text-gray-500 font-sans">Node</span>
+          <span id="drawer-service-node-name" class="text-gray-300 truncate max-w-[280px]">—</span>
+        </div>
+        <div class="flex items-center justify-between p-2.5">
+          <span class="text-gray-500 font-sans">Image</span>
+          <span id="drawer-service-image" class="text-gray-300 truncate max-w-[280px] select-all">—</span>
+        </div>
+        <div class="flex items-center justify-between p-2.5">
+          <span class="text-gray-500 font-sans">Service Port</span>
+          <span id="drawer-service-port" class="text-gray-300">—</span>
+        </div>
+        <div class="flex items-center justify-between p-2.5">
+          <span class="text-gray-500 font-sans">CPU Limit</span>
+          <span id="drawer-service-cpu-limit" class="text-gray-300">—</span>
+        </div>
+        <div class="flex items-center justify-between p-2.5">
+          <span class="text-gray-500 font-sans">Memory Limit</span>
+          <span id="drawer-service-mem-limit" class="text-gray-300">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Lifecycle Management Section -->
+    <div class="space-y-2 pt-2">
+      <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Process & Service Controls</h4>
+      <div class="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-3">
+        <p class="text-[11px] text-gray-400 leading-normal">
+          Trigger Kubernetes deployment rollout restarts, or scale replicas. Core platform services cannot be stopped.
+        </p>
+        <div id="drawer-service-actions" class="flex items-center gap-2 pt-1">
+          <!-- Dynamically populated buttons -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Drawer Footer -->
+  <div class="p-4 border-t border-white/[0.08] flex items-center justify-between shrink-0 bg-[#181818] text-xs">
+    <span class="text-[11px] text-gray-500" id="drawer-service-refreshed-at">Live synced with cluster</span>
+    <button type="button" onclick="closeServiceDrawer()" class="btn-ghost text-xs px-3 py-1.5 text-gray-400 hover:text-white">
+      Close
+    </button>
+  </div>
+</div>
+
+<!-- ========================================================================= -->
 <!-- SERVICE ACTION CONFIRMATION MODAL                                         -->
 <!-- ========================================================================= -->
-<div id="service-confirm-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+<div id="service-confirm-modal" class="hidden fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
   <div class="bg-gray-900 border border-gray-700 rounded-xl max-w-md w-full p-6 shadow-2xl space-y-4">
     <div class="flex items-start gap-3">
       <div id="service-confirm-icon-box" class="w-10 h-10 rounded-full flex items-center justify-center shrink-0">
@@ -1296,8 +1408,22 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 // =============================================================================
-// SERVICES REAL-TIME OBSERVABILITY & LIFECYCLE MANAGEMENT
+// SERVICES REAL-TIME OBSERVABILITY, DRAWER & LIFECYCLE MANAGEMENT
 // =============================================================================
+let _servicesData = {{ (services_overview.services | default([])) | tojson if services_overview and services_overview.services else '[]' }};
+let _servicesMap = {};
+let _currentDrawerServiceId = null;
+
+function _indexServicesMap() {
+  _servicesMap = {};
+  if (Array.isArray(_servicesData)) {
+    _servicesData.forEach(s => {
+      if (s && s.id) _servicesMap[s.id] = s;
+    });
+  }
+}
+_indexServicesMap();
+
 let _autoPollTimer = null;
 let _pendingServiceAction = null;
 
@@ -1376,16 +1502,14 @@ function renderServicesOverview(data) {
     updatedEl.textContent = 'Updated: ' + now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   }
 
-  // Update Individual Service Cards
-  const services = data.services || [];
-  services.forEach(s => {
-    // Status Badge
-    const badgeContainer = document.getElementById('service-badge-' + s.id);
-    if (badgeContainer) {
-      badgeContainer.innerHTML = getStatusBadgeHtml(s.status);
-    }
+  _servicesData = data.services || [];
+  _indexServicesMap();
 
-    // Metrics
+  // Update Table Row Badges & Metrics
+  _servicesData.forEach(s => {
+    const badgeContainer = document.getElementById('service-badge-' + s.id);
+    if (badgeContainer) badgeContainer.innerHTML = getStatusBadgeHtml(s.status);
+
     const replicasEl = document.getElementById('service-replicas-' + s.id);
     if (replicasEl) replicasEl.textContent = s.ready_replicas + ' / ' + s.desired_replicas;
 
@@ -1394,16 +1518,12 @@ function renderServicesOverview(data) {
 
     const uptimeEl = document.getElementById('service-uptime-' + s.id);
     if (uptimeEl) uptimeEl.textContent = s.uptime || '—';
-
-    const limitsEl = document.getElementById('service-limits-' + s.id);
-    if (limitsEl) limitsEl.textContent = (s.cpu_limit || '—') + ' / ' + (s.memory_limit || '—');
-
-    // Action Controls
-    const actionsContainer = document.getElementById('service-actions-' + s.id);
-    if (actionsContainer) {
-      actionsContainer.innerHTML = getServiceActionsHtml(s);
-    }
   });
+
+  // Sync Open Drawer
+  if (_currentDrawerServiceId && _servicesMap[_currentDrawerServiceId]) {
+    populateServiceDrawer(_servicesMap[_currentDrawerServiceId]);
+  }
 }
 
 function getStatusBadgeHtml(status) {
@@ -1430,32 +1550,138 @@ function getStatusBadgeHtml(status) {
   }
 }
 
-function getServiceActionsHtml(s) {
+// Service Details Drawer Controls
+function openServiceDrawer(serviceId) {
+  const service = (_servicesMap && _servicesMap[serviceId]) || _servicesData.find(s => s.id === serviceId);
+  if (!service) return;
+  _currentDrawerServiceId = serviceId;
+  populateServiceDrawer(service);
+
+  const drawer = document.getElementById('service-drawer');
+  const overlay = document.getElementById('service-drawer-overlay');
+  if (drawer && overlay) {
+    drawer.classList.remove('hidden');
+    drawer.style.display = 'flex';
+    overlay.classList.remove('hidden');
+  }
+}
+
+function closeServiceDrawer() {
+  _currentDrawerServiceId = null;
+  const drawer = document.getElementById('service-drawer');
+  const overlay = document.getElementById('service-drawer-overlay');
+  if (drawer && overlay) {
+    drawer.classList.add('hidden');
+    drawer.style.display = 'none';
+    overlay.classList.add('hidden');
+  }
+}
+
+function populateServiceDrawer(s) {
+  if (!s) return;
+
+  const avatar = document.getElementById('drawer-service-avatar');
+  if (avatar) avatar.textContent = (s.display_name || s.id || 'S')[0].toUpperCase();
+
+  const title = document.getElementById('drawer-service-title');
+  if (title) title.textContent = s.display_name || s.id;
+
+  const coreBadge = document.getElementById('drawer-service-core-badge');
+  if (coreBadge) {
+    if (s.is_core) coreBadge.classList.remove('hidden');
+    else coreBadge.classList.add('hidden');
+  }
+
+  const subname = document.getElementById('drawer-service-subname');
+  if (subname) subname.textContent = s.name || s.id;
+
+  const cat = document.getElementById('drawer-service-category');
+  if (cat) cat.textContent = s.category || 'General';
+
+  const badge = document.getElementById('drawer-service-badge');
+  if (badge) badge.innerHTML = getStatusBadgeHtml(s.status);
+
+  const replicas = document.getElementById('drawer-service-replicas');
+  if (replicas) replicas.textContent = (s.ready_replicas || 0) + ' / ' + (s.desired_replicas || 0);
+
+  const uptime = document.getElementById('drawer-service-uptime');
+  if (uptime) uptime.textContent = s.uptime || '—';
+
+  const restarts = document.getElementById('drawer-service-restarts');
+  if (restarts) restarts.textContent = s.restarts || 0;
+
+  const lastRestart = document.getElementById('drawer-service-last-restart');
+  if (lastRestart) lastRestart.textContent = s.last_restart || '—';
+
+  const desc = document.getElementById('drawer-service-desc');
+  if (desc) desc.textContent = s.description || 'Platform component.';
+
+  const depName = document.getElementById('drawer-service-dep-name');
+  if (depName) depName.textContent = s.name || '—';
+
+  const ns = document.getElementById('drawer-service-namespace');
+  if (ns) ns.textContent = s.namespace || 'lake-of-tears';
+
+  const pod = document.getElementById('drawer-service-pod-name');
+  if (pod) pod.textContent = s.pod_name || (s.desired_replicas === 0 ? 'None (scaled to 0)' : '—');
+
+  const node = document.getElementById('drawer-service-node-name');
+  if (node) node.textContent = s.node_name || '—';
+
+  const img = document.getElementById('drawer-service-image');
+  if (img) img.textContent = s.image || '—';
+
+  const port = document.getElementById('drawer-service-port');
+  if (port) port.textContent = s.port || '—';
+
+  const cpu = document.getElementById('drawer-service-cpu-limit');
+  if (cpu) cpu.textContent = s.cpu_limit || '—';
+
+  const mem = document.getElementById('drawer-service-mem-limit');
+  if (mem) mem.textContent = s.memory_limit || '—';
+
+  const actions = document.getElementById('drawer-service-actions');
+  if (actions) {
+    actions.innerHTML = getDrawerActionsHtml(s);
+  }
+}
+
+function getDrawerActionsHtml(s) {
   if (s.status === 'stopped') {
     return `<button type="button" onclick="promptServiceAction('${s.id}', '${s.display_name}', 'start')"
-      class="w-full text-xs px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium transition-colors flex items-center justify-center gap-1.5">
-      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/></svg>
+      class="w-full text-xs px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition-colors flex items-center justify-center gap-2 shadow-sm">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/></svg>
       Start Service
     </button>`;
   } else {
     const stopButtonHtml = s.is_core
       ? `<button type="button" disabled title="Core services cannot be stopped to prevent instance lock-out"
-          class="text-xs px-2.5 py-1.5 rounded border border-gray-800 text-gray-600 cursor-not-allowed flex items-center gap-1">
+          class="text-xs px-3 py-2 rounded-lg border border-gray-800 text-gray-600 cursor-not-allowed flex items-center gap-1.5 opacity-60">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
           Stop
         </button>`
       : `<button type="button" onclick="promptServiceAction('${s.id}', '${s.display_name}', 'stop')"
-          class="text-xs px-2.5 py-1.5 rounded border border-red-900/60 text-red-400 hover:text-red-300 hover:border-red-700/80 transition-colors flex items-center gap-1">
-          Stop
+          class="text-xs px-3.5 py-2 rounded-lg border border-red-900/60 text-red-400 hover:text-red-300 hover:border-red-700/80 hover:bg-red-950/20 transition-colors flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          Stop Service
         </button>`;
 
     return `<button type="button" onclick="promptServiceAction('${s.id}', '${s.display_name}', 'restart')"
-      class="flex-1 text-xs px-2.5 py-1.5 rounded border border-gray-700 hover:border-gray-500 text-gray-300 hover:text-white transition-colors flex items-center justify-center gap-1.5">
+      class="flex-1 text-xs px-3.5 py-2 rounded-lg border border-gray-700 hover:border-gray-500 text-gray-200 hover:text-white hover:bg-white/[0.04] transition-colors flex items-center justify-center gap-2">
       <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-      Restart
+      Restart Service
     </button>
     ${stopButtonHtml}`;
   }
 }
+
+// Global Escape Key Listener for Modals and Drawers
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closeServiceDrawer();
+    closeServiceConfirmModal();
+  }
+});
 
 // Confirmation Dialog Modal
 function promptServiceAction(serviceId, displayName, action) {

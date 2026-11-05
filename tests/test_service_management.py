@@ -153,7 +153,19 @@ def test_service_manager_status_mapping():
     mock_deployments = [
         {
             "metadata": {"name": "lake-of-tears-backend"},
-            "spec": {"replicas": 1},
+            "spec": {
+                "replicas": 1,
+                "template": {
+                    "spec": {
+                        "containers": [
+                            {
+                                "image": "lake-of-tears-backend:latest",
+                                "ports": [{"containerPort": 8000}],
+                            }
+                        ]
+                    }
+                },
+            },
             "status": {"readyReplicas": 1},
         },
         {
@@ -217,6 +229,8 @@ def test_service_manager_status_mapping():
         assert backend["desired_replicas"] == 1
         assert backend["restarts"] == 2
         assert backend["cpu_limit"] == "1000m"
+        assert backend["image"] == "lake-of-tears-backend:latest"
+        assert backend["port"] == 8000
 
         # Jupyter should be stopped
         jupyter = services["jupyter"]
@@ -388,6 +402,14 @@ def test_admin_panel_template_tabs_structure():
     assert 'id="admin-panel-workspaces"' in content
     assert 'id="admin-panel-vaults"' in content
     assert 'id="admin-panel-platform"' in content
+
+    # Minimalist List View & Slide-Over Drawer
+    assert 'id="services-list-container"' in content
+    assert 'id="service-drawer"' in content
+    assert 'id="service-drawer-overlay"' in content
+    assert "openServiceDrawer(" in content
+    assert "closeServiceDrawer(" in content
+    assert 'id="drawer-service-actions"' in content
 
     # Confirmation modal & Auto-poll controls
     assert 'id="service-confirm-modal"' in content

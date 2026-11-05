@@ -87,6 +87,8 @@ class ServiceInfo:
     cpu_limit: str | None = None
     memory_limit: str | None = None
     last_restart: str | None = None
+    image: str | None = None
+    port: int | None = None
     extra_details: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -285,6 +287,15 @@ class KubernetesServiceManager:
                 category = meta.get("category", "General")
                 is_core = srv_id in SAFEGUARDED_SERVICES or dep_name in SAFEGUARDED_SERVICES
 
+                # Extract container spec from deployment template
+                dep_containers = (
+                    spec.get("template", {}).get("spec", {}).get("containers", [])
+                )
+                image = dep_containers[0].get("image") if dep_containers else None
+                port = meta.get("port")
+                if not port and dep_containers and dep_containers[0].get("ports"):
+                    port = dep_containers[0]["ports"][0].get("containerPort")
+
                 # Correlate active pod
                 dep_pods = pods_by_deployment.get(dep_name, []) or pods_by_deployment.get(
                     f"lake-of-tears-{srv_id}", []
@@ -321,6 +332,16 @@ class KubernetesServiceManager:
                         limits = res.get("limits", {})
                         cpu_limit = limits.get("cpu")
                         memory_limit = limits.get("memory")
+                        if not image:
+                            image = containers[0].get("image")
+
+                # Fallback resource limits from deployment template if not found on pod
+                if (not cpu_limit or not memory_limit) and dep_containers:
+                    dep_limits = dep_containers[0].get("resources", {}).get("limits", {})
+                    if not cpu_limit:
+                        cpu_limit = dep_limits.get("cpu")
+                    if not memory_limit:
+                        memory_limit = dep_limits.get("memory")
 
                 # Template annotations for rollout restart time
                 template_annotations = (
@@ -379,6 +400,8 @@ class KubernetesServiceManager:
                         cpu_limit=cpu_limit,
                         memory_limit=memory_limit,
                         last_restart=self._format_age(last_restart) if last_restart else None,
+                        image=image,
+                        port=port,
                     )
                 )
 
