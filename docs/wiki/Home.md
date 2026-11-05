@@ -22,6 +22,7 @@
 | [Chunking and Vector Embeddings](Chunking-and-Vector-Embeddings.md) | How text becomes vectors stored in Parquet, how to register a source for embedding, how long text is split into chunks (`recursive`, `document`, `agentic`), and query examples |
 | [DuckDB Querying and Analytics](DuckDB-Querying-and-Analytics.md) | Where you can run SQL, connecting DuckDB to MinIO, partition-aware query patterns, vector search syntax, and using the lake from notebooks and Superset |
 | [Workspaces and Catalog Management](Workspaces-and-Catalog-Management.md) | Workspace isolation, the workspace cookie, deletion and purge lifecycles, catalog sharing and administration |
+| [Secret Management](Secret-Management.md) | Databricks-compatible secrets (`dbutils.secrets` SDK parity), internal AES-256-GCM vault, Azure Key Vault, AWS Secrets Manager, 3-tier ACLs, config templating, and automatic log redaction |
 
 More guides will appear in this list as they are published.
 
@@ -51,6 +52,7 @@ For Kubernetes, see the [Helm instructions in the README](https://github.com/Lak
 ## Where to go next
 
 - New to the project? Start with the [Architecture Overview](Architecture-Overview.md).
+- Managing credentials & pipelines? Explore [Secret Management](Secret-Management.md).
 - Running a multi-team instance? Read [Workspaces and Catalog Management](Workspaces-and-Catalog-Management.md).
 - Want to contribute? See [CONTRIBUTING.md](https://github.com/Lake-of-Tears/lake-of-tears/blob/main/CONTRIBUTING.md) and the [branching strategy](https://github.com/Lake-of-Tears/lake-of-tears/blob/main/docs/branching-strategy.md).
 - Found a problem? [Open an issue](https://github.com/Lake-of-Tears/lake-of-tears/issues).

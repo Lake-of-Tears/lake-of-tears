@@ -44,6 +44,11 @@
       "slug": "workspaces-and-catalog-management",
       "title": "Workspaces and Catalog Management",
       "file": "Workspaces-and-Catalog-Management.md"
+    },
+    {
+      "slug": "secret-management",
+      "title": "Secret Management",
+      "file": "Secret-Management.md"
     }
   ]
 }

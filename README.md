@@ -27,6 +27,7 @@ Lake of Tears is a self-hosted data platform inspired by Databricks — one URL,
 - **Single entry point** — Kubernetes Ingress at port 80; no juggling separate ports or tabs
 - **Authentication** — email/password login, self-registration toggle (`AUTH_REGISTRATION_ENABLED`), and SSO via Google, Microsoft Entra ID, Okta, GitHub, GitLab, or any generic OpenID Connect (OIDC) provider with auto-discovery
 - **Multi-user with roles** — `admin` and `viewer` roles; first registered user becomes admin automatically
+- **Secret Management** — Databricks `dbutils.secrets` parity (`lake_of_tears.secrets`), Internal AES-256-GCM vault, Azure Key Vault, AWS Secrets Manager, 3-tier ACLs (`READ`/`WRITE`/`MANAGE`), config templating (`{{secrets/scope/key}}`), and automatic output log redaction
 - **Theme toggle** — Light / Dark / Auto (follows OS preference, falls back to time-of-day)
 - S3-compatible object storage via MinIO CE
 - Parquet-native storage partitioned by `year=/month=/day=`
