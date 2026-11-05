@@ -54,6 +54,20 @@
     - Catalog drawer UI controls added for Chunking Strategy, Chunk Size, and Chunk Overlap, plus Strategy display pill in status overview.
   - **Local Deployment:** Rebuilt images `lake-of-tears-backend:latest` and `lake-of-tears-ui:latest`; rolled out to local k8s deployments `lake-of-tears-backend` and `lake-of-tears-lakeui`. Verified live table sync and multi-chunk explosion on `tmdb-trending`.
 
+- **Issue #383 & PR #388 (Superadmin Vault Configuration Panel & Workspace Secret Scopes UI):**
+  - **Status:** **COMPLETED, DEPLOYED, MERGED & CI GREEN**
+  - **Pull Request:** Merged via PR #388 into `main` (`e56c1d2`).
+  - **Kanban Board:** Moved to **Done** on [Lake of Tears (Main) Project #3](https://github.com/orgs/Lake-of-Tears/projects/3) (Item IDs `PVTI_lADOFEJxWM4Bmf-gzhGI9Nw` and `PVTI_lADOFEJxWM4Bmf-gzhGKyDE`).
+  - **Test Suite:** 795 tests passing (`tests/test_ui_secrets.py` and `tests/test_cloud_vault_providers.py`).
+  - **Changes:**
+    - Superadmin Vault Configuration Panel in `/settings/admin` with tabbed configuration for Internal DB Vault, Azure Key Vault, and AWS Secrets Manager.
+    - Live Test Connection AJAX verification with real-time status banners.
+    - Cross-workspace secret scopes audit inventory table (`GET /api/admin/vault-providers/scopes`).
+    - Workspace Secret Scopes UI in `/settings/workspace` with Databricks-compatible scope listing, provider pills, and user permission badges.
+    - Create Scope Modal, Manage Keys slide-over modal with masked write-only secret inputs and visibility toggles, and Scope ACLs Modal for granular READ/WRITE/MANAGE grants.
+    - Secure AJAX endpoints for key rotation, key deletion, ACL grant, and ACL revocation without page reloads.
+  - **Local Deployment:** Rebuilt images `lake-of-tears-backend:latest` and `lake-of-tears-ui:latest`; rolled out to local k8s deployments `lake-of-tears-backend` and `lake-of-tears-lakeui`. Verified live health check at `http://localhost/api/health`.
+
 - **Issue #382 & PR #387 (Secret Consumption Runtime, SDK & Automatic Log Redaction):**
   - **Status:** **COMPLETED, DEPLOYED, MERGED & CI GREEN**
   - **Pull Request:** Merged via PR #387 into `main` (`4b0174f`).
