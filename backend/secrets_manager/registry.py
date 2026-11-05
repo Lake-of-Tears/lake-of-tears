@@ -4,7 +4,10 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from secrets_manager.aws_sm import AWSSecretsManagerProvider
+from secrets_manager.azure_kv import AzureKeyVaultProvider
 from secrets_manager.base import BaseSecretProvider
+from secrets_manager.config import get_vault_provider_config
 from secrets_manager.internal import InternalSecretProvider
 
 
@@ -19,8 +22,17 @@ def get_secret_provider(
     if normalized == "internal":
         return InternalSecretProvider(db)
 
-    # Future cloud providers (Issue #381 / #384) will register here
+    if normalized in ("azure_keyvault", "azure"):
+        system_conf = get_vault_provider_config(db, "azure_keyvault")
+        merged = {**system_conf, **(provider_config or {})}
+        return AzureKeyVaultProvider(merged)
+
+    if normalized in ("aws_secrets_manager", "aws"):
+        system_conf = get_vault_provider_config(db, "aws_secrets_manager")
+        merged = {**system_conf, **(provider_config or {})}
+        return AWSSecretsManagerProvider(merged)
+
     raise NotImplementedError(
-        f"Secret provider backend '{backend_type}' is not yet configured or supported. "
-        "Supported in Phase 1: 'internal'."
+        f"Secret provider backend '{backend_type}' is not yet supported. "
+        "Supported in Phase 1: 'internal', 'azure_keyvault', 'aws_secrets_manager'."
     )

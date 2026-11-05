@@ -213,12 +213,38 @@ class SecretManagerService:
         self.db.commit()
 
     def list_keys_in_scope(self, scope: SecretScope) -> list[SecretKey]:
-        return (
+        provider = get_secret_provider(scope.backend_type, self.db, scope.provider_config)
+        try:
+            key_names = provider.list_keys(scope)
+        except Exception as e:
+            logger.warning("Failed to list keys from provider for scope %s: %s", scope.name, e)
+            key_names = []
+
+        records = (
             self.db.query(SecretKey)
             .filter(SecretKey.scope_id == scope.id)
             .order_by(SecretKey.key.asc())
             .all()
         )
+        rec_map = {r.key: r for r in records}
+        now = datetime.now(UTC)
+
+        results = []
+        for kn in key_names:
+            if kn in rec_map:
+                results.append(rec_map[kn])
+            else:
+                results.append(
+                    SecretKey(
+                        scope_id=scope.id,
+                        key=kn,
+                        encrypted_value="[EXTERNAL_MANAGED]",
+                        version=1,
+                        created_at=scope.created_at or now,
+                        updated_at=scope.updated_at or now,
+                    )
+                )
+        return results or records
 
     def get_secret_value(self, scope: SecretScope, key: str) -> tuple[str, int, datetime]:
         provider = get_secret_provider(scope.backend_type, self.db, scope.provider_config)
@@ -261,6 +287,28 @@ class SecretManagerService:
             .filter(SecretKey.scope_id == scope.id, SecretKey.key == clean_key)
             .first()
         )
+        now = datetime.now(UTC)
+        if not secret_record:
+            secret_record = SecretKey(
+                scope_id=scope.id,
+                key=clean_key,
+                encrypted_value="[EXTERNAL_MANAGED]" if scope.backend_type != "internal" else "",
+                version=1,
+                created_by=user.id,
+                updated_by=user.id,
+                created_at=now,
+                updated_at=now,
+            )
+            self.db.add(secret_record)
+            self.db.commit()
+            self.db.refresh(secret_record)
+        elif scope.backend_type != "internal":
+            secret_record.version += 1
+            secret_record.updated_at = now
+            secret_record.updated_by = user.id
+            self.db.commit()
+            self.db.refresh(secret_record)
+
         return secret_record
 
     def delete_secret_value(self, scope: SecretScope, key: str) -> bool:
@@ -271,6 +319,14 @@ class SecretManagerService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Secret key '{key}' not found in scope '{scope.name}'",
             )
+        rec = (
+            self.db.query(SecretKey)
+            .filter(SecretKey.scope_id == scope.id, SecretKey.key == key)
+            .first()
+        )
+        if rec:
+            self.db.delete(rec)
+            self.db.commit()
         return True
 
     def list_acls(self, scope: SecretScope) -> list[SecretAcl]:

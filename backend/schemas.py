@@ -1048,3 +1048,23 @@ class SecretAclResponse(BaseModel):
     created_by: uuid.UUID | None = None
 
     model_config = {"from_attributes": True}
+
+
+class VaultProviderConfigUpdate(BaseModel):
+    config: dict[str, Any]
+
+
+class VaultProviderStatusResponse(BaseModel):
+    provider: str
+    display_name: str
+    is_configured: bool
+    config: dict[str, Any]
+
+
+class VaultTestConnectionRequest(BaseModel):
+    config: dict[str, Any] | None = None
+
+
+class VaultTestConnectionResponse(BaseModel):
+    success: bool
+    message: str
