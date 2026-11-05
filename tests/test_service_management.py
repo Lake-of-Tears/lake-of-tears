@@ -135,9 +135,10 @@ def make_token(user: User, db_session) -> str:
 # UNIT TESTS: KUBERNETES SERVICE MANAGER
 # =============================================================================
 
+
 def test_service_manager_safeguards():
     mgr = KubernetesServiceManager()
-    
+
     # Attempting to stop core services must raise ValueError
     for srv in SAFEGUARDED_SERVICES:
         with pytest.raises(ValueError) as exc:
@@ -147,7 +148,7 @@ def test_service_manager_safeguards():
 
 def test_service_manager_status_mapping():
     mgr = KubernetesServiceManager()
-    
+
     # Mock deployments and pods
     mock_deployments = [
         {
@@ -196,17 +197,18 @@ def test_service_manager_status_mapping():
         },
     ]
 
-    with patch.object(mgr, "_get_deployments", return_value=mock_deployments), \
-         patch.object(mgr, "_get_pods", return_value=mock_pods), \
-         patch.object(mgr, "is_cluster_accessible", return_value=True):
-        
+    with (
+        patch.object(mgr, "_get_deployments", return_value=mock_deployments),
+        patch.object(mgr, "_get_pods", return_value=mock_pods),
+        patch.object(mgr, "is_cluster_accessible", return_value=True),
+    ):
         overview = mgr.list_services()
         assert overview["cluster_connected"] is True
         assert overview["total_services"] == 3
         assert overview["healthy_count"] == 1
 
         services = {s["id"]: s for s in overview["services"]}
-        
+
         # Backend should be running & core
         backend = services["backend"]
         assert backend["status"] == "running"
@@ -255,6 +257,7 @@ def test_service_manager_lifecycle_actions():
 # INTEGRATION TESTS: BACKEND API ENDPOINTS
 # =============================================================================
 
+
 def test_backend_services_endpoints_auth(backend_client, regular_user, db_session):
     # Unauthenticated
     resp = backend_client.get("/api/admin/services")
@@ -286,10 +289,11 @@ def test_backend_services_lifecycle_api(backend_client, superadmin_user, db_sess
 
     mgr = get_service_manager()
 
-    with patch.object(mgr, "restart_service", return_value={"success": True, "action": "restart"}), \
-         patch.object(mgr, "stop_service", return_value={"success": True, "action": "stop"}), \
-         patch.object(mgr, "start_service", return_value={"success": True, "action": "start"}):
-
+    with (
+        patch.object(mgr, "restart_service", return_value={"success": True, "action": "restart"}),
+        patch.object(mgr, "stop_service", return_value={"success": True, "action": "stop"}),
+        patch.object(mgr, "start_service", return_value={"success": True, "action": "start"}),
+    ):
         # Restart
         resp = backend_client.post("/api/admin/services/airflow/restart", headers=headers)
         assert resp.status_code == 200
@@ -314,6 +318,7 @@ def test_backend_services_lifecycle_api(backend_client, superadmin_user, db_sess
 # =============================================================================
 # INTEGRATION TESTS: UI PROXY ENDPOINTS
 # =============================================================================
+
 
 def test_ui_proxy_services_endpoints(superadmin_user, regular_user, db_session):
     ui_client = TestClient(ui_main.app)
@@ -360,6 +365,7 @@ def test_ui_proxy_services_endpoints(superadmin_user, regular_user, db_session):
 # =============================================================================
 # INTEGRATION TESTS: UI ADMIN PANEL TEMPLATE & TABS
 # =============================================================================
+
 
 def test_admin_panel_template_tabs_structure():
     template_path = repo_root / "ui" / "templates" / "settings" / "admin.html"

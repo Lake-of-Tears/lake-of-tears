@@ -3020,7 +3020,9 @@ async def settings_admin_services_list(request: Request):
             resp = client.get(f"{BACKEND_URL}/api/admin/services", headers=headers)
             return JSONResponse(resp.json(), status_code=resp.status_code)
     except Exception as exc:
-        return JSONResponse({"error": str(exc), "services": [], "cluster_connected": False}, status_code=502)
+        return JSONResponse(
+            {"error": str(exc), "services": [], "cluster_connected": False}, status_code=502
+        )
 
 
 @app.post("/settings/admin/services/{service_name}/restart")
@@ -3033,7 +3035,9 @@ async def settings_admin_service_restart(request: Request, service_name: str):
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     try:
         with httpx.Client(timeout=20) as client:
-            resp = client.post(f"{BACKEND_URL}/api/admin/services/{service_name}/restart", headers=headers)
+            resp = client.post(
+                f"{BACKEND_URL}/api/admin/services/{service_name}/restart", headers=headers
+            )
             try:
                 data = resp.json()
             except Exception:
@@ -3053,7 +3057,9 @@ async def settings_admin_service_stop(request: Request, service_name: str):
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     try:
         with httpx.Client(timeout=20) as client:
-            resp = client.post(f"{BACKEND_URL}/api/admin/services/{service_name}/stop", headers=headers)
+            resp = client.post(
+                f"{BACKEND_URL}/api/admin/services/{service_name}/stop", headers=headers
+            )
             try:
                 data = resp.json()
             except Exception:
@@ -3073,7 +3079,9 @@ async def settings_admin_service_start(request: Request, service_name: str):
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     try:
         with httpx.Client(timeout=20) as client:
-            resp = client.post(f"{BACKEND_URL}/api/admin/services/{service_name}/start", headers=headers)
+            resp = client.post(
+                f"{BACKEND_URL}/api/admin/services/{service_name}/start", headers=headers
+            )
             try:
                 data = resp.json()
             except Exception:

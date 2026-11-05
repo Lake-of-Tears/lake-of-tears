@@ -6,8 +6,8 @@ import os
 import shutil
 import subprocess
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 
@@ -78,15 +78,15 @@ class ServiceInfo:
     ready_replicas: int
     is_core: bool
     restarts: int
-    uptime: Optional[str] = None
-    created_at: Optional[str] = None
-    pod_name: Optional[str] = None
-    node_name: Optional[str] = None
-    cpu_usage: Optional[str] = None
-    memory_usage: Optional[str] = None
-    cpu_limit: Optional[str] = None
-    memory_limit: Optional[str] = None
-    last_restart: Optional[str] = None
+    uptime: str | None = None
+    created_at: str | None = None
+    pod_name: str | None = None
+    node_name: str | None = None
+    cpu_usage: str | None = None
+    memory_usage: str | None = None
+    cpu_limit: str | None = None
+    memory_limit: str | None = None
+    last_restart: str | None = None
     extra_details: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -96,7 +96,7 @@ class ServiceInfo:
 class KubernetesServiceManager:
     """Manages observation and lifecycle controls for platform services in Kubernetes."""
 
-    def __init__(self, namespace: Optional[str] = None):
+    def __init__(self, namespace: str | None = None):
         self.namespace = namespace or os.getenv("K8S_NAMESPACE", "lake-of-tears")
         self.sa_token_path = "/var/run/secrets/kubernetes.io/serviceaccount/token"
         self.sa_ca_path = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
@@ -108,7 +108,7 @@ class KubernetesServiceManager:
             self.mode = "in_cluster"
             if os.path.exists(self.sa_ns_path):
                 try:
-                    with open(self.sa_ns_path, "r", encoding="utf-8") as f:
+                    with open(self.sa_ns_path, encoding="utf-8") as f:
                         ns = f.read().strip()
                         if ns:
                             self.namespace = ns
@@ -143,7 +143,7 @@ class KubernetesServiceManager:
     def _get_http_client(self) -> httpx.Client:
         token = ""
         if os.path.exists(self.sa_token_path):
-            with open(self.sa_token_path, "r", encoding="utf-8") as f:
+            with open(self.sa_token_path, encoding="utf-8") as f:
                 token = f.read().strip()
 
         return httpx.Client(
@@ -223,13 +223,13 @@ class KubernetesServiceManager:
                 logger.warning("Failed to list pods via kubectl: %s", e)
         return []
 
-    def _format_age(self, created_at_str: Optional[str]) -> Optional[str]:
+    def _format_age(self, created_at_str: str | None) -> str | None:
         if not created_at_str:
             return None
         try:
             # Parse ISO 8601 string (e.g. 2026-11-05T04:12:00Z)
             dt = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             diff = now - dt
             seconds = int(diff.total_seconds())
             if seconds < 0:
@@ -280,21 +280,15 @@ class KubernetesServiceManager:
                 ready_replicas = status_dict.get("readyReplicas", 0)
 
                 meta = SERVICE_METADATA.get(srv_id, {})
-                display_name = meta.get(
-                    "display_name", srv_id.replace("-", " ").title()
-                )
-                description = meta.get(
-                    "description", "Platform infrastructure deployment."
-                )
+                display_name = meta.get("display_name", srv_id.replace("-", " ").title())
+                description = meta.get("description", "Platform infrastructure deployment.")
                 category = meta.get("category", "General")
-                is_core = (
-                    srv_id in SAFEGUARDED_SERVICES or dep_name in SAFEGUARDED_SERVICES
-                )
+                is_core = srv_id in SAFEGUARDED_SERVICES or dep_name in SAFEGUARDED_SERVICES
 
                 # Correlate active pod
-                dep_pods = pods_by_deployment.get(
-                    dep_name, []
-                ) or pods_by_deployment.get(f"lake-of-tears-{srv_id}", [])
+                dep_pods = pods_by_deployment.get(dep_name, []) or pods_by_deployment.get(
+                    f"lake-of-tears-{srv_id}", []
+                )
                 active_pod = dep_pods[0] if dep_pods else None
 
                 pod_name = None
@@ -330,13 +324,9 @@ class KubernetesServiceManager:
 
                 # Template annotations for rollout restart time
                 template_annotations = (
-                    spec.get("template", {})
-                    .get("metadata", {})
-                    .get("annotations", {})
+                    spec.get("template", {}).get("metadata", {}).get("annotations", {})
                 )
-                last_restart = template_annotations.get(
-                    "kubectl.kubernetes.io/restartedAt"
-                )
+                last_restart = template_annotations.get("kubectl.kubernetes.io/restartedAt")
 
                 # Determine overall service status
                 if desired_replicas == 0:
@@ -350,9 +340,7 @@ class KubernetesServiceManager:
                             "containerStatuses", []
                         )
                         waiting_state = (
-                            container_statuses[0]
-                            .get("state", {})
-                            .get("waiting", {})
+                            container_statuses[0].get("state", {}).get("waiting", {})
                             if container_statuses
                             else {}
                         )
@@ -390,9 +378,7 @@ class KubernetesServiceManager:
                         memory_usage="—",
                         cpu_limit=cpu_limit,
                         memory_limit=memory_limit,
-                        last_restart=self._format_age(last_restart)
-                        if last_restart
-                        else None,
+                        last_restart=self._format_age(last_restart) if last_restart else None,
                     )
                 )
 
@@ -433,7 +419,7 @@ class KubernetesServiceManager:
     def restart_service(self, service_name: str) -> dict[str, Any]:
         """Trigger a rolling restart of the specified deployment."""
         dep_name = self._resolve_deployment_name(service_name)
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_iso = datetime.now(UTC).isoformat()
 
         if self.mode == "in_cluster":
             with self._get_http_client() as client:
@@ -442,9 +428,7 @@ class KubernetesServiceManager:
                     "spec": {
                         "template": {
                             "metadata": {
-                                "annotations": {
-                                    "kubectl.kubernetes.io/restartedAt": now_iso
-                                }
+                                "annotations": {"kubectl.kubernetes.io/restartedAt": now_iso}
                             }
                         }
                     }
@@ -460,9 +444,7 @@ class KubernetesServiceManager:
                         "message": f"Service '{service_name}' restart initiated successfully.",
                         "restarted_at": now_iso,
                     }
-                raise RuntimeError(
-                    f"Kubernetes restart failed ({resp.status_code}): {resp.text}"
-                )
+                raise RuntimeError(f"Kubernetes restart failed ({resp.status_code}): {resp.text}")
         elif self.mode == "kubectl_cli":
             try:
                 res = subprocess.run(
@@ -517,9 +499,7 @@ class KubernetesServiceManager:
                         "action": "stop",
                         "message": f"Service '{service_name}' stopped (replicas scaled to 0).",
                     }
-                raise RuntimeError(
-                    f"Kubernetes stop failed ({resp.status_code}): {resp.text}"
-                )
+                raise RuntimeError(f"Kubernetes stop failed ({resp.status_code}): {resp.text}")
         elif self.mode == "kubectl_cli":
             try:
                 res = subprocess.run(
@@ -567,9 +547,7 @@ class KubernetesServiceManager:
                         "action": "start",
                         "message": f"Service '{service_name}' started (replicas scaled to 1).",
                     }
-                raise RuntimeError(
-                    f"Kubernetes start failed ({resp.status_code}): {resp.text}"
-                )
+                raise RuntimeError(f"Kubernetes start failed ({resp.status_code}): {resp.text}")
         elif self.mode == "kubectl_cli":
             try:
                 res = subprocess.run(
@@ -600,7 +578,7 @@ class KubernetesServiceManager:
         raise RuntimeError("No Kubernetes management backend available.")
 
 
-_global_manager: Optional[KubernetesServiceManager] = None
+_global_manager: KubernetesServiceManager | None = None
 
 
 def get_service_manager() -> KubernetesServiceManager:
