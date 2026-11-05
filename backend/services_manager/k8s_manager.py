@@ -288,9 +288,7 @@ class KubernetesServiceManager:
                 is_core = srv_id in SAFEGUARDED_SERVICES or dep_name in SAFEGUARDED_SERVICES
 
                 # Extract container spec from deployment template
-                dep_containers = (
-                    spec.get("template", {}).get("spec", {}).get("containers", [])
-                )
+                dep_containers = spec.get("template", {}).get("spec", {}).get("containers", [])
                 image = dep_containers[0].get("image") if dep_containers else None
                 port = meta.get("port")
                 if not port and dep_containers and dep_containers[0].get("ports"):
