@@ -21,7 +21,19 @@
      gh project item-edit --id <item_id> --field-id PVTSSF_lADOFEJxWM4Bmf-gzhlIwtk --single-select-option-id 98236657 --project-id PVT_kwDOFEJxWM4Bmf-g
      ```
 
-## Current Project State & Next Steps (as of Nov 3, 2026)
+## Current Project State & Next Steps (as of Nov 5, 2026)
+- **Issue #50 & PR #389 (Clarify First-Time Bootstrap Flow & Resolve Day-0 Registration Lockout):**
+  - **Status:** **COMPLETED, MERGED & ALL 798 TESTS PASSING**
+  - **Pull Request:** Merged via PR #389 into `main` (`8f8749f`).
+  - **Kanban Board:** Moved to **Done** on [Lake of Tears (Main) Project #3](https://github.com/orgs/Lake-of-Tears/projects/3) (Issue item `PVTI_lADOFEJxWM4Bmf-gzg_5bZY`, PR item `PVTI_lADOFEJxWM4Bmf-gzhGOM20`).
+  - **Test Suite:** 798 tests passing (`tests/test_auth_registration_and_providers.py`).
+  - **Changes:**
+    - Visual indication: Added a Day-0 Bootstrap Callout banner to `/login` when `user_count == 0` explaining that the platform is in Initial Setup Mode and that registering the first account initializes the platform with the root `superadmin` role.
+    - Day-0 Lockout Edge Case: Ensured that if `AUTH_REGISTRATION_ENABLED=false` is set in the environment or Helm values, the registration tab and form remain unlocked and visible during initial setup so operators are never locked out of fresh deployments.
+    - Auto-Tab Selection: `/login` automatically opens to the "Setup Superadmin" registration tab when 0 users exist rather than displaying a blank sign-in form.
+    - Inline hints: Added an alert on the sign-in form if visited while the database is uninitialized with a 1-click action to switch back to superadmin setup.
+    - Updated `README.md` and `deploy/helm/lake-of-tears/templates/NOTES.txt` with clear Day-0 bootstrap and Initial Setup instructions.
+
 - **Issue #294 (User-Scoped Catalog Access & Grants):**
   - **Status:** **COMPLETED, VERIFIED & MERGED**
   - **Pull Request:** Merged via PR #374 into `main` (`3fc9952`).
