@@ -923,7 +923,7 @@
               {% else %}
               <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-gray-800 text-gray-300 border border-gray-700">Internal DB</span>
               {% endif %}
-              <span class="text-[11px] text-gray-500 font-mono">{{ s.key_count }} key{% if s.key_count != 1 %}s{% endif %}</span>
+              <span id="scope-key-count-{{ s.id }}" data-scope-id="{{ s.id }}" data-scope-name="{{ s.name }}" class="text-[11px] text-gray-500 font-mono">{{ s.key_count }} key{% if s.key_count != 1 %}s{% endif %}</span>
             </div>
             <div class="text-[11px] text-gray-500 mt-0.5 flex items-center gap-2">
               <span>Your access:</span>
@@ -1061,6 +1061,7 @@
               </div>
             </div>
             <div id="new-key-error" class="hidden text-xs text-red-400"></div>
+            <div id="new-key-success" class="hidden text-xs text-emerald-400 font-mono"></div>
             <div class="flex justify-end">
               <button type="submit" id="new-key-btn" class="btn-primary text-xs py-1.5 px-3">
                 Save Secret
@@ -1229,9 +1230,11 @@
     const nameInput = document.getElementById('new-key-name');
     const valInput = document.getElementById('new-key-value');
     const errBox = document.getElementById('new-key-error');
+    const succBox = document.getElementById('new-key-success');
     if (nameInput) nameInput.value = '';
     if (valInput) valInput.value = '';
     if (errBox) errBox.classList.add('hidden');
+    if (succBox) succBox.classList.add('hidden');
 
     const modal = document.getElementById('keys-modal');
     if (modal) modal.classList.remove('hidden');
@@ -1241,6 +1244,10 @@
   function closeKeysModal() {
     const modal = document.getElementById('keys-modal');
     if (modal) modal.classList.add('hidden');
+    const errBox = document.getElementById('new-key-error');
+    const succBox = document.getElementById('new-key-success');
+    if (errBox) errBox.classList.add('hidden');
+    if (succBox) succBox.classList.add('hidden');
   }
 
   async function fetchKeys(scopeId) {
@@ -1255,7 +1262,17 @@
         return;
       }
       const keys = await resp.json();
-      if (countLabel) countLabel.textContent = `${keys.length} key${keys.length === 1 ? '' : 's'}`;
+      const countText = `${keys.length} key${keys.length === 1 ? '' : 's'}`;
+      if (countLabel) countLabel.textContent = countText;
+
+      // Dynamically update the scope row key counter in the workspace table
+      const scopeCountEl = document.getElementById(`scope-key-count-${scopeId}`) ||
+                           document.querySelector(`[data-scope-id="${scopeId}"]`) ||
+                           document.querySelector(`[data-scope-name="${_activeScopeName}"]`);
+      if (scopeCountEl) {
+        scopeCountEl.textContent = countText;
+      }
+
       if (!keys.length) {
         container.innerHTML = '<p class="text-xs text-gray-500 italic py-2">No keys stored in this scope yet.</p>';
         return;
@@ -1289,8 +1306,10 @@
     const keyValue = document.getElementById('new-key-value').value;
     const btn = document.getElementById('new-key-btn');
     const errBox = document.getElementById('new-key-error');
+    const succBox = document.getElementById('new-key-success');
 
-    errBox.classList.add('hidden');
+    if (errBox) errBox.classList.add('hidden');
+    if (succBox) succBox.classList.add('hidden');
     btn.disabled = true;
     btn.textContent = 'Saving...';
 
@@ -1302,16 +1321,25 @@
       });
       const data = await resp.json();
       if (!resp.ok) {
-        errBox.textContent = data.detail || 'Failed to save secret';
-        errBox.classList.remove('hidden');
+        if (errBox) {
+          errBox.textContent = data.detail || 'Failed to save secret';
+          errBox.classList.remove('hidden');
+        }
       } else {
         document.getElementById('new-key-name').value = '';
         document.getElementById('new-key-value').value = '';
+        if (succBox) {
+          succBox.textContent = `✓ Key '${keyName}' saved successfully.`;
+          succBox.classList.remove('hidden');
+          setTimeout(() => { if (succBox) succBox.classList.add('hidden'); }, 3500);
+        }
         await fetchKeys(_activeScopeId);
       }
     } catch (e) {
-      errBox.textContent = 'Could not reach server: ' + e;
-      errBox.classList.remove('hidden');
+      if (errBox) {
+        errBox.textContent = 'Could not reach server: ' + e;
+        errBox.classList.remove('hidden');
+      }
     } finally {
       btn.disabled = false;
       btn.textContent = 'Save Secret';
@@ -1322,11 +1350,18 @@
     if (!confirm(`Delete secret key '${keyName}'? Applications referencing this key will fail to resolve it.`)) {
       return;
     }
+    const errBox = document.getElementById('new-key-error');
+    const succBox = document.getElementById('new-key-success');
     try {
       const resp = await fetch(`/api/workspaces/${_activeWsId}/secrets/scopes/${_activeScopeId}/keys/${keyName}`, {
         method: 'DELETE'
       });
       if (resp.ok) {
+        if (succBox) {
+          succBox.textContent = `✓ Key '${keyName}' deleted.`;
+          succBox.classList.remove('hidden');
+          setTimeout(() => { if (succBox) succBox.classList.add('hidden'); }, 3500);
+        }
         await fetchKeys(_activeScopeId);
       } else {
         alert('Failed to delete key.');
