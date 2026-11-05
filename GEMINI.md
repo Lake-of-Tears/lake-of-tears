@@ -22,6 +22,23 @@
      ```
 
 ## Current Project State & Next Steps (as of Nov 5, 2026)
+- **Issue #296 & PR #391 (Helm Lifecycle Scripts: install, update, and destroy with TOON configuration):**
+  - **Status:** **COMPLETED, MERGED & ALL 814 TESTS PASSING**
+  - **Pull Request:** Merged via PR #391 into `main` (`b265ba6`).
+  - **Kanban Board:** Moved to **Done** on [Lake of Tears (Main) Project #3](https://github.com/orgs/Lake-of-Tears/projects/3) (Issue item `PVTI_lADOFEJxWM4Bmf-gzhDSjFU`, PR item `PVTI_lADOFEJxWM4Bmf-gzhGVDUM`).
+  - **Test Suite:** 814 tests passing (`tests/test_helm_lifecycle_scripts.py`).
+  - **Changes:**
+    - Standardized lifecycle operations around Lake of Tears' **TOON (Token-Oriented Object Notation)** specification (`lake-of-tears.toon`) and dynamic Helm compiler (`scripts/toon2helm.py`) with zero plaintext secret persistence to disk.
+    - Unified root CLI runner [`./lot`](file:///Users/Jay/Development/lake-of-tears/lot) with `install`, `update`, `destroy`, `status`, and `config` commands.
+    - Direct executable scripts in `deploy/scripts/`:
+      - [`deploy/scripts/install.sh`](file:///Users/Jay/Development/lake-of-tears/deploy/scripts/install.sh): Checks prerequisites, multi-tier Python runtime resolution, auto-generates secure random credentials for `changeme-*` placeholders, manages namespace creation, compiles TOON to Helm dynamically, polls live `/api/health`, and renders a clean terminal deployment summary table with Ingress URLs and Day-0 superadmin instructions.
+      - [`deploy/scripts/update.sh`](file:///Users/Jay/Development/lake-of-tears/deploy/scripts/update.sh): Implements a TrueNAS-style update architecture supporting `stable` (release tags) and `edge` (`origin/main`) trains, `--check-only`, and machine-readable `--json` output for future Lake UI Admin Panel (`/settings/admin#updates`) integration. Performs atomic rolling updates (`--atomic --timeout 10m`) with automated rollback to prior working revision on failure.
+      - [`deploy/scripts/destroy.sh`](file:///Users/Jay/Development/lake-of-tears/deploy/scripts/destroy.sh): Safe-by-default uninstallation that preserves PersistentVolumeClaims (PVCs) for MinIO, Postgres, Airflow, and Jupyter notebooks. Complete data purging requires explicit selection and typing confirmation of the namespace name (`lake-of-tears`) to prevent accidental data loss (bypassed with `--force`).
+      - [`deploy/scripts/status.sh`](file:///Users/Jay/Development/lake-of-tears/deploy/scripts/status.sh): Inspects active Helm release, pod workload phases, and resolved service URLs.
+      - [`deploy/scripts/common.sh`](file:///Users/Jay/Development/lake-of-tears/deploy/scripts/common.sh): Shared shell library for color logging, runtime resolution, cluster validation, and secret handling.
+    - Added [`pipeline/shared/lifecycle.py`](file:///Users/Jay/Development/lake-of-tears/pipeline/shared/lifecycle.py) and [`scripts/lifecycle_helper.py`](file:///Users/Jay/Development/lake-of-tears/scripts/lifecycle_helper.py) for config resolution, secret scanning/generation, and TrueNAS-style version checks.
+    - Updated `README.md` and `deploy/helm/README.md` with `./lot` usage documentation.
+
 - **Issue #269 & PR #390 (Platform Service & Process Management and Tabbed Admin Panel UI):**
   - **Status:** **COMPLETED, DEPLOYED, MERGED & ALL 806 TESTS PASSING**
   - **Pull Request:** Merged via PR #390 into `main` (`4537efa`).
