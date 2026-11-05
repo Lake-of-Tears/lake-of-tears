@@ -571,13 +571,22 @@ def _run_query(
             return {"ok": False, "error": reason, "error_info": classified}
 
     if not is_superadmin:
-        allowed, reason = sql_guardrails.validate_sql_s3_paths(
-            sql=sql,
-            workspace_slug=workspace_slug or "default",
-            catalogs=catalogs,
-            is_superadmin=is_superadmin,
-            bucket=MINIO_BUCKET,
-        )
+        if sql_guardrails.is_write_sql(sql):
+            allowed, reason = sql_guardrails.validate_statement_guardrails(
+                sql=sql,
+                workspace_slug=workspace_slug or "default",
+                catalogs=catalogs,
+                is_superadmin=is_superadmin,
+                bucket=MINIO_BUCKET,
+            )
+        else:
+            allowed, reason = sql_guardrails.validate_sql_s3_paths(
+                sql=sql,
+                workspace_slug=workspace_slug or "default",
+                catalogs=catalogs,
+                is_superadmin=is_superadmin,
+                bucket=MINIO_BUCKET,
+            )
         if not allowed:
             return {
                 "ok": False,
@@ -604,9 +613,46 @@ def _run_query(
                 state=ai_state,
                 client_factory=_ai_client,
             )
-            rel = con.execute(sql)
-            columns = [desc[0] for desc in (rel.description or [])]
-            rows = rel.fetchall()
+            if not read_only and sql_guardrails.is_write_sql(sql):
+                import sqlglot
+                from sqlglot import exp
+
+                clean_sql = re.sub(r"--.*?$", "", sql, flags=re.MULTILINE)
+                clean_sql = re.sub(r"/\*.*?\*/", "", clean_sql, flags=re.DOTALL).strip()
+                try:
+                    stmt = sqlglot.parse_one(clean_sql, read="duckdb")
+                    tbl = stmt.find(exp.Table)
+                    if tbl and tbl.name:
+                        sch = tbl.db or "default"
+                        con.execute(f'CREATE SCHEMA IF NOT EXISTS "{sch}"')
+                        con.execute(f'DROP VIEW IF EXISTS "{sch}"."{tbl.name}"')
+                        con.execute(f'DROP VIEW IF EXISTS "{tbl.name}"')
+                except Exception:
+                    pass
+
+            try:
+                rel = con.execute(sql)
+            except Exception as ddl_exc:
+                if (
+                    not read_only
+                    and "drop table" in sql.lower()
+                    and any(k in str(ddl_exc).lower() for k in ("does not exist", "type view"))
+                ):
+                    rel = None
+                else:
+                    raise
+
+            if rel is not None and rel.description:
+                columns = [desc[0] for desc in rel.description]
+                rows = rel.fetchall()
+                if columns in (["Count"], ["Success"]) and (
+                    not rows or rows == [(0,)] or rows == [(True,)]
+                ):
+                    columns = []
+                    rows = []
+            else:
+                columns = []
+                rows = []
             elapsed_ms = round((time.perf_counter() - start_ts) * 1000.0, 2)
             return {
                 "ok": True,
@@ -630,6 +676,138 @@ def _run_query(
     finally:
         if cancel is not None:
             cancel.detach()
+
+
+def _execute_sql_with_guardrails(
+    request: Request,
+    sql: str,
+    catalogs: list[dict[str, Any]] | None = None,
+    max_ai_rows: int = 50,
+) -> dict[str, Any]:
+    ws = getattr(request.state, "workspace", None)
+    header_ws = str(request.headers.get("X-Workspace-Slug") or "").strip()
+    query_ws = str(request.query_params.get("workspace_slug") or "").strip()
+    ws_slug = (
+        (ws.get("slug") if isinstance(ws, dict) else getattr(ws, "slug", None))
+        or header_ws
+        or query_ws
+        or "default"
+    )
+    user = getattr(request.state, "user", None)
+    is_superadmin = (
+        user.get("role") == "superadmin"
+        if isinstance(user, dict)
+        else getattr(user, "role", None) == "superadmin"
+    )
+    user_ws_role = (
+        (ws.get("role") if isinstance(ws, dict) else getattr(ws, "role", None))
+        if ws
+        else ("superadmin" if is_superadmin else None)
+    )
+    is_write = sql_guardrails.is_write_sql(sql)
+    is_write_allowed = is_superadmin or user_ws_role in ("write", "admin", "owner", "superadmin")
+
+    # 1. Reject write statements from users without write privileges
+    if is_write and not is_write_allowed:
+        return {
+            "ok": False,
+            "error": "Policy Block: Query Blocked by Read-Only Policy. Only read-only queries (SELECT, WITH, DESCRIBE, SUMMARIZE, SHOW, EXPLAIN, VALUES) are permitted. Write, admin, or owner role is required for DDL/DML statements.",
+            "error_info": {
+                "error_type": "READ_ONLY",
+                "title": "Policy Block: Write Access Required",
+                "message": "Only users with write, admin, or owner privileges can execute DDL/DML statements like CREATE TABLE, DROP, or INSERT.",
+            },
+            "columns": [],
+            "rows": [],
+            "row_count": 0,
+            "execution_ms": 0.0,
+        }
+
+    # 2. For write statements with valid permissions, execute via backend Statement Execution API for S3 export & CatalogTable persistence
+    if is_write:
+        token = request.cookies.get("lake_token") or ""
+        if not token and request.headers.get("Authorization", "").startswith("Bearer "):
+            token = request.headers.get("Authorization", "").split(" ", 1)[1].strip()
+
+        if token:
+            try:
+                headers = {
+                    "Authorization": f"Bearer {token}",
+                    "X-Workspace-Slug": ws_slug,
+                }
+                payload = {
+                    "statement": sql,
+                    "format": "JSON_ARRAY",
+                }
+                with httpx.Client(timeout=60.0) as client:
+                    resp = client.post(
+                        f"{BACKEND_URL}/api/sql/statements",
+                        headers=headers,
+                        json=payload,
+                    )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    status_obj = data.get("status") or {}
+                    if status_obj.get("state") == "SUCCEEDED":
+                        manifest = data.get("manifest") or {}
+                        cols = [c["name"] for c in (manifest.get("schema") or {}).get("columns") or []]
+                        result_obj = data.get("result") or {}
+                        rows = result_obj.get("data_array") or []
+                        return {
+                            "ok": True,
+                            "columns": cols,
+                            "rows": rows,
+                            "row_count": manifest.get("total_row_count", len(rows)),
+                            "execution_ms": data.get("execution_ms", 0.0),
+                            "statement_id": data.get("statement_id"),
+                        }
+                    else:
+                        err_msg = (status_obj.get("error") or {}).get("message") or "Statement execution failed."
+                        return {
+                            "ok": False,
+                            "error": err_msg,
+                            "error_code": 400,
+                            "error_info": {"title": "Execution Error", "message": err_msg},
+                            "columns": [],
+                            "rows": [],
+                            "row_count": 0,
+                            "execution_ms": data.get("execution_ms", 0.0),
+                        }
+                elif resp.status_code in (400, 403, 404, 422):
+                    detail = ""
+                    try:
+                        detail = resp.json().get("detail")
+                    except Exception:
+                        detail = resp.text
+                    return {
+                        "ok": False,
+                        "error": detail or f"Statement execution error ({resp.status_code})",
+                        "error_code": resp.status_code,
+                        "error_info": {
+                            "error_type": "READ_ONLY" if resp.status_code == 403 else "SQL",
+                            "title": "Policy Block" if resp.status_code == 403 else "Statement Execution Error",
+                            "message": detail,
+                        },
+                        "columns": [],
+                        "rows": [],
+                        "row_count": 0,
+                        "execution_ms": 0.0,
+                    }
+            except Exception as exc:
+                logger.warning(
+                    "Backend /api/sql/statements call failed, falling back to local DuckDB execution: %s",
+                    exc,
+                )
+
+    # 3. Read statements (or local fallback): execute via DuckDB runner
+    return _run_query(
+        sql,
+        catalogs=catalogs,
+        read_only=(not is_write),
+        max_ai_rows=max_ai_rows,
+        workspace_slug=ws_slug,
+        is_superadmin=is_superadmin,
+    )
 
 
 def _ai_query(
@@ -1322,29 +1500,14 @@ async def sql_get(request: Request):
 
 @app.post("/sql", response_class=HTMLResponse)
 async def sql_post(request: Request, sql: str = Form(...)):
+    all_catalogs = _resolve_ui_all_catalogs(request)
+    result = _execute_sql_with_guardrails(
+        request=request,
+        sql=sql,
+        catalogs=all_catalogs,
+    )
     catalogs = _resolve_ui_catalogs(request)
     shared_workspaces_catalogs = _resolve_ui_shared_catalogs(request)
-    all_catalogs = _resolve_ui_all_catalogs(request)
-    ws = getattr(request.state, "workspace", None)
-    header_ws = str(request.headers.get("X-Workspace-Slug") or "").strip()
-    ws_slug = (
-        (ws.get("slug") if isinstance(ws, dict) else getattr(ws, "slug", None))
-        or header_ws
-        or "default"
-    )
-    user = getattr(request.state, "user", None)
-    is_superadmin = (
-        user.get("role") == "superadmin"
-        if isinstance(user, dict)
-        else getattr(user, "role", None) == "superadmin"
-    )
-    result = _run_query(
-        sql,
-        catalogs=all_catalogs,
-        read_only=True,
-        workspace_slug=ws_slug,
-        is_superadmin=is_superadmin,
-    )
     ai_info = ai_gateway_client.provider_info()
     return templates.TemplateResponse(
         request=request,
@@ -5917,32 +6080,13 @@ async def ui_ai_context(request: Request):
 async def ui_ai_sql_execute(request: Request):
     body = await request.json()
     sql = str(body.get("sql") or "")
-    # Read-only is strictly enforced unconditionally for all users and endpoints
-    read_only = True
     max_ai_rows = int(body.get("max_ai_rows", 50))
     catalogs = _resolve_ui_all_catalogs(request)
-    ws = getattr(request.state, "workspace", None)
-    req_ws = str(
-        request.query_params.get("workspace_slug") or request.headers.get("X-Workspace-Slug") or ""
-    ).strip()
-    ws_slug = (
-        (ws.get("slug") if isinstance(ws, dict) else getattr(ws, "slug", None))
-        or req_ws
-        or "default"
-    )
-    user = getattr(request.state, "user", None)
-    is_superadmin = (
-        user.get("role") == "superadmin"
-        if isinstance(user, dict)
-        else getattr(user, "role", None) == "superadmin"
-    )
-    res = _run_query(
-        sql,
+    res = _execute_sql_with_guardrails(
+        request=request,
+        sql=sql,
         catalogs=catalogs,
-        read_only=read_only,
         max_ai_rows=max_ai_rows,
-        workspace_slug=ws_slug,
-        is_superadmin=is_superadmin,
     )
     if res.get("ok"):
         res["rows"] = [[duckdb_ai.serialize_cell(c) for c in r] for r in res.get("rows", [])]

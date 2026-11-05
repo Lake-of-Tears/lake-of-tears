@@ -621,6 +621,12 @@ def _execute_statement_on_duckdb(
 
         # Inspect for DDL/DML target table to materialize existing view before mutation
         op, ddl_schema, ddl_table = _extract_ddl_dml_target(req.statement, target_schema)
+        if ddl_schema and ddl_schema.lower() != "main":
+            try:
+                con.execute(f'CREATE SCHEMA IF NOT EXISTS "{ddl_schema}"')
+            except Exception:
+                pass
+
         if op in ("INSERT", "UPDATE", "DELETE", "ALTER", "DROP") and ddl_schema and ddl_table:
             existing_s3 = _find_catalog_table_s3_path(catalogs, ddl_schema, ddl_table)
             if existing_s3:
@@ -634,6 +640,12 @@ def _execute_statement_on_duckdb(
                         )
                 except Exception:
                     pass
+        elif op == "CREATE" and ddl_schema and ddl_table:
+            try:
+                con.execute(f'DROP VIEW IF EXISTS "{ddl_schema}"."{ddl_table}"')
+                con.execute(f'DROP VIEW IF EXISTS "{ddl_table}"')
+            except Exception:
+                pass
 
         if stored.cancel_event.is_set():
             stored.status = StatementStatus(state="CANCELED")
@@ -807,7 +819,7 @@ def execute_statement(
 
     # 1. Enforce workspace RBAC for DDL/DML write statements
     is_write = is_write_sql(cleaned_sql)
-    if is_write and not is_superadmin and role not in ("write", "admin"):
+    if is_write and not is_superadmin and role not in ("write", "admin", "owner", "superadmin"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access Denied: Workspace viewer role is read-only. Write or admin role is required for DDL/DML statements.",

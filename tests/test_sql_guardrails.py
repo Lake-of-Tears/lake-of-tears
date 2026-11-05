@@ -547,24 +547,17 @@ class TestFastAPIEndpoints:
         assert resp_create.status_code == 200
         assert "Query Blocked by Read-Only Policy" in resp_create.text
 
-        # 2. Superadmin also has read-only policy enforced on POST /sql
+        # 2. Superadmin / write role is permitted to execute DDL (CREATE TABLE) like Databricks
         admin_payload = {"sub": "admin-1", "email": "admin@lake.local", "role": "superadmin"}
         admin_token = jwt.encode(admin_payload, self.ui_main.AUTH_SECRET_KEY, algorithm="HS256")
         self.ui_client.cookies.set("lake_token", admin_token)
 
-        resp_admin_copy = self.ui_client.post(
-            "/sql",
-            data={"sql": "COPY (SELECT 1 AS x) TO 's3://datalake/admin_test.parquet'"},
-        )
-        assert resp_admin_copy.status_code == 200
-        assert "Query Blocked by Read-Only Policy" in resp_admin_copy.text
-
         resp_admin_create = self.ui_client.post(
             "/sql",
-            data={"sql": "CREATE TABLE t_admin AS SELECT 1"},
+            data={"sql": "CREATE TABLE t_admin AS SELECT 1 AS x"},
         )
         assert resp_admin_create.status_code == 200
-        assert "Query Blocked by Read-Only Policy" in resp_admin_create.text
+        assert "Query Blocked by Read-Only Policy" not in resp_admin_create.text
 
         # 3. Read query succeeds
         resp_read = self.ui_client.post(

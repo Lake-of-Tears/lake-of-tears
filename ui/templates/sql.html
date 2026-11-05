@@ -157,6 +157,15 @@
             {% endif %}
           </div>
         </div>
+        {% if (not result.columns or result.columns in (['Count'], ['Success'])) and result.row_count == 0 %}
+        <div class="p-8 flex flex-col items-center justify-center text-center space-y-2 text-gray-400 my-auto">
+          <div class="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 mb-1">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+          </div>
+          <p class="text-sm font-semibold text-gray-100">Statement executed successfully</p>
+          <p class="text-xs text-gray-400">DDL/DML command completed with 0 rows returned.</p>
+        </div>
+        {% else %}
         <div class="overflow-auto flex-1">
           <table class="w-full text-xs">
             <thead class="sticky top-0 bg-gray-900 border-b border-gray-800">
@@ -177,6 +186,7 @@
             </tbody>
           </table>
         </div>
+        {% endif %}
         {% else %}
         <div class="p-5 space-y-4 overflow-auto">
           {% set info = result.error_info %}
