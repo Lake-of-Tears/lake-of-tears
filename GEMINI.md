@@ -54,7 +54,20 @@
     - Catalog drawer UI controls added for Chunking Strategy, Chunk Size, and Chunk Overlap, plus Strategy display pill in status overview.
   - **Local Deployment:** Rebuilt images `lake-of-tears-backend:latest` and `lake-of-tears-ui:latest`; rolled out to local k8s deployments `lake-of-tears-backend` and `lake-of-tears-lakeui`. Verified live table sync and multi-chunk explosion on `tmdb-trending`.
 
-- **PR #378 ('Need help signing in?' Modal, Password Reset, and Account Discovery Flow):**
+- **Issue #380 & PR #385 (Secret Management Core Architecture, Data Models & Internal Encrypted DB Provider):**
+  - **Status:** **COMPLETED, DEPLOYED, MERGED & CI GREEN**
+  - **Pull Request:** Merged via PR #385 into `main` (`6ec52fe`).
+  - **Kanban Board:** Moved to **Done** on [Lake of Tears (Main) Project #3](https://github.com/orgs/Lake-of-Tears/projects/3) (Item IDs `PVTI_lADOFEJxWM4Bmf-gzhGI8gc` and `PVTI_lADOFEJxWM4Bmf-gzhGJGno`).
+  - **Database Migration:** Alembic revision `0021_secret_scopes_keys_and_acls` applied.
+  - **Test Suite:** 777 tests passing (`tests/test_secret_manager.py`).
+  - **Changes:**
+    - Database models `SecretScope`, `SecretKey`, and `SecretAcl` added to `backend/models.py`.
+    - Alembic migration `0021_secret_scopes_keys_and_acls.py` applied, creating `secret_scopes`, `secret_keys`, and `secret_acls` with unique constraints and indexing.
+    - Extensible secret provider abstraction in `backend/secrets_manager/` with `BaseSecretProvider` and `InternalSecretProvider` implementing AES-256-GCM / HMAC-SHA256 envelope encryption. Plaintext secret values are never returned in list endpoints.
+    - `SecretManagerService` handling Databricks-style 3-tier ACLs (`MANAGE`, `WRITE`, `READ`) per user or workspace role, with Superadmin root bypass and creator ownership.
+    - REST API router in `backend/secrets_router.py` mounted at `/api/v1/secrets` and `/api/v1/workspaces/{workspace_id}/secrets`.
+  - **Local Deployment:** Rebuilt image `lake-of-tears-backend:latest`; rolled out to local k8s deployment `lake-of-tears-backend` in namespace `lake-of-tears`. Verified live health check at `http://localhost/api/health` and database migration 0021 in Postgres.
+
   - **Status:** **COMPLETED, DEPLOYED, MERGED & CI GREEN**
   - **Pull Request:** Merged via PR #378 into `main` (`f755392`).
   - **Kanban Board:** Moved to **Done** on [Lake of Tears (Main) Project #3](https://github.com/orgs/Lake-of-Tears/projects/3) (Item ID `PVTI_lADOFEJxWM4Bmf-gzhF2YEA`).
