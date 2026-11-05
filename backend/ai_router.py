@@ -160,6 +160,7 @@ def explain_sql(
 
 
 @router.post("/table-from-prompt", response_model=TableFromPromptResponse)
+@router.post("/prompt-to-table", response_model=TableFromPromptResponse)
 def table_from_prompt(
     req: TableFromPromptRequest,
     ctx: tuple[Workspace, str, User] = Depends(_resolve_ai_context),

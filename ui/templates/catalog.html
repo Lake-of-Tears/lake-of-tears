@@ -2,6 +2,7 @@
 {% block title %}Catalog — Lake of Tears{% endblock %}
 
 {% block content %}
+{% set has_ai = (has_ai or (ai_info is defined and ai_info and ai_info.provider)) %}
 <div class="max-w-4xl mx-auto">
 
   {% if error %}
@@ -182,6 +183,7 @@
                         <div class="text-[10px] text-gray-400">CREATE TABLE statement</div>
                       </div>
                     </a>
+                    {% if has_ai %}
                     <button type="button" onclick="openCreateTablePromptModal('{{ catalog.id }}', '{{ schema.id }}', '{{ catalog.slug|sql_ident }}', '{{ schema.slug|sql_ident }}')" class="w-full text-left px-3 py-2 hover:bg-white/[0.08] text-gray-200 flex items-center gap-2">
                       <svg class="w-4 h-4 text-cyan-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
                       <div>
@@ -189,6 +191,18 @@
                         <div class="text-[10px] text-gray-400">Natural language & TOON</div>
                       </div>
                     </button>
+                    {% else %}
+                    <div class="w-full text-left px-3 py-2 text-gray-500 flex items-center justify-between cursor-not-allowed opacity-60" title="No AI provider configured in Admin Panel (Settings → Admin Panel)">
+                      <div class="flex items-center gap-2">
+                        <svg class="w-4 h-4 text-gray-500 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                        <div>
+                          <div class="font-medium text-gray-400">Prompt to Table</div>
+                          <div class="text-[10px] text-gray-500">Requires AI Provider</div>
+                        </div>
+                      </div>
+                      <span class="text-[9px] bg-gray-800 text-gray-400 px-1 py-0.5 rounded font-mono">No LLM</span>
+                    </div>
+                    {% endif %}
                   </div>
                 </div>
                 {% endif %}
@@ -468,8 +482,10 @@
         <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
         Export TOON
       </button>
-      <button type="button" id="panel-ai-btn" onclick="enrichCurrentTableAi()" class="btn-ghost text-xs py-1.5 text-purple-400 hover:text-purple-300 border border-purple-800/40 flex items-center gap-1.5" title="Auto-generate semantic descriptions & column comments">
-        <svg class="w-3.5 h-3.5 text-purple-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+      <button type="button" id="panel-ai-btn" onclick="enrichCurrentTableAi()"
+              class="btn-ghost text-xs py-1.5 flex items-center gap-1.5 border {% if has_ai %}text-purple-400 hover:text-purple-300 border-purple-800/40{% else %}text-gray-500 opacity-50 cursor-not-allowed pointer-events-none border-gray-800{% endif %}"
+              {% if not has_ai %}disabled title="No AI provider configured in Admin Panel (Settings → Admin Panel)"{% else %}title="Auto-generate semantic descriptions & column comments"{% endif %}>
+        <svg class="w-3.5 h-3.5 {% if has_ai %}text-purple-400{% else %}text-gray-500{% endif %}" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
         Enrich with AI
       </button>
     </div>
@@ -581,12 +597,17 @@
       <div>
         <div class="flex items-center justify-between mb-1">
           <label class="block text-xs font-medium text-gray-400">Description <span class="text-gray-600">(optional)</span></label>
-          <button type="button" onclick="generateSchemaDescriptionAi()" id="btn-ai-schema-desc" class="text-[11px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1 transition-colors">
+          <button type="button" onclick="generateSchemaDescriptionAi()" id="btn-ai-schema-desc"
+                  class="text-[11px] flex items-center gap-1 transition-colors {% if has_ai %}text-cyan-400 hover:text-cyan-300{% else %}text-gray-500 opacity-50 cursor-not-allowed pointer-events-none{% endif %}"
+                  {% if not has_ai %}disabled title="No AI provider configured in Admin Panel (Settings → Admin Panel)"{% endif %}>
             <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
             Generate with AI
           </button>
         </div>
         <textarea id="create-schema-desc-input" rows="2" placeholder="What domain data lives in this schema?" class="input-dark w-full text-sm"></textarea>
+        {% if not has_ai %}
+        <p class="text-[10px] text-gray-500 italic mt-1">AI generation disabled: no LLM is configured in <a href="/settings/admin#ai" class="text-cyan-400 hover:underline">Settings → Admin Panel</a>.</p>
+        {% endif %}
       </div>
       <div id="create-schema-error" class="hidden text-xs text-rose-400 bg-rose-950/30 border border-rose-800/40 p-2.5 rounded"></div>
       <div class="flex gap-2 justify-end pt-2 border-t border-white/[0.06]">
@@ -831,6 +852,8 @@
 </div>
 
 <script>
+const HAS_AI_CONFIGURED = {{ 'true' if has_ai else 'false' }};
+
 function _key(id) { return 'lot-open-' + id; }
 
 function toggleCatalog(id) {
@@ -1513,6 +1536,10 @@ function updateSchemaSlugPreview() {
 }
 
 async function generateSchemaDescriptionAi() {
+  if (!HAS_AI_CONFIGURED) {
+    alert('No AI provider configured. Please configure an LLM in Settings → Admin Panel.');
+    return;
+  }
   const name = document.getElementById('create-schema-name-input').value;
   if (!name.trim()) {
     alert('Please enter a schema name first.');
@@ -1526,20 +1553,31 @@ async function generateSchemaDescriptionAi() {
   try {
     const catSelect = document.getElementById('create-schema-catalog-select');
     const catName = catSelect ? catSelect.options[catSelect.selectedIndex].text : 'main';
-    const resp = await fetch('/api/catalog/ai/generate-description', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        asset_type: 'schema',
-        name: name,
-        catalog_name: catName
-      })
+    const payload = JSON.stringify({
+      asset_type: 'schema',
+      name: name,
+      catalog_name: catName
     });
+
+    let resp = await fetch('/api/ai/generate-description', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload
+    });
+    if (!resp.ok && resp.status === 404) {
+      resp = await fetch('/api/catalog/ai/generate-description', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload
+      });
+    }
     const data = await resp.json();
     if (data.ok && data.description) {
       document.getElementById('create-schema-desc-input').value = data.description;
     } else {
-      alert(data.error || 'Failed to generate description');
+      alert(data.detail || data.error || 'Failed to generate description');
     }
   } catch (err) {
     alert('Network error: ' + err);
@@ -1562,17 +1600,27 @@ async function submitCreateSchema(e) {
   submitBtn.innerHTML = '<span>Creating...</span>';
 
   try {
-    const resp = await fetch(`/api/catalog/${catId}/schemas`, {
+    const payload = JSON.stringify({ name: name, description: desc || null });
+    let resp = await fetch(`/api/catalogs/${catId}/schemas`, {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: name, description: desc || null })
+      body: payload
     });
+    if (!resp.ok && resp.status === 404) {
+      resp = await fetch(`/api/catalog/${catId}/schemas`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload
+      });
+    }
     const data = await resp.json();
-    if (resp.ok && data.ok) {
+    if (resp.ok && (data.id || (data.ok !== false && data.ok !== undefined))) {
       closeCreateSchemaModal();
       window.location.reload();
     } else {
-      errDiv.textContent = data.error || 'Failed to create schema';
+      errDiv.textContent = data.detail || data.error || 'Failed to create schema';
       errDiv.classList.remove('hidden');
     }
   } catch (err) {
@@ -1693,10 +1741,18 @@ async function handleFileSelected(e) {
   formData.append('file', file);
 
   try {
-    const resp = await fetch('/api/ingest/preview-file', {
+    let resp = await fetch('/catalog/preview-file', {
       method: 'POST',
+      credentials: 'include',
       body: formData
     });
+    if (!resp.ok && resp.status === 404) {
+      resp = await fetch('/api/ingest/preview-file', {
+        method: 'POST',
+        credentials: 'include',
+        body: formData
+      });
+    }
     const data = await resp.json();
     if (data.ok && data.columns) {
       uploadInferredColumns = data.columns;
@@ -1803,16 +1859,24 @@ async function submitCreateTableUpload() {
   formData.append('columns_json', JSON.stringify(columnOverrides));
 
   try {
-    const resp = await fetch('/api/ingest/create-table-from-file', {
+    let resp = await fetch('/catalog/create-table-from-file', {
       method: 'POST',
+      credentials: 'include',
       body: formData
     });
+    if (!resp.ok && resp.status === 404) {
+      resp = await fetch('/api/ingest/create-table-from-file', {
+        method: 'POST',
+        credentials: 'include',
+        body: formData
+      });
+    }
     const data = await resp.json();
-    if (resp.ok && data.ok) {
+    if (resp.ok && (data.id || (data.ok !== false && data.ok !== undefined))) {
       closeCreateTableUploadModal();
       window.location.reload();
     } else {
-      errDiv.textContent = data.error || 'Failed to create table from file';
+      errDiv.textContent = data.detail || data.error || 'Failed to create table from file';
       errDiv.classList.remove('hidden');
     }
   } catch (err) {
@@ -1854,6 +1918,10 @@ function onPromptCatChanged() {
 }
 
 async function generateTableFromPromptAi() {
+  if (!HAS_AI_CONFIGURED) {
+    alert('No AI provider configured. Please configure an LLM in Settings → Admin Panel.');
+    return;
+  }
   const prompt = document.getElementById('prompt-table-input').value.trim();
   if (!prompt) {
     alert('Please enter a natural language prompt describing your table.');
@@ -1874,15 +1942,25 @@ async function generateTableFromPromptAi() {
   errDiv.classList.add('hidden');
 
   try {
-    const resp = await fetch('/api/catalog/ai/prompt-to-table', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        prompt: prompt,
-        catalog: catName,
-        schema: schName
-      })
+    const payload = JSON.stringify({
+      prompt: prompt,
+      catalog: catName,
+      schema: schName
     });
+    let resp = await fetch('/api/ai/table-from-prompt', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload
+    });
+    if (!resp.ok && resp.status === 404) {
+      resp = await fetch('/api/catalog/ai/prompt-to-table', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload
+      });
+    }
     const data = await resp.json();
     if (data.ok) {
       promptGeneratedSpec = data;
@@ -1910,7 +1988,7 @@ async function generateTableFromPromptAi() {
       document.getElementById('btn-submit-prompt-table').disabled = false;
       document.getElementById('prompt-status-hint').textContent = `Ready to create table "${data.table_name}"`;
     } else {
-      errDiv.textContent = data.error || 'Failed to generate table specification';
+      errDiv.textContent = data.detail || data.error || 'Failed to generate table specification';
       errDiv.classList.remove('hidden');
     }
   } catch (err) {
@@ -1951,16 +2029,24 @@ async function submitCreateTableFromToon() {
   formData.append('columns_json', JSON.stringify(promptGeneratedSpec.columns));
 
   try {
-    const resp = await fetch('/api/catalog/create-table-from-toon', {
+    let resp = await fetch('/catalog/create-table-from-toon', {
       method: 'POST',
+      credentials: 'include',
       body: formData
     });
+    if (!resp.ok && resp.status === 404) {
+      resp = await fetch('/api/catalog/create-table-from-toon', {
+        method: 'POST',
+        credentials: 'include',
+        body: formData
+      });
+    }
     const data = await resp.json();
-    if (resp.ok && data.ok) {
+    if (resp.ok && (data.id || (data.ok !== false && data.ok !== undefined))) {
       closeCreateTablePromptModal();
       window.location.reload();
     } else {
-      errDiv.textContent = data.error || 'Failed to create table from TOON';
+      errDiv.textContent = data.detail || data.error || 'Failed to create table from TOON';
       errDiv.classList.remove('hidden');
     }
   } catch (err) {
@@ -1987,18 +2073,24 @@ async function openExportToonModal(assetType, catId, schId, name, tableId) {
   modal.classList.remove('hidden');
 
   const endpoint = assetType === 'schema'
-    ? `/api/catalog/${catId}/schemas/${schId}/toon`
-    : `/api/catalog/${catId}/schemas/${schId}/tables/${tableId || currentTableId}/toon`;
+    ? `/api/catalogs/${catId}/schemas/${schId}/toon`
+    : `/api/catalogs/${catId}/schemas/${schId}/tables/${tableId || currentTableId}/toon`;
 
   try {
-    const resp = await fetch(endpoint);
+    let resp = await fetch(endpoint, { credentials: 'include' });
+    if (!resp.ok && resp.status === 404) {
+      const altEndpoint = assetType === 'schema'
+        ? `/api/catalog/${catId}/schemas/${schId}/toon`
+        : `/api/catalog/${catId}/schemas/${schId}/tables/${tableId || currentTableId}/toon`;
+      resp = await fetch(altEndpoint, { credentials: 'include' });
+    }
     const data = await resp.json();
     if (data.ok && data.toon) {
       exportCurrentToonText = data.toon;
       exportCurrentFilename = data.filename || `${name}.toon`;
       codeBlock.textContent = data.toon;
     } else {
-      codeBlock.textContent = '# Error: ' + (data.error || 'Failed to generate TOON');
+      codeBlock.textContent = '# Error: ' + (data.detail || data.error || 'Failed to generate TOON');
     }
   } catch (err) {
     codeBlock.textContent = '# Network error: ' + err;
@@ -2038,6 +2130,10 @@ function openCurrentTableToon() {
 }
 
 async function enrichCurrentTableAi() {
+  if (!HAS_AI_CONFIGURED) {
+    alert('No AI provider configured. Please configure an LLM in Settings → Admin Panel.');
+    return;
+  }
   if (!currentTableData) return;
   const btn = document.getElementById('panel-ai-btn');
   const origHtml = btn.innerHTML;
@@ -2045,17 +2141,27 @@ async function enrichCurrentTableAi() {
   btn.innerHTML = '<span class="animate-spin">⏳</span> AI...';
 
   try {
-    const resp = await fetch('/api/catalog/ai/generate-description', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        asset_type: 'table',
-        name: currentTableIdent,
-        catalog_name: currentCatIdent,
-        schema_name: currentSchIdent,
-        columns: currentTableData.column_defs || []
-      })
+    const payload = JSON.stringify({
+      asset_type: 'table',
+      name: currentTableIdent,
+      catalog_name: currentCatIdent,
+      schema_name: currentSchIdent,
+      columns: currentTableData.column_defs || []
     });
+    let resp = await fetch('/api/ai/generate-description', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload
+    });
+    if (!resp.ok && resp.status === 404) {
+      resp = await fetch('/api/catalog/ai/generate-description', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload
+      });
+    }
     const data = await resp.json();
     if (data.ok && data.description) {
       currentTableData.description = data.description;
@@ -2070,7 +2176,7 @@ async function enrichCurrentTableAi() {
       renderDetailsTab(currentTableData, currentCatIdent, currentSchIdent, currentTableIdent);
       alert('Table enriched with AI semantic metadata!');
     } else {
-      alert(data.error || 'Failed to enrich with AI');
+      alert(data.detail || data.error || 'Failed to enrich with AI');
     }
   } catch (err) {
     alert('Network error: ' + err);

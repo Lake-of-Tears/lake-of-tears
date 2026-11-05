@@ -204,6 +204,7 @@ app.include_router(dashboards_router, prefix="/api/v1/dashboards", tags=["dashbo
 app.include_router(dashboards_router, prefix="/api/dashboards", tags=["dashboards"])
 app.include_router(ai_router, prefix="/api/v1/ai", tags=["ai"])
 app.include_router(ai_router, prefix="/api/ai", tags=["ai"])
+app.include_router(ai_router, prefix="/api/catalog/ai", tags=["ai"])
 app.include_router(sql_router, prefix="/api/v1/sql", tags=["sql"])
 app.include_router(sql_router, prefix="/api/sql", tags=["sql"])
 app.include_router(webhooks_router, prefix="/api/v1/ingest/webhooks", tags=["webhooks"])
@@ -2570,6 +2571,7 @@ def list_schemas(
 
 
 @app.post("/api/catalogs/{catalog_id}/schemas", response_model=CatalogSchemaResponse)
+@app.post("/api/catalog/{catalog_id}/schemas", response_model=CatalogSchemaResponse)
 def create_schema(
     catalog_id: str,
     req: CreateSchemaRequest,
@@ -2675,6 +2677,7 @@ def delete_schema(
 
 
 @app.get("/api/catalogs/{catalog_id}/schemas/{schema_id}/toon")
+@app.get("/api/catalog/{catalog_id}/schemas/{schema_id}/toon")
 def export_schema_toon(
     catalog_id: str,
     schema_id: str,
@@ -2817,6 +2820,7 @@ def get_table(
 
 
 @app.get("/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}/toon")
+@app.get("/api/catalog/{catalog_id}/schemas/{schema_id}/tables/{table_id}/toon")
 def export_table_toon(
     catalog_id: str,
     schema_id: str,

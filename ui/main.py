@@ -878,6 +878,8 @@ async def catalog(request: Request):
                 owned_catalogs.append(cat)
     shared_workspaces_catalogs = _resolve_ui_shared_catalogs(request)
     error = request.query_params.get("error")
+    ai_info = ai_gateway_client.provider_info()
+    has_ai = bool(ai_info and ai_info.get("provider"))
     return templates.TemplateResponse(
         request=request,
         name="catalog.html",
@@ -887,6 +889,8 @@ async def catalog(request: Request):
             "shared_workspaces_catalogs": shared_workspaces_catalogs,
             "page": "catalog",
             "error": error,
+            "ai_info": ai_info,
+            "has_ai": has_ai,
         },
     )
 
@@ -1499,6 +1503,8 @@ async def ingest(request: Request):
 
 @app.post("/api/ingest/preview-file")
 @app.post("/ingest/preview-file")
+@app.post("/api/catalog/preview-file")
+@app.post("/catalog/preview-file")
 async def api_ingest_preview_file(
     request: Request,
     file: UploadFile = File(...),
