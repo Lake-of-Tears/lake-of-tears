@@ -598,6 +598,7 @@ def _run_query(
                 "execution_ms": 0.0,
             }
 
+    sql = duckdb_ai.strip_catalog_qualifiers(sql, catalogs)
     ai_state = {"rows_processed": 0, "ai_calls": 0}
     start_ts = time.perf_counter()
     try:
@@ -1256,6 +1257,54 @@ async def catalog_table_status(
             {"ok": False, "error": "Failed to fetch table details"}, status_code=404
         )
     return JSONResponse({"ok": True, "table": tbl_data})
+
+
+@app.patch("/catalog/{catalog_id}/schemas/{schema_id}/tables/{table_id}")
+async def catalog_update_table_metadata(
+    request: Request,
+    catalog_id: str,
+    schema_id: str,
+    table_id: str,
+):
+    """Persist table description and column descriptions (e.g. from Enrich with AI)."""
+    token = request.cookies.get("lake_token")
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"ok": False, "error": "Not authenticated"}, status_code=401)
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Invalid JSON body"}, status_code=400)
+
+    payload = {k: data[k] for k in ("description", "column_defs") if data.get(k) is not None}
+    if not payload:
+        return JSONResponse({"ok": False, "error": "Nothing to update"}, status_code=400)
+
+    ws = getattr(request.state, "workspace", None)
+    workspace_id = (
+        (str(ws["id"]) if ws and isinstance(ws, dict) and "id" in ws else None)
+        or request.cookies.get("lake_workspace_id")
+        or request.cookies.get("lake_active_workspace")
+    )
+    workspace_slug = (
+        ws.get("slug") if ws and isinstance(ws, dict) else None
+    ) or request.cookies.get("lake_workspace_slug")
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.patch(
+                f"{BACKEND_URL}/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}",
+                json=payload,
+                headers=_build_backend_headers(token or "", workspace_id, workspace_slug),
+            )
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": f"Backend unreachable: {exc}"}, status_code=502)
+    if resp.status_code != 200:
+        try:
+            detail = resp.json().get("detail") or resp.text
+        except Exception:
+            detail = resp.text
+        return JSONResponse({"ok": False, "error": detail}, status_code=resp.status_code)
+    return JSONResponse({"ok": True, "table": resp.json()})
 
 
 @app.post("/catalog/create")

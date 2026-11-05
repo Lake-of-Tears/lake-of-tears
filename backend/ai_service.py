@@ -2056,3 +2056,41 @@ def run_genie_chat(
         "tables_used": tables_used,
         "error": None,
     }
+
+
+def strip_catalog_qualifiers(sql: str, catalogs: list[dict[str, Any]] | None) -> str:
+    """Drop a leading Lake catalog qualifier from three-part names (``catalog.schema.table``).
+
+    Lake catalogs are not DuckDB databases: their schemas are created directly on the connection.
+    ``"default".telemetry.events`` would otherwise fail with "Schema with name telemetry does not
+    exist", so the catalog part is removed when it names a workspace catalog. The SQL is returned
+    unchanged when nothing matches or it cannot be parsed.
+    """
+    if not sql or not catalogs:
+        return sql
+    names = {
+        str(v).strip().lower() for cat in catalogs for v in (cat.get("name"), cat.get("slug")) if v
+    }
+    names -= {"memory", "system", "temp"}
+    if not names or "." not in sql:
+        return sql
+    try:
+        statements = sqlglot.parse(sql, read="duckdb")
+    except Exception:
+        return sql
+    changed = False
+    for stmt in statements:
+        if stmt is None:
+            continue
+        for tbl in stmt.find_all(exp.Table):
+            cat_part = tbl.args.get("catalog")
+            if cat_part is not None and tbl.args.get("db") is not None:
+                if str(cat_part.name).strip().lower() in names:
+                    tbl.set("catalog", None)
+                    changed = True
+    if not changed:
+        return sql
+    try:
+        return ";\n".join(s.sql(dialect="duckdb") for s in statements if s is not None)
+    except Exception:
+        return sql

@@ -1240,3 +1240,41 @@ def test_workspace_settings_non_admin_member_sees_catalogs_and_request_button():
         assert 'id="catalog-dir-modal"' in html
         assert 'id="request-reason-modal"' in html
         assert "/settings/workspace/catalogs/cat-1/delete" not in html
+
+
+# ── Table metadata persistence (Enrich with AI) ────────────────────────────────
+
+
+def test_update_table_metadata_proxies_patch_to_backend():
+    client.cookies.set("lake_token", _make_token())
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"id": "t1", "description": "Telemetry events"}
+
+    with patch("httpx.AsyncClient.patch", return_value=mock_resp) as patched:
+        resp = client.patch(
+            "/catalog/c1/schemas/s1/tables/t1",
+            json={
+                "description": "Telemetry events",
+                "column_defs": [{"name": "a", "type": "INTEGER", "description": "id"}],
+                "ignored": "x",
+            },
+        )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    sent = patched.call_args.kwargs["json"]
+    assert set(sent) == {"description", "column_defs"}
+    assert patched.call_args.args[0].endswith("/api/catalogs/c1/schemas/s1/tables/t1")
+
+
+def test_update_table_metadata_requires_payload_and_surfaces_errors():
+    client.cookies.set("lake_token", _make_token())
+    assert client.patch("/catalog/c1/schemas/s1/tables/t1", json={}).status_code == 400
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 403
+    mock_resp.json.return_value = {"detail": "Access denied"}
+    with patch("httpx.AsyncClient.patch", return_value=mock_resp):
+        resp = client.patch("/catalog/c1/schemas/s1/tables/t1", json={"description": "x"})
+    assert resp.status_code == 403
+    assert resp.json()["error"] == "Access denied"

@@ -1311,6 +1311,8 @@ function showTable(catIdent, schIdent, tableIdent, table) {
     aiBtn.classList.add('opacity-50', 'cursor-not-allowed', 'pointer-events-none');
   }
 
+  syncEnrichButton();
+
   // Render tabs
   renderColumnsTab(table);
   renderDetailsTab(table, catIdent, schIdent, tableIdent);
@@ -2463,24 +2465,43 @@ function openCurrentTableToon() {
   openExportToonModal('table', currentCatId, currentSchId, currentTableIdent, currentTableId);
 }
 
+// Tables with an Enrich-with-AI request in flight, keyed by table id. The button reflects the
+// table that is open; several tables can be enriched at once but each only once at a time.
+const enrichInFlight = new Set();
+
+function syncEnrichButton() {
+  const btn = document.getElementById('panel-ai-btn');
+  if (!btn || !HAS_AI_CONFIGURED) return;
+  if (!btn.dataset.origHtml) btn.dataset.origHtml = btn.innerHTML;
+  const busy = enrichInFlight.has(currentTableId);
+  btn.disabled = busy;
+  btn.innerHTML = busy ? '<span class="animate-spin">⏳</span> AI...' : btn.dataset.origHtml;
+}
+
 async function enrichCurrentTableAi() {
   if (!HAS_AI_CONFIGURED) {
     showCatalogToast('No AI provider configured. Configure an LLM in Settings → Admin Panel.', 'warning');
     return;
   }
-  if (!currentTableData) return;
-  const btn = document.getElementById('panel-ai-btn');
-  const origHtml = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = '<span class="animate-spin">⏳</span> AI...';
+  if (!currentTableData || enrichInFlight.has(currentTableId)) return;
+
+  // Capture the table now: the drawer may show a different table by the time the response lands.
+  const ctx = {
+    catId: currentCatId, schId: currentSchId, tableId: currentTableId,
+    catIdent: currentCatIdent, schIdent: currentSchIdent, tableIdent: currentTableIdent,
+    table: currentTableData
+  };
+  const isOpen = () => currentTableId === ctx.tableId && currentTableData === ctx.table;
+  enrichInFlight.add(ctx.tableId);
+  syncEnrichButton();
 
   try {
     const payload = JSON.stringify({
       asset_type: 'table',
-      name: currentTableIdent,
-      catalog_name: currentCatIdent,
-      schema_name: currentSchIdent,
-      columns: currentTableData.column_defs || []
+      name: ctx.tableIdent,
+      catalog_name: ctx.catIdent,
+      schema_name: ctx.schIdent,
+      columns: ctx.table.column_defs || []
     });
     let resp = await fetch('/api/ai/generate-description', {
       method: 'POST',
@@ -2498,25 +2519,49 @@ async function enrichCurrentTableAi() {
     }
     const data = await resp.json();
     if (data.ok && data.description) {
-      currentTableData.description = data.description;
-      if (data.column_descriptions && currentTableData.column_defs) {
-        currentTableData.column_defs.forEach(c => {
+      ctx.table.description = data.description;
+      if (data.column_descriptions && ctx.table.column_defs) {
+        ctx.table.column_defs.forEach(c => {
           if (data.column_descriptions[c.name]) {
             c.description = data.column_descriptions[c.name];
           }
         });
       }
-      renderColumnsTab(currentTableData);
-      renderDetailsTab(currentTableData, currentCatIdent, currentSchIdent, currentTableIdent);
-      showCatalogToast('Table enriched with AI semantic metadata', 'success');
+      if (isOpen()) {
+        renderColumnsTab(ctx.table);
+        renderDetailsTab(ctx.table, ctx.catIdent, ctx.schIdent, ctx.tableIdent);
+      }
+      // Keep the list row's cached JSON current so reopening the drawer shows the new text.
+      const rowEl = document.querySelector(`[data-table-id="${ctx.tableId}"]`);
+      if (rowEl) rowEl.setAttribute('data-table', JSON.stringify(ctx.table));
+
+      const saveResp = await fetch(
+        `/catalog/${ctx.catId}/schemas/${ctx.schId}/tables/${ctx.tableId}`,
+        {
+          method: 'PATCH',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            description: ctx.table.description,
+            column_defs: ctx.table.column_defs || null
+          })
+        }
+      );
+      const saved = await saveResp.json().catch(() => ({}));
+      const label = ctx.tableIdent ? ` (${ctx.tableIdent})` : '';
+      if (saveResp.ok && saved.ok) {
+        showCatalogToast('Table enriched with AI and saved' + label, 'success');
+      } else {
+        showCatalogToast('Generated, but saving failed' + label + ': ' + (saved.error || saveResp.status), 'error');
+      }
     } else {
       showCatalogToast(data.detail || data.error || 'Failed to enrich with AI', 'error');
     }
   } catch (err) {
     showCatalogToast('Network error: ' + err, 'error');
   } finally {
-    btn.disabled = false;
-    btn.innerHTML = origHtml;
+    enrichInFlight.delete(ctx.tableId);
+    syncEnrichButton();
   }
 }
 

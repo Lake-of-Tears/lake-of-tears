@@ -620,7 +620,9 @@ def _execute_statement_on_duckdb(
                 pass
 
         # Inspect for DDL/DML target table to materialize existing view before mutation
-        op, ddl_schema, ddl_table = _extract_ddl_dml_target(req.statement, target_schema)
+        op, ddl_schema, ddl_table = _extract_ddl_dml_target(
+            ai_service.strip_catalog_qualifiers(req.statement, catalogs), target_schema
+        )
         if ddl_schema and ddl_schema.lower() != "main":
             try:
                 con.execute(f'CREATE SCHEMA IF NOT EXISTS "{ddl_schema}"')
@@ -651,7 +653,8 @@ def _execute_statement_on_duckdb(
             stored.status = StatementStatus(state="CANCELED")
             return
 
-        prepared_sql, bound_params = _prepare_parameters(req.statement, req.parameters)
+        statement_sql = ai_service.strip_catalog_qualifiers(req.statement, catalogs)
+        prepared_sql, bound_params = _prepare_parameters(statement_sql, req.parameters)
         if bound_params is not None:
             rel = con.execute(prepared_sql, bound_params)
         else:
