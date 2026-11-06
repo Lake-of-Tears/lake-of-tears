@@ -22,6 +22,22 @@
      ```
 
 ## Current Project State & Next Steps (as of Nov 5, 2026)
+- **Issue #393 & PR #394 (Dynamic AI Model Discovery, Multi-Tier Fallback Chain, and Deprecation Handling):**
+  - **Status:** **COMPLETED, MERGED & ALL 846 TESTS PASSING**
+  - **Pull Request:** Merged via PR #394 into `main` (`45d9a28`).
+  - **Kanban Board:** Moved to **Done** on [Lake of Tears (Main) Project #3](https://github.com/orgs/Lake-of-Tears/projects/3) (Issue item `PVTI_lADOFEJxWM4Bmf-gzhGbHjo`, PR item `PVTI_lADOFEJxWM4Bmf-gzhGbPUw`).
+  - **Test Suite:** 846 tests passing (`tests/test_ai_admin.py`, `tests/test_ai_providers.py`, `tests/test_ai_http_providers.py`, `tests/test_ai_bedrock.py`).
+  - **Changes:**
+    - **Dynamic Model Discovery:** Added `discover_models()` to `AIProvider` base class and concrete implementations for Google Gemini (`client.models.list()`), OpenAI & OpenAI-compatible (`/v1/models`), Ollama (`/api/tags`), and Amazon Bedrock (`list_foundation_models()`). Exposed via `POST /api/admin/ai-provider/discover-models` with UI proxy in `ui/main.py`.
+    - **Admin Panel UI Enhancements (`ui/templates/settings/admin.html`):**
+      - Added "Discover Models" action button alongside Chat Model and Embedding Model fields that queries live provider APIs and populates verified models into `<datalist>` comboboxes, retaining manual override typing.
+      - Rendered transparent active runtime defaults beneath inputs when left blank (e.g. `Active default when blank: gemini-2.5-flash`).
+      - Added an amber Deprecation Warning Banner at the top of the AI configuration panel whenever an upstream model is retired or fails with 404, featuring a 1-click `Migrate to [Model]` action and dismissal endpoint.
+    - **Self-Healing Fallback Chain for Gemini:**
+      - Updated default chat model from `gemini-3.8-flash` to production-grade `gemini-2.5-flash`.
+      - Implemented automatic fallback chain `("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash")` in `GeminiProvider.generate()`: on 404 / deprecated model errors from Google, gracefully retries with the next candidate so user queries never crash, recording a deprecation warning in `system_settings`.
+    - **Documentation:** Updated `docs/wiki/AI-Providers.md` with Model Discovery and self-healing fallback documentation.
+
 - **Issue #235 & PR (Create Schemas & Tables via UI with File Upload, SQL DDL, and AI-First TOON Support):**
   - **Status:** **COMPLETED, VERIFIED & ALL 824 TESTS PASSING**
   - **Kanban Board:** Lake of Tears (Main) Project #3 (Issue item `PVTI_lADOFEJxWM4Bmf-gzhBrMGA`).
