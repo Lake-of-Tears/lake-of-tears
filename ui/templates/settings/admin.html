@@ -1046,6 +1046,32 @@
       <div class="mb-4 text-xs px-3 py-2 rounded-md border border-red-800/50 bg-red-900/20 text-red-300" role="alert">{{ ai_error }}</div>
       {% endif %}
 
+      {% if ai_provider and ai_provider.get('deprecation_warning') %}
+      {% set dw = ai_provider.deprecation_warning %}
+      <div id="ai-deprecation-alert" class="p-3.5 rounded-lg bg-amber-950/40 border border-amber-700/60 flex items-start justify-between gap-3 mb-4">
+        <div class="flex items-start gap-2.5">
+          <svg class="w-5 h-5 text-amber-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <div class="text-xs">
+            <div class="font-semibold text-amber-200">AI Model Deprecation Detected</div>
+            <p class="text-amber-300/90 mt-0.5">
+              Configured model <code class="px-1 py-0.5 rounded bg-black/40 text-amber-100 font-mono">{{ dw.failed_model }}</code> is unavailable or discontinued by {{ dw.provider }}.
+              Queries are automatically using fallback <code class="px-1 py-0.5 rounded bg-black/40 text-emerald-300 font-mono">{{ dw.fallback_model }}</code>.
+            </p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <button type="button" onclick="applyFallbackModel('{{ dw.provider }}', '{{ dw.fallback_model }}')" class="btn-primary text-xs px-2.5 py-1">
+            Migrate to {{ dw.fallback_model }}
+          </button>
+          <button type="button" onclick="dismissDeprecationWarning()" class="text-gray-400 hover:text-white text-xs px-2 py-1">
+            Dismiss
+          </button>
+        </div>
+      </div>
+      {% endif %}
+
       {% if not ai_provider %}
       <div class="text-xs px-3 py-2 rounded-md border border-amber-800/50 bg-amber-900/20 text-amber-300">
         The AI provider settings could not be loaded from the backend.
@@ -1088,12 +1114,45 @@
                    placeholder="{{ f.default if f.default is not none else '' }}"
                    class="w-40 input-dark text-sm font-mono"
                    style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+            {% if f.default is not none %}
+            <p class="text-[11px] text-gray-500 mt-1">
+              Active default when blank: <code class="text-emerald-400/90 font-mono">{{ f.default }}</code>
+            </p>
+            {% endif %}
+            {% elif f.name in ('chat_model', 'embedding_model') %}
+            <div class="relative flex items-center gap-2">
+              <input id="ai-{{ p.name }}-{{ f.name }}" type="text" name="cfg__{{ p.name }}__{{ f.name }}"
+                     list="datalist-{{ p.name }}-{{ f.name }}"
+                     value="{{ p.config.get(f.name) or '' }}" autocomplete="off"
+                     placeholder="{{ f.default or f.placeholder or '' }}"
+                     class="w-full input-dark text-sm font-mono"
+                     style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+              <datalist id="datalist-{{ p.name }}-{{ f.name }}"></datalist>
+              <button type="button" onclick="discoverAiModels('{{ p.name }}')"
+                      title="Discover available models from {{ p.label }} API"
+                      class="shrink-0 px-2.5 py-2 text-xs rounded border border-gray-700 bg-white/[0.04] text-gray-300 hover:text-white hover:border-gray-500 transition-colors flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5 text-gray-400 discover-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                <span class="hidden sm:inline discover-label">Discover</span>
+              </button>
+            </div>
+            {% if f.default %}
+            <p class="text-[11px] text-gray-500 mt-1">
+              Active default when blank: <code class="text-emerald-400/90 font-mono">{{ f.default }}</code>
+            </p>
+            {% endif %}
             {% else %}
             <input id="ai-{{ p.name }}-{{ f.name }}" type="text" name="cfg__{{ p.name }}__{{ f.name }}"
                    value="{{ p.config.get(f.name) or '' }}" autocomplete="off"
                    placeholder="{{ f.default or f.placeholder or '' }}"
                    class="w-full input-dark text-sm font-mono"
                    style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+            {% if f.default %}
+            <p class="text-[11px] text-gray-500 mt-1">
+              Active default when blank: <code class="text-emerald-400/90 font-mono">{{ f.default }}</code>
+            </p>
+            {% endif %}
             {% endif %}
           </div>
           {% endfor %}
@@ -1853,6 +1912,101 @@ async function testAiProvider() {
   }
 }
 
+async function discoverAiModels(chosen) {
+  chosen = chosen || document.getElementById('ai-provider-select').value;
+  const statusBox = document.getElementById('ai-test-status');
+  const config = {};
+  const prefix = 'cfg__' + chosen + '__';
+  document.querySelectorAll('.ai-provider-fields[data-provider="' + chosen + '"] [name^="' + prefix + '"]').forEach(function (el) {
+    config[el.name.substring(prefix.length)] = el.value;
+  });
+
+  const paint = function (kind, text) {
+    statusBox.classList.remove('hidden', 'bg-emerald-900/20', 'border-emerald-800/50', 'text-emerald-300', 'bg-red-900/20', 'border-red-800/50', 'text-red-300', 'bg-blue-900/20', 'border-blue-800/50', 'text-blue-300');
+    if (kind === 'ok') {
+      statusBox.classList.add('bg-emerald-900/20', 'border-emerald-800/50', 'text-emerald-300');
+    } else if (kind === 'err') {
+      statusBox.classList.add('bg-red-900/20', 'border-red-800/50', 'text-red-300');
+    } else {
+      statusBox.classList.add('bg-blue-900/20', 'border-blue-800/50', 'text-blue-300');
+    }
+    statusBox.textContent = text;
+  };
+
+  paint('info', 'Discovering available models from ' + chosen + '...');
+  try {
+    const resp = await fetch('/settings/admin/ai-provider/discover-models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: chosen, config: config }),
+    });
+    const body = await resp.json().catch(function () { return { ok: false, message: 'Invalid response from server' }; });
+    if (resp.ok && body.ok) {
+      const models = body.models || {};
+      const chatModels = models.chat || [];
+      const embModels = models.embedding || [];
+
+      const chatDl = document.getElementById('datalist-' + chosen + '-chat_model');
+      if (chatDl) {
+        chatDl.innerHTML = '';
+        chatModels.forEach(function (m) {
+          const opt = document.createElement('option');
+          opt.value = m;
+          chatDl.appendChild(opt);
+        });
+      }
+
+      const embDl = document.getElementById('datalist-' + chosen + '-embedding_model');
+      if (embDl) {
+        embDl.innerHTML = '';
+        embModels.forEach(function (m) {
+          const opt = document.createElement('option');
+          opt.value = m;
+          embDl.appendChild(opt);
+        });
+      }
+
+      paint('ok', 'Discovered ' + chatModels.length + ' chat models and ' + embModels.length + ' embedding models from ' + chosen + '. Click inputs to select.');
+    } else {
+      paint('err', 'Discovery failed: ' + (body.message || body.detail || 'Could not list models. Check credentials and permissions.'));
+    }
+  } catch (e) {
+    paint('err', 'Network error while discovering models: ' + e);
+  }
+}
+
+async function dismissDeprecationWarning() {
+  const alertEl = document.getElementById('ai-deprecation-alert');
+  try {
+    const resp = await fetch('/settings/admin/ai-provider/dismiss-deprecation-warning', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (resp.ok && alertEl) {
+      alertEl.remove();
+    }
+  } catch (e) {
+    if (alertEl) alertEl.remove();
+  }
+}
+
+function applyFallbackModel(provider, fallbackModel) {
+  const select = document.getElementById('ai-provider-select');
+  if (select && select.value !== provider) {
+    select.value = provider;
+    if (typeof aiProviderChanged === 'function') {
+      aiProviderChanged();
+    }
+  }
+  const chatInput = document.getElementById('ai-' + provider + '-chat_model');
+  if (chatInput) {
+    chatInput.value = fallbackModel;
+    chatInput.focus();
+    chatInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  dismissDeprecationWarning();
+}
+
 // =============================================================================
 // VAULT PROVIDERS SCRIPTS
 // =============================================================================
@@ -1908,6 +2062,101 @@ async function testVaultProvider(provider) {
   } finally {
     btn.disabled = false;
   }
+}
+
+async function discoverAiModels(chosen) {
+  chosen = chosen || document.getElementById('ai-provider-select').value;
+  const statusBox = document.getElementById('ai-test-status');
+  const config = {};
+  const prefix = 'cfg__' + chosen + '__';
+  document.querySelectorAll('.ai-provider-fields[data-provider="' + chosen + '"] [name^="' + prefix + '"]').forEach(function (el) {
+    config[el.name.substring(prefix.length)] = el.value;
+  });
+
+  const paint = function (kind, text) {
+    statusBox.classList.remove('hidden', 'bg-emerald-900/20', 'border-emerald-800/50', 'text-emerald-300', 'bg-red-900/20', 'border-red-800/50', 'text-red-300', 'bg-blue-900/20', 'border-blue-800/50', 'text-blue-300');
+    if (kind === 'ok') {
+      statusBox.classList.add('bg-emerald-900/20', 'border-emerald-800/50', 'text-emerald-300');
+    } else if (kind === 'err') {
+      statusBox.classList.add('bg-red-900/20', 'border-red-800/50', 'text-red-300');
+    } else {
+      statusBox.classList.add('bg-blue-900/20', 'border-blue-800/50', 'text-blue-300');
+    }
+    statusBox.textContent = text;
+  };
+
+  paint('info', 'Discovering available models from ' + chosen + '...');
+  try {
+    const resp = await fetch('/settings/admin/ai-provider/discover-models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: chosen, config: config }),
+    });
+    const body = await resp.json().catch(function () { return { ok: false, message: 'Invalid response from server' }; });
+    if (resp.ok && body.ok) {
+      const models = body.models || {};
+      const chatModels = models.chat || [];
+      const embModels = models.embedding || [];
+
+      const chatDl = document.getElementById('datalist-' + chosen + '-chat_model');
+      if (chatDl) {
+        chatDl.innerHTML = '';
+        chatModels.forEach(function (m) {
+          const opt = document.createElement('option');
+          opt.value = m;
+          chatDl.appendChild(opt);
+        });
+      }
+
+      const embDl = document.getElementById('datalist-' + chosen + '-embedding_model');
+      if (embDl) {
+        embDl.innerHTML = '';
+        embModels.forEach(function (m) {
+          const opt = document.createElement('option');
+          opt.value = m;
+          embDl.appendChild(opt);
+        });
+      }
+
+      paint('ok', 'Discovered ' + chatModels.length + ' chat models and ' + embModels.length + ' embedding models from ' + chosen + '. Click inputs to select.');
+    } else {
+      paint('err', 'Discovery failed: ' + (body.message || body.detail || 'Could not list models. Check credentials and permissions.'));
+    }
+  } catch (e) {
+    paint('err', 'Network error while discovering models: ' + e);
+  }
+}
+
+async function dismissDeprecationWarning() {
+  const alertEl = document.getElementById('ai-deprecation-alert');
+  try {
+    const resp = await fetch('/settings/admin/ai-provider/dismiss-deprecation-warning', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (resp.ok && alertEl) {
+      alertEl.remove();
+    }
+  } catch (e) {
+    if (alertEl) alertEl.remove();
+  }
+}
+
+function applyFallbackModel(provider, fallbackModel) {
+  const select = document.getElementById('ai-provider-select');
+  if (select && select.value !== provider) {
+    select.value = provider;
+    if (typeof aiProviderChanged === 'function') {
+      aiProviderChanged();
+    }
+  }
+  const chatInput = document.getElementById('ai-' + provider + '-chat_model');
+  if (chatInput) {
+    chatInput.value = fallbackModel;
+    chatInput.focus();
+    chatInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  dismissDeprecationWarning();
 }
 
 function updateVaultTestButtons() {

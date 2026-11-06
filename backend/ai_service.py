@@ -215,7 +215,7 @@ SQL_AI_FUNCTIONS: list[dict[str, str]] = [
         "name": "ai_query",
         "signature": "ai_query([model,] prompt)",
         "description": "Invoke a Gemini foundation model per row with a custom prompt (supports 1-arg prompt or 2-arg Databricks-style model + prompt).",
-        "example": "SELECT description, ai_query('gemini-3.8-flash', 'Classify sentiment in one word: ' || description) AS sentiment FROM read_parquet('s3://datalake/workspaces/default/raw/stripe_charges/**/*.parquet') LIMIT 10",
+        "example": "SELECT description, ai_query('gemini-2.5-flash', 'Classify sentiment in one word: ' || description) AS sentiment FROM read_parquet('s3://datalake/workspaces/default/raw/stripe_charges/**/*.parquet') LIMIT 10",
     },
     {
         "name": "ai_summarize",

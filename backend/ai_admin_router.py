@@ -9,8 +9,10 @@ from ai_providers import ProviderError, build_provider, save_provider_config
 from ai_providers.registry import (
     PROVIDERS,
     active_provider_name,
+    clear_deprecation_warning,
     describe_providers,
     effective_provider_config,
+    get_deprecation_warning,
     load_provider_config,
     validate_provider_updates,
 )
@@ -31,6 +33,11 @@ class SaveProviderRequest(BaseModel):
 
 
 class TestProviderRequest(BaseModel):
+    provider: str | None = None
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class DiscoverModelsRequest(BaseModel):
     provider: str | None = None
     config: dict[str, Any] = Field(default_factory=dict)
 
@@ -84,3 +91,53 @@ def test_ai_provider(
     except ProviderError as exc:
         return {"ok": False, "provider": name, "message": str(exc)}
     return provider.test_connection()
+
+
+@router.post("/discover-models")
+def discover_ai_models(
+    req: DiscoverModelsRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+) -> dict[str, Any]:
+    """Discover available chat and embedding models from the provider's API."""
+    name = req.provider or active_provider_name(db)
+    if name not in PROVIDERS:
+        raise HTTPException(400, f"Unknown AI provider '{name}'")
+    overrides = _validated(name, req.config)
+    _, stored = load_provider_config(db, name)
+    cfg = effective_provider_config(name, stored, overrides)
+    try:
+        provider = build_provider(name, cfg)
+        models = provider.discover_models()
+        return {
+            "ok": True,
+            "provider": name,
+            "models": models,
+            "message": f"Found {len(models.get('chat', []))} chat models and {len(models.get('embedding', []))} embedding models.",
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "provider": name,
+            "models": {"chat": [], "embedding": []},
+            "message": str(exc),
+        }
+
+
+@router.get("/deprecation-warning")
+def get_ai_deprecation_warning(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+) -> dict[str, Any]:
+    """Get active deprecation warning banner info if a fallback was triggered."""
+    return {"warning": get_deprecation_warning(db)}
+
+
+@router.post("/dismiss-deprecation-warning")
+def dismiss_ai_deprecation_warning(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+) -> dict[str, Any]:
+    """Dismiss the active deprecation warning banner."""
+    clear_deprecation_warning(db)
+    return {"ok": True}

@@ -156,6 +156,58 @@ def test_info_describes_the_provider_without_secrets():
     }
 
 
+def test_gemini_fallback_on_404_or_deprecated():
+    client = MagicMock()
+    recorded = []
+
+    def on_fallback(failed, fallback, reason):
+        recorded.append((failed, fallback, reason))
+
+    def fake_generate(**kwargs):
+        if kwargs.get("model") == "gemini-deprecated":
+            raise RuntimeError("404 Not Found: models/gemini-deprecated is not found")
+        return MagicMock(text="recovered reply")
+
+    client.models.generate_content.side_effect = fake_generate
+    provider = GeminiProvider(
+        KEY,
+        chat_model="gemini-deprecated",
+        client_factory=lambda _key: client,
+        on_fallback=on_fallback,
+    )
+    reply = provider.generate("hello")
+    assert reply == "recovered reply"
+    assert len(recorded) == 1
+    assert recorded[0][0] == "gemini-deprecated"
+    assert recorded[0][1] == "gemini-2.5-flash"
+    assert "404" in recorded[0][2]
+
+
+def test_gemini_fallback_does_not_trigger_on_auth_errors():
+    client = MagicMock()
+    client.models.generate_content.side_effect = RuntimeError("401 Unauthorized: Invalid API key")
+    provider = GeminiProvider(KEY, chat_model="gemini-bad-key", client_factory=lambda _key: client)
+    with pytest.raises(ProviderError) as exc:
+        provider.generate("hello")
+    assert "401" in str(exc.value)
+
+
+def test_gemini_discover_models():
+    client = MagicMock()
+    m1 = MagicMock()
+    m1.name = "models/gemini-2.5-flash"
+    m1.supported_actions = ["generateContent"]
+    m2 = MagicMock()
+    m2.name = "models/gemini-embedding-001"
+    m2.supported_actions = ["embedContent"]
+    client.models.list.return_value = [m1, m2]
+
+    provider = GeminiProvider(KEY, client_factory=lambda _key: client)
+    models = provider.discover_models()
+    assert "gemini-2.5-flash" in models["chat"]
+    assert "gemini-embedding-001" in models["embedding"]
+
+
 # ── registry and settings ─────────────────────────────────────────────────────
 
 
