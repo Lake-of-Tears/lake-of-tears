@@ -530,6 +530,118 @@ kubectl rollout restart deployment -n lake-of-tears
 | Changed `POSTGRES_AUTH_PASSWORD` and the backend cannot connect | The database user password was not updated inside PostgreSQL; run `ALTER USER` before updating secrets (section 6) |
 | Notebooks disappear after a Jupyter pod restart | Ensure persistent volume is configured; see [#176](https://github.com/Lake-of-Tears/lake-of-tears/issues/176) |
 
+## 9. Cluster Status & Topology APIs (Angler CLI & LLM Inspection)
+
+Lake of Tears exposes native REST endpoints to allow Angler CLI (`angler compute status`, `angler compute list`) and automated LLM agents to inspect real-time cluster readiness, service health, pod allocations, and infrastructure topology.
+
+### 9.1 Cluster Health & Status (`GET /api/cluster/status`)
+
+Returns real-time health of analytical engines, storage systems, and scheduler services. Authenticated users with valid session tokens or Personal Access Tokens (PATs) can query this endpoint.
+
+**Request:**
+```http
+GET /api/cluster/status
+Authorization: Bearer <token>
+```
+
+**Response (`200 OK` - `ClusterStatusResponse`):**
+```json
+{
+  "status": "healthy",
+  "cluster_connected": true,
+  "mode": "kubectl_cli",
+  "namespace": "lake-of-tears",
+  "timestamp": "2026-11-06T20:20:00Z",
+  "total_services": 8,
+  "healthy_count": 8,
+  "services": {
+    "duckdb": {
+      "name": "duckdb",
+      "display_name": "DuckDB Analytical Engine",
+      "status": "running",
+      "category": "Analytics",
+      "port": null,
+      "pod_name": null,
+      "node_name": null,
+      "restarts": 0,
+      "uptime": null,
+      "created_at": null,
+      "cpu_usage": null,
+      "memory_usage": null,
+      "cpu_limit": null,
+      "memory_limit": null,
+      "active_connections": 1,
+      "latency_ms": 1.25,
+      "error": null,
+      "extra_details": {"engine": "DuckDB", "embedded": true}
+    },
+    "minio": {
+      "name": "minio",
+      "display_name": "MinIO Object Storage",
+      "status": "running",
+      "category": "Storage",
+      "port": 9000,
+      "pod_name": "lake-of-tears-minio-7c87c947d-2b4k1",
+      "node_name": "orbstack",
+      "restarts": 0,
+      "uptime": "2d 4h",
+      "cpu_limit": "2",
+      "memory_limit": "4Gi",
+      "latency_ms": 2.15,
+      "error": null
+    }
+  }
+}
+```
+
+### 9.2 Cluster Topology (`GET /api/cluster/topology`)
+
+Exposes active external routing paths, ingress URL bindings, and persistent storage volume allocations across the cluster.
+
+**Request:**
+```http
+GET /api/cluster/topology
+Authorization: Bearer <token>
+```
+
+**Response (`200 OK` - `ClusterTopologyResponse`):**
+```json
+{
+  "namespace": "lake-of-tears",
+  "mode": "kubectl_cli",
+  "ingress_routes": [
+    {
+      "service": "lakeui",
+      "url": "http://localhost/",
+      "host": "localhost",
+      "path": "/",
+      "tls_enabled": false
+    },
+    {
+      "service": "minio",
+      "url": "http://minio.localhost/",
+      "host": "minio.localhost",
+      "path": "/",
+      "tls_enabled": false
+    }
+  ],
+  "storage_volumes": [
+    {
+      "name": "lake-of-tears-minio-pvc",
+      "pvc_name": "lake-of-tears-minio-pvc",
+      "mount_path": "/data",
+      "size": "200Gi",
+      "storage_class": "local-path",
+      "status": "Bound"
+    }
+  ],
+  "raw_config": {
+    "storageClass": "local-path",
+    "ingressHost": "localhost"
+  }
+}
+```
+
 ## Related pages
 
 - [Home](Home.md)
