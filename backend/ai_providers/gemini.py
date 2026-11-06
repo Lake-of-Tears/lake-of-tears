@@ -178,9 +178,9 @@ class GeminiProvider(AIProvider):
                     continue
 
                 methods = getattr(m, "supported_actions", None)
-                if not isinstance(methods, (list, tuple, set)):
+                if not isinstance(methods, list | tuple | set):
                     methods = getattr(m, "supported_generation_methods", None)
-                if not isinstance(methods, (list, tuple, set)):
+                if not isinstance(methods, list | tuple | set):
                     methods = []
                 is_generate = "generateContent" in methods
                 is_embed = "embedContent" in methods

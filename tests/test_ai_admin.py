@@ -265,7 +265,6 @@ def test_discover_models_reports_error_without_raising(admin, monkeypatch):
 
 def test_deprecation_warning_lifecycle(admin):
     from ai_providers.registry import (
-        clear_deprecation_warning,
         get_deprecation_warning,
         record_deprecation_warning,
     )
