@@ -1313,6 +1313,185 @@ async def catalog_update_table_metadata(
     return JSONResponse({"ok": True, "table": resp.json()})
 
 
+# ── Catalog Schema & Table Deletion, Dependencies, and Trash Recovery ────────
+
+
+@app.get("/api/catalogs/{catalog_id}/schemas/{schema_id}/dependencies")
+@app.get("/api/catalog/{catalog_id}/schemas/{schema_id}/dependencies")
+async def ui_get_schema_dependencies(request: Request, catalog_id: str, schema_id: str):
+    token = request.cookies.get("lake_token")
+    ws = request.state.workspace
+    ws_id = (
+        (str(ws["id"]) if ws and isinstance(ws, dict) and "id" in ws else None)
+        or request.cookies.get("lake_workspace_id")
+        or request.cookies.get("lake_active_workspace")
+    )
+    ws_slug = (
+        ws.get("slug") if ws and isinstance(ws, dict) else None
+    ) or request.cookies.get("lake_workspace_slug")
+    data = await _backend_get_async(
+        f"/api/catalogs/{catalog_id}/schemas/{schema_id}/dependencies",
+        token or "",
+        workspace_id=ws_id,
+        workspace_slug=ws_slug,
+    )
+    if data is None:
+        return JSONResponse({"ok": False, "error": "Failed fetching dependencies"}, status_code=500)
+    return JSONResponse(data)
+
+
+@app.get("/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}/dependencies")
+@app.get("/api/catalog/{catalog_id}/schemas/{schema_id}/tables/{table_id}/dependencies")
+async def ui_get_table_dependencies(
+    request: Request, catalog_id: str, schema_id: str, table_id: str
+):
+    token = request.cookies.get("lake_token")
+    ws = request.state.workspace
+    ws_id = (
+        (str(ws["id"]) if ws and isinstance(ws, dict) and "id" in ws else None)
+        or request.cookies.get("lake_workspace_id")
+        or request.cookies.get("lake_active_workspace")
+    )
+    ws_slug = (
+        ws.get("slug") if ws and isinstance(ws, dict) else None
+    ) or request.cookies.get("lake_workspace_slug")
+    data = await _backend_get_async(
+        f"/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}/dependencies",
+        token or "",
+        workspace_id=ws_id,
+        workspace_slug=ws_slug,
+    )
+    if data is None:
+        return JSONResponse({"ok": False, "error": "Failed fetching dependencies"}, status_code=500)
+    return JSONResponse(data)
+
+
+@app.delete("/api/catalogs/{catalog_id}/schemas/{schema_id}")
+@app.delete("/api/catalog/{catalog_id}/schemas/{schema_id}")
+async def ui_delete_schema(
+    request: Request,
+    catalog_id: str,
+    schema_id: str,
+    cascade: bool = Query(False),
+):
+    token = request.cookies.get("lake_token")
+    ws = request.state.workspace
+    ws_id = (
+        (str(ws["id"]) if ws and isinstance(ws, dict) and "id" in ws else None)
+        or request.cookies.get("lake_workspace_id")
+        or request.cookies.get("lake_active_workspace")
+    )
+    ws_slug = (
+        ws.get("slug") if ws and isinstance(ws, dict) else None
+    ) or request.cookies.get("lake_workspace_slug")
+    res, err = _backend_delete_with_error(
+        f"/api/catalogs/{catalog_id}/schemas/{schema_id}?cascade={'true' if cascade else 'false'}",
+        token or "",
+        workspace_id=ws_id,
+        workspace_slug=ws_slug,
+    )
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=400)
+    return JSONResponse(res or {"ok": True})
+
+
+@app.delete("/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}")
+@app.delete("/api/catalog/{catalog_id}/schemas/{schema_id}/tables/{table_id}")
+async def ui_delete_table(request: Request, catalog_id: str, schema_id: str, table_id: str):
+    token = request.cookies.get("lake_token")
+    ws = request.state.workspace
+    ws_id = (
+        (str(ws["id"]) if ws and isinstance(ws, dict) and "id" in ws else None)
+        or request.cookies.get("lake_workspace_id")
+        or request.cookies.get("lake_active_workspace")
+    )
+    ws_slug = (
+        ws.get("slug") if ws and isinstance(ws, dict) else None
+    ) or request.cookies.get("lake_workspace_slug")
+    res, err = _backend_delete_with_error(
+        f"/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}",
+        token or "",
+        workspace_id=ws_id,
+        workspace_slug=ws_slug,
+    )
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=400)
+    return JSONResponse(res or {"ok": True})
+
+
+@app.get("/api/catalog/trash")
+@app.get("/api/catalogs/trash")
+async def ui_get_catalog_trash(request: Request):
+    token = request.cookies.get("lake_token")
+    ws = request.state.workspace
+    ws_id = (
+        (str(ws["id"]) if ws and isinstance(ws, dict) and "id" in ws else None)
+        or request.cookies.get("lake_workspace_id")
+        or request.cookies.get("lake_active_workspace")
+    )
+    ws_slug = (
+        ws.get("slug") if ws and isinstance(ws, dict) else None
+    ) or request.cookies.get("lake_workspace_slug")
+    data = await _backend_get_async(
+        "/api/catalog/trash",
+        token or "",
+        workspace_id=ws_id,
+        workspace_slug=ws_slug,
+    )
+    return JSONResponse(data or [])
+
+
+@app.post("/api/catalog/trash/{asset_id}/restore")
+@app.post("/api/catalogs/trash/{asset_id}/restore")
+async def ui_restore_catalog_asset(request: Request, asset_id: str):
+    token = request.cookies.get("lake_token")
+    ws = request.state.workspace
+    ws_id = (
+        (str(ws["id"]) if ws and isinstance(ws, dict) and "id" in ws else None)
+        or request.cookies.get("lake_workspace_id")
+        or request.cookies.get("lake_active_workspace")
+    )
+    ws_slug = (
+        ws.get("slug") if ws and isinstance(ws, dict) else None
+    ) or request.cookies.get("lake_workspace_slug")
+    res, err = _backend_post_with_error(
+        f"/api/catalog/trash/{asset_id}/restore",
+        token or "",
+        {},
+        workspace_id=ws_id,
+        workspace_slug=ws_slug,
+    )
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=400)
+    return JSONResponse(res or {"ok": True})
+
+
+@app.post("/api/catalog/trash/{asset_id}/purge")
+@app.post("/api/catalogs/trash/{asset_id}/purge")
+async def ui_purge_catalog_asset(request: Request, asset_id: str):
+    token = request.cookies.get("lake_token")
+    ws = request.state.workspace
+    ws_id = (
+        (str(ws["id"]) if ws and isinstance(ws, dict) and "id" in ws else None)
+        or request.cookies.get("lake_workspace_id")
+        or request.cookies.get("lake_active_workspace")
+    )
+    ws_slug = (
+        ws.get("slug") if ws and isinstance(ws, dict) else None
+    ) or request.cookies.get("lake_workspace_slug")
+    res, err = _backend_post_with_error(
+        f"/api/catalog/trash/{asset_id}/purge",
+        token or "",
+        {},
+        workspace_id=ws_id,
+        workspace_slug=ws_slug,
+    )
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=400)
+    return JSONResponse(res or {"ok": True})
+
+
+
 @app.post("/catalog/create")
 async def catalog_create(
     request: Request,
