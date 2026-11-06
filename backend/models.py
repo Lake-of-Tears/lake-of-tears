@@ -572,3 +572,52 @@ class SecretAcl(Base):
 
     scope: Mapped["SecretScope"] = relationship(back_populates="acls")
     creator: Mapped["User | None"] = relationship(foreign_keys=[created_by])
+
+
+class DeletedCatalogAsset(Base):
+    __tablename__ = "deleted_catalog_assets"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    catalog_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("catalogs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    schema_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )
+    # 'table' | 'schema'
+    asset_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    slug: Mapped[str] = mapped_column(String(255), nullable=False)
+    tier: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    s3_path_pattern: Mapped[str | None] = mapped_column(Text, nullable=True)
+    column_defs: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=list)
+    schema_drift: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    vector_index: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
+    is_managed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    trash_s3_prefix: Mapped[str | None] = mapped_column(Text, nullable=True)
+    trash_embeddings_prefix: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Batch ID links cascaded schema drops to child tables
+    batch_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )
+    dropped_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    dropped_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    purge_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    workspace: Mapped["Workspace"] = relationship(foreign_keys=[workspace_id])
+    catalog: Mapped["Catalog"] = relationship(foreign_keys=[catalog_id])
+    dropper: Mapped["User | None"] = relationship(foreign_keys=[dropped_by])

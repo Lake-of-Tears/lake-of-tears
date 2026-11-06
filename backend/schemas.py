@@ -511,6 +511,61 @@ class CatalogTableResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class DeletedCatalogAssetResponse(BaseModel):
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    catalog_id: uuid.UUID
+    catalog_name: str | None = None
+    schema_id: uuid.UUID | None = None
+    schema_name: str | None = None
+    asset_type: str  # 'table' | 'schema'
+    name: str
+    slug: str
+    tier: str | None = None
+    description: str | None = None
+    s3_path_pattern: str | None = None
+    column_defs: list | None = None
+    schema_drift: bool = False
+    vector_index: dict | None = None
+    is_managed: bool = True
+    trash_s3_prefix: str | None = None
+    trash_embeddings_prefix: str | None = None
+    batch_id: uuid.UUID | None = None
+    dropped_by: uuid.UUID | None = None
+    dropped_by_email: str | None = None
+    dropped_at: datetime
+    purge_at: datetime
+    days_remaining: float | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class AssetDependency(BaseModel):
+    id: str
+    name: str
+    type: str  # 'dag' | 'pipeline'
+    file_path: str | None = None
+    match_snippet: str | None = None
+
+
+class AssetDependenciesResponse(BaseModel):
+    target_type: str  # 'table' | 'schema'
+    target_name: str
+    is_managed: bool = True
+    child_tables_count: int = 0
+    dependencies: list[AssetDependency] = []
+    has_dependencies: bool = False
+
+
+class DeleteTableRequest(BaseModel):
+    confirm_name: str
+
+
+class DeleteSchemaRequest(BaseModel):
+    confirm_name: str
+    cascade: bool = False
+
+
 class CatalogSchemaResponse(BaseModel):
     id: uuid.UUID
     catalog_id: uuid.UUID

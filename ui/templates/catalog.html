@@ -167,7 +167,10 @@
   html[data-theme="light"] #create-schema-modal > div,
   html[data-theme="light"] #create-table-upload-modal > div,
   html[data-theme="light"] #create-table-prompt-modal > div,
-  html[data-theme="light"] #export-toon-modal > div {
+  html[data-theme="light"] #export-toon-modal > div,
+  html[data-theme="light"] #delete-table-modal > div,
+  html[data-theme="light"] #delete-schema-modal > div,
+  html[data-theme="light"] #trash-drawer {
     background-color: #ffffff !important;
     border-color: #e5e7eb !important;
     color: #111827 !important;
@@ -176,7 +179,9 @@
   html[data-theme="light"] #create-schema-modal label,
   html[data-theme="light"] #create-table-upload-modal label,
   html[data-theme="light"] #create-table-prompt-modal label,
-  html[data-theme="light"] #create-catalog-modal label {
+  html[data-theme="light"] #create-catalog-modal label,
+  html[data-theme="light"] #delete-table-modal label,
+  html[data-theme="light"] #delete-schema-modal label {
     color: #374151 !important;
   }
   html[data-theme="light"] #create-schema-modal div[class*="border-b"],
@@ -186,6 +191,11 @@
   html[data-theme="light"] #create-table-prompt-modal div[class*="border-t"],
   html[data-theme="light"] #export-toon-modal div[class*="border-b"],
   html[data-theme="light"] #export-toon-modal div[class*="border-t"],
+  html[data-theme="light"] #delete-table-modal div[class*="border-b"],
+  html[data-theme="light"] #delete-table-modal div[class*="border-t"],
+  html[data-theme="light"] #delete-schema-modal div[class*="border-b"],
+  html[data-theme="light"] #delete-schema-modal div[class*="border-t"],
+  html[data-theme="light"] #trash-drawer div[class*="border-b"],
   html[data-theme="light"] #create-catalog-modal div[class*="border-b"] {
     border-color: #e5e7eb !important;
   }
@@ -282,6 +292,19 @@
         </svg>
         Add Data
       </a>
+      <!-- Trash / Recently Deleted Button with Badge -->
+      <button type="button"
+              id="trash-drawer-btn"
+              onclick="openTrashDrawer()"
+              class="btn-ghost text-xs px-3 py-1.5 border border-white/[0.08] hover:border-amber-500/40 text-gray-400 hover:text-amber-300 flex items-center gap-1.5 transition-all shadow-sm"
+              title="View recently deleted tables & schemas (7-day recovery)">
+        <svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+        </svg>
+        <span>Trash</span>
+        <span id="trash-count-badge" class="hidden text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-amber-950/60 text-amber-400 border border-amber-800/50">0</span>
+      </button>
+
       {% if request.state.user %}
       <button onclick="document.getElementById('create-catalog-modal').classList.remove('hidden')"
               class="btn-primary">
@@ -426,6 +449,19 @@
                         title="Export Schema definition as TOON">
                   TOON
                 </button>
+
+                {% if schema.tier not in ('bronze', 'silver', 'gold') and (catalog.my_access in ('owner', 'write') or (request.state.user and request.state.user.role in ('superadmin', 'admin'))) %}
+                <!-- Delete Schema Button -->
+                <button type="button"
+                        onclick="openDeleteSchemaModal('{{ catalog.id }}', '{{ schema.id }}', '{{ schema.slug|sql_ident }}', '{{ schema.name }}', {{ schema.tables | length }})"
+                        class="btn-xs border border-transparent hover:border-red-500/30 text-gray-500 hover:text-red-400 hover:bg-red-500/10 p-1 rounded transition-colors"
+                        title="Delete schema">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                  </svg>
+                </button>
+                {% endif %}
+
 
                 <span class="text-[11px] text-gray-600">
                   {{ schema.tables | length }} table{{ 's' if schema.tables | length != 1 }}
@@ -761,6 +797,17 @@
         <svg class="w-3.5 h-3.5 {% if has_ai %}text-purple-400{% else %}text-gray-500{% endif %}" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
         Enrich with AI
       </button>
+
+      <!-- Delete Table Button -->
+      <button type="button" id="panel-delete-btn" onclick="openDeleteTableModal()"
+              class="btn-ghost text-xs py-1.5 text-gray-400 hover:text-red-400 border border-gray-800 hover:border-red-800/40 flex items-center gap-1.5 transition-colors ml-auto"
+              title="Delete table">
+        <svg class="w-3.5 h-3.5 text-gray-500 hover:text-red-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+        </svg>
+        Delete
+      </button>
+
     </div>
 
     <!-- Tabs bar -->
@@ -1123,6 +1170,156 @@
     </div>
   </div>
 </div>
+
+<!-- Delete Table Safety Modal -->
+<div id="delete-table-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+  <div class="bg-[#18181b] border border-red-500/30 rounded-xl shadow-2xl w-full max-w-lg p-6 flex flex-col space-y-4">
+    <div class="flex items-center justify-between pb-3 border-b border-white/[0.08]">
+      <div class="flex items-center gap-2.5">
+        <div class="w-8 h-8 rounded-lg bg-red-950/60 border border-red-500/40 flex items-center justify-center text-red-400">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+          </svg>
+        </div>
+        <div>
+          <h2 class="text-base font-semibold text-gray-100">Delete Table</h2>
+          <p class="text-xs text-gray-400 font-mono" id="delete-table-qualified-name"></p>
+        </div>
+      </div>
+      <button type="button" onclick="closeDeleteTableModal()" class="text-gray-500 hover:text-gray-300 p-1 rounded">✕</button>
+    </div>
+
+    <!-- Storage Handling Banner -->
+    <div id="delete-table-storage-banner" class="p-3 rounded-lg text-xs flex items-start gap-2.5 border">
+      <!-- Injected dynamically based on managed vs external -->
+    </div>
+
+    <!-- DAG / LAB Dependency Warnings -->
+    <div id="delete-table-deps-container" class="hidden p-3 rounded-lg bg-amber-950/30 border border-amber-800/40 text-xs text-amber-300 space-y-1.5">
+      <div class="font-semibold flex items-center gap-1.5 text-amber-200">
+        <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+        <span>Referenced in Pipelines / DAGs</span>
+      </div>
+      <ul id="delete-table-deps-list" class="list-disc list-inside space-y-0.5 text-amber-400 font-mono text-[11px]"></ul>
+    </div>
+
+    <!-- Confirmation input -->
+    <div class="space-y-1.5">
+      <label class="block text-xs text-gray-400">
+        Type <span class="font-mono text-red-400 font-bold select-all" id="delete-table-confirm-target"></span> to confirm:
+      </label>
+      <input type="text" id="delete-table-confirm-input" oninput="checkDeleteTableConfirm()" placeholder=""
+             class="w-full bg-black/40 border border-gray-700 rounded-lg px-3 py-2 text-xs font-mono text-gray-200 focus:outline-none focus:border-red-500">
+    </div>
+
+    <div class="flex items-center justify-end gap-2 pt-2 border-t border-white/[0.08]">
+      <button type="button" onclick="closeDeleteTableModal()" class="btn-ghost text-xs">Cancel</button>
+      <button type="button" id="delete-table-submit-btn" disabled onclick="submitDeleteTable()"
+              class="btn-xs px-3 py-2 rounded-lg bg-red-600/50 hover:bg-red-600 text-white font-medium text-xs opacity-50 cursor-not-allowed transition-all flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+        <span>Delete Table</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Delete Schema Safety Modal -->
+<div id="delete-schema-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+  <div class="bg-[#18181b] border border-red-500/30 rounded-xl shadow-2xl w-full max-w-lg p-6 flex flex-col space-y-4">
+    <div class="flex items-center justify-between pb-3 border-b border-white/[0.08]">
+      <div class="flex items-center gap-2.5">
+        <div class="w-8 h-8 rounded-lg bg-red-950/60 border border-red-500/40 flex items-center justify-center text-red-400">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+          </svg>
+        </div>
+        <div>
+          <h2 class="text-base font-semibold text-gray-100">Delete Schema</h2>
+          <p class="text-xs text-gray-400 font-mono" id="delete-schema-qualified-name"></p>
+        </div>
+      </div>
+      <button type="button" onclick="closeDeleteSchemaModal()" class="text-gray-500 hover:text-gray-300 p-1 rounded">✕</button>
+    </div>
+
+    <!-- Cascade Notice if child tables exist -->
+    <div id="delete-schema-cascade-box" class="hidden p-3 rounded-lg bg-amber-950/30 border border-amber-800/40 text-xs text-amber-200 space-y-2">
+      <div class="flex items-start gap-2">
+        <svg class="w-4 h-4 text-amber-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+        <div>
+          <p class="font-semibold text-amber-300">Schema contains child tables</p>
+          <p class="text-[11px] text-amber-400/90" id="delete-schema-child-msg"></p>
+        </div>
+      </div>
+      <label class="flex items-center gap-2 pt-1 font-medium cursor-pointer">
+        <input type="checkbox" id="delete-schema-cascade-cb" onchange="checkDeleteSchemaConfirm()" class="rounded border-gray-700 text-red-500 focus:ring-red-500">
+        <span>Delete all tables and views contained in this schema (CASCADE)</span>
+      </label>
+    </div>
+
+    <!-- DAG / LAB Dependency Warnings -->
+    <div id="delete-schema-deps-container" class="hidden p-3 rounded-lg bg-amber-950/30 border border-amber-800/40 text-xs text-amber-300 space-y-1.5">
+      <div class="font-semibold flex items-center gap-1.5 text-amber-200">
+        <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+        <span>Referenced in Pipelines / DAGs</span>
+      </div>
+      <ul id="delete-schema-deps-list" class="list-disc list-inside space-y-0.5 text-amber-400 font-mono text-[11px]"></ul>
+    </div>
+
+    <!-- Confirmation input -->
+    <div class="space-y-1.5">
+      <label class="block text-xs text-gray-400">
+        Type <span class="font-mono text-red-400 font-bold select-all" id="delete-schema-confirm-target"></span> to confirm:
+      </label>
+      <input type="text" id="delete-schema-confirm-input" oninput="checkDeleteSchemaConfirm()" placeholder=""
+             class="w-full bg-black/40 border border-gray-700 rounded-lg px-3 py-2 text-xs font-mono text-gray-200 focus:outline-none focus:border-red-500">
+    </div>
+
+    <div class="flex items-center justify-end gap-2 pt-2 border-t border-white/[0.08]">
+      <button type="button" onclick="closeDeleteSchemaModal()" class="btn-ghost text-xs">Cancel</button>
+      <button type="button" id="delete-schema-submit-btn" disabled onclick="submitDeleteSchema()"
+              class="btn-xs px-3 py-2 rounded-lg bg-red-600/50 hover:bg-red-600 text-white font-medium text-xs opacity-50 cursor-not-allowed transition-all flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+        <span>Delete Schema</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Recently Deleted (Trash) Slide-Over Drawer -->
+<div id="trash-drawer" class="fixed inset-y-0 right-0 w-[560px] max-w-[95vw] bg-[#161616] border-l border-white/[0.08] shadow-2xl z-50 hidden transition-all duration-150 flex flex-col">
+  <!-- Header -->
+  <div class="px-5 py-4 border-b border-white/[0.08] shrink-0 space-y-2">
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-2.5">
+        <div class="w-8 h-8 rounded-lg bg-amber-950/60 border border-amber-800/40 flex items-center justify-center text-amber-400">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+          </svg>
+        </div>
+        <div>
+          <h2 class="font-semibold text-gray-100 text-sm">Recently Deleted (Trash)</h2>
+          <p class="text-[11px] text-gray-500">7-day soft-delete retention window for managed tables & schemas</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button type="button" onclick="loadTrashItems()" class="text-gray-500 hover:text-gray-300 p-1.5 rounded hover:bg-white/[0.04] transition-colors" title="Refresh">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        </button>
+        <button onclick="closeTrashDrawer()" class="text-gray-500 hover:text-gray-300 p-1.5 rounded hover:bg-white/[0.04] transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Trash Items List -->
+  <div class="flex-1 overflow-y-auto p-5 text-sm space-y-3" id="trash-items-container">
+    <div class="flex items-center justify-center py-12 text-gray-500 text-xs">
+      Loading deleted assets...
+    </div>
+  </div>
+</div>
+<div id="trash-overlay" class="hidden fixed inset-0 z-40 bg-black/50" onclick="closeTrashDrawer()"></div>
 
 <script>
 const HAS_AI_CONFIGURED = {{ 'true' if has_ai else 'false' }};
@@ -2659,5 +2856,393 @@ window.navigateCatalogTo = function(item) {
     }, 150);
   }
 })();
+
+// ── Catalog Deletion & Trash Recovery ─────────────────────────────────────────
+
+let deleteTableTarget = { catId: '', schId: '', tableId: '', name: '' };
+let deleteSchemaTarget = { catId: '', schId: '', slug: '', name: '', childCount: 0 };
+
+async function initTrashBadge() {
+  try {
+    const resp = await fetch('/api/catalog/trash', { credentials: 'include' });
+    if (resp.ok) {
+      const items = await resp.json();
+      const badge = document.getElementById('trash-count-badge');
+      if (badge) {
+        if (items && items.length > 0) {
+          badge.textContent = items.length;
+          badge.classList.remove('hidden');
+        } else {
+          badge.classList.add('hidden');
+        }
+      }
+    }
+  } catch (err) {
+    console.debug('Failed to fetch trash badge count', err);
+  }
+}
+document.addEventListener('DOMContentLoaded', initTrashBadge);
+
+function openTrashDrawer() {
+  closePanel();
+  const drawer = document.getElementById('trash-drawer');
+  const overlay = document.getElementById('trash-overlay');
+  if (drawer && overlay) {
+    drawer.classList.remove('hidden');
+    drawer.style.display = 'flex';
+    overlay.classList.remove('hidden');
+    loadTrashItems();
+  }
+}
+
+function closeTrashDrawer() {
+  const drawer = document.getElementById('trash-drawer');
+  const overlay = document.getElementById('trash-overlay');
+  if (drawer && overlay) {
+    drawer.classList.add('hidden');
+    drawer.style.display = 'none';
+    overlay.classList.add('hidden');
+  }
+}
+
+async function loadTrashItems() {
+  const container = document.getElementById('trash-items-container');
+  if (!container) return;
+  container.innerHTML = '<div class="py-12 text-center text-gray-500 text-xs">Loading deleted assets...</div>';
+
+  try {
+    const resp = await fetch('/api/catalog/trash', { credentials: 'include' });
+    if (!resp.ok) {
+      container.innerHTML = '<div class="py-12 text-center text-red-400 text-xs">Failed to load trash assets</div>';
+      return;
+    }
+    const items = await resp.json();
+    initTrashBadge();
+
+    if (!items || items.length === 0) {
+      container.innerHTML = `
+        <div class="py-16 text-center space-y-2">
+          <div class="w-10 h-10 rounded-full bg-white/[0.04] text-gray-600 flex items-center justify-center mx-auto">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+            </svg>
+          </div>
+          <p class="text-sm font-medium text-gray-300">Trash is empty</p>
+          <p class="text-xs text-gray-500">Deleted tables and schemas will be held here for 7 days before permanent purge.</p>
+        </div>`;
+      return;
+    }
+
+    container.innerHTML = items.map(item => {
+      const isTable = item.asset_type === 'table';
+      const qualified = item.schema_name
+        ? `${item.catalog_name || 'main'}.${item.schema_name}.${item.name}`
+        : `${item.catalog_name || 'main'}.${item.name}`;
+      const rem = item.days_remaining !== null ? `${item.days_remaining}d remaining` : '7d TTL';
+
+      return `
+        <div class="p-3.5 rounded-lg border border-white/[0.06] bg-[#1a1a1e] space-y-2.5 group hover:border-white/[0.12] transition-colors">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0">
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <span class="text-[10px] font-mono px-1.5 py-0.5 rounded ${isTable ? 'bg-blue-950/60 text-blue-400 border border-blue-800/40' : 'bg-purple-950/60 text-purple-400 border border-purple-800/40'} font-semibold uppercase">
+                  ${item.asset_type}
+                </span>
+                <span class="font-mono text-xs font-semibold text-gray-200 truncate">${item.name}</span>
+                ${item.is_managed ? '<span class="text-[10px] text-emerald-400/80 font-mono">managed</span>' : '<span class="text-[10px] text-gray-500 font-mono">external</span>'}
+              </div>
+              <p class="text-[11px] font-mono text-gray-500 truncate mt-0.5">${qualified}</p>
+            </div>
+            <span class="text-[11px] font-mono px-2 py-0.5 rounded bg-amber-950/50 text-amber-400 border border-amber-800/40 shrink-0">
+              ${rem}
+            </span>
+          </div>
+
+          <div class="flex items-center justify-between pt-1 border-t border-white/[0.04] text-[11px] text-gray-500">
+            <span>Dropped ${item.dropped_by_email ? 'by ' + item.dropped_by_email : ''}</span>
+            <div class="flex items-center gap-1.5">
+              <button type="button" onclick="purgeTrashAsset('${item.id}', '${item.name}')"
+                      class="px-2 py-1 text-xs text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
+                      title="Permanently purge now">
+                Purge
+              </button>
+              <button type="button" onclick="restoreTrashAsset('${item.id}', '${item.name}')"
+                      class="px-2.5 py-1 text-xs bg-emerald-600/30 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/40 rounded transition-all font-medium flex items-center gap-1"
+                      title="Restore to active catalog">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                Restore
+              </button>
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+  } catch (err) {
+    container.innerHTML = `<div class="py-12 text-center text-red-400 text-xs">Error: ${err.message}</div>`;
+  }
+}
+
+async function restoreTrashAsset(assetId, name) {
+  try {
+    const resp = await fetch(`/api/catalog/trash/${assetId}/restore`, {
+      method: 'POST',
+      credentials: 'include'
+    });
+    const res = await resp.json();
+    if (!resp.ok || !res.ok) {
+      showCatalogToast(res.error || res.detail || 'Failed to restore asset', 'error');
+      return;
+    }
+    showCatalogToast(res.message || `Restored ${name}`, 'success');
+    loadTrashItems();
+    setTimeout(() => window.location.reload(), 1200);
+  } catch (err) {
+    showCatalogToast(`Restore error: ${err.message}`, 'error');
+  }
+}
+
+async function purgeTrashAsset(assetId, name) {
+  if (!confirm(`Are you sure you want to permanently delete '${name}'? This cannot be undone.`)) {
+    return;
+  }
+  try {
+    const resp = await fetch(`/api/catalog/trash/${assetId}/purge`, {
+      method: 'POST',
+      credentials: 'include'
+    });
+    const res = await resp.json();
+    if (!resp.ok || !res.ok) {
+      showCatalogToast(res.error || res.detail || 'Failed to purge asset', 'error');
+      return;
+    }
+    showCatalogToast(`Permanently deleted ${name}`, 'info');
+    loadTrashItems();
+  } catch (err) {
+    showCatalogToast(`Purge error: ${err.message}`, 'error');
+  }
+}
+
+// ── Delete Table Modal ──
+
+async function openDeleteTableModal() {
+  if (!currentTableData) return;
+  deleteTableTarget = {
+    catId: currentCatId,
+    schId: currentSchId,
+    tableId: currentTableId,
+    name: currentTableIdent
+  };
+
+  const modal = document.getElementById('delete-table-modal');
+  const qual = document.getElementById('delete-table-qualified-name');
+  const targetLabel = document.getElementById('delete-table-confirm-target');
+  const input = document.getElementById('delete-table-confirm-input');
+  const submitBtn = document.getElementById('delete-table-submit-btn');
+  const banner = document.getElementById('delete-table-storage-banner');
+  const depsContainer = document.getElementById('delete-table-deps-container');
+  const depsList = document.getElementById('delete-table-deps-list');
+
+  qual.textContent = `${currentCatIdent}.${currentSchIdent}.${currentTableIdent}`;
+  targetLabel.textContent = currentTableIdent;
+  input.value = '';
+  submitBtn.disabled = true;
+  submitBtn.classList.add('opacity-50', 'cursor-not-allowed');
+
+  // Determine managed vs external
+  const s3Pat = (currentTableData.s3_path_pattern || '').trim();
+  const isManaged = s3Pat.includes('/workspaces/') || !s3Pat;
+  if (isManaged) {
+    banner.className = 'p-3 rounded-lg text-xs flex items-start gap-2.5 bg-blue-950/30 border border-blue-800/40 text-blue-200';
+    banner.innerHTML = `
+      <svg class="w-4 h-4 text-blue-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      <div>
+        <span class="font-semibold text-blue-300">Managed Lakehouse Table</span>
+        <p class="text-[11px] text-blue-400/80 mt-0.5">Parquet data and vector embeddings will be moved to the workspace trash and permanently purged after 7 days (UNDROP recoverable).</p>
+      </div>`;
+  } else {
+    banner.className = 'p-3 rounded-lg text-xs flex items-start gap-2.5 bg-gray-900 border border-gray-700 text-gray-300';
+    banner.innerHTML = `
+      <svg class="w-4 h-4 text-gray-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      <div>
+        <span class="font-semibold text-gray-200">External Table</span>
+        <p class="text-[11px] text-gray-400 mt-0.5">Only catalog metadata will be dropped. Raw data files at <code class="font-mono text-gray-300">${s3Pat}</code> remain untouched.</p>
+      </div>`;
+  }
+
+  depsContainer.classList.add('hidden');
+  depsList.innerHTML = '';
+  modal.classList.remove('hidden');
+
+  // Fetch dependencies asynchronously
+  try {
+    const dResp = await fetch(`/api/catalog/${currentCatId}/schemas/${currentSchId}/tables/${currentTableId}/dependencies`, { credentials: 'include' });
+    if (dResp.ok) {
+      const dData = await dResp.json();
+      if (dData.has_dependencies && dData.dependencies && dData.dependencies.length > 0) {
+        depsContainer.classList.remove('hidden');
+        depsList.innerHTML = dData.dependencies.map(d => `<li>${d.type.toUpperCase()}: ${d.name} ${d.match_snippet ? `— "${d.match_snippet}"` : ''}</li>`).join('');
+      }
+    }
+  } catch (err) {
+    console.debug('Failed loading table dependencies', err);
+  }
+}
+
+function closeDeleteTableModal() {
+  document.getElementById('delete-table-modal').classList.add('hidden');
+}
+
+function checkDeleteTableConfirm() {
+  const val = (document.getElementById('delete-table-confirm-input').value || '').trim();
+  const btn = document.getElementById('delete-table-submit-btn');
+  const match = val.toLowerCase() === deleteTableTarget.name.toLowerCase();
+  btn.disabled = !match;
+  btn.classList.toggle('opacity-50', !match);
+  btn.classList.toggle('cursor-not-allowed', !match);
+}
+
+async function submitDeleteTable() {
+  const btn = document.getElementById('delete-table-submit-btn');
+  btn.disabled = true;
+  btn.innerHTML = 'Deleting...';
+
+  try {
+    const resp = await fetch(`/api/catalog/${deleteTableTarget.catId}/schemas/${deleteTableTarget.schId}/tables/${deleteTableTarget.tableId}`, {
+      method: 'DELETE',
+      credentials: 'include'
+    });
+    const res = await resp.json();
+    if (!resp.ok || !res.ok) {
+      showCatalogToast(res.error || res.detail || 'Failed to delete table', 'error');
+      btn.disabled = false;
+      btn.innerHTML = 'Delete Table';
+      return;
+    }
+    showCatalogToast(`Table '${deleteTableTarget.name}' moved to trash (7-day UNDROP recovery available)`, 'success');
+    closeDeleteTableModal();
+    closePanel();
+    initTrashBadge();
+    setTimeout(() => window.location.reload(), 1000);
+  } catch (err) {
+    showCatalogToast(`Delete failed: ${err.message}`, 'error');
+    btn.disabled = false;
+    btn.innerHTML = 'Delete Table';
+  }
+}
+
+// ── Delete Schema Modal ──
+
+async function openDeleteSchemaModal(catId, schId, slug, name, childCount) {
+  closeAllDropdowns();
+  deleteSchemaTarget = {
+    catId: catId,
+    schId: schId,
+    slug: slug,
+    name: name || slug,
+    childCount: childCount || 0
+  };
+
+  const modal = document.getElementById('delete-schema-modal');
+  const qual = document.getElementById('delete-schema-qualified-name');
+  const targetLabel = document.getElementById('delete-schema-confirm-target');
+  const input = document.getElementById('delete-schema-confirm-input');
+  const cascadeBox = document.getElementById('delete-schema-cascade-box');
+  const cascadeCb = document.getElementById('delete-schema-cascade-cb');
+  const childMsg = document.getElementById('delete-schema-child-msg');
+  const submitBtn = document.getElementById('delete-schema-submit-btn');
+  const depsContainer = document.getElementById('delete-schema-deps-container');
+  const depsList = document.getElementById('delete-schema-deps-list');
+
+  qual.textContent = `schema: ${slug}`;
+  targetLabel.textContent = slug;
+  input.value = '';
+  cascadeCb.checked = false;
+  submitBtn.disabled = true;
+  submitBtn.classList.add('opacity-50', 'cursor-not-allowed');
+
+  if (childCount > 0) {
+    cascadeBox.classList.remove('hidden');
+    childMsg.textContent = `Contains ${childCount} table(s). Without CASCADE, dropping non-empty schemas is blocked.`;
+  } else {
+    cascadeBox.classList.add('hidden');
+  }
+
+  depsContainer.classList.add('hidden');
+  depsList.innerHTML = '';
+  modal.classList.remove('hidden');
+
+  try {
+    const dResp = await fetch(`/api/catalog/${catId}/schemas/${schId}/dependencies`, { credentials: 'include' });
+    if (dResp.ok) {
+      const dData = await dResp.json();
+      if (dData.has_dependencies && dData.dependencies && dData.dependencies.length > 0) {
+        depsContainer.classList.remove('hidden');
+        depsList.innerHTML = dData.dependencies.map(d => `<li>${d.type.toUpperCase()}: ${d.name} ${d.match_snippet ? `— "${d.match_snippet}"` : ''}</li>`).join('');
+      }
+    }
+  } catch (err) {
+    console.debug('Failed loading schema dependencies', err);
+  }
+}
+
+function closeDeleteSchemaModal() {
+  document.getElementById('delete-schema-modal').classList.add('hidden');
+}
+
+function checkDeleteSchemaConfirm() {
+  const val = (document.getElementById('delete-schema-confirm-input').value || '').trim();
+  const btn = document.getElementById('delete-schema-submit-btn');
+  const cascadeCb = document.getElementById('delete-schema-cascade-cb');
+
+  const nameMatch = (
+    val.toLowerCase() === deleteSchemaTarget.slug.toLowerCase() ||
+    val.toLowerCase() === deleteSchemaTarget.name.toLowerCase()
+  );
+  const cascadeOk = deleteSchemaTarget.childCount === 0 || cascadeCb.checked;
+
+  const valid = nameMatch && cascadeOk;
+  btn.disabled = !valid;
+  btn.classList.toggle('opacity-50', !valid);
+  btn.classList.toggle('cursor-not-allowed', !valid);
+}
+
+async function submitDeleteSchema() {
+  const btn = document.getElementById('delete-schema-submit-btn');
+  const cascadeCb = document.getElementById('delete-schema-cascade-cb');
+  const cascade = cascadeCb ? cascadeCb.checked : false;
+
+  btn.disabled = true;
+  btn.innerHTML = 'Deleting...';
+
+  try {
+    const resp = await fetch(`/api/catalog/${deleteSchemaTarget.catId}/schemas/${deleteSchemaTarget.schId}?cascade=${cascade ? 'true' : 'false'}`, {
+      method: 'DELETE',
+      credentials: 'include'
+    });
+    const res = await resp.json();
+    if (!resp.ok || !res.ok) {
+      showCatalogToast(res.error || res.detail || 'Failed to delete schema', 'error');
+      btn.disabled = false;
+      btn.innerHTML = 'Delete Schema';
+      return;
+    }
+    showCatalogToast(`Schema '${deleteSchemaTarget.slug}' moved to trash`, 'success');
+    closeDeleteSchemaModal();
+    initTrashBadge();
+    setTimeout(() => window.location.reload(), 1000);
+  } catch (err) {
+    showCatalogToast(`Delete failed: ${err.message}`, 'error');
+    btn.disabled = false;
+    btn.innerHTML = 'Delete Schema';
+  }
+}
+
+// Global Escape key handler for slide-over drawers and modals
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closeDeleteTableModal();
+    closeDeleteSchemaModal();
+    closeTrashDrawer();
+  }
+});
 </script>
 {% endblock %}

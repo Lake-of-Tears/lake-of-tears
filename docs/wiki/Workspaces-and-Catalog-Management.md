@@ -323,6 +323,56 @@ To minimize token consumption when injecting lakehouse schemas into autonomous L
 - **Enrich with AI:**
   - 1-click action in Table Details drawer to automatically generate semantic business summaries and per-column documentation for existing datasets.
 
+### Schema & Table Deletion, CASCADE Drops, and 7-Day UNDROP Recovery
+
+Lake of Tears provides Databricks parity for schema and table lifecycle management, including safety modals, dependency checks, physical trash storage isolation, and a 7-day retention window for instant disaster recovery:
+
+```mermaid
+flowchart TD
+    UIAction["Delete triggered in Catalog Explorer or SQL Editor"] --> Target{"Asset Type"}
+    Target -- "Table" --> TableCheck{"Managed or External?"}
+    TableCheck -- "Managed Table" --> MoveTrash["Move Parquet data to workspaces/{ws}/.trash/{asset_id}/<br/>Move vector embeddings to .trash/{asset_id}_embeddings/"]
+    TableCheck -- "External Table" --> DropMeta["Drop catalog metadata only<br/>Raw storage left untouched"]
+    
+    Target -- "Schema" --> CascadeCheck{"Contains child tables?"}
+    CascadeCheck -- "No" --> SoftDelSchema["Soft-delete schema record into deleted_catalog_assets"]
+    CascadeCheck -- "Yes & cascade=false" --> RestrictErr["Reject with 409 Conflict (RESTRICT)"]
+    CascadeCheck -- "Yes & cascade=true" --> BatchDrop["Generate batch_id<br/>Soft-delete child tables to .trash/<br/>Soft-delete schema into deleted_catalog_assets"]
+
+    MoveTrash --> ArchiveRecord[("deleted_catalog_assets<br/>Postgres Table (7-day TTL)")]
+    DropMeta --> ArchiveRecord
+    SoftDelSchema --> ArchiveRecord
+    BatchDrop --> ArchiveRecord
+
+    ArchiveRecord --> Recovery{"Within 7 Days?"}
+    Recovery -- "UNDROP executed (UI or SQL)" --> RestoreAction["Move storage back from .trash/<br/>Restore table/schema records to active catalog"]
+    Recovery -- "TTL Expired (> 7 days)" --> PurgeAction["Background sweeper permanently deletes .trash/ files & records"]
+```
+
+#### 1. Table Deletion in Catalog View
+- **UI Trigger:** `Delete` action in the Table Details slide-over drawer (`#table-panel`).
+- **Safety & Typing Confirmation Modal:**
+  - Requires the user to type the exact table name before confirming deletion.
+  - **Managed vs. External Awareness:** Clearly indicates whether raw storage and embeddings will be moved to the 7-day trash or if only catalog metadata is dropped.
+  - **Pipeline & DAG Dependency Check:** Dynamically inspects workspace Airflow DAG Python files and `PipelineMetadata` descriptions, warning operators if downstream ETL workflows reference the table.
+
+#### 2. Schema Deletion with CASCADE
+- **UI Trigger:** Trash icon action on custom schema rows in Catalog Explorer (locked medallion schemas `bronze`, `silver`, `gold` are strictly protected and cannot be deleted).
+- **Interactive Cascade Control:**
+  - If child tables or views exist, deletion without CASCADE is blocked (matching standard SQL `RESTRICT` behavior with `409 Conflict`).
+  - Checking the `Delete all tables and views contained in this schema (CASCADE)` checkbox soft-deletes the schema and all child assets in a unified batch (`batch_id`).
+
+#### 3. 7-Day Soft-Delete & UNDROP Recovery
+- **Dedicated Archive Store (`deleted_catalog_assets`):** Complete snapshots of dropped table schemas, column definitions, vector indices, and storage references are preserved without unique slug collision issues.
+- **Top Header Trash Drawer:**
+  - Click the `Trash (N)` pill button in the top navigation bar to open the Recently Deleted drawer.
+  - View soft-deleted assets, who dropped them, and real-time countdown badges (e.g. `6.8d remaining`).
+  - **1-Click Restore:** Restores table or schema (including all cascaded child tables) and moves physical S3 data back instantly.
+  - **Purge Now:** Admin action to immediately hard-delete assets without waiting for the 7-day TTL.
+- **SQL UNDROP Execution:**
+  - Run `UNDROP TABLE <catalog>.<schema>.<table_name>` or `UNDROP SCHEMA <catalog>.<schema>` directly in the Lake SQL Editor (`/sql`).
+  - Lake of Tears intercepts and executes the restore pipeline before the DuckDB engine, returning formatted execution success manifests.
+
 ---
 
 ## 6. UI Asset Isolation & the "Hide Shared Assets" Toggle

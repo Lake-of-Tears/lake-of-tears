@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import UTC, datetime
 from typing import Any
 
 from storage_service import MINIO_BUCKET, _human_size, get_s3_client
+
+logger = logging.getLogger("lake.backend.catalog_storage")
 
 _GLOB_CHARS = re.compile(r"[*?\[]")
 
@@ -139,3 +142,46 @@ def delete_prefix(prefix: str, bucket: str = MINIO_BUCKET, client=None) -> int:
             s3.delete_objects(Bucket=bucket, Delete={"Objects": objects})
             deleted += len(objects)
     return deleted
+
+
+def move_prefix(
+    src_prefix: str,
+    dst_prefix: str,
+    bucket: str = MINIO_BUCKET,
+    client: Any = None,
+) -> int:
+    """Move all objects under src_prefix to dst_prefix. Returns the number moved."""
+    s3 = client or get_s3_client()
+    clean_src = src_prefix.strip("/")
+    if clean_src and not clean_src.endswith("/"):
+        clean_src += "/"
+    clean_dst = dst_prefix.strip("/")
+    if clean_dst and not clean_dst.endswith("/"):
+        clean_dst += "/"
+
+    moved = 0
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=clean_src):
+        contents = page.get("Contents", [])
+        if not contents:
+            continue
+        to_delete = []
+        for item in contents:
+            key = item["Key"]
+            rel_key = key[len(clean_src) :]
+            dst_key = f"{clean_dst}{rel_key}"
+            try:
+                s3.copy_object(
+                    Bucket=bucket,
+                    CopySource={"Bucket": bucket, "Key": key},
+                    Key=dst_key,
+                )
+                to_delete.append({"Key": key})
+                moved += 1
+            except Exception as exc:
+                logger.warning("Failed to copy %s to %s: %s", key, dst_key, exc)
+
+        if to_delete:
+            s3.delete_objects(Bucket=bucket, Delete={"Objects": to_delete})
+
+    return moved

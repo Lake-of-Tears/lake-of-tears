@@ -97,6 +97,7 @@ from pipelines_router import router as pipelines_router
 from schemas import (
     AddMemberRequest,
     AnomalyDetectRequest,
+    AssetDependenciesResponse,
     CandidateMemberResponse,
     CatalogAccessResponse,
     CatalogDirectoryItem,
@@ -109,6 +110,7 @@ from schemas import (
     CreateSchemaRequest,
     CreateTableRequest,
     CreateWorkspaceRequest,
+    DeletedCatalogAssetResponse,
     DeleteWorkspaceRequest,
     ForgotPasswordRequest,
     InboundAccessRequest,
@@ -173,6 +175,12 @@ async def lifespan(app: FastAPI):
     try:
         _backfill_default_catalogs(db)
         _ensure_system_settings(db)
+        try:
+            import catalog_trash_service
+
+            catalog_trash_service.purge_expired_assets(db)
+        except Exception as exc:
+            logger.debug("Catalog trash startup sweeper skipped or failed: %s", exc)
     finally:
         db.close()
     yield
@@ -2647,8 +2655,15 @@ def update_schema(
     )
 
 
-@app.delete("/api/catalogs/{catalog_id}/schemas/{schema_id}")
-def delete_schema(
+@app.get(
+    "/api/catalogs/{catalog_id}/schemas/{schema_id}/dependencies",
+    response_model=AssetDependenciesResponse,
+)
+@app.get(
+    "/api/catalog/{catalog_id}/schemas/{schema_id}/dependencies",
+    response_model=AssetDependenciesResponse,
+)
+def get_schema_dependencies(
     catalog_id: str,
     schema_id: str,
     db: Session = Depends(get_db),
@@ -2661,7 +2676,7 @@ def delete_schema(
     catalog = db.query(Catalog).filter(Catalog.id == cat_uuid).first() if cat_uuid else None
     if not catalog:
         raise HTTPException(404, "Catalog not found")
-    _assert_catalog_access(db, catalog, current_user, "owner", ws=ws)
+    _assert_catalog_access(db, catalog, current_user, "read", ws=ws)
     schema = (
         db.query(CatalogSchema).filter_by(id=sch_uuid, catalog_id=cat_uuid).first()
         if sch_uuid and cat_uuid
@@ -2669,11 +2684,49 @@ def delete_schema(
     )
     if not schema:
         raise HTTPException(404, "Schema not found")
-    if schema.tier in _MEDALLION_TIERS:
-        raise HTTPException(400, f"Cannot delete the locked '{schema.tier}' medallion schema")
-    db.delete(schema)
+    import catalog_trash_service
+
+    return catalog_trash_service.check_schema_dependencies(
+        schema=schema, catalog=catalog, workspace=ws, db=db
+    )
+
+
+@app.delete("/api/catalogs/{catalog_id}/schemas/{schema_id}")
+@app.delete("/api/catalog/{catalog_id}/schemas/{schema_id}")
+def delete_schema(
+    catalog_id: str,
+    schema_id: str,
+    cascade: bool = False,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    ws_ctx: tuple[Workspace, str] | None = Depends(get_catalog_workspace_and_role),
+):
+    ws = _extract_ws(ws_ctx)
+    cat_uuid = _as_uuid(catalog_id)
+    sch_uuid = _as_uuid(schema_id)
+    catalog = db.query(Catalog).filter(Catalog.id == cat_uuid).first() if cat_uuid else None
+    if not catalog:
+        raise HTTPException(404, "Catalog not found")
+    _assert_catalog_access(db, catalog, current_user, "write", ws=ws)
+    schema = (
+        db.query(CatalogSchema).filter_by(id=sch_uuid, catalog_id=cat_uuid).first()
+        if sch_uuid and cat_uuid
+        else None
+    )
+    if not schema:
+        raise HTTPException(404, "Schema not found")
+    import catalog_trash_service
+
+    deleted_assets = catalog_trash_service.soft_delete_schema(
+        db=db,
+        schema=schema,
+        catalog=catalog,
+        workspace=ws,
+        user_id=current_user.id,
+        cascade=cascade,
+    )
     db.commit()
-    return {"ok": True}
+    return {"ok": True, "deleted_count": len(deleted_assets)}
 
 
 @app.get("/api/catalogs/{catalog_id}/schemas/{schema_id}/toon")
@@ -3004,7 +3057,53 @@ def sync_table_vector_index_endpoint(
     return CatalogTableResponse.model_validate(table)
 
 
+@app.get(
+    "/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}/dependencies",
+    response_model=AssetDependenciesResponse,
+)
+@app.get(
+    "/api/catalog/{catalog_id}/schemas/{schema_id}/tables/{table_id}/dependencies",
+    response_model=AssetDependenciesResponse,
+)
+def get_table_dependencies(
+    catalog_id: str,
+    schema_id: str,
+    table_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    ws_ctx: tuple[Workspace, str] | None = Depends(get_catalog_workspace_and_role),
+):
+    ws = _extract_ws(ws_ctx)
+    cat_uuid = _as_uuid(catalog_id)
+    sch_uuid = _as_uuid(schema_id)
+    tbl_uuid = _as_uuid(table_id)
+    catalog = db.query(Catalog).filter(Catalog.id == cat_uuid).first() if cat_uuid else None
+    if not catalog:
+        raise HTTPException(404, "Catalog not found")
+    _assert_catalog_access(db, catalog, current_user, "read", ws=ws)
+    schema = (
+        db.query(CatalogSchema).filter_by(id=sch_uuid, catalog_id=cat_uuid).first()
+        if (sch_uuid and cat_uuid)
+        else None
+    )
+    if not schema:
+        raise HTTPException(404, "Schema not found")
+    table = (
+        db.query(CatalogTable).filter_by(id=tbl_uuid, schema_id=sch_uuid).first()
+        if (tbl_uuid and sch_uuid)
+        else None
+    )
+    if not table:
+        raise HTTPException(404, "Table not found")
+    import catalog_trash_service
+
+    return catalog_trash_service.check_table_dependencies(
+        table=table, schema=schema, catalog=catalog, workspace=ws, db=db
+    )
+
+
 @app.delete("/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}")
+@app.delete("/api/catalog/{catalog_id}/schemas/{schema_id}/tables/{table_id}")
 def delete_table(
     catalog_id: str,
     schema_id: str,
@@ -3021,6 +3120,13 @@ def delete_table(
     if not catalog:
         raise HTTPException(404, "Catalog not found")
     _assert_catalog_access(db, catalog, current_user, "write", ws=ws)
+    schema = (
+        db.query(CatalogSchema).filter_by(id=sch_uuid, catalog_id=cat_uuid).first()
+        if (sch_uuid and cat_uuid)
+        else None
+    )
+    if not schema:
+        raise HTTPException(404, "Schema not found")
     table = (
         db.query(CatalogTable).filter_by(id=tbl_uuid, schema_id=sch_uuid).first()
         if (tbl_uuid and sch_uuid)
@@ -3028,9 +3134,98 @@ def delete_table(
     )
     if not table:
         raise HTTPException(404, "Table not found")
-    db.delete(table)
+    import catalog_trash_service
+
+    deleted = catalog_trash_service.soft_delete_table(
+        db=db,
+        table=table,
+        schema=schema,
+        catalog=catalog,
+        workspace=ws,
+        user_id=current_user.id,
+    )
     db.commit()
-    return {"ok": True}
+    return {"ok": True, "deleted_id": str(deleted.id)}
+
+
+# ── Catalog Trash & Recovery ──────────────────────────────────────────────────
+
+
+@app.get("/api/catalog/trash", response_model=list[DeletedCatalogAssetResponse])
+@app.get("/api/catalogs/trash", response_model=list[DeletedCatalogAssetResponse])
+def get_catalog_trash(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    ctx: tuple[Workspace, str] = Depends(get_catalog_workspace_and_role),
+):
+    ws, role = ctx
+    import catalog_trash_service
+
+    return catalog_trash_service.list_workspace_trash(db, ws.id)
+
+
+@app.post("/api/catalog/trash/{asset_id}/restore")
+@app.post("/api/catalogs/trash/{asset_id}/restore")
+def restore_catalog_asset(
+    asset_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    ctx: tuple[Workspace, str] = Depends(get_catalog_workspace_and_role),
+):
+    ws, role = ctx
+    if current_user.role != "superadmin" and role not in ("admin", "write"):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Write or admin access required to restore catalog assets",
+        )
+    asset_uuid = _as_uuid(asset_id)
+    if not asset_uuid:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid asset ID")
+    import catalog_trash_service
+
+    return catalog_trash_service.restore_asset(db, asset_uuid, ws)
+
+
+@app.post("/api/catalog/trash/{asset_id}/purge")
+@app.post("/api/catalogs/trash/{asset_id}/purge")
+def purge_catalog_asset(
+    asset_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    ctx: tuple[Workspace, str] = Depends(get_catalog_workspace_and_role),
+):
+    ws, role = ctx
+    if current_user.role != "superadmin" and role != "admin":
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Admin access required to permanently purge trash assets",
+        )
+    asset_uuid = _as_uuid(asset_id)
+    if not asset_uuid:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid asset ID")
+    import catalog_trash_service
+    from models import DeletedCatalogAsset
+
+    asset = db.query(DeletedCatalogAsset).filter_by(id=asset_uuid, workspace_id=ws.id).first()
+    if not asset:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Deleted asset not found")
+    catalog_trash_service.purge_asset(db, asset)
+    db.commit()
+    return {"ok": True, "purged_id": str(asset_uuid)}
+
+
+@app.post("/api/catalog/trash/purge-expired")
+@app.post("/api/catalogs/trash/purge-expired")
+def purge_expired_catalog_trash(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role != "superadmin":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Superadmin access required")
+    import catalog_trash_service
+
+    purged_count = catalog_trash_service.purge_expired_assets(db)
+    return {"ok": True, "purged_count": purged_count}
 
 
 # ── Access management ─────────────────────────────────────────────────────────

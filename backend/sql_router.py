@@ -394,7 +394,16 @@ def _sync_catalog_table_metadata(
 
         if operation == "DROP":
             if existing_table is not None:
-                db.delete(existing_table)
+                import catalog_trash_service
+
+                catalog_trash_service.soft_delete_table(
+                    db=db,
+                    table=existing_table,
+                    schema=schema_obj,
+                    catalog=catalog,
+                    workspace=workspace,
+                    user_id=getattr(user, "id", None),
+                )
                 db.commit()
             return
 
@@ -827,6 +836,72 @@ def execute_statement(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access Denied: Workspace viewer role is read-only. Write or admin role is required for DDL/DML statements.",
         )
+
+    # 1b. Intercept UNDROP TABLE / UNDROP SCHEMA statements before DuckDB engine
+    if cleaned_sql.lstrip().upper().startswith("UNDROP"):
+        import catalog_trash_service
+
+        is_undrop, msg = catalog_trash_service.try_handle_undrop_statement(
+            sql=cleaned_sql,
+            workspace=ws,
+            user=user,
+            default_catalog=req.catalog,
+            default_schema=req.schema_name,
+            db=db,
+        )
+        if is_undrop:
+            statement_id = str(uuid.uuid4())
+            is_err = (msg or "").startswith("Error:") or (
+                (msg or "").startswith("UNDROP") and "failed:" in (msg or "")
+            )
+            if is_err:
+                stored = StoredStatement(
+                    statement_id=statement_id,
+                    workspace_id=str(ws.id),
+                    workspace_slug=ws.slug,
+                    user_id=str(user.id),
+                    statement=cleaned_sql,
+                    catalog=req.catalog or "main",
+                    schema_name=req.schema_name or "default",
+                    warehouse_id=req.warehouse_id or "default",
+                    format=req.format,
+                    status=StatementStatus(
+                        state="FAILED",
+                        error=StatementErrorInfo(
+                            error_code="EXECUTION_ERROR",
+                            message=msg or "UNDROP failed",
+                        ),
+                    ),
+                    execution_ms=5.0,
+                )
+            else:
+                cols = [StatementColumnInfo(name="result", type_text="VARCHAR")]
+                manifest, chunks = _build_chunks_and_manifest(
+                    statement_id=statement_id,
+                    columns=cols,
+                    raw_rows=[[msg]],
+                    row_limit=req.row_limit,
+                    byte_limit=req.byte_limit,
+                    chunk_size=req.chunk_size,
+                    fmt=req.format,
+                )
+                stored = StoredStatement(
+                    statement_id=statement_id,
+                    workspace_id=str(ws.id),
+                    workspace_slug=ws.slug,
+                    user_id=str(user.id),
+                    statement=cleaned_sql,
+                    catalog=req.catalog or "main",
+                    schema_name=req.schema_name or "default",
+                    warehouse_id=req.warehouse_id or "default",
+                    format=req.format,
+                    status=StatementStatus(state="SUCCEEDED"),
+                    manifest=manifest,
+                    chunks=chunks,
+                    execution_ms=10.0,
+                )
+            statement_store.put(stored)
+            return _to_execution_response(stored)
 
     # 2. Enforce host filesystem & S3 workspace isolation guardrails
     catalogs = ai_service.get_workspace_catalogs_from_db(db, ws.id, user_id=user.id)

@@ -322,11 +322,14 @@ _FILE_PATH_LIKE_RE = re.compile(
 
 
 def is_write_sql(sql: str) -> bool:
-    """Return True if the SQL statement contains DDL or DML operations (CREATE, INSERT, UPDATE, DELETE, ALTER, DROP, COPY TO)."""
+    """Return True if the SQL statement contains DDL or DML operations (CREATE, INSERT, UPDATE, DELETE, ALTER, DROP, UNDROP, COPY TO)."""
     cleaned = re.sub(r"--.*?$", "", sql, flags=re.MULTILINE)
     cleaned = re.sub(r"/\*.*?\*/", "", cleaned, flags=re.DOTALL).strip()
     if not cleaned:
         return False
+
+    if re.match(r"^\s*UNDROP\b", cleaned, re.IGNORECASE):
+        return True
 
     try:
         statements = [s for s in sqlglot.parse(cleaned, read="duckdb") if s is not None]
