@@ -1120,22 +1120,39 @@
             </p>
             {% endif %}
             {% elif f.name in ('chat_model', 'embedding_model') %}
-            <div class="relative flex items-center gap-2">
-              <input id="ai-{{ p.name }}-{{ f.name }}" type="text" name="cfg__{{ p.name }}__{{ f.name }}"
-                     list="datalist-{{ p.name }}-{{ f.name }}"
-                     value="{{ p.config.get(f.name) or '' }}" autocomplete="off"
-                     placeholder="{{ f.default or f.placeholder or '' }}"
-                     class="w-full input-dark text-sm font-mono"
-                     style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
-              <datalist id="datalist-{{ p.name }}-{{ f.name }}"></datalist>
-              <button type="button" onclick="discoverAiModels('{{ p.name }}')"
-                      title="Discover available models from {{ p.label }} API"
-                      class="shrink-0 px-2.5 py-2 text-xs rounded border border-gray-700 bg-white/[0.04] text-gray-300 hover:text-white hover:border-gray-500 transition-colors flex items-center gap-1.5">
-                <svg class="w-3.5 h-3.5 text-gray-400 discover-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                <span class="hidden sm:inline discover-label">Discover</span>
-              </button>
+            <div class="relative model-combobox-wrap" id="combobox-wrap-{{ p.name }}-{{ f.name }}">
+              <div class="flex items-center gap-2">
+                <div class="relative flex-1">
+                  <input id="ai-{{ p.name }}-{{ f.name }}" type="text" name="cfg__{{ p.name }}__{{ f.name }}"
+                         value="{{ p.config.get(f.name) or '' }}" autocomplete="off"
+                         placeholder="{{ f.default or f.placeholder or '' }}"
+                         class="w-full input-dark text-sm font-mono pr-8 focus:ring-1 focus:ring-blue-500/50"
+                         style="background-color: var(--c-input-bg); border-color: var(--c-input-border);"
+                         onfocus="openCustomModelDropdown('{{ p.name }}', '{{ f.name }}')"
+                         oninput="filterCustomModelDropdown('{{ p.name }}', '{{ f.name }}')"
+                         onkeydown="handleCustomModelDropdownKey(event, '{{ p.name }}', '{{ f.name }}')" />
+                  <button type="button" tabindex="-1" onclick="toggleCustomModelDropdown('{{ p.name }}', '{{ f.name }}')"
+                          class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 p-1 transition-colors"
+                          title="Toggle model suggestions">
+                    <svg class="w-4 h-4 transition-transform duration-200 dropdown-arrow-{{ p.name }}-{{ f.name }}" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                </div>
+                <button type="button" id="btn-discover-{{ p.name }}-{{ f.name }}" onclick="discoverAiModels('{{ p.name }}', '{{ f.name }}')"
+                        title="Discover available models from {{ p.label }} API"
+                        class="shrink-0 px-3 py-2 text-xs font-medium rounded-md border border-gray-700 bg-white/[0.04] text-gray-300 hover:text-white hover:bg-white/[0.08] hover:border-gray-500 transition-colors flex items-center gap-1.5 shadow-sm">
+                  <svg class="w-3.5 h-3.5 text-gray-400 discover-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span class="discover-label">Discover</span>
+                </button>
+              </div>
+
+              <!-- Custom Styled Suggestions Dropdown -->
+              <div id="dropdown-{{ p.name }}-{{ f.name }}"
+                   class="hidden absolute left-0 right-16 top-full mt-1.5 max-h-56 overflow-y-auto rounded-lg border border-white/10 bg-[#161619] shadow-2xl z-50 p-1.5 backdrop-blur-md">
+              </div>
             </div>
             {% if f.default %}
             <p class="text-[11px] text-gray-500 mt-1">
@@ -1912,7 +1929,142 @@ async function testAiProvider() {
   }
 }
 
-async function discoverAiModels(chosen) {
+const _curatedModels = {
+  gemini: {
+    chat_model: [
+      { id: 'gemini-2.5-flash', tag: 'Recommended' },
+      { id: 'gemini-2.5-pro', tag: 'High Reasoning' },
+      { id: 'gemini-2.0-flash', tag: 'Fast' },
+      { id: 'gemini-1.5-flash', tag: 'LTS Stable' },
+    ],
+    embedding_model: [
+      { id: 'gemini-embedding-001', tag: 'Recommended (768d)' },
+      { id: 'text-embedding-004', tag: '768d' },
+    ],
+  },
+  openai: {
+    chat_model: [
+      { id: 'gpt-4o-mini', tag: 'Recommended' },
+      { id: 'gpt-4o', tag: 'Flagship' },
+      { id: 'o1-mini', tag: 'Reasoning' },
+      { id: 'o3-mini', tag: 'Fast Reasoning' },
+    ],
+    embedding_model: [
+      { id: 'text-embedding-3-small', tag: 'Recommended (1536d)' },
+      { id: 'text-embedding-3-large', tag: 'High Accuracy (3072d)' },
+    ],
+  },
+  bedrock: {
+    chat_model: [
+      { id: 'anthropic.claude-3-5-haiku-20241022-v1:0', tag: 'Recommended' },
+      { id: 'anthropic.claude-3-5-sonnet-20241022-v2:0', tag: 'Sonnet' },
+    ],
+    embedding_model: [
+      { id: 'amazon.titan-embed-text-v2:0', tag: 'Recommended (1024d)' },
+      { id: 'cohere.embed-english-v3', tag: 'Cohere' },
+    ],
+  },
+  ollama: {
+    chat_model: [
+      { id: 'llama3.2', tag: 'Fast' },
+      { id: 'mistral', tag: 'General' },
+      { id: 'deepseek-r1', tag: 'Reasoning' },
+    ],
+    embedding_model: [
+      { id: 'nomic-embed-text', tag: 'Recommended' },
+      { id: 'bge-m3', tag: 'Multilingual' },
+    ],
+  },
+};
+
+function getModelList(provider, field) {
+  if (!_curatedModels[provider]) _curatedModels[provider] = {};
+  if (!_curatedModels[provider][field]) _curatedModels[provider][field] = [];
+  return _curatedModels[provider][field];
+}
+
+function openCustomModelDropdown(provider, field) {
+  const dropdown = document.getElementById('dropdown-' + provider + '-' + field);
+  if (!dropdown) return;
+  const input = document.getElementById('ai-' + provider + '-' + field);
+  renderCustomModelDropdown(provider, field, input ? input.value : '');
+  dropdown.classList.remove('hidden');
+  const arrow = document.querySelector('.dropdown-arrow-' + provider + '-' + field);
+  if (arrow) arrow.classList.add('rotate-180');
+}
+
+function closeCustomModelDropdown(provider, field) {
+  const dropdown = document.getElementById('dropdown-' + provider + '-' + field);
+  if (dropdown) dropdown.classList.add('hidden');
+  const arrow = document.querySelector('.dropdown-arrow-' + provider + '-' + field);
+  if (arrow) arrow.classList.remove('rotate-180');
+}
+
+function toggleCustomModelDropdown(provider, field) {
+  const dropdown = document.getElementById('dropdown-' + provider + '-' + field);
+  if (dropdown && !dropdown.classList.contains('hidden')) {
+    closeCustomModelDropdown(provider, field);
+  } else {
+    openCustomModelDropdown(provider, field);
+  }
+}
+
+function filterCustomModelDropdown(provider, field) {
+  const input = document.getElementById('ai-' + provider + '-' + field);
+  renderCustomModelDropdown(provider, field, input ? input.value : '');
+  const dropdown = document.getElementById('dropdown-' + provider + '-' + field);
+  if (dropdown) dropdown.classList.remove('hidden');
+}
+
+function selectCustomModel(provider, field, modelId) {
+  const input = document.getElementById('ai-' + provider + '-' + field);
+  if (input) {
+    input.value = modelId;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  closeCustomModelDropdown(provider, field);
+}
+
+function handleCustomModelDropdownKey(e, provider, field) {
+  if (e.key === 'Escape') {
+    closeCustomModelDropdown(provider, field);
+  }
+}
+
+function renderCustomModelDropdown(provider, field, query) {
+  const dropdown = document.getElementById('dropdown-' + provider + '-' + field);
+  if (!dropdown) return;
+  const models = getModelList(provider, field);
+  const q = (query || '').toLowerCase().trim();
+  const filtered = q ? models.filter(m => (m.id || '').toLowerCase().includes(q)) : models;
+
+  if (!filtered.length) {
+    dropdown.innerHTML = '<div class="px-3 py-2 text-xs text-gray-500 italic text-center">No matching models found. Custom input accepted.</div>';
+    return;
+  }
+
+  dropdown.innerHTML = filtered.map(m => `
+    <div class="px-2.5 py-1.5 rounded-md text-xs font-mono text-gray-200 hover:bg-blue-600/30 hover:text-white cursor-pointer flex items-center justify-between group transition-colors"
+         onmousedown="selectCustomModel('${provider}', '${field}', '${m.id}')">
+      <span class="truncate font-medium text-gray-100 group-hover:text-white">${m.id}</span>
+      <span class="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.06] text-gray-400 group-hover:text-blue-200 border border-white/[0.08] shrink-0 ml-2">${m.tag || 'Discovered'}</span>
+    </div>
+  `).join('');
+}
+
+// Click outside listener to close custom dropdowns
+document.addEventListener('click', function (e) {
+  if (!e.target.closest('.model-combobox-wrap')) {
+    document.querySelectorAll('[id^="dropdown-"]').forEach(d => {
+      d.classList.add('hidden');
+    });
+    document.querySelectorAll('[class*="dropdown-arrow-"]').forEach(a => {
+      a.classList.remove('rotate-180');
+    });
+  }
+});
+
+async function discoverAiModels(chosen, targetField) {
   chosen = chosen || document.getElementById('ai-provider-select').value;
   const statusBox = document.getElementById('ai-test-status');
   const config = {};
@@ -1946,27 +2098,33 @@ async function discoverAiModels(chosen) {
       const chatModels = models.chat || [];
       const embModels = models.embedding || [];
 
-      const chatDl = document.getElementById('datalist-' + chosen + '-chat_model');
-      if (chatDl) {
-        chatDl.innerHTML = '';
-        chatModels.forEach(function (m) {
-          const opt = document.createElement('option');
-          opt.value = m;
-          chatDl.appendChild(opt);
-        });
-      }
+      if (!_curatedModels[chosen]) _curatedModels[chosen] = {};
+      
+      // Update chat models
+      const existingChat = new Set((_curatedModels[chosen].chat_model || []).map(m => m.id));
+      const mergedChat = [...(_curatedModels[chosen].chat_model || [])];
+      chatModels.forEach(m => {
+        if (!existingChat.has(m)) {
+          mergedChat.push({ id: m, tag: 'API Verified' });
+        }
+      });
+      _curatedModels[chosen].chat_model = mergedChat;
 
-      const embDl = document.getElementById('datalist-' + chosen + '-embedding_model');
-      if (embDl) {
-        embDl.innerHTML = '';
-        embModels.forEach(function (m) {
-          const opt = document.createElement('option');
-          opt.value = m;
-          embDl.appendChild(opt);
-        });
-      }
+      // Update embedding models
+      const existingEmb = new Set((_curatedModels[chosen].embedding_model || []).map(m => m.id));
+      const mergedEmb = [...(_curatedModels[chosen].embedding_model || [])];
+      embModels.forEach(m => {
+        if (!existingEmb.has(m)) {
+          mergedEmb.push({ id: m, tag: 'API Verified' });
+        }
+      });
+      _curatedModels[chosen].embedding_model = mergedEmb;
 
-      paint('ok', 'Discovered ' + chatModels.length + ' chat models and ' + embModels.length + ' embedding models from ' + chosen + '. Click inputs to select.');
+      // Re-render and open dropdown for target field or chat_model
+      const openField = targetField || 'chat_model';
+      openCustomModelDropdown(chosen, openField);
+
+      paint('ok', 'Discovered ' + chatModels.length + ' chat models and ' + embModels.length + ' embedding models from ' + chosen + '. Suggestions menu opened.');
     } else {
       paint('err', 'Discovery failed: ' + (body.message || body.detail || 'Could not list models. Check credentials and permissions.'));
     }
@@ -2064,7 +2222,142 @@ async function testVaultProvider(provider) {
   }
 }
 
-async function discoverAiModels(chosen) {
+const _curatedModels = {
+  gemini: {
+    chat_model: [
+      { id: 'gemini-2.5-flash', tag: 'Recommended' },
+      { id: 'gemini-2.5-pro', tag: 'High Reasoning' },
+      { id: 'gemini-2.0-flash', tag: 'Fast' },
+      { id: 'gemini-1.5-flash', tag: 'LTS Stable' },
+    ],
+    embedding_model: [
+      { id: 'gemini-embedding-001', tag: 'Recommended (768d)' },
+      { id: 'text-embedding-004', tag: '768d' },
+    ],
+  },
+  openai: {
+    chat_model: [
+      { id: 'gpt-4o-mini', tag: 'Recommended' },
+      { id: 'gpt-4o', tag: 'Flagship' },
+      { id: 'o1-mini', tag: 'Reasoning' },
+      { id: 'o3-mini', tag: 'Fast Reasoning' },
+    ],
+    embedding_model: [
+      { id: 'text-embedding-3-small', tag: 'Recommended (1536d)' },
+      { id: 'text-embedding-3-large', tag: 'High Accuracy (3072d)' },
+    ],
+  },
+  bedrock: {
+    chat_model: [
+      { id: 'anthropic.claude-3-5-haiku-20241022-v1:0', tag: 'Recommended' },
+      { id: 'anthropic.claude-3-5-sonnet-20241022-v2:0', tag: 'Sonnet' },
+    ],
+    embedding_model: [
+      { id: 'amazon.titan-embed-text-v2:0', tag: 'Recommended (1024d)' },
+      { id: 'cohere.embed-english-v3', tag: 'Cohere' },
+    ],
+  },
+  ollama: {
+    chat_model: [
+      { id: 'llama3.2', tag: 'Fast' },
+      { id: 'mistral', tag: 'General' },
+      { id: 'deepseek-r1', tag: 'Reasoning' },
+    ],
+    embedding_model: [
+      { id: 'nomic-embed-text', tag: 'Recommended' },
+      { id: 'bge-m3', tag: 'Multilingual' },
+    ],
+  },
+};
+
+function getModelList(provider, field) {
+  if (!_curatedModels[provider]) _curatedModels[provider] = {};
+  if (!_curatedModels[provider][field]) _curatedModels[provider][field] = [];
+  return _curatedModels[provider][field];
+}
+
+function openCustomModelDropdown(provider, field) {
+  const dropdown = document.getElementById('dropdown-' + provider + '-' + field);
+  if (!dropdown) return;
+  const input = document.getElementById('ai-' + provider + '-' + field);
+  renderCustomModelDropdown(provider, field, input ? input.value : '');
+  dropdown.classList.remove('hidden');
+  const arrow = document.querySelector('.dropdown-arrow-' + provider + '-' + field);
+  if (arrow) arrow.classList.add('rotate-180');
+}
+
+function closeCustomModelDropdown(provider, field) {
+  const dropdown = document.getElementById('dropdown-' + provider + '-' + field);
+  if (dropdown) dropdown.classList.add('hidden');
+  const arrow = document.querySelector('.dropdown-arrow-' + provider + '-' + field);
+  if (arrow) arrow.classList.remove('rotate-180');
+}
+
+function toggleCustomModelDropdown(provider, field) {
+  const dropdown = document.getElementById('dropdown-' + provider + '-' + field);
+  if (dropdown && !dropdown.classList.contains('hidden')) {
+    closeCustomModelDropdown(provider, field);
+  } else {
+    openCustomModelDropdown(provider, field);
+  }
+}
+
+function filterCustomModelDropdown(provider, field) {
+  const input = document.getElementById('ai-' + provider + '-' + field);
+  renderCustomModelDropdown(provider, field, input ? input.value : '');
+  const dropdown = document.getElementById('dropdown-' + provider + '-' + field);
+  if (dropdown) dropdown.classList.remove('hidden');
+}
+
+function selectCustomModel(provider, field, modelId) {
+  const input = document.getElementById('ai-' + provider + '-' + field);
+  if (input) {
+    input.value = modelId;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  closeCustomModelDropdown(provider, field);
+}
+
+function handleCustomModelDropdownKey(e, provider, field) {
+  if (e.key === 'Escape') {
+    closeCustomModelDropdown(provider, field);
+  }
+}
+
+function renderCustomModelDropdown(provider, field, query) {
+  const dropdown = document.getElementById('dropdown-' + provider + '-' + field);
+  if (!dropdown) return;
+  const models = getModelList(provider, field);
+  const q = (query || '').toLowerCase().trim();
+  const filtered = q ? models.filter(m => (m.id || '').toLowerCase().includes(q)) : models;
+
+  if (!filtered.length) {
+    dropdown.innerHTML = '<div class="px-3 py-2 text-xs text-gray-500 italic text-center">No matching models found. Custom input accepted.</div>';
+    return;
+  }
+
+  dropdown.innerHTML = filtered.map(m => `
+    <div class="px-2.5 py-1.5 rounded-md text-xs font-mono text-gray-200 hover:bg-blue-600/30 hover:text-white cursor-pointer flex items-center justify-between group transition-colors"
+         onmousedown="selectCustomModel('${provider}', '${field}', '${m.id}')">
+      <span class="truncate font-medium text-gray-100 group-hover:text-white">${m.id}</span>
+      <span class="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.06] text-gray-400 group-hover:text-blue-200 border border-white/[0.08] shrink-0 ml-2">${m.tag || 'Discovered'}</span>
+    </div>
+  `).join('');
+}
+
+// Click outside listener to close custom dropdowns
+document.addEventListener('click', function (e) {
+  if (!e.target.closest('.model-combobox-wrap')) {
+    document.querySelectorAll('[id^="dropdown-"]').forEach(d => {
+      d.classList.add('hidden');
+    });
+    document.querySelectorAll('[class*="dropdown-arrow-"]').forEach(a => {
+      a.classList.remove('rotate-180');
+    });
+  }
+});
+
+async function discoverAiModels(chosen, targetField) {
   chosen = chosen || document.getElementById('ai-provider-select').value;
   const statusBox = document.getElementById('ai-test-status');
   const config = {};
@@ -2098,27 +2391,33 @@ async function discoverAiModels(chosen) {
       const chatModels = models.chat || [];
       const embModels = models.embedding || [];
 
-      const chatDl = document.getElementById('datalist-' + chosen + '-chat_model');
-      if (chatDl) {
-        chatDl.innerHTML = '';
-        chatModels.forEach(function (m) {
-          const opt = document.createElement('option');
-          opt.value = m;
-          chatDl.appendChild(opt);
-        });
-      }
+      if (!_curatedModels[chosen]) _curatedModels[chosen] = {};
+      
+      // Update chat models
+      const existingChat = new Set((_curatedModels[chosen].chat_model || []).map(m => m.id));
+      const mergedChat = [...(_curatedModels[chosen].chat_model || [])];
+      chatModels.forEach(m => {
+        if (!existingChat.has(m)) {
+          mergedChat.push({ id: m, tag: 'API Verified' });
+        }
+      });
+      _curatedModels[chosen].chat_model = mergedChat;
 
-      const embDl = document.getElementById('datalist-' + chosen + '-embedding_model');
-      if (embDl) {
-        embDl.innerHTML = '';
-        embModels.forEach(function (m) {
-          const opt = document.createElement('option');
-          opt.value = m;
-          embDl.appendChild(opt);
-        });
-      }
+      // Update embedding models
+      const existingEmb = new Set((_curatedModels[chosen].embedding_model || []).map(m => m.id));
+      const mergedEmb = [...(_curatedModels[chosen].embedding_model || [])];
+      embModels.forEach(m => {
+        if (!existingEmb.has(m)) {
+          mergedEmb.push({ id: m, tag: 'API Verified' });
+        }
+      });
+      _curatedModels[chosen].embedding_model = mergedEmb;
 
-      paint('ok', 'Discovered ' + chatModels.length + ' chat models and ' + embModels.length + ' embedding models from ' + chosen + '. Click inputs to select.');
+      // Re-render and open dropdown for target field or chat_model
+      const openField = targetField || 'chat_model';
+      openCustomModelDropdown(chosen, openField);
+
+      paint('ok', 'Discovered ' + chatModels.length + ' chat models and ' + embModels.length + ' embedding models from ' + chosen + '. Suggestions menu opened.');
     } else {
       paint('err', 'Discovery failed: ' + (body.message || body.detail || 'Could not list models. Check credentials and permissions.'));
     }
