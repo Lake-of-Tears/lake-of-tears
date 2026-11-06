@@ -16,7 +16,7 @@ permissions:
 jobs:
   lint:
     name: Code Quality (Ruff)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -35,7 +35,7 @@ jobs:
 
   security-sast:
     name: "Security: SAST (Bandit)"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -51,7 +51,7 @@ jobs:
 
   security-deps:
     name: "Security: Dependencies (pip-audit)"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -67,7 +67,7 @@ jobs:
 
   security-docker:
     name: "Security: Dockerfiles (Trivy)"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -87,7 +87,7 @@ jobs:
 
   docker-build-backend:
     name: "Build Image: Backend"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -104,7 +104,7 @@ jobs:
 
   docker-build-ui:
     name: "Build Image: UI"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -121,7 +121,7 @@ jobs:
 
   docker-build-airflow:
     name: "Build Image: Airflow"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -139,7 +139,7 @@ jobs:
 
   helm-lint:
     name: "Helm: Chart Validation"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -155,7 +155,7 @@ jobs:
 
   test:
     name: Unit Tests (Pytest)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -171,7 +171,7 @@ jobs:
 
   summary:
     name: CI Summary & Deployment Tag
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs:
       - lint
       - security-sast
