@@ -47,6 +47,7 @@ from auth import (
     verify_password_reset_token,
 )
 from catalog_storage import delete_prefix, prefixes_to_delete
+from cluster_router import router as cluster_router
 from dashboards_router import router as dashboards_router
 from database import get_db
 from email_service import (
@@ -221,6 +222,8 @@ app.include_router(ai_gateway_router, prefix="/api/internal/ai", tags=["ai-inter
 app.include_router(ai_admin_router, prefix="/api/admin/ai-provider", tags=["ai-admin"])
 app.include_router(vault_admin_router, prefix="/api/admin/vault-providers", tags=["vault-admin"])
 app.include_router(services_admin_router, prefix="/api/admin/services", tags=["services-admin"])
+app.include_router(cluster_router, prefix="/api/v1/cluster", tags=["cluster"])
+app.include_router(cluster_router, prefix="/api/cluster", tags=["cluster"])
 app.include_router(secrets_router, prefix="/api/v1/secrets", tags=["secrets"])
 app.include_router(secrets_router, prefix="/api/secrets", tags=["secrets"])
 app.include_router(

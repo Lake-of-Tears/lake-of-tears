@@ -1160,3 +1160,64 @@ class VaultTestConnectionRequest(BaseModel):
 class VaultTestConnectionResponse(BaseModel):
     success: bool
     message: str
+
+
+# ── Cluster Management Schemas (Angler CLI & LLM inspection) ───────────────
+
+
+class ServiceHealthDetail(BaseModel):
+    name: str
+    display_name: str
+    status: str
+    category: str
+    port: int | None = None
+    pod_name: str | None = None
+    node_name: str | None = None
+    restarts: int = 0
+    uptime: str | None = None
+    created_at: str | None = None
+    cpu_usage: str | None = None
+    memory_usage: str | None = None
+    cpu_limit: str | None = None
+    memory_limit: str | None = None
+    active_connections: int | None = None
+    latency_ms: float | None = None
+    error: str | None = None
+    extra_details: dict[str, Any] = Field(default_factory=dict)
+
+
+class ClusterStatusResponse(BaseModel):
+    status: str
+    cluster_connected: bool
+    mode: str
+    namespace: str
+    timestamp: datetime
+    total_services: int
+    healthy_count: int
+    services: dict[str, ServiceHealthDetail]
+
+
+class StorageVolume(BaseModel):
+    name: str
+    pvc_name: str | None = None
+    mount_path: str
+    size: str | None = None
+    storage_class: str | None = None
+    status: str | None = None
+
+
+class IngressRoute(BaseModel):
+    service: str
+    url: str
+    host: str
+    path: str
+    tls_enabled: bool = False
+
+
+class ClusterTopologyResponse(BaseModel):
+    namespace: str
+    mode: str
+    ingress_routes: list[IngressRoute]
+    storage_volumes: list[StorageVolume]
+    raw_config: dict[str, Any] | None = None
+
