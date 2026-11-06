@@ -3483,7 +3483,11 @@ async def settings_admin_ai_provider_discover_models(request: Request):
         )
     except Exception as exc:
         return JSONResponse(
-            {"ok": False, "models": {"chat": [], "embedding": []}, "message": f"Connection error: {exc}"},
+            {
+                "ok": False,
+                "models": {"chat": [], "embedding": []},
+                "message": f"Connection error: {exc}",
+            },
             status_code=502,
         )
 

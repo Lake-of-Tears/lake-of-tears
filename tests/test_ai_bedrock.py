@@ -39,7 +39,10 @@ class FakeRuntime:
     def list_foundation_models(self):
         return {
             "modelSummaries": [
-                {"modelId": "anthropic.claude-3-5-haiku-20241022-v1:0", "outputModalities": ["TEXT"]},
+                {
+                    "modelId": "anthropic.claude-3-5-haiku-20241022-v1:0",
+                    "outputModalities": ["TEXT"],
+                },
                 {"modelId": "amazon.titan-embed-text-v2:0", "outputModalities": ["EMBEDDING"]},
             ]
         }

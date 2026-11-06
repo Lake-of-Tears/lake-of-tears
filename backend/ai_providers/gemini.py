@@ -11,7 +11,11 @@ logger = logging.getLogger(__name__)
 DEFAULT_CHAT_MODEL = "gemini-2.5-flash"
 DEFAULT_EMBEDDING_MODEL = "gemini-embedding-001"
 DEFAULT_DIMENSION = 768
-GEMINI_CHAT_FALLBACKS: tuple[str, ...] = ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash")
+GEMINI_CHAT_FALLBACKS: tuple[str, ...] = (
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+)
 
 
 def _is_model_unavailable_error(exc: Exception) -> bool:
@@ -119,7 +123,9 @@ class GeminiProvider(AIProvider):
                     )
                     if self._on_fallback is not None:
                         try:
-                            self._on_fallback(primary, cand, self._redact(last_exc or "Model unavailable"))
+                            self._on_fallback(
+                                primary, cand, self._redact(last_exc or "Model unavailable")
+                            )
                         except Exception:
                             pass
                 return (getattr(resp, "text", None) or "").strip()
