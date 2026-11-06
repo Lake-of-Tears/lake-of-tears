@@ -35,13 +35,24 @@ Thumbs.db
 alexa-exports/
 logs/
 
-# Claude Code memory
+# AI assistant memory and local context files
 .claude/
 CLAUDE.md
+GEMINI.md
+.gemini/
+.cursor/
+.cursorrules
+.windsurf/
+.windsurfrules
+.continue/
+.copilot/
+.aider*
+*MEMORY.md
+*memory*.md
+chat_history/
 
 # Docker volumes (local dev)
 minio-data/
 airflow/
 !docker/airflow/
 notebooks/
-.aider*
