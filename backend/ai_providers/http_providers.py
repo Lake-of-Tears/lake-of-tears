@@ -140,6 +140,30 @@ class _HttpProvider(AIProvider):
         except ValueError as exc:
             raise ProviderError(f"{url} did not return JSON") from exc
 
+    def _get(self, path: str) -> dict[str, Any]:
+        url = f"{self._base_url}{path}"
+        try:
+            with httpx.Client(
+                timeout=httpx.Timeout(READ_TIMEOUT, connect=CONNECT_TIMEOUT),
+                transport=self._transport,
+            ) as client:
+                resp = client.get(url, headers=self._headers())
+        except httpx.ConnectError as exc:
+            raise ProviderError(
+                f"Could not connect to {self._base_url}. Is the server running and reachable "
+                f"from the backend? ({self._redact(str(exc))})"
+            ) from exc
+        except httpx.TimeoutException as exc:
+            raise ProviderError(f"Timed out waiting for {self._base_url}{path}") from exc
+        except httpx.HTTPError as exc:
+            raise ProviderError(self._redact(f"Request to {url} failed: {exc}")) from exc
+        if resp.status_code >= 400:
+            raise ProviderError(self._http_error(resp))
+        try:
+            return resp.json()
+        except ValueError as exc:
+            raise ProviderError(f"{url} did not return JSON") from exc
+
     def _http_error(self, resp: httpx.Response) -> str:
         detail = ""
         try:
@@ -199,6 +223,24 @@ class OpenAICompatibleProvider(_HttpProvider):
         except (KeyError, TypeError) as exc:
             raise ProviderError("Unexpected response from /embeddings") from exc
 
+    def discover_models(self) -> dict[str, list[str]]:
+        data = self._get("/models")
+        chat: list[str] = []
+        embedding: list[str] = []
+        items = data.get("data", []) if isinstance(data, dict) else []
+        for item in items:
+            mid = item.get("id") if isinstance(item, dict) else str(item)
+            if not mid:
+                continue
+            lower = mid.lower()
+            if "embed" in lower or "bge" in lower:
+                embedding.append(mid)
+            else:
+                chat.append(mid)
+        if not embedding and chat:
+            embedding = list(chat)
+        return {"chat": sorted(chat), "embedding": sorted(embedding)}
+
 
 class OllamaProvider(_HttpProvider):
     """Ollama's native API (``/api/chat`` and ``/api/embed``)."""
@@ -236,6 +278,23 @@ class OllamaProvider(_HttpProvider):
             return [list(map(float, v)) for v in data["embeddings"]]
         except (KeyError, TypeError) as exc:
             raise ProviderError("Unexpected response from /api/embed") from exc
+
+    def discover_models(self) -> dict[str, list[str]]:
+        data = self._get("/api/tags")
+        chat: list[str] = []
+        embedding: list[str] = []
+        for item in data.get("models", []):
+            name = item.get("name") if isinstance(item, dict) else str(item)
+            if not name:
+                continue
+            lower = name.lower()
+            if "embed" in lower or "bge" in lower or "minilm" in lower or "nomic" in lower:
+                embedding.append(name)
+            else:
+                chat.append(name)
+        if not embedding and chat:
+            embedding = list(chat)
+        return {"chat": sorted(chat), "embedding": sorted(embedding)}
 
 
 OPENAI_BASE_URL = "https://api.openai.com/v1"

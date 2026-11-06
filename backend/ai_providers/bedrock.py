@@ -230,3 +230,42 @@ class BedrockProvider(AIProvider):
             with _LOCK:
                 _PROBED[(self._region, self._embedding_model)] = size
         return vectors
+
+    def discover_models(self) -> dict[str, list[str]]:
+        chat: list[str] = []
+        embedding: list[str] = []
+        try:
+            if self._client is not None and hasattr(self._client, "list_foundation_models"):
+                data = self._client.list_foundation_models()
+            else:
+                import boto3
+                from botocore.config import Config
+
+                kwargs: dict[str, Any] = {}
+                access, secret, token = self._keys
+                if access:
+                    kwargs.update(aws_access_key_id=access, aws_secret_access_key=secret)
+                    if token:
+                        kwargs["aws_session_token"] = token
+                bedrock = boto3.client(
+                    "bedrock",
+                    region_name=self._region,
+                    config=Config(read_timeout=30, connect_timeout=10, retries={"max_attempts": 2}),
+                    **kwargs,
+                )
+                data = bedrock.list_foundation_models()
+
+            summaries = data.get("modelSummaries", [])
+            for m in summaries:
+                mid = m.get("modelId")
+                if not mid:
+                    continue
+                modalities = m.get("outputModalities", [])
+                if "EMBEDDING" in modalities or "embed" in mid.lower():
+                    embedding.append(mid)
+                elif "TEXT" in modalities or "claude" in mid.lower():
+                    chat.append(mid)
+        except Exception as exc:
+            raise ProviderError(f"Failed to list Bedrock models: {self._redact(str(exc))}") from exc
+
+        return {"chat": sorted(chat), "embedding": sorted(embedding)}

@@ -80,6 +80,13 @@ class AIProvider(LLMProvider, EmbeddingProvider):
             dimension=dimension,
         )
 
+    def discover_models(self) -> dict[str, list[str]]:
+        """Return available models grouped by capability: {'chat': [...], 'embedding': [...]}.
+
+        Subclasses override this if the provider's API supports listing models.
+        """
+        return {"chat": [], "embedding": []}
+
     def test_connection(self) -> dict[str, Any]:
         """Exercise text generation and embeddings with one small call each and report the outcome.
 

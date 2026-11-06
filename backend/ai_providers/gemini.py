@@ -1,17 +1,40 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Any
 
 from ai_providers.base import AIProvider, ProviderError, ProviderNotConfigured
 
-DEFAULT_CHAT_MODEL = "gemini-3.8-flash"
+logger = logging.getLogger(__name__)
+
+DEFAULT_CHAT_MODEL = "gemini-2.5-flash"
 DEFAULT_EMBEDDING_MODEL = "gemini-embedding-001"
 DEFAULT_DIMENSION = 768
+GEMINI_CHAT_FALLBACKS: tuple[str, ...] = ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash")
+
+
+def _is_model_unavailable_error(exc: Exception) -> bool:
+    """Check whether an exception indicates the requested model ID is retired or missing."""
+    msg = str(exc).lower()
+    return any(
+        term in msg
+        for term in (
+            "404",
+            "not found",
+            "not_found",
+            "deprecated",
+            "discontinued",
+            "is not supported",
+            "unsupported model",
+            "invalid model",
+            "model_not_found",
+        )
+    )
 
 
 class GeminiProvider(AIProvider):
-    """Google Gemini through the ``google-genai`` SDK (the behaviour Lake of Tears has today)."""
+    """Google Gemini through the ``google-genai`` SDK with dynamic fallback and discovery."""
 
     name = "gemini"
 
@@ -22,6 +45,7 @@ class GeminiProvider(AIProvider):
         embedding_model: str = DEFAULT_EMBEDDING_MODEL,
         dimension: int = DEFAULT_DIMENSION,
         client_factory: Callable[[str], Any] | None = None,
+        on_fallback: Callable[[str, str, str], None] | None = None,
     ):
         if not (api_key or "").strip():
             raise ProviderNotConfigured(
@@ -32,6 +56,7 @@ class GeminiProvider(AIProvider):
         self._embedding_model = embedding_model or DEFAULT_EMBEDDING_MODEL
         self._dimension = int(dimension or DEFAULT_DIMENSION)
         self._client_factory = client_factory
+        self._on_fallback = on_fallback
         self._client: Any = None
 
     @property
@@ -56,7 +81,7 @@ class GeminiProvider(AIProvider):
                 self._client = genai.Client(api_key=self._api_key)
         return self._client
 
-    def _redact(self, exc: Exception) -> str:
+    def _redact(self, exc: Exception | str) -> str:
         return str(exc).replace(self._api_key, "***")
 
     def generate(
@@ -72,14 +97,47 @@ class GeminiProvider(AIProvider):
             config["system_instruction"] = system
         if temperature is not None:
             config["temperature"] = temperature
-        kwargs: dict[str, Any] = {"model": model or self._chat_model, "contents": prompt}
-        if config:
-            kwargs["config"] = config
-        try:
-            resp = self._get_client().models.generate_content(**kwargs)
-        except Exception as exc:
-            raise ProviderError(self._redact(exc)) from exc
-        return (getattr(resp, "text", None) or "").strip()
+
+        primary = model or self._chat_model
+        candidates = [primary]
+        for fb in GEMINI_CHAT_FALLBACKS:
+            if fb not in candidates:
+                candidates.append(fb)
+
+        last_exc: Exception | None = None
+        for cand in candidates:
+            kwargs: dict[str, Any] = {"model": cand, "contents": prompt}
+            if config:
+                kwargs["config"] = config
+            try:
+                resp = self._get_client().models.generate_content(**kwargs)
+                if cand != primary:
+                    logger.warning(
+                        "Gemini model '%s' unavailable; successfully fell back to '%s'",
+                        primary,
+                        cand,
+                    )
+                    if self._on_fallback is not None:
+                        try:
+                            self._on_fallback(primary, cand, self._redact(last_exc or "Model unavailable"))
+                        except Exception:
+                            pass
+                return (getattr(resp, "text", None) or "").strip()
+            except Exception as exc:
+                last_exc = exc
+                if _is_model_unavailable_error(exc):
+                    logger.warning(
+                        "Gemini model '%s' failed (%s); checking fallback candidates",
+                        cand,
+                        self._redact(exc),
+                    )
+                    continue
+                # If error is not a model deprecation/404 (e.g. invalid auth), raise immediately
+                raise ProviderError(self._redact(exc)) from exc
+
+        if last_exc is not None:
+            raise ProviderError(self._redact(last_exc)) from last_exc
+        return ""
 
     def embed_texts(self, texts: list[str], *, query: bool = False) -> list[list[float]]:
         if not texts:
@@ -102,3 +160,47 @@ class GeminiProvider(AIProvider):
                     f"expected {self._dimension}"
                 )
         return vectors
+
+    def discover_models(self) -> dict[str, list[str]]:
+        """List available Gemini models from Google AI Studio."""
+        client = self._get_client()
+        chat_models: list[str] = []
+        embedding_models: list[str] = []
+        try:
+            models_iter = client.models.list()
+            for m in models_iter:
+                name = getattr(m, "name", "") or ""
+                if name.startswith("models/"):
+                    clean_name = name[7:]
+                else:
+                    clean_name = name
+                if not clean_name:
+                    continue
+
+                methods = getattr(m, "supported_actions", None)
+                if not isinstance(methods, (list, tuple, set)):
+                    methods = getattr(m, "supported_generation_methods", None)
+                if not isinstance(methods, (list, tuple, set)):
+                    methods = []
+                is_generate = "generateContent" in methods
+                is_embed = "embedContent" in methods
+                if not methods:
+                    if "embed" in clean_name.lower():
+                        is_embed = True
+                    elif "gemini" in clean_name.lower():
+                        is_generate = True
+
+                if is_generate and clean_name not in chat_models:
+                    chat_models.append(clean_name)
+                if is_embed and clean_name not in embedding_models:
+                    embedding_models.append(clean_name)
+        except Exception as exc:
+            raise ProviderError(f"Failed to list Gemini models: {self._redact(exc)}") from exc
+
+        return {
+            "chat": sorted(
+                chat_models,
+                key=lambda x: (not x.startswith("gemini-2"), not x.startswith("gemini"), x),
+            ),
+            "embedding": sorted(embedding_models, key=lambda x: (not x.startswith("gemini"), x)),
+        }

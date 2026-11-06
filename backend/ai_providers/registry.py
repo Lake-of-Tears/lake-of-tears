@@ -47,7 +47,50 @@ from ai_providers.http_providers import (
 
 AI_PROVIDER_SETTING = "ai_provider"
 AI_PROVIDER_CONFIG_SETTING = "ai_provider_config"
+AI_PROVIDER_DEPRECATION_WARNING_SETTING = "ai_provider_deprecation_warning"
 DEFAULT_PROVIDER = "gemini"
+
+
+def record_deprecation_warning(
+    db: Session,
+    provider: str,
+    failed_model: str,
+    fallback_model: str,
+    reason: str = "",
+) -> None:
+    data = {
+        "provider": provider,
+        "failed_model": failed_model,
+        "fallback_model": fallback_model,
+        "reason": reason or f"Model '{failed_model}' is deprecated or unavailable.",
+        "timestamp": datetime.now(UTC).isoformat(),
+    }
+    _set_setting(db, AI_PROVIDER_DEPRECATION_WARNING_SETTING, json.dumps(data), None)
+    try:
+        db.commit()
+    except Exception:
+        pass
+
+
+def get_deprecation_warning(db: Session | None = None) -> dict[str, Any] | None:
+    with _session(db) as session:
+        raw = _get_setting(session, AI_PROVIDER_DEPRECATION_WARNING_SETTING)
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else None
+    except ValueError:
+        return None
+
+
+def clear_deprecation_warning(db: Session | None = None) -> None:
+    with _session(db) as session:
+        _set_setting(session, AI_PROVIDER_DEPRECATION_WARNING_SETTING, None, None)
+        try:
+            session.commit()
+        except Exception:
+            pass
 
 
 @dataclass(frozen=True)
@@ -76,11 +119,20 @@ class ProviderSpec:
 
 
 def _build_gemini(cfg: dict[str, Any]) -> AIProvider:
+    def on_fallback(failed_model: str, fallback_model: str, reason: str = ""):
+        try:
+            with _session(None) as session:
+                record_deprecation_warning(session, "gemini", failed_model, fallback_model, reason)
+        except Exception:
+            pass
+
     return GeminiProvider(
         api_key=str(cfg.get("api_key") or ""),
         chat_model=str(cfg.get("chat_model") or DEFAULT_CHAT_MODEL),
         embedding_model=str(cfg.get("embedding_model") or DEFAULT_EMBEDDING_MODEL),
         dimension=int(cfg.get("dimension") or DEFAULT_DIMENSION),
+        client_factory=cfg.get("client_factory"),
+        on_fallback=on_fallback,
     )
 
 
@@ -586,4 +638,8 @@ def describe_providers(db: Session | None = None) -> dict[str, Any]:
                 "configured": all(bool(cfg.get(f.name)) for f in spec.fields if f.required),
             }
         )
-    return {"active": active, "providers": providers}
+    return {
+        "active": active,
+        "providers": providers,
+        "deprecation_warning": get_deprecation_warning(db),
+    }

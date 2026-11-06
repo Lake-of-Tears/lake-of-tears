@@ -38,16 +38,20 @@ flowchart LR
 
 1. Sign in as a superadmin and open **Settings, Admin Panel, AI Provider**.
 2. Pick the provider. The form shows only that provider's fields.
-3. Fill them in (section 4) and click **Test Connection**. It uses the values on screen, saved or not, and reports the chat model and the embedding model separately, each with its latency and the embedding dimension.
-4. Click **Save**. Every part of Lake of Tears uses the new provider from the next request.
+3. Fill in your credentials and click **Discover Models** to automatically populate verified models from the provider's API into the Chat and Embedding dropdowns, or type your own custom model string.
+4. Click **Test Connection**. It uses the values on screen, saved or not, and reports the chat model and the embedding model separately, each with its latency and the embedding dimension.
+5. Click **Save and activate**. Every part of Lake of Tears uses the new provider from the next request.
 
 ## 4. Provider settings
 
 ### Google Gemini
 API key from Google AI Studio, chat model, embedding model and dimension.
+- **Default Models:** Chat defaults to `gemini-2.5-flash`, embedding to `gemini-embedding-001` (768 dimensions).
+- **Self-Healing Fallback Chain:** If a configured Gemini model returns a 404 (Not Found) or 400 (Discontinued/Deprecated), Lake of Tears automatically retries the query against the stable fallback sequence (`gemini-2.5-flash` -> `gemini-2.0-flash` -> `gemini-1.5-flash`) so user queries never fail.
+- **Deprecation Alert Banner:** When a fallback is triggered, an amber alert banner appears on the Admin Panel detailing the retired model and providing a 1-click **Migrate** button.
 
 ### OpenAI
-API key. The models and dimension default as in the table above.
+API key. The models and dimension default to `gpt-4o-mini`, `text-embedding-3-small`, and 1536 dimensions. Click **Discover Models** to query your account's `/v1/models`.
 
 ### Azure AI Foundry
 Endpoint (`https://<resource>.openai.azure.com`), API key, the **chat deployment name**, the **embedding deployment name** and the API version (default `2024-10-21`). The key is sent in an `api-key` header.

@@ -231,3 +231,64 @@ def test_connection_reports_which_half_failed_without_the_key():
     assert result["embedding"]["ok"] is True
     assert result["chat"]["ok"] is False
     assert KEY not in json.dumps(result)
+
+
+# ── Model Discovery & Deprecation Warnings ────────────────────────────────────
+
+
+def test_discover_models_endpoint(admin, monkeypatch):
+    class _MockProvider:
+        def discover_models(self):
+            return {"chat": ["gemini-2.5-flash"], "embedding": ["gemini-embedding-001"]}
+
+    monkeypatch.setattr(ai_admin_router, "build_provider", lambda name, cfg: _MockProvider())
+    resp = admin.post(BASE + "/discover-models", json={"provider": "gemini"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["models"]["chat"] == ["gemini-2.5-flash"]
+    assert data["models"]["embedding"] == ["gemini-embedding-001"]
+    assert "Found 1 chat models" in data["message"]
+
+
+def test_discover_models_reports_error_without_raising(admin, monkeypatch):
+    def bad_build(name, cfg):
+        raise ProviderError("Cannot connect to API")
+
+    monkeypatch.setattr(ai_admin_router, "build_provider", bad_build)
+    resp = admin.post(BASE + "/discover-models", json={"provider": "gemini"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is False
+    assert "Cannot connect to API" in data["message"]
+
+
+def test_deprecation_warning_lifecycle(admin):
+    from ai_providers.registry import (
+        clear_deprecation_warning,
+        get_deprecation_warning,
+        record_deprecation_warning,
+    )
+
+    record_deprecation_warning(
+        admin.db, "gemini", "gemini-3.8-flash", "gemini-2.5-flash", "404 Not Found"
+    )
+    warn = get_deprecation_warning(admin.db)
+    assert warn is not None
+    assert warn["failed_model"] == "gemini-3.8-flash"
+    assert warn["fallback_model"] == "gemini-2.5-flash"
+
+    # API endpoint returns it
+    resp = admin.get(BASE + "/deprecation-warning")
+    assert resp.status_code == 200
+    assert resp.json()["warning"]["fallback_model"] == "gemini-2.5-flash"
+
+    # Dismiss endpoint clears it
+    dismiss_resp = admin.post(BASE + "/dismiss-deprecation-warning")
+    assert dismiss_resp.status_code == 200
+    assert dismiss_resp.json()["ok"] is True
+
+    # Check it is cleared
+    assert get_deprecation_warning(admin.db) is None
+    resp2 = admin.get(BASE + "/deprecation-warning")
+    assert resp2.json()["warning"] is None

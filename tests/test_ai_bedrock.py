@@ -36,6 +36,14 @@ class FakeRuntime:
             out = {"embedding": [0.5] * self.dimension}
         return {"body": io.BytesIO(json.dumps(out).encode())}
 
+    def list_foundation_models(self):
+        return {
+            "modelSummaries": [
+                {"modelId": "anthropic.claude-3-5-haiku-20241022-v1:0", "outputModalities": ["TEXT"]},
+                {"modelId": "amazon.titan-embed-text-v2:0", "outputModalities": ["EMBEDDING"]},
+            ]
+        }
+
 
 @pytest.fixture(autouse=True)
 def _clean():
@@ -116,3 +124,11 @@ def test_registry_lists_bedrock_and_masks_both_secrets():
     assert PROVIDERS["bedrock"].secret_fields == ("secret_access_key", "session_token")
     assert build_provider("bedrock", {"region": "eu-west-1"}).chat_model.startswith("anthropic.")
     assert SECRET not in json.dumps(describe_providers(FakeDB()))
+
+
+def test_bedrock_discover_models():
+    rt = FakeRuntime()
+    p = provider(rt)
+    models = p.discover_models()
+    assert models["chat"] == ["anthropic.claude-3-5-haiku-20241022-v1:0"]
+    assert models["embedding"] == ["amazon.titan-embed-text-v2:0"]

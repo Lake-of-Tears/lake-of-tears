@@ -949,7 +949,7 @@ EXAMPLE_QUERIES = [
     },
     {
         "label": "✨ AI Sentiment (ai_query)",
-        "sql": "SELECT id, amount_usd, description, ai_query('gemini-3.8-flash', 'Classify payment risk in one word: ' || description) AS risk_label FROM read_parquet('s3://datalake/raw/stripe_charges/**/*.parquet') LIMIT 10",
+        "sql": "SELECT id, amount_usd, description, ai_query('gemini-2.5-flash', 'Classify payment risk in one word: ' || description) AS risk_label FROM read_parquet('s3://datalake/raw/stripe_charges/**/*.parquet') LIMIT 10",
     },
     {
         "label": "✨ AI Summarize (ai_summarize)",
@@ -3448,6 +3448,66 @@ async def settings_admin_ai_provider_test(request: Request):
         return JSONResponse({"ok": False, "message": str(detail)}, status_code=resp.status_code)
     except Exception as exc:
         return JSONResponse({"ok": False, "message": f"Connection error: {exc}"}, status_code=502)
+
+
+@app.post("/settings/admin/ai-provider/discover-models")
+async def settings_admin_ai_provider_discover_models(request: Request):
+    """Discover available models for a provider using entered or stored configuration."""
+    user = request.state.user
+    if not user or user.get("role") != "superadmin":
+        return JSONResponse(
+            {"ok": False, "message": "Superadmin access required."}, status_code=403
+        )
+    token = request.cookies.get("lake_token")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    payload = {"provider": body.get("provider") or None, "config": body.get("config") or {}}
+    try:
+        with httpx.Client(timeout=60) as client:
+            resp = client.post(
+                f"{BACKEND_URL}/api/admin/ai-provider/discover-models",
+                headers={"Authorization": f"Bearer {token}"} if token else {},
+                json=payload,
+            )
+        if resp.status_code == 200:
+            return JSONResponse(resp.json())
+        try:
+            detail = resp.json().get("detail") or resp.text
+        except Exception:
+            detail = resp.text
+        return JSONResponse(
+            {"ok": False, "models": {"chat": [], "embedding": []}, "message": str(detail)},
+            status_code=resp.status_code,
+        )
+    except Exception as exc:
+        return JSONResponse(
+            {"ok": False, "models": {"chat": [], "embedding": []}, "message": f"Connection error: {exc}"},
+            status_code=502,
+        )
+
+
+@app.post("/settings/admin/ai-provider/dismiss-deprecation-warning")
+async def settings_admin_ai_provider_dismiss_warning(request: Request):
+    """Dismiss the deprecation warning banner."""
+    user = request.state.user
+    if not user or user.get("role") != "superadmin":
+        return JSONResponse(
+            {"ok": False, "message": "Superadmin access required."}, status_code=403
+        )
+    token = request.cookies.get("lake_token")
+    try:
+        with httpx.Client(timeout=10) as client:
+            resp = client.post(
+                f"{BACKEND_URL}/api/admin/ai-provider/dismiss-deprecation-warning",
+                headers={"Authorization": f"Bearer {token}"} if token else {},
+            )
+        if resp.status_code == 200:
+            return JSONResponse(resp.json())
+        return JSONResponse({"ok": False}, status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "message": str(exc)}, status_code=502)
 
 
 @app.post("/settings/admin/vault-providers/{provider}")

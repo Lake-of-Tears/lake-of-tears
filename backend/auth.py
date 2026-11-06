@@ -30,7 +30,7 @@ ALGORITHM = "HS256"
 COOKIE_NAME = "lake_token"
 GEMINI_API_KEY_SETTING = "gemini_api_key"
 GEMINI_MODEL_SETTING = "gemini_default_model"
-DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 
 
 def is_registration_enabled() -> bool:

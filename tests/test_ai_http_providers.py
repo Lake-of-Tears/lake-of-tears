@@ -220,7 +220,39 @@ def test_vectors_of_different_lengths_are_rejected():
         oai(Server(uneven)).embed_texts(["a", "b"])
 
 
+def test_openai_compatible_discover_models():
+    def handle(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/v1/models":
+            return httpx.Response(
+                200,
+                json={"data": [{"id": "gpt-4o-mini"}, {"id": "text-embedding-3-small"}]},
+            )
+        return httpx.Response(404)
+
+    server = Server(handle)
+    provider = oai(server)
+    models = provider.discover_models()
+    assert models["chat"] == ["gpt-4o-mini"]
+    assert models["embedding"] == ["text-embedding-3-small"]
+
+
 # ── Ollama ────────────────────────────────────────────────────────────────────
+
+
+def test_ollama_discover_models():
+    def handle(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/api/tags":
+            return httpx.Response(
+                200,
+                json={"models": [{"name": "llama3.2:latest"}, {"name": "nomic-embed-text:latest"}]},
+            )
+        return httpx.Response(404)
+
+    server = Server(handle)
+    provider = ollama(server)
+    models = provider.discover_models()
+    assert models["chat"] == ["llama3.2:latest"]
+    assert models["embedding"] == ["nomic-embed-text:latest"]
 
 
 def test_ollama_chat_uses_the_native_api_without_streaming():
