@@ -1326,9 +1326,9 @@ async def ui_get_schema_dependencies(request: Request, catalog_id: str, schema_i
         or request.cookies.get("lake_workspace_id")
         or request.cookies.get("lake_active_workspace")
     )
-    ws_slug = (
-        ws.get("slug") if ws and isinstance(ws, dict) else None
-    ) or request.cookies.get("lake_workspace_slug")
+    ws_slug = (ws.get("slug") if ws and isinstance(ws, dict) else None) or request.cookies.get(
+        "lake_workspace_slug"
+    )
     data = await _backend_get_async(
         f"/api/catalogs/{catalog_id}/schemas/{schema_id}/dependencies",
         token or "",
@@ -1352,9 +1352,9 @@ async def ui_get_table_dependencies(
         or request.cookies.get("lake_workspace_id")
         or request.cookies.get("lake_active_workspace")
     )
-    ws_slug = (
-        ws.get("slug") if ws and isinstance(ws, dict) else None
-    ) or request.cookies.get("lake_workspace_slug")
+    ws_slug = (ws.get("slug") if ws and isinstance(ws, dict) else None) or request.cookies.get(
+        "lake_workspace_slug"
+    )
     data = await _backend_get_async(
         f"/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}/dependencies",
         token or "",
@@ -1381,9 +1381,9 @@ async def ui_delete_schema(
         or request.cookies.get("lake_workspace_id")
         or request.cookies.get("lake_active_workspace")
     )
-    ws_slug = (
-        ws.get("slug") if ws and isinstance(ws, dict) else None
-    ) or request.cookies.get("lake_workspace_slug")
+    ws_slug = (ws.get("slug") if ws and isinstance(ws, dict) else None) or request.cookies.get(
+        "lake_workspace_slug"
+    )
     res, err = _backend_delete_with_error(
         f"/api/catalogs/{catalog_id}/schemas/{schema_id}?cascade={'true' if cascade else 'false'}",
         token or "",
@@ -1405,9 +1405,9 @@ async def ui_delete_table(request: Request, catalog_id: str, schema_id: str, tab
         or request.cookies.get("lake_workspace_id")
         or request.cookies.get("lake_active_workspace")
     )
-    ws_slug = (
-        ws.get("slug") if ws and isinstance(ws, dict) else None
-    ) or request.cookies.get("lake_workspace_slug")
+    ws_slug = (ws.get("slug") if ws and isinstance(ws, dict) else None) or request.cookies.get(
+        "lake_workspace_slug"
+    )
     res, err = _backend_delete_with_error(
         f"/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}",
         token or "",
@@ -1429,9 +1429,9 @@ async def ui_get_catalog_trash(request: Request):
         or request.cookies.get("lake_workspace_id")
         or request.cookies.get("lake_active_workspace")
     )
-    ws_slug = (
-        ws.get("slug") if ws and isinstance(ws, dict) else None
-    ) or request.cookies.get("lake_workspace_slug")
+    ws_slug = (ws.get("slug") if ws and isinstance(ws, dict) else None) or request.cookies.get(
+        "lake_workspace_slug"
+    )
     data = await _backend_get_async(
         "/api/catalog/trash",
         token or "",
@@ -1451,9 +1451,9 @@ async def ui_restore_catalog_asset(request: Request, asset_id: str):
         or request.cookies.get("lake_workspace_id")
         or request.cookies.get("lake_active_workspace")
     )
-    ws_slug = (
-        ws.get("slug") if ws and isinstance(ws, dict) else None
-    ) or request.cookies.get("lake_workspace_slug")
+    ws_slug = (ws.get("slug") if ws and isinstance(ws, dict) else None) or request.cookies.get(
+        "lake_workspace_slug"
+    )
     res, err = _backend_post_with_error(
         f"/api/catalog/trash/{asset_id}/restore",
         token or "",
@@ -1476,9 +1476,9 @@ async def ui_purge_catalog_asset(request: Request, asset_id: str):
         or request.cookies.get("lake_workspace_id")
         or request.cookies.get("lake_active_workspace")
     )
-    ws_slug = (
-        ws.get("slug") if ws and isinstance(ws, dict) else None
-    ) or request.cookies.get("lake_workspace_slug")
+    ws_slug = (ws.get("slug") if ws and isinstance(ws, dict) else None) or request.cookies.get(
+        "lake_workspace_slug"
+    )
     res, err = _backend_post_with_error(
         f"/api/catalog/trash/{asset_id}/purge",
         token or "",
@@ -1489,7 +1489,6 @@ async def ui_purge_catalog_asset(request: Request, asset_id: str):
     if err:
         return JSONResponse({"ok": False, "error": err}, status_code=400)
     return JSONResponse(res or {"ok": True})
-
 
 
 @app.post("/catalog/create")

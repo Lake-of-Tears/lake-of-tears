@@ -185,4 +185,3 @@ def move_prefix(
             s3.delete_objects(Bucket=bucket, Delete={"Objects": to_delete})
 
     return moved
-

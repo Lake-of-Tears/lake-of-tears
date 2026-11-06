@@ -851,9 +851,8 @@ def execute_statement(
         )
         if is_undrop:
             statement_id = str(uuid.uuid4())
-            is_err = (
-                (msg or "").startswith("Error:")
-                or ((msg or "").startswith("UNDROP") and "failed:" in (msg or ""))
+            is_err = (msg or "").startswith("Error:") or (
+                (msg or "").startswith("UNDROP") and "failed:" in (msg or "")
             )
             if is_err:
                 stored = StoredStatement(
@@ -903,7 +902,6 @@ def execute_statement(
                 )
             statement_store.put(stored)
             return _to_execution_response(stored)
-
 
     # 2. Enforce host filesystem & S3 workspace isolation guardrails
     catalogs = ai_service.get_workspace_catalogs_from_db(db, ws.id, user_id=user.id)

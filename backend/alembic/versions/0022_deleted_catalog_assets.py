@@ -76,5 +76,7 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_deleted_catalog_assets_purge_at"), table_name="deleted_catalog_assets")
     op.drop_index(op.f("ix_deleted_catalog_assets_batch_id"), table_name="deleted_catalog_assets")
     op.drop_index(op.f("ix_deleted_catalog_assets_catalog_id"), table_name="deleted_catalog_assets")
-    op.drop_index(op.f("ix_deleted_catalog_assets_workspace_id"), table_name="deleted_catalog_assets")
+    op.drop_index(
+        op.f("ix_deleted_catalog_assets_workspace_id"), table_name="deleted_catalog_assets"
+    )
     op.drop_table("deleted_catalog_assets")

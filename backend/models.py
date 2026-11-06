@@ -590,7 +590,9 @@ class DeletedCatalogAsset(Base):
         nullable=False,
         index=True,
     )
-    schema_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    schema_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )
     # 'table' | 'schema'
     asset_type: Mapped[str] = mapped_column(String(32), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -605,18 +607,17 @@ class DeletedCatalogAsset(Base):
     trash_s3_prefix: Mapped[str | None] = mapped_column(Text, nullable=True)
     trash_embeddings_prefix: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Batch ID links cascaded schema drops to child tables
-    batch_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    batch_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )
     dropped_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     dropped_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
-    purge_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    purge_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     workspace: Mapped["Workspace"] = relationship(foreign_keys=[workspace_id])
     catalog: Mapped["Catalog"] = relationship(foreign_keys=[catalog_id])
     dropper: Mapped["User | None"] = relationship(foreign_keys=[dropped_by])
-

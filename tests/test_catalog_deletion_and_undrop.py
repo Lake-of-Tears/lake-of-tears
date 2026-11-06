@@ -109,7 +109,10 @@ def mock_catalog_fixture(db_session):
             {"name": "month", "type": "VARCHAR", "nullable": False},
             {"name": "amount", "type": "DOUBLE", "nullable": True},
         ],
-        vector_index={"status": "synced", "dest_s3": f"s3://datalake/workspaces/{ws.slug}/embeddings/monthly_revenue/data.parquet"},
+        vector_index={
+            "status": "synced",
+            "dest_s3": f"s3://datalake/workspaces/{ws.slug}/embeddings/monthly_revenue/data.parquet",
+        },
     )
     db_session.add(managed_table)
 
@@ -140,12 +143,22 @@ def mock_catalog_fixture(db_session):
 
 def test_managed_vs_external_table_pattern():
     """Verify managed table detection logic."""
-    assert is_pattern_in_workspace("s3://datalake/workspaces/finance/cat/sch/tbl/data.parquet", "finance")
-    assert not is_pattern_in_workspace("s3://datalake/external-partners/events/*.parquet", "finance")
+    assert is_pattern_in_workspace(
+        "s3://datalake/workspaces/finance/cat/sch/tbl/data.parquet", "finance"
+    )
+    assert not is_pattern_in_workspace(
+        "s3://datalake/external-partners/events/*.parquet", "finance"
+    )
     assert not is_pattern_in_workspace("s3://datalake/workspaces/marketing/cat/sch/tbl/", "finance")
 
-    assert s3_prefix_for_pattern("s3://datalake/workspaces/finance/cat/sch/tbl/data.parquet") == "workspaces/finance/cat/sch/tbl/"
-    assert s3_prefix_for_pattern("s3://datalake/workspaces/finance/cat/sch/tbl/*.parquet") == "workspaces/finance/cat/sch/tbl/"
+    assert (
+        s3_prefix_for_pattern("s3://datalake/workspaces/finance/cat/sch/tbl/data.parquet")
+        == "workspaces/finance/cat/sch/tbl/"
+    )
+    assert (
+        s3_prefix_for_pattern("s3://datalake/workspaces/finance/cat/sch/tbl/*.parquet")
+        == "workspaces/finance/cat/sch/tbl/"
+    )
 
 
 def test_medallion_schema_deletion_blocked(db_session, mock_catalog_fixture):
@@ -333,7 +346,10 @@ def test_purge_expired_assets_ttl(mock_del, db_session, mock_catalog_fixture):
 
     # Verify expired was deleted, active remains
     assert db_session.query(DeletedCatalogAsset).filter_by(id=expired_asset.id).first() is None
-    assert db_session.query(DeletedCatalogAsset).filter_by(id=active_trash_asset.id).first() is not None
+    assert (
+        db_session.query(DeletedCatalogAsset).filter_by(id=active_trash_asset.id).first()
+        is not None
+    )
 
 
 def test_sql_guardrails_undrop():

@@ -2729,7 +2729,6 @@ def delete_schema(
     return {"ok": True, "deleted_count": len(deleted_assets)}
 
 
-
 @app.get("/api/catalogs/{catalog_id}/schemas/{schema_id}/toon")
 @app.get("/api/catalog/{catalog_id}/schemas/{schema_id}/toon")
 def export_schema_toon(
@@ -3215,7 +3214,6 @@ def purge_catalog_asset(
     return {"ok": True, "purged_id": str(asset_uuid)}
 
 
-
 @app.post("/api/catalog/trash/purge-expired")
 @app.post("/api/catalogs/trash/purge-expired")
 def purge_expired_catalog_trash(
@@ -3228,8 +3226,6 @@ def purge_expired_catalog_trash(
 
     purged_count = catalog_trash_service.purge_expired_assets(db)
     return {"ok": True, "purged_count": purged_count}
-
-
 
 
 # ── Access management ─────────────────────────────────────────────────────────

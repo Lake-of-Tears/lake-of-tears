@@ -352,11 +352,7 @@ def restore_asset(
     workspace: Workspace,
 ) -> dict[str, Any]:
     """Restore a soft-deleted table or schema (with its cascaded children) from trash."""
-    asset = (
-        db.query(DeletedCatalogAsset)
-        .filter_by(id=asset_id, workspace_id=workspace.id)
-        .first()
-    )
+    asset = db.query(DeletedCatalogAsset).filter_by(id=asset_id, workspace_id=workspace.id).first()
     if not asset:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deleted asset not found")
 
@@ -370,9 +366,7 @@ def restore_asset(
     if asset.asset_type == "schema":
         # Check for slug collision
         existing_schema = (
-            db.query(CatalogSchema)
-            .filter_by(catalog_id=catalog.id, slug=asset.slug)
-            .first()
+            db.query(CatalogSchema).filter_by(catalog_id=catalog.id, slug=asset.slug).first()
         )
         if existing_schema:
             raise HTTPException(
@@ -433,9 +427,7 @@ def restore_asset(
 
         # Check for slug collision in target schema
         existing_table = (
-            db.query(CatalogTable)
-            .filter_by(schema_id=schema.id, slug=asset.slug)
-            .first()
+            db.query(CatalogTable).filter_by(schema_id=schema.id, slug=asset.slug).first()
         )
         if existing_table:
             raise HTTPException(
@@ -534,9 +526,7 @@ def purge_expired_assets(db: Session) -> int:
     return count
 
 
-def list_workspace_trash(
-    db: Session, workspace_id: uuid.UUID
-) -> list[DeletedCatalogAssetResponse]:
+def list_workspace_trash(db: Session, workspace_id: uuid.UUID) -> list[DeletedCatalogAssetResponse]:
     """Return all soft-deleted catalog assets in the workspace with TTL countdown."""
     assets = (
         db.query(DeletedCatalogAsset)
@@ -553,7 +543,6 @@ def list_workspace_trash(
             purge_dt = purge_dt.replace(tzinfo=UTC)
         delta = purge_dt - now
         days_rem = max(0.0, round(delta.total_seconds() / 86400.0, 1))
-
 
         cat_name = a.catalog.name if a.catalog else None
         schema_name = None
@@ -607,7 +596,9 @@ def try_handle_undrop_statement(
     """
     cleaned = re.sub(r"--.*?$", "", sql, flags=re.MULTILINE)
     cleaned = re.sub(r"/\*.*?\*/", "", cleaned, flags=re.DOTALL).strip()
-    match = re.match(r"^UNDROP\s+(TABLE|SCHEMA)\s+(?:IF\s+EXISTS\s+)?([^\s;]+)", cleaned, re.IGNORECASE)
+    match = re.match(
+        r"^UNDROP\s+(TABLE|SCHEMA)\s+(?:IF\s+EXISTS\s+)?([^\s;]+)", cleaned, re.IGNORECASE
+    )
     if not match:
         return False, None
 
@@ -646,7 +637,10 @@ def try_handle_undrop_statement(
 
     asset = q.first()
     if not asset:
-        return True, f"Error: No recently deleted {asset_type} named '{raw_target}' found in workspace trash."
+        return (
+            True,
+            f"Error: No recently deleted {asset_type} named '{raw_target}' found in workspace trash.",
+        )
 
     try:
         res = restore_asset(db, asset.id, workspace)

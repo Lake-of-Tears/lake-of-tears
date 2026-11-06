@@ -566,7 +566,6 @@ class DeleteSchemaRequest(BaseModel):
     cascade: bool = False
 
 
-
 class CatalogSchemaResponse(BaseModel):
     id: uuid.UUID
     catalog_id: uuid.UUID
