@@ -728,36 +728,30 @@ class KubernetesServiceManager:
                     for path_item in rule.get("http", {}).get("paths", []):
                         path = path_item.get("path", "/")
                         backend_svc = (
-                            path_item.get("backend", {})
-                            .get("service", {})
-                            .get("name", "unknown")
+                            path_item.get("backend", {}).get("service", {}).get("name", "unknown")
                         )
                         svc_id = self._extract_service_id(backend_svc)
                         tls_enabled = host in tls_hosts
                         scheme = "https" if tls_enabled else "http"
-                        ingress_routes.append({
-                            "service": svc_id,
-                            "url": f"{scheme}://{host}{path}",
-                            "host": host,
-                            "path": path,
-                            "tls_enabled": tls_enabled,
-                        })
+                        ingress_routes.append(
+                            {
+                                "service": svc_id,
+                                "url": f"{scheme}://{host}{path}",
+                                "host": host,
+                                "path": path,
+                                "tls_enabled": tls_enabled,
+                            }
+                        )
 
         if not ingress_routes:
-            base_host = (
-                ingress_cfg.get("host")
-                or os.getenv("INGRESS_HOST")
-                or "localhost"
-            )
+            base_host = ingress_cfg.get("host") or os.getenv("INGRESS_HOST") or "localhost"
             minio_console = (
                 ingress_cfg.get("minioConsoleHost")
                 or os.getenv("MINIO_CONSOLE_HOST")
                 or f"minio.{base_host}"
             )
             minio_api = (
-                ingress_cfg.get("minioApiHost")
-                or os.getenv("MINIO_API_HOST")
-                or f"s3.{base_host}"
+                ingress_cfg.get("minioApiHost") or os.getenv("MINIO_API_HOST") or f"s3.{base_host}"
             )
             superset_host = (
                 ingress_cfg.get("supersetHost")
@@ -819,8 +813,8 @@ class KubernetesServiceManager:
                 meta = pvc.get("metadata", {})
                 spec = pvc.get("spec", {})
                 pvc_name = meta.get("name", "")
-                requests = spec.get("resources", {}).get("requests", {})
-                size = requests.get("storage")
+                resource_requests = spec.get("resources", {}).get("requests", {})
+                size = resource_requests.get("storage")
                 sc = spec.get("storageClassName")
                 status = pvc.get("status", {}).get("phase", "Bound")
 
@@ -834,14 +828,16 @@ class KubernetesServiceManager:
                 elif "catalog" in pvc_name:
                     mount = "/var/lake/catalog"
 
-                storage_volumes.append({
-                    "name": pvc_name,
-                    "pvc_name": pvc_name,
-                    "mount_path": mount,
-                    "size": size,
-                    "storage_class": sc,
-                    "status": status,
-                })
+                storage_volumes.append(
+                    {
+                        "name": pvc_name,
+                        "pvc_name": pvc_name,
+                        "mount_path": mount,
+                        "size": size,
+                        "storage_class": sc,
+                        "status": status,
+                    }
+                )
 
         if not storage_volumes:
             storage_class = global_cfg.get("storageClass") or "local-path"
@@ -901,7 +897,6 @@ class KubernetesServiceManager:
                 "ingressHost": ingress_cfg.get("host", "localhost"),
             },
         }
-
 
     def _resolve_deployment_name(self, service_name: str) -> str:
         srv = (service_name or "").strip()

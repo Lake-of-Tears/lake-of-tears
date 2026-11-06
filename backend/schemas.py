@@ -1220,4 +1220,3 @@ class ClusterTopologyResponse(BaseModel):
     ingress_routes: list[IngressRoute]
     storage_volumes: list[StorageVolume]
     raw_config: dict[str, Any] | None = None
-
