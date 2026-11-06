@@ -1037,15 +1037,27 @@ async def catalog(request: Request):
     token = request.cookies.get("lake_token")
     ws = request.state.workspace
     catalogs = []
+    trash_count = 0
     if token and ws and isinstance(ws, dict) and ws.get("id"):
+        ws_id_str = str(ws["id"])
         catalogs = (
             _backend_get(
                 f"/api/workspaces/{ws['id']}/catalogs",
                 token,
-                workspace_id=str(ws["id"]),
+                workspace_id=ws_id_str,
             )
             or []
         )
+        try:
+            trash_items = _backend_get(
+                "/api/catalog/trash",
+                token,
+                workspace_id=ws_id_str,
+            )
+            if isinstance(trash_items, list):
+                trash_count = len(trash_items)
+        except Exception:
+            trash_count = 0
     owned_catalogs = []
     ws_id = str(ws["id"]) if ws and isinstance(ws, dict) and ws.get("id") else None
     if isinstance(catalogs, list):
@@ -1080,6 +1092,7 @@ async def catalog(request: Request):
             "error": error,
             "ai_info": ai_info,
             "has_ai": has_ai,
+            "trash_count": trash_count,
         },
     )
 
