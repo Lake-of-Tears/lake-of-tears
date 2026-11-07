@@ -1,8 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Pipelines · Lake of Tears{% endblock %}
+{% block head %}
+<script src="/static/js/controllers/pipelines.js"></script>
+{% endblock %}
 
 {% block content %}
-<div class="max-w-7xl mx-auto space-y-6" id="pipelines-container">
+<div class="max-w-7xl mx-auto space-y-6" id="pipelines-container" x-data="pipelinesManager()">
 
   <!-- Toast Notification Container -->
   <div id="toast-container" class="fixed top-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
