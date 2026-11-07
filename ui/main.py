@@ -2075,6 +2075,31 @@ async def pipelines(request: Request):
     )
 
 
+@app.get("/bundles", response_class=HTMLResponse)
+async def bundles(request: Request):
+    ws = request.state.workspace
+    user = request.state.user
+    user_role = user.get("role") if user else "user"
+    my_role = (ws.get("my_role") if ws else None) or user_role
+    all_ws = getattr(request.state, "workspaces", None) or []
+    current_ws_id = str(ws.get("id")) if ws and ws.get("id") else None
+    shared_workspaces = [
+        w for w in all_ws if w.get("is_shared") and str(w.get("id")) != current_ws_id
+    ]
+    return templates.TemplateResponse(
+        request=request,
+        name="bundles.html",
+        context={
+            "request": request,
+            "page": "bundles",
+            "workspace": ws,
+            "shared_workspaces": shared_workspaces,
+            "user": user,
+            "my_role": my_role,
+        },
+    )
+
+
 @app.get("/notebooks", response_class=HTMLResponse)
 async def notebooks(request: Request):
     ws = request.state.workspace
@@ -6961,3 +6986,321 @@ async def ui_ai_chat_cancel(request: Request):
         return JSONResponse({"ok": False, "error": "No matching running request."}, status_code=404)
     entry[1].cancel()
     return JSONResponse({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# Lake Asset Bundles (LABs) API Proxies & AI Generator
+# ---------------------------------------------------------------------------
+
+
+def _get_bundle_workspace_context(
+    request: Request,
+) -> tuple[str | None, str | None, str | None]:
+    token = _get_request_token(request)
+    ws = getattr(request.state, "workspace", None) or {}
+    ws_id = str(ws.get("id")) if ws.get("id") else request.query_params.get("workspace_id")
+    ws_slug = str(ws.get("slug")) if ws.get("slug") else request.query_params.get("workspace_slug")
+    return token, ws_id, ws_slug
+
+
+@app.get("/api/bundles")
+async def api_bundles_list(request: Request):
+    token, ws_id, ws_slug = _get_bundle_workspace_context(request)
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+
+    target = request.query_params.get("target")
+    status_filter = request.query_params.get("status")
+    params: dict[str, str] = {}
+    if target and target != "all":
+        params["target"] = target
+    if status_filter and status_filter != "all":
+        params["status"] = status_filter
+
+    query_str = f"?{urllib.parse.urlencode(params)}" if params else ""
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(
+                f"{BACKEND_URL}/api/bundles{query_str}",
+                headers=_build_backend_headers(token or "", ws_id, ws_slug),
+            )
+        return Response(
+            content=resp.content,
+            status_code=resp.status_code,
+            media_type="application/json",
+        )
+    except Exception as exc:
+        return JSONResponse({"detail": f"Failed to contact backend: {exc}"}, status_code=502)
+
+
+@app.get("/api/bundles/{bundle_id}")
+async def api_bundles_detail(request: Request, bundle_id: str):
+    token, ws_id, ws_slug = _get_bundle_workspace_context(request)
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+
+    include_drift = request.query_params.get("include_drift", "true")
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(
+                f"{BACKEND_URL}/api/bundles/{bundle_id}?include_drift={include_drift}",
+                headers=_build_backend_headers(token or "", ws_id, ws_slug),
+            )
+        return Response(
+            content=resp.content,
+            status_code=resp.status_code,
+            media_type="application/json",
+        )
+    except Exception as exc:
+        return JSONResponse({"detail": f"Failed to contact backend: {exc}"}, status_code=502)
+
+
+@app.post("/api/bundles/validate")
+async def api_bundles_validate(request: Request):
+    token, ws_id, ws_slug = _get_bundle_workspace_context(request)
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    if ws_slug and not body.get("workspace_slug"):
+        body["workspace_slug"] = ws_slug
+    if ws_id and not body.get("workspace_id"):
+        body["workspace_id"] = ws_id
+
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.post(
+                f"{BACKEND_URL}/api/bundles/validate",
+                json=body,
+                headers=_build_backend_headers(token or "", ws_id, ws_slug),
+            )
+        return Response(
+            content=resp.content,
+            status_code=resp.status_code,
+            media_type="application/json",
+        )
+    except Exception as exc:
+        return JSONResponse({"detail": f"Failed to contact backend: {exc}"}, status_code=502)
+
+
+@app.post("/api/bundles/deploy")
+async def api_bundles_deploy(request: Request):
+    token, ws_id, ws_slug = _get_bundle_workspace_context(request)
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    if ws_slug and not body.get("workspace_slug"):
+        body["workspace_slug"] = ws_slug
+    if ws_id and not body.get("workspace_id"):
+        body["workspace_id"] = ws_id
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.post(
+                f"{BACKEND_URL}/api/bundles/deploy",
+                json=body,
+                headers=_build_backend_headers(token or "", ws_id, ws_slug),
+            )
+        return Response(
+            content=resp.content,
+            status_code=resp.status_code,
+            media_type="application/json",
+        )
+    except Exception as exc:
+        return JSONResponse({"detail": f"Failed to contact backend: {exc}"}, status_code=502)
+
+
+@app.post("/api/bundles/{bundle_id}/run")
+async def api_bundles_run(request: Request, bundle_id: str):
+    token, ws_id, ws_slug = _get_bundle_workspace_context(request)
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+
+    pipeline_name = request.query_params.get("pipeline_name")
+    try:
+        body = await request.json()
+        if not pipeline_name:
+            pipeline_name = body.get("pipeline_name")
+    except Exception:
+        body = {}
+
+    url = f"{BACKEND_URL}/api/bundles/{bundle_id}/run"
+    if pipeline_name:
+        url += f"?pipeline_name={urllib.parse.quote(pipeline_name)}"
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.post(
+                url,
+                json=body,
+                headers=_build_backend_headers(token or "", ws_id, ws_slug),
+            )
+        return Response(
+            content=resp.content,
+            status_code=resp.status_code,
+            media_type="application/json",
+        )
+    except Exception as exc:
+        return JSONResponse({"detail": f"Failed to contact backend: {exc}"}, status_code=502)
+
+
+@app.delete("/api/bundles/{bundle_id}")
+async def api_bundles_delete(request: Request, bundle_id: str):
+    token, ws_id, ws_slug = _get_bundle_workspace_context(request)
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+
+    cascade = request.query_params.get("cascade", "true")
+    purge_storage = request.query_params.get("purge_storage", "false")
+    url = f"{BACKEND_URL}/api/bundles/{bundle_id}?cascade={cascade}&purge_storage={purge_storage}"
+
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            resp = client.delete(
+                url,
+                headers=_build_backend_headers(token or "", ws_id, ws_slug),
+            )
+        return Response(
+            content=resp.content,
+            status_code=resp.status_code,
+            media_type="application/json",
+        )
+    except Exception as exc:
+        return JSONResponse({"detail": f"Failed to contact backend: {exc}"}, status_code=502)
+
+
+@app.post("/api/bundles/generate-ai")
+async def api_bundles_generate_ai(request: Request):
+    token, ws_id, ws_slug = _get_bundle_workspace_context(request)
+    if not token and AUTH_ENABLED:
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    prompt = str(body.get("prompt") or "").strip()
+    if not prompt:
+        return JSONResponse({"error": "Prompt is required"}, status_code=400)
+
+    slug = ws_slug or body.get("workspace_slug") or "analytics"
+    manifest_str = None
+    model_used = "ai-gateway"
+
+    # Attempt AI Gateway first
+    try:
+        if ai_gateway_client.is_configured():
+            client = ai_gateway_client.GatewayClient()
+            sys_inst = (
+                "You are an expert Lake of Tears Lake Asset Bundle (LAB) architect.\n"
+                "Generate a concise, valid TOON manifest (`lake.toon`) matching the user requirements.\n"
+                "Return ONLY the TOON text without markdown code blocks, backticks, or intro/outro comments.\n"
+                "Ensure valid TOON syntax:\n"
+                "bundle:\n"
+                "  name: <bundle_slug>\n"
+                "  version: 0.1.0\n"
+                "targets:\n"
+                "  dev:\n"
+                f"    workspace: {slug}\n"
+                "resources:\n"
+                "  catalogs[...]{...}:\n"
+                "  schemas[...]{...}:\n"
+                "  tables[...]{...}:\n"
+                "  pipelines: ...\n"
+            )
+            ai_res = client.models.generate_content(
+                contents=prompt,
+                config={"system_instruction": sys_inst, "temperature": 0.2},
+            )
+            raw_text = (ai_res.text or "").strip()
+            raw_text = re.sub(r"^```[a-z]*\n?", "", raw_text)
+            raw_text = re.sub(r"\n?```$", "", raw_text).strip()
+            if raw_text:
+                manifest_str = raw_text
+                model_used = ai_gateway_client.chat_model() or "ai-gateway"
+    except Exception:
+        manifest_str = None
+
+    # Fallback to intelligent heuristic generator
+    if not manifest_str:
+        model_used = "heuristic-starter-architect"
+        words = re.findall(r"[a-zA-Z0-9]+", prompt.lower())
+        stop_words = {
+            "build",
+            "a",
+            "an",
+            "the",
+            "with",
+            "and",
+            "in",
+            "for",
+            "to",
+            "create",
+            "bundle",
+            "lakehouse",
+        }
+        name_parts = [w for w in words if w not in stop_words][:3]
+        bundle_name = "-".join(name_parts) if name_parts else "data-lake-bundle"
+        pipeline_name = bundle_name.replace("-", "_")
+
+        manifest_str = f"""# Lake Asset Bundle (TOON Specification)
+bundle:
+  name: {bundle_name}
+  version: 0.1.0
+  description: {prompt[:80]}...
+
+targets:
+  dev:
+    workspace: {slug}
+    default_catalog: main_lake
+  prod:
+    workspace: {slug}
+    default_catalog: main_lake
+
+resources:
+  catalogs[1]{{name,description}}:
+    main_lake,Core Lakehouse Catalog
+
+  schemas[3]{{catalog,name,tier,description}}:
+    main_lake,bronze,bronze,Raw ingested events
+    main_lake,silver,silver,Cleaned dimensional models
+    main_lake,gold,gold,Aggregated revenue marts
+
+  tables[2]{{name,catalog,schema,format,s3_path_pattern}}:
+    raw_events,main_lake,bronze,parquet,"s3://datalake/bronze/events/*.parquet"
+    aggregated_metrics,main_lake,gold,parquet,"s3://datalake/gold/metrics/*.parquet"
+
+  pipelines:
+    {pipeline_name}_pipeline:
+      schedule: "0 4 * * *"
+      tasks[2]{{name,type,entrypoint,upstream_tasks}}:
+        ingest_bronze,duckdb_sql,sql/ingest.sql,[]
+        aggregate_gold,duckdb_sql,sql/aggregate.sql,[ingest_bronze]
+
+  dashboards:
+    {pipeline_name}_overview:
+      title: "{bundle_name.replace('-', ' ').title()} Overview"
+      widgets:
+        kpi_count:
+          type: metric
+          query: "SELECT count(*) AS total_rows FROM main_lake.gold.aggregated_metrics"
+"""
+
+    return JSONResponse(
+        {
+            "manifest": manifest_str,
+            "format": "toon",
+            "model": model_used,
+            "valid": True,
+        }
+    )

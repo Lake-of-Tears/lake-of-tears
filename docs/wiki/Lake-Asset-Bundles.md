@@ -183,3 +183,36 @@ Mounted under `/api/bundles` and `/api/v1/bundles`:
 | `GET` | `/api/bundles/{bundle_id}` | Retrieves deployment detail, resource map, snapshot, and drift | Viewer / Member |
 | `POST` | `/api/bundles/{bundle_id}/run` | Triggers ad-hoc execution of a bundle pipeline | Write / Admin |
 | `DELETE` | `/api/bundles/{bundle_id}` | Safely destroys and unlinks provisioned bundle resources | Write / Admin |
+
+---
+
+## 8. Lake UI Bundles Explorer & Conversational AI Generator
+
+Mounted at `/bundles` within the primary navigation sidebar (under *Data Engineering*):
+
+### 8.1. Declarative Bundles Gallery
+- **Reactive State Management:** Driven by the offline Alpine.js controller `bundlesManager` in `ui/static/js/controllers/bundles.js`.
+- **Filtering & Search:** Real-time search by bundle name, version, and target, with target (`dev`, `staging`, `prod`) and deployment status filters.
+- **Resource Summary Cards:** Visual counters for provisioned catalogs, tables, pipelines, and dashboards, with deployment timestamps and Git commit badges.
+
+### 8.2. Slide-Over Details & Topology Drawer
+- **Overview Tab:** Live drift detection report, deployment metadata, and ad-hoc Airflow pipeline execution triggers.
+- **Resources Tab:** Grouped inventory of all provisioned database objects with column specifications and task entrypoints.
+- **Manifest Tab:** Canonical manifest viewer with 1-click clipboard copy and syntax highlighting.
+- **Visual Topology Tab:** Multi-tier DAG visualization depicting the asset flow from storage namespaces through managed tables, Airflow transformation tasks, and visual dashboards.
+
+### 8.3. Pre-Deploy & Dry-Run Validation Modal
+- Direct manifest editing in TOON, YAML, or JSON.
+- 1-click **Validate & Diff** executing dry-run reconciliation before modifying live state.
+- Visual breakdown of resources to create, update, delete, or leave unchanged.
+
+### 8.4. Conversational AI Prompt-to-Bundle Generator
+- Natural language to production-ready TOON specification generator powered by workspace LLM integrations via `GatewayClient` with automatic fallback to heuristic starter templates.
+- Curated template prompts for Customer 360, E-Commerce Medallion Lakehouses, and Fraud Detection pipelines.
+- Direct handoff into the Pre-Deploy modal for immediate validation and rollout.
+
+### 8.5. Teardown & Deletion Safeguards
+- Typed confirmation (`DESTROY`) required before resource destruction.
+- Optional storage purge toggle for raw Parquet and vector embeddings.
+- Automatic preservation of core medallion schemas (`bronze`, `silver`, `gold`).
+

@@ -1,0 +1,884 @@
+{% extends "base.html" %}
+{% block title %}Asset Bundles · Lake of Tears{% endblock %}
+{% block head %}
+<script src="/static/js/controllers/bundles.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto space-y-6" id="bundles-container" x-data="bundlesManager()" x-cloak>
+
+  <!-- Page Header -->
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-white/[0.07]">
+    <div>
+      <div class="flex items-center gap-3">
+        <h1 class="text-xl font-bold tracking-tight text-gray-100 flex items-center gap-2">
+          <svg class="w-5 h-5 text-purple-400 shrink-0" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+          </svg>
+          Lake Asset Bundles
+        </h1>
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-500/10 text-purple-300 border border-purple-500/20">
+          <span class="w-1.5 h-1.5 rounded-full bg-purple-400"></span>
+          {{ workspace.name if workspace else 'Active Workspace' }}
+        </span>
+        {% if my_role == 'viewer' %}
+        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-gray-500/10 text-gray-400 border border-gray-500/20">
+          Read-Only Viewer
+        </span>
+        {% endif %}
+      </div>
+      <p class="text-xs text-gray-400 mt-1">
+        Declarative DataOps & Medallion Lakehouse specification with AI-first TOON / YAML manifests, Airflow DAG generation & atomic drift sync.
+      </p>
+    </div>
+
+    <!-- Top Action Controls -->
+    <div class="flex items-center gap-2">
+      <button @click="fetchBundles()" :disabled="isLoading" class="btn-ghost text-xs flex items-center gap-1.5 py-1.5 px-3">
+        <svg class="w-3.5 h-3.5 text-gray-400" :class="{ 'animate-spin': isLoading }" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        <span>Refresh</span>
+      </button>
+
+      {% if my_role != 'viewer' %}
+      <!-- AI Bundle Architect Button -->
+      <button @click="openAIModal()" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-gradient-to-r from-purple-600/30 to-indigo-600/30 hover:from-purple-600/50 hover:to-indigo-600/50 text-purple-200 border border-purple-500/30 transition-all shadow-sm">
+        <svg class="w-3.5 h-3.5 text-purple-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z"/>
+        </svg>
+        <span>AI Generator</span>
+      </button>
+
+      <!-- Deploy Bundle Button -->
+      <button @click="openDeployModal()" class="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-md shadow-sm">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+        </svg>
+        <span>Deploy Bundle</span>
+      </button>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Search & Filter Controls Toolbar -->
+  <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-gray-900/60 p-3 rounded-lg border border-white/[0.06]">
+    <div class="flex flex-1 items-center gap-2">
+      <!-- Search Input -->
+      <div class="relative flex-1 max-w-md">
+        <svg class="w-3.5 h-3.5 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+        </svg>
+        <input
+          type="text"
+          x-model="searchQuery"
+          placeholder="Filter bundles by name, version, target..."
+          class="w-full bg-black/40 border border-white/[0.08] rounded-md pl-9 pr-3 py-1.5 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-purple-500/60"
+        />
+        <button
+          x-show="searchQuery"
+          @click="searchQuery = ''"
+          class="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 text-xs"
+        >✕</button>
+      </div>
+
+      <!-- Target Filter -->
+      <select
+        x-model="targetFilter"
+        class="bg-black/40 border border-white/[0.08] rounded-md px-2.5 py-1.5 text-xs text-gray-300 focus:outline-none focus:border-purple-500/60"
+      >
+        <option value="all">All Targets</option>
+        <option value="dev">Dev</option>
+        <option value="staging">Staging</option>
+        <option value="prod">Prod</option>
+      </select>
+
+      <!-- Status Filter -->
+      <select
+        x-model="statusFilter"
+        @change="fetchBundles()"
+        class="bg-black/40 border border-white/[0.08] rounded-md px-2.5 py-1.5 text-xs text-gray-300 focus:outline-none focus:border-purple-500/60"
+      >
+        <option value="all">All Statuses</option>
+        <option value="active">Active</option>
+        <option value="deploying">Deploying</option>
+        <option value="pending_drift_sync">Pending Drift Sync</option>
+        <option value="failed">Failed</option>
+        <option value="destroyed">Destroyed</option>
+      </select>
+    </div>
+
+    <!-- Count Summary -->
+    <div class="text-xs text-gray-400 font-mono self-center">
+      Showing <span class="text-purple-300 font-semibold" x-text="filteredBundles.length"></span> of <span x-text="bundles.length"></span> bundles
+    </div>
+  </div>
+
+  <!-- Loading State -->
+  <div x-show="isLoading && bundles.length === 0" class="py-16 text-center">
+    <div class="inline-block animate-spin rounded-full h-8 w-8 border-2 border-purple-500 border-t-transparent mb-3"></div>
+    <p class="text-xs text-gray-400">Loading Lake Asset Bundles...</p>
+  </div>
+
+  <!-- Empty State -->
+  <div
+    x-show="!isLoading && filteredBundles.length === 0"
+    class="py-16 px-6 text-center bg-gray-900/30 border border-white/[0.05] rounded-xl"
+  >
+    <div class="w-12 h-12 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400 flex items-center justify-center mx-auto mb-4">
+      <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+      </svg>
+    </div>
+    <h3 class="text-sm font-semibold text-gray-200">No Asset Bundles Found</h3>
+    <p class="text-xs text-gray-400 max-w-md mx-auto mt-1 mb-6">
+      Lake Asset Bundles (LABs) package your lakehouse catalogs, schemas, tables, DuckDB pipelines, and dashboards as declarative code with automated drift tracking.
+    </p>
+    {% if my_role != 'viewer' %}
+    <div class="flex items-center justify-center gap-3">
+      <button @click="openAIModal()" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-purple-600/20 text-purple-300 border border-purple-500/30 hover:bg-purple-600/30 transition-colors">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z"/>
+        </svg>
+        <span>Generate with AI Architect</span>
+      </button>
+      <button @click="openDeployModal()" class="btn-primary text-xs py-1.5 px-3">
+        <span>Deploy First Bundle</span>
+      </button>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Bundles Gallery Cards Grid -->
+  <div x-show="filteredBundles.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <template x-for="b in filteredBundles" :key="b.id">
+      <div class="bg-gray-900/50 hover:bg-gray-900/80 border border-white/[0.08] hover:border-purple-500/40 rounded-xl p-5 flex flex-col justify-between transition-all duration-150 shadow-sm group">
+        
+        <!-- Card Top Section -->
+        <div>
+          <!-- Title & Badges -->
+          <div class="flex items-start justify-between gap-3 mb-2">
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2 flex-wrap">
+                <h3 class="text-sm font-semibold text-gray-100 truncate group-hover:text-purple-300 transition-colors" x-text="b.bundle_name"></h3>
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono bg-white/[0.06] text-gray-300 border border-white/[0.08]" x-text="'v' + (b.version || '0.1.0')"></span>
+              </div>
+              <p class="text-xs text-gray-400 mt-1 line-clamp-2" x-text="b.description || 'Declarative bundle asset specification'"></p>
+            </div>
+
+            <!-- Target Pill -->
+            <span
+              class="shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-mono font-medium uppercase tracking-wider"
+              :class="getTargetBadgeClass(b.target)"
+              x-text="b.target || 'dev'"
+            ></span>
+          </div>
+
+          <!-- Status & Drift Summary -->
+          <div class="flex items-center gap-2 mt-3 mb-4">
+            <span
+              class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium"
+              :class="getStatusBadgeClass(b.status)"
+            >
+              <span class="w-1.5 h-1.5 rounded-full" :class="{
+                'bg-emerald-400': b.status === 'active',
+                'bg-blue-400': b.status === 'deploying',
+                'bg-red-400': b.status === 'failed',
+                'bg-amber-400': b.status === 'pending_drift_sync',
+                'bg-gray-400': b.status === 'destroyed'
+              }"></span>
+              <span x-text="(b.status || 'active').replace('_', ' ').toUpperCase()"></span>
+            </span>
+
+            <span x-show="b.git_commit_sha" class="text-[10px] font-mono text-gray-500 bg-black/40 px-1.5 py-0.5 rounded border border-white/[0.05]" x-text="(b.git_commit_sha || '').slice(0, 7)"></span>
+          </div>
+
+          <!-- Provisioned Resources Counters -->
+          <div class="grid grid-cols-4 gap-2 bg-black/30 p-2.5 rounded-lg border border-white/[0.05] text-center my-3">
+            <div>
+              <div class="text-xs font-semibold text-gray-200" x-text="b.catalogs_count || (b.resources_map?.catalogs?.length || 0)"></div>
+              <div class="text-[10px] text-gray-500 uppercase tracking-wider">Catalogs</div>
+            </div>
+            <div>
+              <div class="text-xs font-semibold text-gray-200" x-text="b.tables_count || (b.resources_map?.tables?.length || 0)"></div>
+              <div class="text-[10px] text-gray-500 uppercase tracking-wider">Tables</div>
+            </div>
+            <div>
+              <div class="text-xs font-semibold text-purple-300" x-text="b.pipelines_count || (b.resources_map?.pipelines?.length || 0)"></div>
+              <div class="text-[10px] text-gray-500 uppercase tracking-wider">Pipelines</div>
+            </div>
+            <div>
+              <div class="text-xs font-semibold text-indigo-300" x-text="b.dashboards_count || (b.resources_map?.dashboards?.length || 0)"></div>
+              <div class="text-[10px] text-gray-500 uppercase tracking-wider">Dashboards</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card Footer & Actions -->
+        <div class="pt-3 border-t border-white/[0.06] flex items-center justify-between gap-2 mt-2">
+          <div class="text-[11px] text-gray-500">
+            Deployed <span class="text-gray-400" x-text="formatDate(b.last_deployed_at || b.created_at)"></span>
+          </div>
+
+          <div class="flex items-center gap-1.5">
+            <!-- View Details Button -->
+            <button
+              @click="openDrawer(b.id)"
+              class="px-2.5 py-1 text-xs font-medium rounded bg-white/[0.06] hover:bg-white/[0.12] text-gray-200 transition-colors flex items-center gap-1"
+            >
+              <span>Inspect</span>
+              <svg class="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/>
+              </svg>
+            </button>
+
+            <!-- Destroy Button (Non-viewers) -->
+            {% if my_role != 'viewer' %}
+            <button
+              @click="openDestroyModal(b)"
+              title="Teardown bundle"
+              class="p-1 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+              </svg>
+            </button>
+            {% endif %}
+          </div>
+        </div>
+
+      </div>
+    </template>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════════ -->
+  <!-- SLIDE-OVER DETAILS & TOPOLOGY DRAWER                                      -->
+  <!-- ══════════════════════════════════════════════════════════════════════════ -->
+  <div
+    x-show="drawerOpen"
+    x-transition:enter="transition ease-out duration-300"
+    x-transition:enter-start="opacity-0"
+    x-transition:enter-end="opacity-100"
+    x-transition:leave="transition ease-in duration-200"
+    x-transition:leave-start="opacity-100"
+    x-transition:leave-end="opacity-0"
+    class="fixed inset-0 z-50 overflow-hidden bg-black/60 backdrop-blur-xs"
+  >
+    <div class="absolute inset-0" @click="closeDrawer()"></div>
+
+    <div class="fixed inset-y-0 right-0 max-w-full flex pl-10">
+      <div
+        x-show="drawerOpen"
+        x-transition:enter="transform transition ease-in-out duration-300"
+        x-transition:enter-start="translate-x-full"
+        x-transition:enter-end="translate-x-0"
+        x-transition:leave="transform transition ease-in-out duration-200"
+        x-transition:leave-start="translate-x-0"
+        x-transition:leave-end="translate-x-full"
+        class="w-screen max-w-2xl bg-gray-900 border-l border-white/[0.08] shadow-2xl flex flex-col justify-between"
+      >
+        <!-- Drawer Header -->
+        <div class="p-6 border-b border-white/[0.08] flex items-start justify-between gap-4 bg-gray-950/60">
+          <div>
+            <div class="flex items-center gap-2">
+              <h2 class="text-lg font-bold text-gray-100" x-text="selectedBundle?.bundle_name || 'Bundle Details'"></h2>
+              <span class="font-mono text-xs text-purple-300 bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20" x-text="'v' + (selectedBundle?.version || '1.0.0')"></span>
+              <span
+                class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono uppercase"
+                :class="getTargetBadgeClass(selectedBundle?.target)"
+                x-text="selectedBundle?.target || 'dev'"
+              ></span>
+            </div>
+            <p class="text-xs text-gray-400 mt-1" x-text="selectedBundle?.description || 'Declarative bundle asset specification'"></p>
+          </div>
+
+          <button @click="closeDrawer()" class="text-gray-400 hover:text-white p-1 rounded-md hover:bg-white/[0.06] transition-colors">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Drawer Tab Navigation -->
+        <div class="flex border-b border-white/[0.08] px-6 bg-black/20 gap-2">
+          <button
+            @click="setDrawerTab('overview')"
+            class="py-2.5 px-3 text-xs font-medium border-b-2 transition-colors flex items-center gap-1.5"
+            :class="activeDrawerTab === 'overview' ? 'border-purple-400 text-purple-300' : 'border-transparent text-gray-400 hover:text-gray-200'"
+          >
+            <span>Overview</span>
+          </button>
+
+          <button
+            @click="setDrawerTab('resources')"
+            class="py-2.5 px-3 text-xs font-medium border-b-2 transition-colors flex items-center gap-1.5"
+            :class="activeDrawerTab === 'resources' ? 'border-purple-400 text-purple-300' : 'border-transparent text-gray-400 hover:text-gray-200'"
+          >
+            <span>Resources</span>
+            <span class="text-[10px] bg-white/[0.08] px-1.5 rounded" x-text="selectedBundle ? Object.keys(selectedBundle.resources_map || {}).length : 0"></span>
+          </button>
+
+          <button
+            @click="setDrawerTab('manifest')"
+            class="py-2.5 px-3 text-xs font-medium border-b-2 transition-colors flex items-center gap-1.5"
+            :class="activeDrawerTab === 'manifest' ? 'border-purple-400 text-purple-300' : 'border-transparent text-gray-400 hover:text-gray-200'"
+          >
+            <span>Manifest</span>
+          </button>
+
+          <button
+            @click="setDrawerTab('topology')"
+            class="py-2.5 px-3 text-xs font-medium border-b-2 transition-colors flex items-center gap-1.5"
+            :class="activeDrawerTab === 'topology' ? 'border-purple-400 text-purple-300' : 'border-transparent text-gray-400 hover:text-gray-200'"
+          >
+            <span>Visual Topology</span>
+          </button>
+        </div>
+
+        <!-- Drawer Body Content -->
+        <div class="flex-1 overflow-y-auto p-6 space-y-6">
+
+          <!-- 1. OVERVIEW TAB -->
+          <div x-show="activeDrawerTab === 'overview'" class="space-y-5">
+            <!-- Metadata Grid -->
+            <div class="grid grid-cols-2 gap-3 bg-black/30 p-4 rounded-xl border border-white/[0.06]">
+              <div>
+                <span class="text-[11px] text-gray-500 uppercase tracking-wider block">Target Environment</span>
+                <span class="text-xs font-semibold text-gray-200 mt-0.5 block" x-text="selectedBundle?.target || 'dev'"></span>
+              </div>
+              <div>
+                <span class="text-[11px] text-gray-500 uppercase tracking-wider block">Status</span>
+                <span class="text-xs font-semibold mt-0.5 inline-flex items-center gap-1" :class="getStatusBadgeClass(selectedBundle?.status)">
+                  <span x-text="(selectedBundle?.status || 'active').toUpperCase()"></span>
+                </span>
+              </div>
+              <div>
+                <span class="text-[11px] text-gray-500 uppercase tracking-wider block">Deployed At</span>
+                <span class="text-xs font-mono text-gray-300 mt-0.5 block" x-text="formatDate(selectedBundle?.last_deployed_at || selectedBundle?.created_at)"></span>
+              </div>
+              <div>
+                <span class="text-[11px] text-gray-500 uppercase tracking-wider block">Deployed By</span>
+                <span class="text-xs font-mono text-gray-300 mt-0.5 block" x-text="selectedBundle?.deployed_by || 'System'"></span>
+              </div>
+              <div class="col-span-2" x-show="selectedBundle?.git_commit_sha">
+                <span class="text-[11px] text-gray-500 uppercase tracking-wider block">Commit SHA</span>
+                <span class="text-xs font-mono text-purple-300 mt-0.5 block" x-text="selectedBundle?.git_commit_sha"></span>
+              </div>
+            </div>
+
+            <!-- Live Drift Detection Panel -->
+            <div class="bg-gray-950/60 p-4 rounded-xl border" :class="driftReport?.in_sync ? 'border-emerald-500/20' : 'border-amber-500/30'">
+              <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center gap-2">
+                  <span class="w-2 h-2 rounded-full" :class="driftReport?.in_sync ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'"></span>
+                  <h4 class="text-xs font-semibold text-gray-200" x-text="driftReport?.in_sync ? 'State in Sync' : 'Workspace Drift Detected'"></h4>
+                </div>
+                <span class="text-[10px] font-mono text-gray-500">Automated Drift Engine</span>
+              </div>
+              <p class="text-xs text-gray-400" x-show="driftReport?.in_sync">
+                The deployed bundle state matches all live database catalogs, schemas, tables, and pipeline records.
+              </p>
+              <div x-show="!driftReport?.in_sync && driftReport" class="text-xs text-amber-300/90 space-y-1">
+                <p>Differences discovered between workspace assets and bundle specification:</p>
+                <div class="bg-black/40 p-2.5 rounded font-mono text-[11px] text-amber-200 border border-amber-500/20">
+                  <div x-show="driftReport?.added?.length > 0">Added: <span x-text="driftReport?.added?.join(', ')"></span></div>
+                  <div x-show="driftReport?.modified?.length > 0">Modified: <span x-text="driftReport?.modified?.join(', ')"></span></div>
+                  <div x-show="driftReport?.removed?.length > 0">Missing/Removed: <span x-text="driftReport?.removed?.join(', ')"></span></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Ad-hoc Pipeline Run Action -->
+            <div class="bg-black/30 p-4 rounded-xl border border-white/[0.06]" x-show="selectedBundle?.resources_map?.pipelines?.length > 0">
+              <h4 class="text-xs font-semibold text-gray-200 mb-2">Trigger Airflow Execution</h4>
+              <p class="text-xs text-gray-400 mb-3">Execute the Airflow DAG generated from this bundle manifest in headless mode.</p>
+              
+              <template x-for="p in (selectedBundle?.resources_map?.pipelines || [])" :key="p.name || p">
+                <div class="flex items-center justify-between py-2 border-t border-white/[0.04]">
+                  <div>
+                    <span class="text-xs font-medium text-gray-200" x-text="p.name || p"></span>
+                    <span class="text-[10px] font-mono text-gray-500 block" x-text="'DAG: ' + (selectedBundle.bundle_name + '_' + (p.name || p))"></span>
+                  </div>
+                  <button
+                    @click="triggerPipeline(selectedBundle.id, p.name || p)"
+                    :disabled="isRunningPipeline"
+                    class="btn-primary text-xs py-1 px-2.5 flex items-center gap-1.5"
+                  >
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <span>Run DAG</span>
+                  </button>
+                </div>
+              </template>
+
+              <!-- Run result banner -->
+              <div x-show="activeRunResult" class="mt-3 p-2.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300 font-mono">
+                ✓ Pipeline triggered: <span x-text="activeRunResult?.dag_run_id || 'Triggered'"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 2. RESOURCES TAB -->
+          <div x-show="activeDrawerTab === 'resources'" class="space-y-4">
+            <template x-for="(items, resType) in (selectedBundle?.resources_map || {})" :key="resType">
+              <div class="bg-black/30 p-4 rounded-xl border border-white/[0.06]">
+                <div class="flex items-center justify-between mb-3 pb-2 border-b border-white/[0.06]">
+                  <h4 class="text-xs font-semibold text-gray-200 uppercase tracking-wider flex items-center gap-2">
+                    <span class="w-1.5 h-1.5 rounded-full bg-purple-400"></span>
+                    <span x-text="resType"></span>
+                  </h4>
+                  <span class="text-[10px] font-mono text-gray-400" x-text="items.length + ' item(s)'"></span>
+                </div>
+
+                <div class="space-y-2">
+                  <template x-for="item in items" :key="item.name || item.id || JSON.stringify(item)">
+                    <div class="bg-gray-900/60 p-2.5 rounded-lg border border-white/[0.04] text-xs">
+                      <div class="flex items-center justify-between">
+                        <span class="font-semibold text-gray-200" x-text="item.name || item.catalog_name || item.title || 'Resource'"></span>
+                        <span x-show="item.format" class="text-[10px] font-mono text-purple-300 bg-purple-500/10 px-1.5 py-0.5 rounded" x-text="item.format"></span>
+                      </div>
+                      <p x-show="item.description" class="text-[11px] text-gray-400 mt-1" x-text="item.description"></p>
+                      
+                      <!-- Table columns subgrid -->
+                      <div x-show="item.columns?.length" class="mt-2 pt-2 border-t border-white/[0.04]">
+                        <span class="text-[10px] text-gray-500 uppercase tracking-wider block mb-1">Columns</span>
+                        <div class="flex flex-wrap gap-1">
+                          <template x-for="col in (item.columns || [])" :key="col.name">
+                            <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-black/40 text-gray-300 border border-white/[0.04]">
+                              <span x-text="col.name"></span>: <span class="text-purple-400" x-text="col.type"></span>
+                            </span>
+                          </template>
+                        </div>
+                      </div>
+
+                      <!-- Pipeline Tasks subgrid -->
+                      <div x-show="item.tasks?.length" class="mt-2 pt-2 border-t border-white/[0.04]">
+                        <span class="text-[10px] text-gray-500 uppercase tracking-wider block mb-1">Tasks</span>
+                        <div class="space-y-1">
+                          <template x-for="task in (item.tasks || [])" :key="task.name">
+                            <div class="text-[11px] font-mono text-gray-300 flex items-center justify-between">
+                              <span class="text-purple-300" x-text="task.name"></span>
+                              <span class="text-gray-500" x-text="task.type + ' (' + task.entrypoint + ')'"></span>
+                            </div>
+                          </template>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <!-- 3. MANIFEST TAB -->
+          <div x-show="activeDrawerTab === 'manifest'" class="space-y-4">
+            <div class="flex items-center justify-between">
+              <span class="text-xs text-gray-400">Canonical Bundle Manifest</span>
+              <button
+                @click="navigator.clipboard.writeText(manifestFormatted); alert('Manifest copied to clipboard!')"
+                class="btn-ghost text-xs py-1 px-2.5 flex items-center gap-1.5"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                </svg>
+                <span>Copy</span>
+              </button>
+            </div>
+
+            <pre class="bg-black/60 p-4 rounded-xl border border-white/[0.08] text-xs font-mono text-purple-200 overflow-x-auto max-h-[500px] leading-relaxed select-all" x-text="manifestFormatted || 'No manifest source available.'"></pre>
+          </div>
+
+          <!-- 4. VISUAL TOPOLOGY TAB -->
+          <div x-show="activeDrawerTab === 'topology'" class="space-y-4">
+            <div class="text-xs text-gray-400">Asset Dependency Flow (DAG)</div>
+            
+            <div class="bg-black/50 p-6 rounded-xl border border-white/[0.08] flex flex-col items-center gap-4">
+              <!-- Tier 1: Catalogs & Schemas -->
+              <div class="w-full">
+                <div class="text-[10px] font-mono text-purple-400 uppercase tracking-widest text-center mb-2">1. Storage & Namespace</div>
+                <div class="flex flex-wrap justify-center gap-3">
+                  <template x-for="cat in (selectedBundle?.resources_map?.catalogs || [])" :key="cat.name">
+                    <div class="px-3 py-2 rounded-lg bg-purple-950/40 border border-purple-500/30 text-xs font-medium text-purple-200 text-center shadow-xs">
+                      <div class="text-[9px] uppercase text-purple-400">Catalog</div>
+                      <span x-text="cat.name"></span>
+                    </div>
+                  </template>
+                </div>
+              </div>
+
+              <!-- Flow Arrow -->
+              <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3"/>
+              </svg>
+
+              <!-- Tier 2: Managed Tables -->
+              <div class="w-full">
+                <div class="text-[10px] font-mono text-blue-400 uppercase tracking-widest text-center mb-2">2. Managed Tables & Schemas</div>
+                <div class="flex flex-wrap justify-center gap-3">
+                  <template x-for="tbl in (selectedBundle?.resources_map?.tables || [])" :key="tbl.name">
+                    <div class="px-3 py-2 rounded-lg bg-blue-950/40 border border-blue-500/30 text-xs font-medium text-blue-200 text-center shadow-xs">
+                      <div class="text-[9px] uppercase text-blue-400" x-text="tbl.format || 'Table'"></div>
+                      <span x-text="tbl.name"></span>
+                    </div>
+                  </template>
+                  <div x-show="!(selectedBundle?.resources_map?.tables?.length)" class="text-xs text-gray-500 italic">No explicit tables defined</div>
+                </div>
+              </div>
+
+              <!-- Flow Arrow -->
+              <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3"/>
+              </svg>
+
+              <!-- Tier 3: Pipelines & DAG Execution -->
+              <div class="w-full">
+                <div class="text-[10px] font-mono text-emerald-400 uppercase tracking-widest text-center mb-2">3. Pipelines & Airflow DAGs</div>
+                <div class="flex flex-wrap justify-center gap-3">
+                  <template x-for="pip in (selectedBundle?.resources_map?.pipelines || [])" :key="pip.name">
+                    <div class="px-3 py-2 rounded-lg bg-emerald-950/40 border border-emerald-500/30 text-xs font-medium text-emerald-200 text-center shadow-xs">
+                      <div class="text-[9px] uppercase text-emerald-400">Pipeline</div>
+                      <span x-text="pip.name"></span>
+                    </div>
+                  </template>
+                  <div x-show="!(selectedBundle?.resources_map?.pipelines?.length)" class="text-xs text-gray-500 italic">No pipelines defined</div>
+                </div>
+              </div>
+
+              <!-- Flow Arrow -->
+              <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3"/>
+              </svg>
+
+              <!-- Tier 4: Dashboards -->
+              <div class="w-full">
+                <div class="text-[10px] font-mono text-amber-400 uppercase tracking-widest text-center mb-2">4. Dashboards & Analytics Marts</div>
+                <div class="flex flex-wrap justify-center gap-3">
+                  <template x-for="dsh in (selectedBundle?.resources_map?.dashboards || [])" :key="dsh.name || dsh.title">
+                    <div class="px-3 py-2 rounded-lg bg-amber-950/40 border border-amber-500/30 text-xs font-medium text-amber-200 text-center shadow-xs">
+                      <div class="text-[9px] uppercase text-amber-400">Dashboard</div>
+                      <span x-text="dsh.name || dsh.title"></span>
+                    </div>
+                  </template>
+                  <div x-show="!(selectedBundle?.resources_map?.dashboards?.length)" class="text-xs text-gray-500 italic">No dashboards defined</div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Drawer Footer -->
+        <div class="p-6 border-t border-white/[0.08] bg-gray-950/60 flex items-center justify-between">
+          <button @click="closeDrawer()" class="btn-ghost text-xs px-3 py-1.5">Close</button>
+
+          {% if my_role != 'viewer' %}
+          <div class="flex items-center gap-2">
+            <button
+              @click="openDestroyModal(selectedBundle)"
+              class="px-3 py-1.5 text-xs font-medium rounded text-red-400 hover:bg-red-500/10 border border-red-500/30 transition-colors"
+            >
+              Teardown Bundle
+            </button>
+          </div>
+          {% endif %}
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════════ -->
+  <!-- PRE-DEPLOY / DRY-RUN MODAL                                                -->
+  <!-- ══════════════════════════════════════════════════════════════════════════ -->
+  <div
+    x-show="deployModalOpen"
+    x-transition:enter="transition ease-out duration-200"
+    x-transition:enter-start="opacity-0"
+    x-transition:enter-end="opacity-100"
+    x-transition:leave="transition ease-in duration-150"
+    x-transition:leave-start="opacity-100"
+    x-transition:leave-end="opacity-0"
+    class="fixed inset-0 z-50 overflow-y-auto bg-black/70 backdrop-blur-xs flex items-center justify-center p-4"
+  >
+    <div
+      @click.outside="closeDeployModal()"
+      class="bg-gray-900 border border-white/[0.1] rounded-2xl max-w-3xl w-full p-6 shadow-2xl space-y-5"
+    >
+      <div class="flex items-center justify-between pb-3 border-b border-white/[0.08]">
+        <div class="flex items-center gap-2">
+          <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+          </svg>
+          <h3 class="text-base font-bold text-gray-100">Deploy Lake Asset Bundle</h3>
+        </div>
+        <button @click="closeDeployModal()" class="text-gray-400 hover:text-white text-sm">✕</button>
+      </div>
+
+      <!-- Controls: Target and Format -->
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-1">Target Environment</label>
+          <select x-model="deployTarget" class="w-full bg-black/40 border border-white/[0.08] rounded-md px-3 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-blue-500">
+            <option value="dev">Dev</option>
+            <option value="staging">Staging</option>
+            <option value="prod">Prod</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-1">Manifest Syntax</label>
+          <select x-model="deployFormat" class="w-full bg-black/40 border border-white/[0.08] rounded-md px-3 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-blue-500">
+            <option value="toon">TOON (lake.toon)</option>
+            <option value="yaml">YAML (lake.yml)</option>
+            <option value="json">JSON</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Manifest Editor Textarea -->
+      <div>
+        <label class="block text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-1">Manifest Specification</label>
+        <textarea
+          x-model="deployManifest"
+          rows="12"
+          class="w-full bg-black/60 border border-white/[0.08] rounded-xl p-3 text-xs font-mono text-purple-200 focus:outline-none focus:border-blue-500/80 leading-relaxed resize-y"
+          placeholder="Paste or write your lake.toon / lake.yml manifest here..."
+        ></textarea>
+      </div>
+
+      <!-- Error / Success Feedback -->
+      <div x-show="deployErrorMessage" class="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-300 font-mono" x-text="deployErrorMessage"></div>
+      <div x-show="deploySuccessMessage" class="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300 font-mono" x-text="deploySuccessMessage"></div>
+
+      <!-- Dry Run Diff Summary Table -->
+      <div x-show="dryRunResult?.valid" class="bg-black/30 p-3 rounded-xl border border-white/[0.06] space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-semibold text-gray-200">Reconciliation Plan (Dry Run)</span>
+          <span class="text-[10px] font-mono text-emerald-400">✓ Syntax Valid</span>
+        </div>
+        <div class="grid grid-cols-4 gap-2 text-center text-xs">
+          <div class="bg-emerald-500/10 border border-emerald-500/20 p-2 rounded">
+            <div class="font-bold text-emerald-300" x-text="dryRunResult?.diff?.to_create?.length || 0"></div>
+            <div class="text-[9px] uppercase text-emerald-400">To Create</div>
+          </div>
+          <div class="bg-amber-500/10 border border-amber-500/20 p-2 rounded">
+            <div class="font-bold text-amber-300" x-text="dryRunResult?.diff?.to_update?.length || 0"></div>
+            <div class="text-[9px] uppercase text-amber-400">To Update</div>
+          </div>
+          <div class="bg-red-500/10 border border-red-500/20 p-2 rounded">
+            <div class="font-bold text-red-300" x-text="dryRunResult?.diff?.to_delete?.length || 0"></div>
+            <div class="text-[9px] uppercase text-red-400">To Delete</div>
+          </div>
+          <div class="bg-blue-500/10 border border-blue-500/20 p-2 rounded">
+            <div class="font-bold text-blue-300" x-text="dryRunResult?.diff?.unchanged?.length || 0"></div>
+            <div class="text-[9px] uppercase text-blue-400">Unchanged</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal Action Buttons -->
+      <div class="flex items-center justify-between pt-3 border-t border-white/[0.08]">
+        <button @click="closeDeployModal()" class="btn-ghost text-xs px-3 py-1.5">Cancel</button>
+        <div class="flex items-center gap-2">
+          <button
+            @click="validateManifest()"
+            :disabled="isValidating || !deployManifest.trim()"
+            class="px-3 py-1.5 text-xs font-medium rounded bg-white/[0.08] hover:bg-white/[0.12] text-gray-200 border border-white/[0.1] transition-colors flex items-center gap-1.5"
+          >
+            <span x-show="!isValidating">Validate & Diff</span>
+            <span x-show="isValidating">Validating...</span>
+          </button>
+          <button
+            @click="executeDeploy()"
+            :disabled="isDeploying || !deployManifest.trim()"
+            class="btn-primary text-xs px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-md shadow-sm flex items-center gap-1.5"
+          >
+            <span x-show="!isDeploying">Deploy Now</span>
+            <span x-show="isDeploying">Deploying...</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════════ -->
+  <!-- CONVERSATIONAL AI PROMPT-TO-BUNDLE MODAL                                  -->
+  <!-- ══════════════════════════════════════════════════════════════════════════ -->
+  <div
+    x-show="aiModalOpen"
+    x-transition:enter="transition ease-out duration-200"
+    x-transition:enter-start="opacity-0"
+    x-transition:enter-end="opacity-100"
+    x-transition:leave="transition ease-in duration-150"
+    x-transition:leave-start="opacity-100"
+    x-transition:leave-end="opacity-0"
+    class="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-xs flex items-center justify-center p-4"
+  >
+    <div
+      @click.outside="closeAIModal()"
+      class="bg-gray-900 border border-purple-500/30 rounded-2xl max-w-3xl w-full p-6 shadow-2xl space-y-5"
+    >
+      <div class="flex items-center justify-between pb-3 border-b border-white/[0.08]">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded-lg bg-purple-500/20 border border-purple-500/30 flex items-center justify-center text-purple-300">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/>
+            </svg>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-gray-100">AI Bundle Architect</h3>
+            <p class="text-xs text-gray-400">Natural language to declarative TOON bundle specification</p>
+          </div>
+        </div>
+        <button @click="closeAIModal()" class="text-gray-400 hover:text-white text-sm">✕</button>
+      </div>
+
+      <!-- Quick Template Starters -->
+      <div>
+        <label class="block text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-1.5">Example Architecture Prompts</label>
+        <div class="flex flex-wrap gap-1.5">
+          <button
+            @click="aiPrompt = 'Build a Customer 360 bundle with bronze clickstream events, silver customer profiles with vector search embeddings, a daily DuckDB aggregation pipeline, and an executive KPI dashboard.'"
+            class="px-2.5 py-1 rounded text-[11px] bg-purple-950/40 hover:bg-purple-900/50 text-purple-300 border border-purple-500/20 transition-colors"
+          >
+            Customer 360 & Vector Search
+          </button>
+          <button
+            @click="aiPrompt = 'Design an E-Commerce lakehouse with bronze raw orders, silver cleaned transactions, gold revenue marts, and an Airflow DAG with hourly reconciliation.'"
+            class="px-2.5 py-1 rounded text-[11px] bg-blue-950/40 hover:bg-blue-900/50 text-blue-300 border border-blue-500/20 transition-colors"
+          >
+            E-Commerce Medallion Lakehouse
+          </button>
+          <button
+            @click="aiPrompt = 'Create a Financial fraud detection bundle with streaming transaction ingestion, high-risk scoring vector index, and an alert monitoring dashboard.'"
+            class="px-2.5 py-1 rounded text-[11px] bg-indigo-950/40 hover:bg-indigo-900/50 text-indigo-300 border border-indigo-500/20 transition-colors"
+          >
+            Financial Fraud Detection
+          </button>
+        </div>
+      </div>
+
+      <!-- Prompt Input -->
+      <div>
+        <label class="block text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-1">Natural Language Requirements</label>
+        <textarea
+          x-model="aiPrompt"
+          rows="4"
+          class="w-full bg-black/60 border border-purple-500/20 rounded-xl p-3 text-xs text-gray-200 focus:outline-none focus:border-purple-500/80 leading-relaxed"
+          placeholder="Describe your data models, schemas, pipelines, schedules, and dashboards in plain English..."
+        ></textarea>
+      </div>
+
+      <!-- Error Feedback -->
+      <div x-show="aiError" class="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-300 font-mono" x-text="aiError"></div>
+
+      <!-- Generated TOON Preview -->
+      <div x-show="generatedManifest" class="space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-semibold text-purple-300">Generated TOON Specification</span>
+          <span class="text-[10px] font-mono text-emerald-400">✓ Ready to Deploy</span>
+        </div>
+        <pre class="bg-black/70 p-3 rounded-xl border border-purple-500/30 text-xs font-mono text-purple-200 overflow-x-auto max-h-56 leading-relaxed select-all" x-text="generatedManifest"></pre>
+      </div>
+
+      <!-- Footer Actions -->
+      <div class="flex items-center justify-between pt-3 border-t border-white/[0.08]">
+        <button @click="closeAIModal()" class="btn-ghost text-xs px-3 py-1.5">Cancel</button>
+        <div class="flex items-center gap-2">
+          <button
+            @click="generateWithAI()"
+            :disabled="isGeneratingAI || !aiPrompt.trim()"
+            class="btn-primary text-xs px-4 py-1.5 bg-purple-600 hover:bg-purple-500 text-white font-medium rounded-md shadow-sm flex items-center gap-1.5"
+          >
+            <span x-show="!isGeneratingAI">Generate TOON</span>
+            <span x-show="isGeneratingAI">Architecting...</span>
+          </button>
+          <button
+            x-show="generatedManifest"
+            @click="applyAIGeneratedToDeploy()"
+            class="px-3 py-1.5 text-xs font-medium rounded bg-emerald-600 hover:bg-emerald-500 text-white transition-colors"
+          >
+            Open in Deploy Modal
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════════ -->
+  <!-- DESTROY / TEARDOWN CONFIRMATION MODAL                                     -->
+  <!-- ══════════════════════════════════════════════════════════════════════════ -->
+  <div
+    x-show="destroyModalOpen"
+    x-transition:enter="transition ease-out duration-200"
+    x-transition:enter-start="opacity-0"
+    x-transition:enter-end="opacity-100"
+    x-transition:leave="transition ease-in duration-150"
+    x-transition:leave-start="opacity-100"
+    x-transition:leave-end="opacity-0"
+    class="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-xs flex items-center justify-center p-4"
+  >
+    <div
+      @click.outside="closeDestroyModal()"
+      class="bg-gray-900 border border-red-500/30 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4"
+    >
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 flex items-center justify-center shrink-0">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+          </svg>
+        </div>
+        <div>
+          <h3 class="text-base font-bold text-gray-100">Teardown Asset Bundle</h3>
+          <p class="text-xs text-gray-400" x-text="'Target: ' + (destroyTarget?.bundle_name || '') + ' (' + (destroyTarget?.target || '') + ')'"></p>
+        </div>
+      </div>
+
+      <p class="text-xs text-gray-300 leading-relaxed">
+        This action will permanently delete all provisioned tables, pipelines, and dashboards managed by this bundle. Core medallion schemas (<code class="text-purple-300">bronze</code>, <code class="text-purple-300">silver</code>, <code class="text-purple-300">gold</code>) will remain protected.
+      </p>
+
+      <div class="flex items-center gap-2 p-3 rounded-lg bg-black/40 border border-white/[0.06]">
+        <input
+          type="checkbox"
+          id="purge-storage-checkbox"
+          x-model="purgeStorageCheck"
+          class="rounded border-white/[0.2] bg-black text-red-500 focus:ring-red-500"
+        />
+        <label for="purge-storage-checkbox" class="text-xs text-gray-300">
+          Also purge raw Parquet files and vector embeddings in object storage
+        </label>
+      </div>
+
+      <div>
+        <label class="block text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-1">
+          Type <span class="text-red-400 font-bold">DESTROY</span> to confirm:
+        </label>
+        <input
+          type="text"
+          x-model="destroyConfirmInput"
+          placeholder="DESTROY"
+          class="w-full bg-black/60 border border-white/[0.08] rounded-md px-3 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-red-500 font-mono"
+        />
+      </div>
+
+      <div x-show="destroyError" class="p-2.5 rounded bg-red-500/10 border border-red-500/20 text-xs text-red-300 font-mono" x-text="destroyError"></div>
+
+      <div class="flex items-center justify-end gap-2 pt-3 border-t border-white/[0.08]">
+        <button @click="closeDestroyModal()" class="btn-ghost text-xs px-3 py-1.5">Cancel</button>
+        <button
+          @click="confirmDestroy()"
+          :disabled="isDestroying || destroyConfirmInput.trim().toUpperCase() !== 'DESTROY'"
+          class="px-3 py-1.5 text-xs font-semibold rounded bg-red-600 hover:bg-red-500 text-white disabled:opacity-50 transition-colors"
+        >
+          <span x-show="!isDestroying">Confirm Teardown</span>
+          <span x-show="isDestroying">Destroying...</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
