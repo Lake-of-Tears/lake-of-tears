@@ -49,6 +49,11 @@
       "slug": "secret-management",
       "title": "Secret Management",
       "file": "Secret-Management.md"
+    },
+    {
+      "slug": "lake-asset-bundles",
+      "title": "Lake Asset Bundles",
+      "file": "Lake-Asset-Bundles.md"
     }
   ]
 }

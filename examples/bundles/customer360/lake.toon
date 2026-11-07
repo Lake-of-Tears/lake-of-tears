@@ -1,0 +1,74 @@
+# =============================================================================
+# Lake of Tears — Lake Asset Bundle (LAB) Specification
+# =============================================================================
+# An AI-first Infrastructure-as-Code manifest format in TOON (Token-Oriented Object Notation).
+# Cuts LLM generation token overhead by 30-60% using tabular array notation.
+# =============================================================================
+
+bundle:
+  name: customer360-medallion
+  version: 0.1.0
+  author: data-platform@lakeoftears.io
+  description: Customer 360 Medallion Architecture (Bronze Ingestion -> Silver Deduplication -> Gold LTV Marts)
+
+variables:
+  raw_bucket:
+    default: datalake-bronze
+    type: string
+    description: Primary S3 ingestion bucket
+  batch_size:
+    default: 50000
+    type: int
+    description: Ingestion chunk batch size
+
+targets:
+  dev:
+    workspace: dev-workspace
+    default_catalog: main_dev
+    variables:
+      raw_bucket: datalake-dev
+  prod:
+    workspace: prod-workspace
+    default_catalog: main_prod
+    variables:
+      raw_bucket: datalake-prod
+
+resources:
+  catalogs[1]{name,description}:
+    main_lake,Primary analytics lakehouse catalog
+
+  schemas[3]{catalog,name,tier,description}:
+    main_lake,bronze,bronze,Raw ingested customer events and clickstream
+    main_lake,silver,silver,Cleaned and deduplicated customer entities
+    main_lake,gold,gold,Aggregated revenue and lifetime value analytical marts
+
+  tables[2]{name,catalog,schema,format,s3_path_pattern}:
+    raw_customers,main_lake,bronze,parquet,"s3://${var.raw_bucket}/customers/*.parquet"
+    dim_customers,main_lake,silver,parquet,"s3://${var.raw_bucket}/silver/dim_customers/*.parquet"
+
+  vector_indexes[1]{name,table,column,metric}:
+    customer_notes_idx,main_lake.silver.dim_customers,notes,cosine
+
+  pipelines:
+    customer_medallion_pipeline:
+      description: Daily ingestion and medallion dimensional build
+      schedule: "0 2 * * *"
+      tasks[3]{name,type,entrypoint,upstream_tasks}:
+        extract_events,duckdb_sql,sql/extract.sql,[]
+        clean_silver,duckdb_sql,sql/silver_transform.sql,[extract_events]
+        build_gold_marts,duckdb_sql,sql/gold_marts.sql,[clean_silver]
+
+  dashboards:
+    executive_overview:
+      description: Executive KPI Dashboard
+      widgets:
+        revenue_metric:
+          type: metric
+          query: "SELECT sum(ltv) FROM main_lake.gold.customer_ltv"
+          width: 4
+          height: 2
+        customer_table:
+          type: table
+          query: "SELECT * FROM main_lake.silver.dim_customers LIMIT 100"
+          width: 8
+          height: 4
