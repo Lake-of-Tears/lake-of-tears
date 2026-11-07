@@ -96,6 +96,11 @@ from models import (
 from notebooks_router import router as notebooks_router
 from oauth import enabled_providers, get_auth_overview, get_oauth_redirect, handle_oauth_callback
 from pipelines_router import router as pipelines_router
+
+try:
+    from bundles.router import router as bundles_router
+except ImportError:
+    from backend.bundles.router import router as bundles_router
 from schemas import (
     AddMemberRequest,
     AnomalyDetectRequest,
@@ -236,6 +241,8 @@ app.include_router(
 app.include_router(
     secrets_router, prefix="/api/workspaces/{workspace_id}/secrets", tags=["secrets"]
 )
+app.include_router(bundles_router, prefix="/api/v1/bundles", tags=["bundles"])
+app.include_router(bundles_router, prefix="/api/bundles", tags=["bundles"])
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

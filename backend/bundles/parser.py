@@ -10,12 +10,21 @@ from typing import Any
 
 import yaml
 
-from backend.bundles.schemas import (
-    BundleSpec,
-    PipelineResource,
-    TargetSpec,
-)
-from backend.toon import dump_toon, parse_toon
+try:
+    from backend.bundles.schemas import (
+        BundleSpec,
+        PipelineResource,
+        TargetSpec,
+    )
+    from backend.toon import dump_toon, parse_toon
+except ImportError:
+    from toon import dump_toon, parse_toon
+
+    from .schemas import (
+        BundleSpec,
+        PipelineResource,
+        TargetSpec,
+    )
 
 VARIABLE_REGEX = re.compile(r"\$\{([^}]+)\}")
 
