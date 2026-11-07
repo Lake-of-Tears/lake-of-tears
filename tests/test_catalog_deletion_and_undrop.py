@@ -305,6 +305,99 @@ def test_undrop_collision_handling(mock_move, db_session, mock_catalog_fixture):
     assert "already exists in schema" in exc_info.value.detail
 
 
+@patch("catalog_trash_service.move_prefix", return_value=1)
+def test_undrop_collision_resolution_rename(mock_move, db_session, mock_catalog_fixture):
+    """Verify UNDROP with strategy='rename' restores as a copy with non-colliding slug."""
+    f = mock_catalog_fixture
+    tbl = f["managed_table"]
+    sch = f["analytics_schema"]
+
+    del_asset = catalog_trash_service.soft_delete_table(
+        db=db_session,
+        table=tbl,
+        schema=sch,
+        catalog=f["catalog"],
+        workspace=f["workspace"],
+        user_id=f["user"].id,
+    )
+    db_session.commit()
+
+    # Recreate table with same slug
+    new_tbl = CatalogTable(
+        id=uuid.uuid4(),
+        schema_id=sch.id,
+        name=del_asset.name,
+        slug=del_asset.slug,
+        description="Active conflicting table",
+    )
+    db_session.add(new_tbl)
+    db_session.commit()
+
+    # Restore with rename strategy
+    res = catalog_trash_service.restore_asset(
+        db=db_session,
+        asset_id=del_asset.id,
+        workspace=f["workspace"],
+        strategy="rename",
+    )
+    assert res["ok"] is True
+    assert "restored" in res["message"].lower()
+
+    # Both original colliding and newly restored copy exist side by side (plus fixture external_table = 3)
+    active_tables = db_session.query(CatalogTable).filter_by(schema_id=sch.id).all()
+    assert len(active_tables) == 3
+    slugs = {t.slug for t in active_tables}
+    assert del_asset.slug in slugs
+    assert "monthly-revenue-restored" in slugs
+
+
+@patch("catalog_trash_service.move_prefix", return_value=1)
+def test_undrop_collision_resolution_replace(mock_move, db_session, mock_catalog_fixture):
+    """Verify UNDROP with strategy='replace' moves existing active table to trash and restores original."""
+    f = mock_catalog_fixture
+    tbl = f["managed_table"]
+    sch = f["analytics_schema"]
+
+    del_asset = catalog_trash_service.soft_delete_table(
+        db=db_session,
+        table=tbl,
+        schema=sch,
+        catalog=f["catalog"],
+        workspace=f["workspace"],
+        user_id=f["user"].id,
+    )
+    db_session.commit()
+
+    # Recreate table with same slug
+    recreated_tbl = CatalogTable(
+        id=uuid.uuid4(),
+        schema_id=sch.id,
+        name=del_asset.name,
+        slug=del_asset.slug,
+        description="Recreated table to be replaced",
+    )
+    db_session.add(recreated_tbl)
+    db_session.commit()
+
+    # Restore with replace strategy
+    res = catalog_trash_service.restore_asset(
+        db=db_session,
+        asset_id=del_asset.id,
+        workspace=f["workspace"],
+        user_id=f["user"].id,
+        strategy="replace",
+    )
+    assert res["ok"] is True
+
+    # The original table is restored to active
+    active = db_session.query(CatalogTable).filter_by(schema_id=sch.id, slug=del_asset.slug).first()
+    assert active is not None
+    # The replaced table is now in trash
+    trash_items = db_session.query(DeletedCatalogAsset).filter_by(slug=del_asset.slug).all()
+    assert len(trash_items) == 1
+    assert trash_items[0].description == "Recreated table to be replaced"
+
+
 @patch("catalog_trash_service.delete_prefix", return_value=1)
 def test_purge_expired_assets_ttl(mock_del, db_session, mock_catalog_fixture):
     """Verify 7-day TTL sweeper purges expired trash assets."""

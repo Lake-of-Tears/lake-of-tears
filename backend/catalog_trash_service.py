@@ -346,12 +346,27 @@ def soft_delete_schema(
     return deleted_assets
 
 
+def _slugify(name: str) -> str:
+    slug = re.sub(r"[^\w\s-]", "", name.lower())
+    slug = re.sub(r"[\s_-]+", "-", slug).strip("-")
+    return slug or "asset"
+
+
 def restore_asset(
     db: Session,
     asset_id: uuid.UUID,
     workspace: Workspace,
+    user_id: uuid.UUID | None = None,
+    strategy: str | None = None,
+    new_name: str | None = None,
 ) -> dict[str, Any]:
-    """Restore a soft-deleted table or schema (with its cascaded children) from trash."""
+    """Restore a soft-deleted table or schema (with its cascaded children) from trash.
+
+    Supports collision resolution:
+      - None (default): raises HTTP 409 Conflict if target slug exists
+      - 'rename' or new_name: restores with a new non-colliding name/slug (e.g. 'table (restored)')
+      - 'replace': soft-deletes the existing active table/schema to trash and restores this one
+    """
     asset = db.query(DeletedCatalogAsset).filter_by(id=asset_id, workspace_id=workspace.id).first()
     if not asset:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deleted asset not found")
@@ -369,16 +384,45 @@ def restore_asset(
             db.query(CatalogSchema).filter_by(catalog_id=catalog.id, slug=asset.slug).first()
         )
         if existing_schema:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Schema with slug '{asset.slug}' already exists in catalog '{catalog.name}'",
-            )
+            if strategy == "replace":
+                soft_delete_schema(
+                    db=db,
+                    schema=existing_schema,
+                    catalog=catalog,
+                    workspace=workspace,
+                    user_id=user_id,
+                )
+                db.flush()
+                target_name = asset.name
+                target_slug = asset.slug
+            elif strategy == "rename" or new_name:
+                target_name = (new_name or "").strip() or f"{asset.name} (restored)"
+                target_slug = _slugify(target_name)
+                i = 2
+                base_name = target_name
+                base_slug = target_slug
+                while (
+                    db.query(CatalogSchema)
+                    .filter_by(catalog_id=catalog.id, slug=target_slug)
+                    .first()
+                ):
+                    target_name = f"{base_name} ({i})"
+                    target_slug = f"{base_slug}-{i}"
+                    i += 1
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Schema with slug '{asset.slug}' already exists in catalog '{catalog.name}'",
+                )
+        else:
+            target_name = (new_name or "").strip() or asset.name
+            target_slug = _slugify(target_name) if new_name else asset.slug
 
         new_schema = CatalogSchema(
             id=uuid.uuid4(),
             catalog_id=catalog.id,
-            name=asset.name,
-            slug=asset.slug,
+            name=target_name,
+            slug=target_slug,
             description=asset.description,
             tier=asset.tier or "bronze",
         )
@@ -401,7 +445,7 @@ def restore_asset(
         db.commit()
         return {
             "ok": True,
-            "message": f"Restored schema '{asset.name}' and {restored_tables} child table(s)",
+            "message": f"Restored schema '{target_name}' and {restored_tables} child table(s)",
             "schema_id": str(new_schema.id),
             "restored_tables_count": restored_tables,
         }
@@ -430,16 +474,46 @@ def restore_asset(
             db.query(CatalogTable).filter_by(schema_id=schema.id, slug=asset.slug).first()
         )
         if existing_table:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Table with slug '{asset.slug}' already exists in schema '{schema.name}'",
-            )
+            if strategy == "replace":
+                soft_delete_table(
+                    db=db,
+                    table=existing_table,
+                    schema=schema,
+                    catalog=catalog,
+                    workspace=workspace,
+                    user_id=user_id,
+                )
+                db.flush()
+                target_name = asset.name
+                target_slug = asset.slug
+            elif strategy == "rename" or new_name:
+                target_name = (new_name or "").strip() or f"{asset.name} (restored)"
+                target_slug = _slugify(target_name)
+                i = 2
+                base_name = target_name
+                base_slug = target_slug
+                while (
+                    db.query(CatalogTable).filter_by(schema_id=schema.id, slug=target_slug).first()
+                ):
+                    target_name = f"{base_name} ({i})"
+                    target_slug = f"{base_slug}-{i}"
+                    i += 1
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Table with slug '{asset.slug}' already exists in schema '{schema.name}'",
+                )
+        else:
+            target_name = (new_name or "").strip() or asset.name
+            target_slug = _slugify(target_name) if new_name else asset.slug
 
-        table_obj = _restore_table_record(db, asset, schema, workspace)
+        table_obj = _restore_table_record(
+            db, asset, schema, workspace, name=target_name, slug=target_slug
+        )
         db.commit()
         return {
             "ok": True,
-            "message": f"Restored table '{asset.name}' in schema '{schema.name}'",
+            "message": f"Restored table '{target_name}' in schema '{schema.name}'",
             "table_id": str(table_obj.id),
             "schema_id": str(schema.id),
         }
@@ -452,20 +526,33 @@ def _restore_table_record(
     asset: DeletedCatalogAsset,
     schema: CatalogSchema,
     workspace: Workspace,
+    name: str | None = None,
+    slug: str | None = None,
 ) -> CatalogTable:
     """Internal helper to move storage back and recreate a CatalogTable record."""
+    final_name = name or asset.name
+    final_slug = slug or asset.slug
+
+    s3_pattern = asset.s3_path_pattern
     # Move S3 data back if it was in trash
     if asset.is_managed and asset.trash_s3_prefix and asset.s3_path_pattern:
         orig_prefix = s3_prefix_for_pattern(asset.s3_path_pattern)
         if orig_prefix:
+            target_prefix = orig_prefix
+            if final_slug != asset.slug:
+                catalog_slug = (
+                    schema.catalog.slug if getattr(schema, "catalog", None) else "default"
+                )
+                target_prefix = f"workspaces/{workspace.slug}/catalogs/{catalog_slug}/{schema.slug}/{final_slug}/"
+                s3_pattern = f"s3://datalake/{target_prefix}**/*.parquet"
             try:
-                move_prefix(asset.trash_s3_prefix, orig_prefix)
+                move_prefix(asset.trash_s3_prefix, target_prefix)
             except Exception as exc:
                 logger.warning("Failed moving table data back from trash: %s", exc)
 
     # Move embeddings back if present
     if asset.trash_embeddings_prefix:
-        orig_emb_prefix = f"workspaces/{workspace.slug}/embeddings/{asset.slug}/"
+        orig_emb_prefix = f"workspaces/{workspace.slug}/embeddings/{final_slug}/"
         try:
             move_prefix(asset.trash_embeddings_prefix, orig_emb_prefix)
         except Exception as exc:
@@ -474,10 +561,10 @@ def _restore_table_record(
     table_obj = CatalogTable(
         id=uuid.uuid4(),
         schema_id=schema.id,
-        name=asset.name,
-        slug=asset.slug,
+        name=final_name,
+        slug=final_slug,
         description=asset.description,
-        s3_path_pattern=asset.s3_path_pattern,
+        s3_path_pattern=s3_pattern,
         column_defs=asset.column_defs or [],
         schema_drift=asset.schema_drift,
         vector_index=asset.vector_index or {},

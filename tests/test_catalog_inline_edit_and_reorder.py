@@ -494,3 +494,83 @@ def test_ui_proxy_patch_and_preferences_endpoints():
         )
         assert res.status_code == 200
         assert res.json()["native_catalog_order"] == [cat_id]
+
+
+def test_ui_catalog_shared_workspace_boundary_protection():
+    """Verify shared catalogs preserve shared workspace boundaries during drag-and-drop."""
+    import jwt
+
+    client = TestClient(ui_main.app)
+
+    curr_ws_id = str(uuid.uuid4())
+    shared_ws1_id = str(uuid.uuid4())
+    shared_ws2_id = str(uuid.uuid4())
+
+    cat1_id = str(uuid.uuid4())
+    cat2_id = str(uuid.uuid4())
+
+    mock_workspaces = [
+        {"id": curr_ws_id, "name": "Current Workspace", "slug": "current", "role": "admin"}
+    ]
+
+    mock_shared_catalogs = [
+        {
+            "id": cat1_id,
+            "name": "default",
+            "slug": "default",
+            "description": "prd default catalog",
+            "owner_workspace_id": shared_ws1_id,
+            "owner_workspace_name": "prd",
+            "my_access": "read",
+            "schemas": [],
+        },
+        {
+            "id": cat2_id,
+            "name": "does_this_create",
+            "slug": "does_this_create",
+            "description": "dev catalog",
+            "owner_workspace_id": shared_ws2_id,
+            "owner_workspace_name": "dev",
+            "my_access": "read",
+            "schemas": [],
+        },
+    ]
+
+    def fake_backend_get(path, *args, **kwargs):
+        if "user-preferences/catalog-order" in path:
+            return {"native_catalog_order": [], "shared_catalog_order": []}
+        if "trash" in path:
+            return []
+        if "catalogs" in path:
+            return mock_shared_catalogs
+        return None
+
+    token = jwt.encode(
+        {"sub": str(uuid.uuid4()), "email": "test@lot.test", "role": "admin"},
+        ui_main.AUTH_SECRET_KEY,
+        algorithm="HS256",
+    )
+
+    with (
+        patch.object(ui_main, "AUTH_ENABLED", True),
+        patch.object(ui_main, "_fetch_workspaces", return_value=mock_workspaces),
+        patch.object(ui_main, "_backend_get", side_effect=fake_backend_get),
+    ):
+        resp = client.get(
+            "/catalog",
+            cookies={
+                "lake_token": token,
+                ui_main._WORKSPACE_COOKIE: curr_ws_id,
+            },
+        )
+
+    assert resp.status_code == 200
+    html = resp.text
+
+    # Verify both shared workspaces are rendered separately with their workspace IDs
+    assert f'data-shared-workspace-id="{shared_ws1_id}"' in html
+    assert f'data-shared-workspace-id="{shared_ws2_id}"' in html
+
+    # Verify client-side drag-and-drop script strictly preserves shared workspace boundaries
+    assert "targetWs && draggedWs && targetWs !== draggedWs" in html
+    assert "data-shared-workspace-id" in html
