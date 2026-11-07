@@ -128,16 +128,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v7
-        with:
-          go-version: "1.24"
-          cache: false
-
       - name: Checkout Angler CLI
         uses: actions/checkout@v7
         with:
           repository: "Lake-of-Tears/angler"
           path: "angler-src"
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: "angler-src/go.mod"
+          cache: false
 
       - name: Build Angler CLI
         run: |
