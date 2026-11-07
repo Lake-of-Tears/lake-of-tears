@@ -1073,6 +1073,28 @@ async def catalog(request: Request):
                 ):
                     continue
                 owned_catalogs.append(cat)
+    if ws_id and token:
+        try:
+            user_prefs = _backend_get(
+                f"/api/workspaces/{ws_id}/user-preferences/catalog-order",
+                token,
+                workspace_id=ws_id,
+            )
+            native_order = (
+                (user_prefs.get("native_catalog_order") or [])
+                if isinstance(user_prefs, dict)
+                else []
+            )
+            if native_order:
+                native_pos = {cat_id: idx for idx, cat_id in enumerate(native_order)}
+                owned_catalogs.sort(
+                    key=lambda c: (
+                        native_pos.get(str(c.get("id")), float("inf")),
+                        c.get("created_at") or "",
+                    )
+                )
+        except Exception:
+            pass
     shared_workspaces_catalogs = _resolve_ui_shared_catalogs(request)
     error = request.query_params.get("error")
     ai_info = ai_gateway_client.provider_info()
@@ -1504,6 +1526,85 @@ async def ui_purge_catalog_asset(request: Request, asset_id: str):
     return JSONResponse(res or {"ok": True})
 
 
+@app.patch("/api/catalogs/{catalog_id}")
+@app.patch("/api/catalog/{catalog_id}")
+async def ui_patch_catalog(request: Request, catalog_id: str):
+    token = request.cookies.get("lake_token")
+    if not token:
+        raise HTTPException(401, "Not authenticated")
+    ws = request.state.workspace
+    ws_id = (
+        (str(ws["id"]) if ws and isinstance(ws, dict) and "id" in ws else None)
+        or request.cookies.get("lake_workspace_id")
+        or request.cookies.get("lake_active_workspace")
+    )
+    ws_slug = (ws.get("slug") if ws and isinstance(ws, dict) else None) or request.cookies.get(
+        "lake_workspace_slug"
+    )
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    res, err = _backend_patch_with_error(
+        f"/api/catalogs/{catalog_id}",
+        token,
+        body,
+        workspace_id=ws_id,
+        workspace_slug=ws_slug,
+    )
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=400)
+    return JSONResponse(res or {"ok": True})
+
+
+@app.put("/api/workspaces/{workspace_id}/user-preferences/catalog-order")
+async def ui_put_catalog_order_preference(request: Request, workspace_id: str):
+    token = request.cookies.get("lake_token")
+    if not token:
+        raise HTTPException(401, "Not authenticated")
+    ws = request.state.workspace
+    ws_slug = (ws.get("slug") if ws and isinstance(ws, dict) else None) or request.cookies.get(
+        "lake_workspace_slug"
+    )
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    status_code, resp_body = _backend_put(
+        f"/api/workspaces/{workspace_id}/user-preferences/catalog-order",
+        token,
+        body,
+        workspace_id=workspace_id,
+        workspace_slug=ws_slug,
+    )
+    if status_code >= 400:
+        err_msg = (
+            resp_body.get("detail", "Failed to update catalog order preference")
+            if isinstance(resp_body, dict)
+            else str(resp_body)
+        )
+        return JSONResponse({"ok": False, "error": err_msg}, status_code=status_code)
+    return JSONResponse(resp_body if isinstance(resp_body, dict) else {"ok": True})
+
+
+@app.get("/api/workspaces/{workspace_id}/user-preferences/catalog-order")
+async def ui_get_catalog_order_preference(request: Request, workspace_id: str):
+    token = request.cookies.get("lake_token")
+    if not token:
+        raise HTTPException(401, "Not authenticated")
+    ws = request.state.workspace
+    ws_slug = (ws.get("slug") if ws and isinstance(ws, dict) else None) or request.cookies.get(
+        "lake_workspace_slug"
+    )
+    res = _backend_get(
+        f"/api/workspaces/{workspace_id}/user-preferences/catalog-order",
+        token,
+        workspace_id=workspace_id,
+        workspace_slug=ws_slug,
+    )
+    return JSONResponse(res or {"native_catalog_order": [], "shared_catalog_order": []})
+
+
 @app.post("/catalog/create")
 async def catalog_create(
     request: Request,
@@ -1705,6 +1806,30 @@ def _resolve_ui_shared_catalogs(request: Request) -> list[dict[str, Any]]:
                 if "schemas" in cat_copy and isinstance(cat_copy["schemas"], list):
                     cat_copy["schemas"] = _sort_schemas(cat_copy["schemas"])
                 groups[ws_id]["catalogs"].append(cat_copy)
+
+    if current_ws_id and token:
+        try:
+            user_prefs = _backend_get(
+                f"/api/workspaces/{current_ws_id}/user-preferences/catalog-order",
+                token,
+                workspace_id=current_ws_id,
+            )
+            shared_order = (
+                (user_prefs.get("shared_catalog_order") or [])
+                if isinstance(user_prefs, dict)
+                else []
+            )
+            if shared_order:
+                shared_pos = {cat_id: idx for idx, cat_id in enumerate(shared_order)}
+                for grp in groups.values():
+                    grp["catalogs"].sort(
+                        key=lambda c: (
+                            shared_pos.get(str(c.get("id")), float("inf")),
+                            c.get("name") or "",
+                        )
+                    )
+        except Exception:
+            pass
 
     return list(groups.values())
 
@@ -2753,6 +2878,45 @@ def _backend_post(
 ) -> dict | None:
     data, _ = _backend_post_with_error(path, token, json, workspace_id, workspace_slug)
     return data
+
+
+def _backend_patch_with_error(
+    path: str,
+    token: str,
+    json: dict,
+    workspace_id: str | None = None,
+    workspace_slug: str | None = None,
+    timeout: float = 5.0,
+) -> tuple[dict | None, str | None]:
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.patch(
+                f"{BACKEND_URL}{path}",
+                json=json,
+                headers=_build_backend_headers(token, workspace_id, workspace_slug),
+            )
+        if resp.status_code in (200, 201, 202):
+            return resp.json(), None
+        try:
+            err_data = resp.json()
+            if isinstance(err_data, dict) and "detail" in err_data:
+                detail = err_data["detail"]
+                if isinstance(detail, list):
+                    messages = [
+                        item.get("msg", str(item)) if isinstance(item, dict) else str(item)
+                        for item in detail
+                    ]
+                    return None, "; ".join(messages)
+                return None, str(detail)
+        except Exception:
+            pass
+        if resp.text.strip():
+            return None, resp.text.strip()
+        return None, f"Request failed with status {resp.status_code}"
+    except httpx.TimeoutException:
+        return None, "Backend request timed out"
+    except Exception:
+        return None, "Backend service unreachable"
 
 
 def _backend_patch(

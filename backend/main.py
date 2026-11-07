@@ -88,6 +88,7 @@ from models import (
     User,
     UserInvitation,
     UserSession,
+    UserWorkspacePreference,
     Workspace,
     WorkspaceMember,
     WorkspaceShare,
@@ -102,6 +103,8 @@ from schemas import (
     CandidateMemberResponse,
     CatalogAccessResponse,
     CatalogDirectoryItem,
+    CatalogOrderPreferenceRequest,
+    CatalogOrderPreferenceResponse,
     CatalogResponse,
     CatalogSchemaResponse,
     CatalogTableResponse,
@@ -2409,11 +2412,14 @@ def update_catalog(
     catalog = db.query(Catalog).filter(Catalog.id == cat_uuid).first() if cat_uuid else None
     if not catalog:
         raise HTTPException(404, "Catalog not found")
-    _assert_catalog_access(db, catalog, current_user, "owner", ws=ws)
     if req.name is not None:
+        _assert_catalog_access(db, catalog, current_user, "owner", ws=ws)
         catalog.name = req.name.strip()
+    else:
+        _assert_catalog_access(db, catalog, current_user, "write", ws=ws)
     if req.description is not None:
-        catalog.description = req.description
+        _assert_catalog_access(db, catalog, current_user, "write", ws=ws)
+        catalog.description = req.description.strip() if req.description else ""
     db.commit()
     db.refresh(catalog)
     return _catalog_response(catalog, current_user, db, ws=ws)
@@ -3539,7 +3545,167 @@ def workspace_catalogs(
         .order_by(Catalog.created_at)
         .all()
     )
+
+    pref = (
+        db.query(UserWorkspacePreference)
+        .filter(
+            UserWorkspacePreference.user_id == current_user.id,
+            UserWorkspacePreference.workspace_id == ws_uuid,
+        )
+        .first()
+    )
+    native_order = (
+        (pref.preferences.get("native_catalog_order") or []) if pref and pref.preferences else []
+    )
+    shared_order = (
+        (pref.preferences.get("shared_catalog_order") or []) if pref and pref.preferences else []
+    )
+
+    if native_order or shared_order:
+        native_cats = [c for c in catalogs if c.owner_workspace_id == ws_uuid]
+        shared_cats = [c for c in catalogs if c.owner_workspace_id != ws_uuid]
+
+        if native_order:
+            native_pos = {cat_id: idx for idx, cat_id in enumerate(native_order)}
+            native_cats.sort(key=lambda c: (native_pos.get(str(c.id), float("inf")), c.created_at))
+
+        if shared_order:
+            shared_pos = {cat_id: idx for idx, cat_id in enumerate(shared_order)}
+            shared_cats.sort(key=lambda c: (shared_pos.get(str(c.id), float("inf")), c.created_at))
+
+        catalogs = native_cats + shared_cats
+
     return [_catalog_response(c, current_user, db, ws=ws) for c in catalogs]
+
+
+@app.put(
+    "/api/workspaces/{workspace_id}/user-preferences/catalog-order",
+    response_model=CatalogOrderPreferenceResponse,
+)
+def save_catalog_order_preference(
+    workspace_id: str,
+    req: CatalogOrderPreferenceRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    ws_uuid = _as_uuid(workspace_id)
+    ws = (
+        db.query(Workspace).filter(Workspace.id == ws_uuid, Workspace.status == "active").first()
+        if ws_uuid
+        else None
+    )
+    if not ws:
+        raise HTTPException(404, "Workspace not found")
+
+    if current_user.role != "superadmin":
+        is_member = any(
+            str(m.workspace_id) == str(workspace_id) for m in current_user.workspace_memberships
+        )
+        if not is_member:
+            has_share = (
+                db.query(WorkspaceShare)
+                .filter(
+                    WorkspaceShare.workspace_id == ws.id,
+                    WorkspaceShare.user_id == current_user.id,
+                    WorkspaceShare.status == "approved",
+                )
+                .first()
+            )
+            if not has_share:
+                raise HTTPException(403, "Not a member of this workspace")
+
+    from sqlalchemy.orm.attributes import flag_modified
+
+    pref = (
+        db.query(UserWorkspacePreference)
+        .filter(
+            UserWorkspacePreference.user_id == current_user.id,
+            UserWorkspacePreference.workspace_id == ws_uuid,
+        )
+        .first()
+    )
+    if not pref:
+        pref = UserWorkspacePreference(
+            id=uuid.uuid4(),
+            user_id=current_user.id,
+            workspace_id=ws_uuid,
+            preferences={
+                "native_catalog_order": req.native_catalog_order,
+                "shared_catalog_order": req.shared_catalog_order,
+            },
+        )
+        db.add(pref)
+    else:
+        prefs = dict(pref.preferences or {})
+        prefs["native_catalog_order"] = req.native_catalog_order
+        prefs["shared_catalog_order"] = req.shared_catalog_order
+        pref.preferences = prefs
+        flag_modified(pref, "preferences")
+        pref.updated_at = datetime.now(UTC)
+
+    db.commit()
+    db.refresh(pref)
+    return CatalogOrderPreferenceResponse(
+        workspace_id=str(ws_uuid),
+        user_id=str(current_user.id),
+        native_catalog_order=pref.preferences.get("native_catalog_order") or [],
+        shared_catalog_order=pref.preferences.get("shared_catalog_order") or [],
+    )
+
+
+@app.get(
+    "/api/workspaces/{workspace_id}/user-preferences/catalog-order",
+    response_model=CatalogOrderPreferenceResponse,
+)
+def get_catalog_order_preference(
+    workspace_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    ws_uuid = _as_uuid(workspace_id)
+    ws = (
+        db.query(Workspace).filter(Workspace.id == ws_uuid, Workspace.status == "active").first()
+        if ws_uuid
+        else None
+    )
+    if not ws:
+        raise HTTPException(404, "Workspace not found")
+
+    if current_user.role != "superadmin":
+        is_member = any(
+            str(m.workspace_id) == str(workspace_id) for m in current_user.workspace_memberships
+        )
+        if not is_member:
+            has_share = (
+                db.query(WorkspaceShare)
+                .filter(
+                    WorkspaceShare.workspace_id == ws.id,
+                    WorkspaceShare.user_id == current_user.id,
+                    WorkspaceShare.status == "approved",
+                )
+                .first()
+            )
+            if not has_share:
+                raise HTTPException(403, "Not a member of this workspace")
+
+    pref = (
+        db.query(UserWorkspacePreference)
+        .filter(
+            UserWorkspacePreference.user_id == current_user.id,
+            UserWorkspacePreference.workspace_id == ws_uuid,
+        )
+        .first()
+    )
+    return CatalogOrderPreferenceResponse(
+        workspace_id=str(ws_uuid),
+        user_id=str(current_user.id),
+        native_catalog_order=(pref.preferences.get("native_catalog_order") or [])
+        if pref and pref.preferences
+        else [],
+        shared_catalog_order=(pref.preferences.get("shared_catalog_order") or [])
+        if pref and pref.preferences
+        else [],
+    )
 
 
 @app.get("/api/workspaces/{workspace_id}/catalog-manifest")

@@ -449,6 +449,18 @@ class UpdateCatalogRequest(BaseModel):
     description: str | None = None
 
 
+class CatalogOrderPreferenceRequest(BaseModel):
+    native_catalog_order: list[str] = Field(default_factory=list)
+    shared_catalog_order: list[str] = Field(default_factory=list)
+
+
+class CatalogOrderPreferenceResponse(BaseModel):
+    workspace_id: str
+    user_id: str
+    native_catalog_order: list[str] = Field(default_factory=list)
+    shared_catalog_order: list[str] = Field(default_factory=list)
+
+
 class CreateSchemaRequest(BaseModel):
     name: str
     description: str | None = None

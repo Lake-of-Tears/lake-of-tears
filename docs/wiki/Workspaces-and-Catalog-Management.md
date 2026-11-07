@@ -373,6 +373,34 @@ flowchart TD
   - Run `UNDROP TABLE <catalog>.<schema>.<table_name>` or `UNDROP SCHEMA <catalog>.<schema>` directly in the Lake SQL Editor (`/sql`).
   - Lake of Tears intercepts and executes the restore pipeline before the DuckDB engine, returning formatted execution success manifests.
 
+### Inline Description Editing & Drag-and-Drop Reordering
+
+Lake of Tears enables users to personalize their Catalog Explorer (`/catalog`) directly in-place:
+
+#### 1. Click-to-Edit Descriptions
+- **"No description" Placeholder:** Catalogs created without a description (or with empty text) display a muted italic *"No description"* label instead of being blank.
+- **Inline Editing:** Clicking the description text or adjacent pencil icon switches into an inline editing input.
+  - **Save:** Click the checkmark (✓) button or press `Enter` (or `Cmd/Ctrl+Enter`).
+  - **Cancel:** Click the cross (✕) button or press `Escape`.
+- **Permissions:** Editing descriptions is permitted for users with `owner` or `write` access on the catalog (`catalog.my_access in ("owner", "write")`), as well as superadmins. Read-only users view static text without editing affordances.
+- **Optimistic Updates:** UI updates instantly with optimistic local feedback, accompanied by a toast notification upon successful persistence via `PATCH /api/catalogs/{catalog_id}`.
+
+#### 2. Drag-and-Drop Catalog Reordering
+- **Native HTML5 DnD:** Full card headers can be dragged and dropped into any custom order without external JavaScript libraries. Standard single-click expand/collapse accordion behavior is fully preserved.
+- **Section Boundary Preservation:** Catalogs are strictly segregated within their respective sections:
+  - *Native Workspace Catalogs:* Reordered within the native workspace section.
+  - *Shared with You:* Reordered within the shared section.
+  - Dragging across section boundaries is disallowed.
+- **Visual Feedback:** A glowing drop indicator line dynamically renders above or below the hovered target card.
+- **Per-User View Persistence:** Custom catalog orders are autosaved per user per workspace to the `user_workspace_preferences` table via `PUT /api/workspaces/{workspace_id}/user-preferences/catalog-order`:
+  ```json
+  {
+    "native_catalog_order": ["<catalog-uuid-1>", "<catalog-uuid-2>"],
+    "shared_catalog_order": ["<shared-uuid-1>", "<shared-uuid-2>"]
+  }
+  ```
+  Changes made by one user only affect their personal view, preserving personalized workflows without altering teammates' preferences.
+
 ---
 
 ## 6. UI Asset Isolation & the "Hide Shared Assets" Toggle
