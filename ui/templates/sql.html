@@ -1,9 +1,12 @@
 {% extends "base.html" %}
 {% block title %}SQL Editor — Lake of Tears{% endblock %}
+{% block head %}
+<script src="/static/js/controllers/sql.js"></script>
+{% endblock %}
 {% block content %}
 {% set has_ai = (ai_info is defined and ai_info and ai_info.provider) %}
 
-<div class="h-full flex flex-col gap-4">
+<div class="h-full flex flex-col gap-4" x-data="sqlEditorManager()">
 
   <!-- Header -->
   <div class="flex items-center justify-between shrink-0 flex-wrap gap-2">

@@ -1,8 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Dashboards · Lake of Tears{% endblock %}
+{% block head %}
+<script src="/static/js/controllers/dashboards.js"></script>
+{% endblock %}
 
 {% block content %}
-<div class="max-w-7xl mx-auto space-y-6 pb-12" id="dashboards-gallery">
+<div class="max-w-7xl mx-auto space-y-6 pb-12" id="dashboards-gallery" x-data="dashboardsGalleryManager()">
 
   <!-- Toast Container -->
   <div id="toast-container" class="fixed top-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
