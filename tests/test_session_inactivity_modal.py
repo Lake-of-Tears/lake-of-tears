@@ -236,3 +236,97 @@ def test_base_template_inactivity_bindings():
 
     # Guard against passive pointer resetting warning while modal is active
     assert "if (!_warningActive) {" in content
+
+
+def test_update_system_settings_request_validation():
+    import pydantic
+    from schemas import UpdateSystemSettingsRequest
+
+    # Allowed: 0 (disabled), 1–1440 minutes
+    for val in [0, 1, 2, 5, 10, 15, 60, 480, 720, 1440]:
+        req = UpdateSystemSettingsRequest(session_inactivity_timeout_minutes=val)
+        assert req.session_inactivity_timeout_minutes == val
+
+    # Disallowed: negative or > 1440 minutes
+    for val in [-1, -60, 1441, 2000]:
+        with pytest.raises(pydantic.ValidationError):
+            UpdateSystemSettingsRequest(session_inactivity_timeout_minutes=val)
+
+
+def test_backend_admin_settings_saves_short_inactivity_timeout(setup_db):
+    import datetime
+
+    user = _create_user(setup_db, role="superadmin")
+    sess = UserSession(
+        user_id=user.id,
+        ip_address="127.0.0.1",
+        user_agent="test",
+        expires_at=datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1),
+    )
+    setup_db.add(sess)
+    setup_db.commit()
+    token = auth.create_token(
+        {"sub": str(user.id), "email": user.email, "role": user.role},
+        session_id=str(sess.id),
+    )
+
+    client = TestClient(backend_main.app)
+    # Test setting 5 minutes (previously rejected by 15-480 constraint)
+    resp = client.patch(
+        "/api/admin/settings",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"session_inactivity_timeout_minutes": 5, "session_max_hours": 12},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["session_inactivity_timeout_minutes"] == 5
+    assert data["session_max_hours"] == 12
+
+    # Verify persisted in database
+    row = (
+        setup_db.query(SystemSetting)
+        .filter(SystemSetting.key == "session_inactivity_timeout_minutes")
+        .first()
+    )
+    assert row is not None
+    assert row.value == 5
+
+
+def test_ui_session_settings_saves_and_invalidates_cache(monkeypatch):
+    import ui_main_inactivity_test as ui_mod
+
+    # Setup initial cache
+    ui_mod._SESSION_CONFIG_CACHE = {
+        "session_inactivity_timeout_minutes": 60,
+        "session_max_hours": 24,
+    }
+    ui_mod._SESSION_CONFIG_FETCHED_AT = 1000.0
+
+    mock_patch_with_error = MagicMock(
+        return_value=({"session_inactivity_timeout_minutes": 5}, None)
+    )
+    monkeypatch.setattr(ui_mod, "_backend_patch_with_error", mock_patch_with_error)
+
+    client = TestClient(ui_mod.app, follow_redirects=False)
+
+    # Superadmin session token using UI secret key
+    token = jwt.encode(
+        {"sub": str(uuid.uuid4()), "email": "admin@example.com", "role": "superadmin"},
+        ui_mod.AUTH_SECRET_KEY,
+        algorithm="HS256",
+    )
+    resp = client.post(
+        "/settings/admin/session-settings",
+        data={"session_inactivity_timeout_minutes": "5", "session_max_hours": "12"},
+        cookies={"lake_token": token},
+    )
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "/settings/admin?saved=session_saved#platform"
+    mock_patch_with_error.assert_called_once_with(
+        "/api/admin/settings",
+        token,
+        {"session_inactivity_timeout_minutes": 5, "session_max_hours": 12},
+    )
+    # Verify cache was invalidated
+    assert ui_mod._SESSION_CONFIG_CACHE is None
+    assert ui_mod._SESSION_CONFIG_FETCHED_AT == 0.0

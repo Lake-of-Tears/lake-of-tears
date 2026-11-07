@@ -15,6 +15,10 @@
   <div class="px-4 py-3 rounded-md bg-emerald-900/30 border border-emerald-800/50 text-emerald-400 text-sm">
     Session terminated successfully.
   </div>
+  {% elif saved == 'session_saved' %}
+  <div class="px-4 py-3 rounded-md bg-emerald-900/30 border border-emerald-800/50 text-emerald-400 text-sm">
+    Session settings saved successfully.
+  </div>
   {% elif saved == 'vault' %}
   <div class="px-4 py-3 rounded-md bg-emerald-900/30 border border-emerald-800/50 text-emerald-400 text-sm">
     Vault configuration saved successfully.
@@ -837,6 +841,11 @@
   <!-- TAB 5: PLATFORM SETTINGS & AUTH                                          -->
   <!-- ========================================================================= -->
   <div id="admin-panel-platform" class="admin-panel hidden space-y-6">
+    {% if settings_error %}
+    <div class="px-4 py-3 rounded-md bg-red-950/40 border border-red-800/60 text-red-300 text-xs">
+      {{ settings_error }}
+    </div>
+    {% endif %}
     <!-- Platform & Retention Settings -->
     <div class="card p-6 space-y-6">
       <div>
@@ -1870,8 +1879,10 @@ function updateInactivityHint(val) {
   const n = parseInt(val, 10);
   if (isNaN(n) || n === 0) { hint.classList.add('hidden'); return; }
   hint.classList.remove('hidden');
-  if (n < 15 || n > 480) {
-    hint.textContent = 'Typical values are 15–480 minutes (8 hours). Values outside this range may disrupt user sessions or reduce security.';
+  if (n < 15) {
+    hint.textContent = 'Users will be logged out after ' + n + ' minute' + (n === 1 ? '' : 's') + ' of inactivity. (Note: Short timeouts are great for testing, but may disrupt normal workflows.)';
+  } else if (n > 480) {
+    hint.textContent = 'Users will be logged out after ' + n + ' minutes (' + (n / 60).toFixed(1) + ' hours) of inactivity.';
   } else {
     hint.textContent = 'Users will be logged out after ' + n + ' minutes of inactivity.';
   }
