@@ -43,6 +43,9 @@ class User(Base):
     password_reset_tokens: Mapped[list["PasswordResetToken"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    workspace_preferences: Mapped[list["UserWorkspacePreference"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
     @property
     def has_password(self) -> bool:
@@ -209,6 +212,9 @@ class Workspace(Base):
         back_populates="workspace", cascade="all, delete-orphan"
     )
     secret_scopes: Mapped[list["SecretScope"]] = relationship(
+        back_populates="workspace", cascade="all, delete-orphan"
+    )
+    user_preferences: Mapped[list["UserWorkspacePreference"]] = relationship(
         back_populates="workspace", cascade="all, delete-orphan"
     )
 
@@ -621,3 +627,33 @@ class DeletedCatalogAsset(Base):
     workspace: Mapped["Workspace"] = relationship(foreign_keys=[workspace_id])
     catalog: Mapped["Catalog"] = relationship(foreign_keys=[catalog_id])
     dropper: Mapped["User | None"] = relationship(foreign_keys=[dropped_by])
+
+
+class UserWorkspacePreference(Base):
+    __tablename__ = "user_workspace_preferences"
+    __table_args__ = (
+        UniqueConstraint("user_id", "workspace_id", name="uq_user_workspace_preferences"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    preferences: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    user: Mapped["User"] = relationship(back_populates="workspace_preferences")
+    workspace: Mapped["Workspace"] = relationship(back_populates="user_preferences")

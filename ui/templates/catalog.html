@@ -259,6 +259,66 @@
   html[data-theme="light"] .catalog-toast-info {
     border-left: 4px solid #06b6d4 !important;
   }
+
+  /* Drag and drop glowing indicator */
+  .catalog-drag-handle {
+    opacity: 0.35;
+    transition: opacity 0.15s ease;
+  }
+  .catalog-header:hover .catalog-drag-handle {
+    opacity: 0.9;
+  }
+  .catalog-card.is-dragging {
+    opacity: 0.35 !important;
+    transform: scale(0.99);
+  }
+  .catalog-drop-target-top {
+    position: relative;
+  }
+  .catalog-drop-target-top::before {
+    content: '';
+    position: absolute;
+    top: -2px;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: #06b6d4;
+    border-radius: 9999px;
+    box-shadow: 0 0 10px #06b6d4, 0 0 4px #22d3ee;
+    z-index: 30;
+    pointer-events: none;
+  }
+  .catalog-drop-target-bottom {
+    position: relative;
+  }
+  .catalog-drop-target-bottom::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: #06b6d4;
+    border-radius: 9999px;
+    box-shadow: 0 0 10px #06b6d4, 0 0 4px #22d3ee;
+    z-index: 30;
+    pointer-events: none;
+  }
+
+  /* Light mode adjustments */
+  html[data-theme="light"] .catalog-drop-target-top::before,
+  html[data-theme="light"] .catalog-drop-target-bottom::after {
+    background: #0284c7;
+    box-shadow: 0 0 8px rgba(2, 132, 199, 0.6);
+  }
+  html[data-theme="light"] .catalog-drag-handle {
+    color: #9ca3af;
+  }
+  html[data-theme="light"] .catalog-desc-container input {
+    background-color: #f9fafb !important;
+    border-color: #cbd5e1 !important;
+    color: #111827 !important;
+  }
 </style>
 
 <div class="max-w-4xl mx-auto">
@@ -336,12 +396,30 @@
     </div>
     <div class="flex flex-col gap-2" id="catalog-list">
     {% for catalog in catalogs %}
-    <div class="card" id="catalog-{{ catalog.id }}">
+    <div class="card catalog-card native-catalog-card transition-all duration-200"
+         id="catalog-{{ catalog.id }}"
+         data-catalog-id="{{ catalog.id }}"
+         data-section="native">
 
       <!-- Catalog row -->
       <div
+        id="catalog-header-{{ catalog.id }}"
         onclick="toggleCatalog('{{ catalog.id }}')"
-        class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-white/[0.03] transition-colors cursor-pointer select-none">
+        class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-white/[0.03] transition-colors cursor-pointer select-none catalog-header"
+        draggable="true">
+
+        <span class="catalog-drag-handle cursor-grab active:cursor-grabbing text-gray-600 hover:text-gray-400 p-0.5 shrink-0"
+              title="Drag to reorder catalog"
+              onclick="event.stopPropagation()">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <circle cx="9" cy="5" r="1.25" fill="currentColor"></circle>
+            <circle cx="15" cy="5" r="1.25" fill="currentColor"></circle>
+            <circle cx="9" cy="12" r="1.25" fill="currentColor"></circle>
+            <circle cx="15" cy="12" r="1.25" fill="currentColor"></circle>
+            <circle cx="9" cy="19" r="1.25" fill="currentColor"></circle>
+            <circle cx="15" cy="19" r="1.25" fill="currentColor"></circle>
+          </svg>
+        </span>
 
         <svg id="chev-cat-{{ catalog.id }}" class="w-4 h-4 text-gray-600 shrink-0 transition-transform duration-150 -rotate-90"
              fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -353,7 +431,7 @@
         </svg>
 
         {% set is_shared = request.state.workspace and catalog.owner_workspace_id != request.state.workspace.id %}
-        <span class="font-semibold text-gray-100 text-sm flex-1">
+        <span class="font-semibold text-gray-100 text-sm shrink-0">
           {% if is_shared and catalog.owner_workspace_name %}
             <span class="text-gray-500">{{ catalog.owner_workspace_name }}.</span>{{ catalog.name }}
           {% else %}
@@ -361,9 +439,63 @@
           {% endif %}
         </span>
 
-        {% if catalog.description %}
-        <span class="text-xs text-gray-600 truncate max-w-[220px] hidden md:block">{{ catalog.description }}</span>
-        {% endif %}
+        {% set can_edit_desc = catalog.my_access in ('owner', 'write') or (request.state.user and request.state.user.role in ('superadmin', 'admin')) %}
+        <div class="catalog-desc-container flex-1 min-w-0 flex items-center gap-1.5 ml-1"
+             id="desc-container-{{ catalog.id }}"
+             onclick="event.stopPropagation()">
+          <!-- Display View -->
+          <div id="desc-view-{{ catalog.id }}" class="group/desc flex items-center gap-1.5 min-w-0 max-w-full">
+            <span id="desc-text-{{ catalog.id }}"
+                  data-prev-desc="{{ catalog.description or '' }}"
+                  {% if can_edit_desc %}
+                  onclick="startCatalogDescEdit('{{ catalog.id }}')"
+                  class="text-xs truncate cursor-pointer hover:text-cyan-300 transition-colors {% if catalog.description %}text-gray-400{% else %}text-gray-500 italic{% endif %}"
+                  title="Click to edit description"
+                  {% else %}
+                  class="text-xs truncate {% if catalog.description %}text-gray-400{% else %}text-gray-500 italic{% endif %}"
+                  {% endif %}>
+              {{ catalog.description if catalog.description else 'No description' }}
+            </span>
+            {% if can_edit_desc %}
+            <button type="button"
+                    onclick="startCatalogDescEdit('{{ catalog.id }}')"
+                    class="opacity-0 group-hover/desc:opacity-100 text-gray-500 hover:text-cyan-400 p-0.5 rounded transition-opacity shrink-0"
+                    title="Edit description">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+              </svg>
+            </button>
+            {% endif %}
+          </div>
+          {% if can_edit_desc %}
+          <!-- Inline Edit Form (Hidden by default) -->
+          <div id="desc-edit-{{ catalog.id }}" class="hidden flex items-center gap-1.5 w-full max-w-md">
+            <input type="text"
+                   id="desc-input-{{ catalog.id }}"
+                   value="{{ catalog.description or '' }}"
+                   placeholder="Enter catalog description..."
+                   class="input-dark text-xs px-2 py-0.5 w-full bg-black/40 border border-cyan-500/50 rounded focus:outline-none focus:border-cyan-400"
+                   onkeydown="handleCatalogDescKeyDown(event, '{{ catalog.id }}')"
+                   onclick="event.stopPropagation()"/>
+            <button type="button"
+                    onclick="saveCatalogDesc('{{ catalog.id }}')"
+                    class="p-1 rounded bg-emerald-950/60 hover:bg-emerald-800/70 border border-emerald-700/60 text-emerald-400 hover:text-emerald-300 shrink-0"
+                    title="Save (Enter)">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+              </svg>
+            </button>
+            <button type="button"
+                    onclick="cancelCatalogDescEdit('{{ catalog.id }}')"
+                    class="p-1 rounded bg-gray-800/80 hover:bg-gray-700 border border-gray-600/50 text-gray-400 hover:text-gray-200 shrink-0"
+                    title="Cancel (Esc)">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+          {% endif %}
+        </div>
 
         {% if catalog.my_access == 'owner' %}
         <span class="text-[10px] px-2 py-0.5 rounded-full border border-blue-700/50 text-blue-400 bg-blue-900/20 font-medium shrink-0">owned</span>
@@ -632,12 +764,30 @@
 
         <!-- Catalogs inside this shared workspace -->
         {% if sws.catalogs %}
-        <div class="flex flex-col gap-2">
+        <div class="flex flex-col gap-2 shared-catalogs-list" data-shared-workspace-id="{{ sws.workspace.id }}">
           {% for catalog in sws.catalogs %}
-          <div class="border border-white/[0.06] rounded-lg overflow-hidden bg-white/[0.01]" id="shared-cat-{{ catalog.id }}" data-shared-workspace-id="{{ sws.workspace.id }}">
-            <button
+          <div class="border border-white/[0.06] rounded-lg overflow-hidden bg-white/[0.01] catalog-card shared-catalog-card transition-all duration-200"
+               id="shared-cat-{{ catalog.id }}"
+               data-catalog-id="{{ catalog.id }}"
+               data-section="shared"
+               data-shared-workspace-id="{{ sws.workspace.id }}">
+            <div
+              id="shared-header-{{ catalog.id }}"
               onclick="toggleCatalog('{{ catalog.id }}')"
-              class="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-white/[0.03] transition-colors">
+              class="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-white/[0.03] transition-colors cursor-pointer select-none catalog-header"
+              draggable="true">
+              <span class="catalog-drag-handle cursor-grab active:cursor-grabbing text-gray-600 hover:text-gray-400 p-0.5 shrink-0"
+                    title="Drag to reorder catalog"
+                    onclick="event.stopPropagation()">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <circle cx="9" cy="5" r="1.25" fill="currentColor"></circle>
+                  <circle cx="15" cy="5" r="1.25" fill="currentColor"></circle>
+                  <circle cx="9" cy="12" r="1.25" fill="currentColor"></circle>
+                  <circle cx="15" cy="12" r="1.25" fill="currentColor"></circle>
+                  <circle cx="9" cy="19" r="1.25" fill="currentColor"></circle>
+                  <circle cx="15" cy="19" r="1.25" fill="currentColor"></circle>
+                </svg>
+              </span>
               <svg id="chev-cat-{{ catalog.id }}" class="w-4 h-4 text-gray-600 shrink-0 transition-transform duration-150 -rotate-90"
                    fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
@@ -645,11 +795,70 @@
               <svg class="w-4 h-4 text-cyan-400 shrink-0" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/>
               </svg>
-              <span class="font-semibold text-gray-100 text-sm flex-1">{{ catalog.name }}</span>
+              <span class="font-semibold text-gray-100 text-sm shrink-0">{{ catalog.name }}</span>
+
+              {% set can_edit_desc = catalog.my_access in ('owner', 'write') or (request.state.user and request.state.user.role in ('superadmin', 'admin')) %}
+              <div class="catalog-desc-container flex-1 min-w-0 flex items-center gap-1.5 ml-1"
+                   id="desc-container-{{ catalog.id }}"
+                   onclick="event.stopPropagation()">
+                <!-- Display View -->
+                <div id="desc-view-{{ catalog.id }}" class="group/desc flex items-center gap-1.5 min-w-0 max-w-full">
+                  <span id="desc-text-{{ catalog.id }}"
+                        data-prev-desc="{{ catalog.description or '' }}"
+                        {% if can_edit_desc %}
+                        onclick="startCatalogDescEdit('{{ catalog.id }}')"
+                        class="text-xs truncate cursor-pointer hover:text-cyan-300 transition-colors {% if catalog.description %}text-gray-400{% else %}text-gray-500 italic{% endif %}"
+                        title="Click to edit description"
+                        {% else %}
+                        class="text-xs truncate {% if catalog.description %}text-gray-400{% else %}text-gray-500 italic{% endif %}"
+                        {% endif %}>
+                    {{ catalog.description if catalog.description else 'No description' }}
+                  </span>
+                  {% if can_edit_desc %}
+                  <button type="button"
+                          onclick="startCatalogDescEdit('{{ catalog.id }}')"
+                          class="opacity-0 group-hover/desc:opacity-100 text-gray-500 hover:text-cyan-400 p-0.5 rounded transition-opacity shrink-0"
+                          title="Edit description">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+                    </svg>
+                  </button>
+                  {% endif %}
+                </div>
+                {% if can_edit_desc %}
+                <!-- Inline Edit Form (Hidden by default) -->
+                <div id="desc-edit-{{ catalog.id }}" class="hidden flex items-center gap-1.5 w-full max-w-md">
+                  <input type="text"
+                         id="desc-input-{{ catalog.id }}"
+                         value="{{ catalog.description or '' }}"
+                         placeholder="Enter catalog description..."
+                         class="input-dark text-xs px-2 py-0.5 w-full bg-black/40 border border-cyan-500/50 rounded focus:outline-none focus:border-cyan-400"
+                         onkeydown="handleCatalogDescKeyDown(event, '{{ catalog.id }}')"
+                         onclick="event.stopPropagation()"/>
+                  <button type="button"
+                          onclick="saveCatalogDesc('{{ catalog.id }}')"
+                          class="p-1 rounded bg-emerald-950/60 hover:bg-emerald-800/70 border border-emerald-700/60 text-emerald-400 hover:text-emerald-300 shrink-0"
+                          title="Save (Enter)">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+                    </svg>
+                  </button>
+                  <button type="button"
+                          onclick="cancelCatalogDescEdit('{{ catalog.id }}')"
+                          class="p-1 rounded bg-gray-800/80 hover:bg-gray-700 border border-gray-600/50 text-gray-400 hover:text-gray-200 shrink-0"
+                          title="Cancel (Esc)">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                  </button>
+                </div>
+                {% endif %}
+              </div>
+
               <span class="text-[10px] px-2 py-0.5 rounded-full border border-cyan-800/40 text-cyan-400 bg-cyan-950/20 font-medium shrink-0">
                 🔗 {{ sws.workspace.name }}
               </span>
-            </button>
+            </div>
             <!-- Schemas in this shared catalog -->
             <div id="schemas-{{ catalog.id }}" class="hidden border-t border-white/[0.05]">
               {% if catalog.schemas %}
@@ -1364,6 +1573,8 @@
 
 <script>
 const HAS_AI_CONFIGURED = {{ 'true' if has_ai else 'false' }};
+const CURRENT_WORKSPACE_ID = "{{ request.state.workspace.id if request.state.workspace else '' }}";
+let wasDraggingCatalog = false;
 
 function showCatalogToast(message, type = 'info') {
   let container = document.getElementById('catalog-toast-container');
@@ -1406,11 +1617,232 @@ function showCatalogToast(message, type = 'info') {
 function _key(id) { return 'lot-open-' + id; }
 
 function toggleCatalog(id) {
+  if (wasDraggingCatalog) return;
   const el = document.getElementById('schemas-' + id);
   const ch = document.getElementById('chev-cat-' + id);
   const open = el.classList.toggle('hidden');
   ch.classList.toggle('-rotate-90', open);
   sessionStorage.setItem(_key('c' + id), open ? '' : '1');
+}
+
+/* ── Inline Catalog Description Editing ── */
+function startCatalogDescEdit(catId) {
+  const view = document.getElementById('desc-view-' + catId);
+  const edit = document.getElementById('desc-edit-' + catId);
+  const input = document.getElementById('desc-input-' + catId);
+  const text = document.getElementById('desc-text-' + catId);
+  if (!view || !edit || !input) return;
+
+  const currentDesc = text.getAttribute('data-prev-desc') || (text.textContent.trim() === 'No description' ? '' : text.textContent.trim());
+  input.value = currentDesc;
+  view.classList.add('hidden');
+  edit.classList.remove('hidden');
+  input.focus();
+  input.select();
+}
+
+function cancelCatalogDescEdit(catId) {
+  const view = document.getElementById('desc-view-' + catId);
+  const edit = document.getElementById('desc-edit-' + catId);
+  const input = document.getElementById('desc-input-' + catId);
+  const text = document.getElementById('desc-text-' + catId);
+  if (!view || !edit) return;
+
+  const prev = text.getAttribute('data-prev-desc') || '';
+  if (input) input.value = prev;
+  edit.classList.add('hidden');
+  view.classList.remove('hidden');
+}
+
+function handleCatalogDescKeyDown(e, catId) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    e.stopPropagation();
+    saveCatalogDesc(catId);
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
+    cancelCatalogDescEdit(catId);
+  }
+}
+
+async function saveCatalogDesc(catId) {
+  const view = document.getElementById('desc-view-' + catId);
+  const edit = document.getElementById('desc-edit-' + catId);
+  const input = document.getElementById('desc-input-' + catId);
+  const text = document.getElementById('desc-text-' + catId);
+  if (!input || !text) return;
+
+  const newVal = input.value.trim();
+  const oldVal = text.getAttribute('data-prev-desc') || (text.textContent.trim() === 'No description' ? '' : text.textContent.trim());
+
+  // Optimistic UI update
+  text.setAttribute('data-prev-desc', newVal);
+  if (newVal) {
+    text.textContent = newVal;
+    text.className = 'text-xs truncate cursor-pointer hover:text-cyan-300 transition-colors text-gray-400';
+  } else {
+    text.textContent = 'No description';
+    text.className = 'text-xs truncate cursor-pointer hover:text-cyan-300 transition-colors text-gray-500 italic';
+  }
+  if (edit) edit.classList.add('hidden');
+  if (view) view.classList.remove('hidden');
+
+  try {
+    let resp = await fetch(`/api/catalogs/${catId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ description: newVal })
+    });
+    if (!resp.ok) {
+      resp = await fetch(`/api/catalog/${catId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ description: newVal })
+      });
+    }
+    if (!resp.ok) {
+      const errData = await resp.json().catch(() => ({}));
+      throw new Error(errData.error || errData.detail || 'Failed to update catalog description');
+    }
+    showCatalogToast('Catalog description updated', 'success');
+  } catch (err) {
+    // Revert optimistic UI
+    text.setAttribute('data-prev-desc', oldVal);
+    if (oldVal) {
+      text.textContent = oldVal;
+      text.className = 'text-xs truncate cursor-pointer hover:text-cyan-300 transition-colors text-gray-400';
+    } else {
+      text.textContent = 'No description';
+      text.className = 'text-xs truncate cursor-pointer hover:text-cyan-300 transition-colors text-gray-500 italic';
+    }
+    showCatalogToast(err.message || 'Error updating description', 'error');
+  }
+}
+
+/* ── Drag-and-Drop Catalog Reordering ── */
+let draggedCatalogCard = null;
+
+function initCatalogDragAndDrop() {
+  const headers = document.querySelectorAll('.catalog-header[draggable="true"]');
+  headers.forEach(header => {
+    header.addEventListener('dragstart', (e) => {
+      const card = header.closest('.native-catalog-card, .shared-catalog-card');
+      if (!card) return;
+      wasDraggingCatalog = true;
+      draggedCatalogCard = card;
+      card.classList.add('is-dragging');
+      const catId = card.getAttribute('data-catalog-id');
+      const section = card.getAttribute('data-section');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', JSON.stringify({ id: catId, section: section }));
+    });
+
+    header.addEventListener('dragend', (e) => {
+      if (draggedCatalogCard) {
+        draggedCatalogCard.classList.remove('is-dragging');
+      }
+      clearDropIndicators();
+      draggedCatalogCard = null;
+      setTimeout(() => { wasDraggingCatalog = false; }, 100);
+    });
+  });
+
+  const cards = document.querySelectorAll('.native-catalog-card, .shared-catalog-card');
+  cards.forEach(card => {
+    card.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      if (!draggedCatalogCard || draggedCatalogCard === card) return;
+
+      const targetSection = card.getAttribute('data-section');
+      const draggedSection = draggedCatalogCard.getAttribute('data-section');
+
+      // Section boundary preservation: strictly disallow dragging across sections
+      if (targetSection !== draggedSection) {
+        e.dataTransfer.dropEffect = 'none';
+        clearDropIndicators();
+        return;
+      }
+
+      e.dataTransfer.dropEffect = 'move';
+      const rect = card.getBoundingClientRect();
+      const isTop = (e.clientY - rect.top) < (rect.height / 2);
+
+      clearDropIndicators();
+      if (isTop) {
+        card.classList.add('catalog-drop-target-top');
+      } else {
+        card.classList.add('catalog-drop-target-bottom');
+      }
+    });
+
+    card.addEventListener('dragleave', (e) => {
+      if (!card.contains(e.relatedTarget)) {
+        card.classList.remove('catalog-drop-target-top', 'catalog-drop-target-bottom');
+      }
+    });
+
+    card.addEventListener('drop', (e) => {
+      e.preventDefault();
+      clearDropIndicators();
+      if (!draggedCatalogCard || draggedCatalogCard === card) return;
+
+      const targetSection = card.getAttribute('data-section');
+      const draggedSection = draggedCatalogCard.getAttribute('data-section');
+      if (targetSection !== draggedSection) return;
+
+      const rect = card.getBoundingClientRect();
+      const isTop = (e.clientY - rect.top) < (rect.height / 2);
+
+      const parent = card.parentNode;
+      if (isTop) {
+        parent.insertBefore(draggedCatalogCard, card);
+      } else {
+        parent.insertBefore(draggedCatalogCard, card.nextSibling);
+      }
+
+      persistCatalogOrder();
+    });
+  });
+}
+
+function clearDropIndicators() {
+  document.querySelectorAll('.catalog-drop-target-top, .catalog-drop-target-bottom').forEach(el => {
+    el.classList.remove('catalog-drop-target-top', 'catalog-drop-target-bottom');
+  });
+}
+
+async function persistCatalogOrder() {
+  if (!CURRENT_WORKSPACE_ID) return;
+
+  const nativeIds = Array.from(document.querySelectorAll('#catalog-list .native-catalog-card'))
+    .map(el => el.getAttribute('data-catalog-id'))
+    .filter(Boolean);
+
+  const sharedIds = Array.from(document.querySelectorAll('.shared-catalog-card'))
+    .map(el => el.getAttribute('data-catalog-id'))
+    .filter(Boolean);
+
+  try {
+    const resp = await fetch(`/api/workspaces/${CURRENT_WORKSPACE_ID}/user-preferences/catalog-order`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        native_catalog_order: nativeIds,
+        shared_catalog_order: sharedIds
+      })
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || err.detail || 'Failed to persist catalog order');
+    }
+    showCatalogToast('Catalog order saved', 'success');
+  } catch (err) {
+    showCatalogToast(err.message || 'Error saving catalog order', 'error');
+  }
 }
 
 function toggleSchema(id) {
@@ -3349,6 +3781,10 @@ window.addEventListener('keydown', (e) => {
     closePurgeTrashModal();
     closeTrashDrawer();
   }
+});
+
+window.addEventListener('DOMContentLoaded', () => {
+  initCatalogDragAndDrop();
 });
 </script>
 {% endblock %}
