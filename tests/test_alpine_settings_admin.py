@@ -60,7 +60,9 @@ def test_alpine_phase2_static_controllers_served():
 
 
 def test_admin_template_alpine_declarative_bindings():
-    admin_html = (repo_root / "ui" / "templates" / "settings" / "admin.html").read_text(encoding="utf-8")
+    admin_html = (repo_root / "ui" / "templates" / "settings" / "admin.html").read_text(
+        encoding="utf-8"
+    )
 
     # Script tag inclusion
     assert 'src="/static/js/controllers/admin.js"' in admin_html
@@ -78,7 +80,9 @@ def test_admin_template_alpine_declarative_bindings():
 
 
 def test_workspace_template_alpine_declarative_bindings():
-    workspace_html = (repo_root / "ui" / "templates" / "settings" / "workspace.html").read_text(encoding="utf-8")
+    workspace_html = (repo_root / "ui" / "templates" / "settings" / "workspace.html").read_text(
+        encoding="utf-8"
+    )
 
     # Script tag inclusion
     assert 'src="/static/js/controllers/workspace-secrets.js"' in workspace_html
