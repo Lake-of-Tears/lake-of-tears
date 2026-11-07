@@ -626,12 +626,16 @@ def refresh_token(
     request: Request,
     db: Session = Depends(get_db),
     lake_token: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
 ):
     """Slide the session window. Preserves the original session_start for the absolute cap."""
-    if not lake_token:
+    token = lake_token
+    if not token and authorization and authorization.startswith("Bearer "):
+        token = authorization[7:]
+    if not token:
         raise HTTPException(401, "Not authenticated")
     try:
-        payload = decode_token(lake_token)
+        payload = decode_token(token)
     except _jwt.ExpiredSignatureError:
         raise HTTPException(401, "Token expired")
     except _jwt.InvalidTokenError:

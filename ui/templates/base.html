@@ -643,12 +643,12 @@
       <p class="text-sm text-gray-400 mb-1">You'll be signed out in</p>
       <p class="text-3xl font-bold text-amber-400 mb-5" id="inactivity-countdown">5:00</p>
       <div class="flex gap-3 justify-center">
-        <button onclick="stayLoggedIn()"
-          class="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-md transition-colors">
+        <button id="inactivity-stay-btn" type="button" onclick="stayLoggedIn()"
+          class="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-md transition-colors cursor-pointer">
           Stay signed in
         </button>
-        <button onclick="signOutNow()"
-          class="px-5 py-2 border border-gray-700 text-gray-400 hover:text-gray-200 text-sm rounded-md transition-colors">
+        <button id="inactivity-signout-btn" type="button" onclick="signOutNow()"
+          class="px-5 py-2 border border-gray-700 text-gray-400 hover:text-gray-200 text-sm rounded-md transition-colors cursor-pointer">
           Sign out now
         </button>
       </div>
@@ -656,18 +656,21 @@
   </div>
 
   <script>
-    const _TIMEOUT_MS  = {{ request.state.session_config.session_inactivity_timeout_minutes }} * 60 * 1000;
-    const _MAX_SESS_MS = {{ request.state.session_config.session_max_hours }} * 3600 * 1000;
-    const _WARN_MS = 5 * 60 * 1000;
+    (function() {
+      const _rawTimeout = {{ request.state.session_config.session_inactivity_timeout_minutes | default(60) }};
+      const _TIMEOUT_MINS = Number.isFinite(Number(_rawTimeout)) ? Number(_rawTimeout) : 60;
+      const _TIMEOUT_MS  = _TIMEOUT_MINS * 60 * 1000;
+      const _MAX_SESS_MS = (Number({{ request.state.session_config.session_max_hours | default(24) }}) || 24) * 3600 * 1000;
 
-    if (_TIMEOUT_MS > 0) {
+      // Adapt warning window: up to 5 minutes, scaled down so it never exceeds 25% of timeout (minimum 15s)
+      const _WARN_MS = (_TIMEOUT_MS > 0)
+        ? Math.min(5 * 60 * 1000, Math.max(15 * 1000, Math.floor(_TIMEOUT_MS * 0.25)))
+        : 0;
+
       let _lastActivity = Date.now();
+      let _lastRefreshAt = Date.now();
       let _warningActive = false;
       let _countdownInterval = null;
-
-      ['mousemove', 'keydown', 'mousedown', 'touchstart', 'scroll', 'click'].forEach(evt =>
-        document.addEventListener(evt, () => { _lastActivity = Date.now(); }, { passive: true })
-      );
 
       function _fmtCountdown(ms) {
         const s = Math.max(0, Math.ceil(ms / 1000));
@@ -675,66 +678,119 @@
       }
 
       function _showWarning(remainingMs) {
-        document.getElementById('inactivity-modal').classList.remove('hidden');
-        document.getElementById('inactivity-countdown').textContent = _fmtCountdown(remainingMs);
+        const modal = document.getElementById('inactivity-modal');
+        if (modal) modal.classList.remove('hidden');
+        const countdownEl = document.getElementById('inactivity-countdown');
+        if (countdownEl) countdownEl.textContent = _fmtCountdown(remainingMs);
         _warningActive = true;
 
         if (_countdownInterval) clearInterval(_countdownInterval);
-        const deadline = Date.now() + remainingMs;
+        const deadline = Date.now() + Math.max(0, remainingMs);
         _countdownInterval = setInterval(() => {
           const left = deadline - Date.now();
-          document.getElementById('inactivity-countdown').textContent = _fmtCountdown(left);
+          if (countdownEl) countdownEl.textContent = _fmtCountdown(left);
           if (left <= 0) {
             clearInterval(_countdownInterval);
+            _countdownInterval = null;
             signOutNow();
           }
         }, 1000);
       }
 
       function _hideWarning() {
-        document.getElementById('inactivity-modal').classList.add('hidden');
+        const modal = document.getElementById('inactivity-modal');
+        if (modal) modal.classList.add('hidden');
         _warningActive = false;
-        if (_countdownInterval) { clearInterval(_countdownInterval); _countdownInterval = null; }
+        if (_countdownInterval) {
+          clearInterval(_countdownInterval);
+          _countdownInterval = null;
+        }
       }
 
       async function stayLoggedIn() {
         _lastActivity = Date.now();
         _hideWarning();
         try {
-          const res = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
-          if (res.status === 401) window.location.href = '/login?reason=session_expired';
-        } catch (_) {}
+          const res = await fetch('/api/auth/refresh', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+          });
+          if (res.status === 401) {
+            window.location.href = '/logout?reason=session_expired';
+            return;
+          }
+          _lastRefreshAt = Date.now();
+        } catch (err) {
+          console.warn('Session refresh error:', err);
+        }
       }
 
       async function signOutNow() {
-        await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
-        window.location.href = '/login?reason=inactivity';
-      }
-
-      async function _refreshTick() {
-        const idleMs = Date.now() - _lastActivity;
-
-        if (idleMs >= _TIMEOUT_MS) {
-          if (!_warningActive) _showWarning(0);
-          return;
-        }
-
-        if (idleMs >= _TIMEOUT_MS - _WARN_MS) {
-          if (!_warningActive) _showWarning(_TIMEOUT_MS - idleMs);
-          return;
-        }
-
-        if (_warningActive) _hideWarning();
-
+        _hideWarning();
         try {
-          const res = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
-          if (res.status === 401) window.location.href = '/login?reason=session_expired';
+          await fetch('/api/auth/logout', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+          });
         } catch (_) {}
+        window.location.href = '/logout?reason=inactivity';
       }
 
-      const _pollInterval = Math.floor(_TIMEOUT_MS / 2);
-      setInterval(_refreshTick, _pollInterval);
-    }
+      // Explicitly register on global window object so inline onclick attributes always resolve
+      window.stayLoggedIn = stayLoggedIn;
+      window.signOutNow = signOutNow;
+
+      // Also attach event listeners directly to the button elements
+      const stayBtn = document.getElementById('inactivity-stay-btn');
+      const signoutBtn = document.getElementById('inactivity-signout-btn');
+      if (stayBtn) stayBtn.addEventListener('click', stayLoggedIn);
+      if (signoutBtn) signoutBtn.addEventListener('click', signOutNow);
+
+      if (_TIMEOUT_MS > 0) {
+        ['mousemove', 'keydown', 'mousedown', 'touchstart', 'scroll', 'click'].forEach(evt =>
+          document.addEventListener(evt, () => {
+            // While modal warning is active, do not silently dismiss or reset idle timer on passive mouse movements:
+            // user must explicitly confirm by clicking "Stay signed in"
+            if (!_warningActive) {
+              _lastActivity = Date.now();
+            }
+          }, { passive: true })
+        );
+
+        async function _refreshTick() {
+          if (_warningActive) return;
+
+          const idleMs = Date.now() - _lastActivity;
+
+          if (idleMs >= _TIMEOUT_MS) {
+            _showWarning(0);
+            return;
+          }
+
+          if (idleMs >= _TIMEOUT_MS - _WARN_MS) {
+            _showWarning(_TIMEOUT_MS - idleMs);
+            return;
+          }
+
+          // Periodic background sliding refresh when user is active
+          const now = Date.now();
+          if (now - _lastRefreshAt >= Math.max(60000, Math.floor(_TIMEOUT_MS / 3))) {
+            _lastRefreshAt = now;
+            try {
+              const res = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
+              if (res.status === 401) {
+                window.location.href = '/logout?reason=session_expired';
+              }
+            } catch (_) {}
+          }
+        }
+
+        const _pollInterval = Math.max(1000, Math.min(5000, Math.floor(_WARN_MS / 4) || 2000));
+        setInterval(_refreshTick, _pollInterval);
+      }
+    })();
   </script>
   {% endif %}
 
