@@ -144,3 +144,42 @@ Pipelines defined within bundles undergo rigorous topological validation:
 - All `upstream_tasks` references are verified against declared task identifiers.
 - Self-dependencies (`task_a -> task_a`) are rejected.
 - Circular dependency cycles (`task_a -> task_b -> task_a`) are detected using 3-state depth-first search (DFS) with full cycle path reporting.
+
+---
+
+## 5. PostgreSQL State Management & Drift Detection
+
+Every bundle deployment is tracked in PostgreSQL via the `workspace_bundles` table:
+
+- **Deployment Tracking:** Records bundle name, deployment target, active status (`active`, `deploying`, `failed`, `destroyed`), version, deployed Git commit SHA, and deploying user.
+- **Resources Map:** Tracks all provisioned asset UUIDs (`catalogs`, `schemas`, `tables`, `vector_indexes`, `pipelines`, `dashboards`, `artifacts`).
+- **Drift Detection:** `BundleStateService.detect_drift(db, bundle_id)` compares registered resource UUIDs and names against the live database, reporting missing or deleted assets in real time.
+
+---
+
+## 6. Deployment Orchestration Engine (`BundleDeployer`)
+
+The deployment engine (`backend/bundles/deployer.py`) automates end-to-end lakehouse provisioning:
+
+1. **Dry-Run Diff Calculation:** Compares desired bundle specifications against current workspace state to produce an exact change summary (`create`, `update`, `delete`, `unchanged`).
+2. **Artifact Synchronization:** Syncs SQL transformation scripts, Python modules, and Jupyter notebooks to workspace MinIO storage (`workspaces/{slug}/bundles/{bundle_name}/`).
+3. **Catalog & Schema Provisioning:** Idempotently creates or updates catalogs and automatically initializes the standard medallion schemas (`bronze`, `silver`, `gold`).
+4. **Table & Vector Index Provisioning:** Registers managed/external DuckDB Parquet tables with column definitions and applies vector embedding search configurations.
+5. **Airflow Multi-Task DAG Compilation:** Generates isolated, syntactically verified Python Airflow DAG code with multi-task dependencies (`task_extract >> task_clean >> task_mart`) and writes DAG files into Airflow workspace directories.
+6. **Dashboard Provisioning:** Creates or updates native workspace dashboards with configured metrics, line charts, and SQL queries.
+7. **Clean Teardown:** Safely unlinks and purges bundle resources on destroy operations while safeguarding core medallion schemas.
+
+---
+
+## 7. REST API Suite (`/api/bundles`)
+
+Mounted under `/api/bundles` and `/api/v1/bundles`:
+
+| Method | Endpoint | Description | Access Role |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/bundles/validate` | Validates manifest syntax, DAG cycles, and generates dry-run diff | Viewer / Member |
+| `POST` | `/api/bundles/deploy` | Executes atomic deployment and updates state | Write / Admin |
+| `GET` | `/api/bundles` | Lists all deployed bundles in the active workspace | Viewer / Member |
+| `GET` | `/api/bundles/{bundle_id}` | Retrieves deployment detail, resource map, snapshot, and drift | Viewer / Member |
+| `POST` | `/api/bundles/{bundle_id}/run` | Triggers ad-hoc execution of a bundle pipeline | Write / Admin |
+| `DELETE` | `/api/bundles/{bundle_id}` | Safely destroys and unlinks provisioned bundle resources | Write / Admin |

@@ -9,7 +9,10 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.bundles.schemas import BundleSpec
+try:
+    from backend.bundles.schemas import BundleSpec
+except ImportError:
+    from .schemas import BundleSpec
 
 try:
     from models import (
@@ -117,11 +120,14 @@ class BundleStateService:
         db: Session,
         workspace_id: uuid.UUID,
         target: str | None = None,
+        status: str | None = None,
     ) -> list[WorkspaceBundle]:
-        """List all bundles deployed within a workspace, optionally filtered by target."""
+        """List all bundles deployed within a workspace, optionally filtered by target and status."""
         stmt = select(WorkspaceBundle).where(WorkspaceBundle.workspace_id == workspace_id)
         if target:
             stmt = stmt.where(WorkspaceBundle.target == target)
+        if status:
+            stmt = stmt.where(WorkspaceBundle.status == status)
         stmt = stmt.order_by(WorkspaceBundle.updated_at.desc())
         return list(db.scalars(stmt).all())
 
@@ -168,8 +174,14 @@ class BundleStateService:
         return True
 
     @staticmethod
-    def detect_drift(db: Session, bundle: WorkspaceBundle) -> dict[str, Any]:
+    def detect_drift(db: Session, bundle: WorkspaceBundle | uuid.UUID) -> dict[str, Any]:
         """Inspect tracked resources against live database records and identify missing assets."""
+        if isinstance(bundle, uuid.UUID):
+            bundle_obj = db.get(WorkspaceBundle, bundle)
+            if not bundle_obj:
+                raise ValueError("Bundle not found")
+            bundle = bundle_obj
+
         res_map = bundle.resources_map or {}
         missing_resources: dict[str, list[str]] = {
             "catalogs": [],

@@ -1,6 +1,7 @@
 """Lake Asset Bundles (LABs) module for Lake of Tears."""
 
-from backend.bundles.parser import (
+from .deployer import BundleDeployer, generate_bundle_dag_code, sync_bundle_artifacts
+from .parser import (
     BundleError,
     BundleParseError,
     BundleValidationError,
@@ -12,9 +13,20 @@ from backend.bundles.parser import (
     validate_bundle,
     validate_pipeline_dependencies,
 )
-from backend.bundles.schemas import (
+from .router import router
+from .schemas import (
+    BundleDeployRequest,
+    BundleDeployResponse,
+    BundleDestroyResponse,
+    BundleDetailResponse,
+    BundleItemResponse,
+    BundleListResponse,
     BundleMetadata,
+    BundleRunRequest,
+    BundleRunResponse,
     BundleSpec,
+    BundleValidateRequest,
+    BundleValidationResponse,
     CatalogResource,
     ColumnDef,
     DashboardResource,
@@ -28,14 +40,25 @@ from backend.bundles.schemas import (
     VariableSpec,
     VectorIndexResource,
 )
-from backend.bundles.state_service import BundleStateService
+from .state_service import BundleStateService
 
 __all__ = [
+    "BundleDeployRequest",
+    "BundleDeployResponse",
+    "BundleDeployer",
+    "BundleDestroyResponse",
+    "BundleDetailResponse",
     "BundleError",
+    "BundleItemResponse",
+    "BundleListResponse",
     "BundleMetadata",
     "BundleParseError",
+    "BundleRunRequest",
+    "BundleRunResponse",
     "BundleSpec",
     "BundleStateService",
+    "BundleValidateRequest",
+    "BundleValidationResponse",
     "BundleValidationError",
     "BundleVariableError",
     "CatalogResource",
@@ -51,9 +74,12 @@ __all__ = [
     "VariableSpec",
     "VectorIndexResource",
     "dump_bundle_to_str",
+    "generate_bundle_dag_code",
     "parse_bundle_file",
     "parse_bundle_str",
     "resolve_bundle",
+    "router",
+    "sync_bundle_artifacts",
     "validate_bundle",
     "validate_pipeline_dependencies",
 ]

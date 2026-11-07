@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -266,3 +268,173 @@ class BundleSpec(BaseModel):
     resources: ResourceInventory = Field(
         default_factory=ResourceInventory, description="Bundle resources"
     )
+
+
+# ── REST API Request & Response Schemas ────────────────────────────────────────
+
+
+class BundleValidateRequest(BaseModel):
+    """Payload for validating a bundle manifest."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    manifest_content: str = Field(
+        ..., description="Raw bundle manifest string (TOON, YAML, or JSON)"
+    )
+    manifest_format: str = Field("toon", description="Manifest format: toon, yaml, yml, json")
+    target: str | None = Field(None, description="Optional target environment name to evaluate")
+    variable_overrides: dict[str, Any] | None = Field(
+        default=None, description="Dynamic variable overrides"
+    )
+    workspace_slug: str | None = Field(None, description="Target workspace slug")
+    workspace_id: str | None = Field(None, description="Target workspace UUID")
+
+
+class BundleValidationResponse(BaseModel):
+    """Result of bundle manifest validation and dry-run reconciliation diff."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    valid: bool = Field(..., description="Whether the bundle manifest is valid and deployable")
+    bundle_name: str = Field(..., description="Validated bundle name")
+    target: str = Field("default", description="Evaluated target name")
+    errors: list[str] = Field(default_factory=list, description="Validation error messages")
+    warnings: list[str] = Field(default_factory=list, description="Validation warning messages")
+    diff: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Reconciliation diff of resources to create, update, delete",
+    )
+    resolved_bundle: dict[str, Any] | None = Field(
+        default=None, description="Resolved bundle specification payload"
+    )
+
+
+class BundleDeployRequest(BaseModel):
+    """Payload for deploying a Lake Asset Bundle."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    manifest_content: str = Field(
+        ..., description="Raw bundle manifest string (TOON, YAML, or JSON)"
+    )
+    manifest_format: str = Field("toon", description="Manifest format: toon, yaml, yml, json")
+    target: str | None = Field(None, description="Target environment name")
+    variable_overrides: dict[str, Any] | None = Field(
+        default=None, description="Dynamic variable overrides"
+    )
+    commit_hash: str | None = Field(None, description="Optional Git commit hash or version tag")
+    files: dict[str, str] | None = Field(
+        default=None,
+        description="Optional mapping of relative file paths to content for artifact sync",
+    )
+    dry_run: bool = Field(False, description="Simulate deployment without persisting changes")
+    workspace_slug: str | None = Field(None, description="Target workspace slug")
+    workspace_id: str | None = Field(None, description="Target workspace UUID")
+
+
+class BundleDeployResponse(BaseModel):
+    """Response returned upon bundle deployment execution."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: uuid.UUID | None = Field(None, description="Workspace bundle deployment UUID")
+    bundle_name: str = Field(..., description="Deployed bundle name")
+    target: str = Field("default", description="Deployed target environment")
+    status: str = Field(..., description="Deployment status: active, deploying, failed")
+    resources_map: dict[str, list[str]] = Field(
+        default_factory=dict, description="Map of resource types to provisioned IDs"
+    )
+    message: str = Field(..., description="Human-readable deployment summary")
+    deployed_at: datetime | None = Field(default=None, description="Deployment timestamp")
+    error_message: str | None = Field(None, description="Error details if deployment failed")
+
+
+class BundleItemResponse(BaseModel):
+    """Summary item for bundle listings."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    bundle_name: str
+    target: str
+    status: str
+    version: str | None = None
+    manifest_format: str
+    commit_hash: str | None = None
+    resources_count: int = 0
+    deployed_by: uuid.UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+    last_deployed_at: datetime | None = None
+
+
+class BundleListResponse(BaseModel):
+    """Paginated or listed collection of deployed workspace bundles."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    bundles: list[BundleItemResponse] = Field(default_factory=list)
+    total: int = 0
+
+
+class BundleDetailResponse(BaseModel):
+    """Full detail view of a deployed workspace bundle."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    bundle_name: str
+    target: str
+    status: str
+    version: str | None = None
+    manifest_format: str
+    manifest_raw: str
+    commit_hash: str | None = None
+    resources_map: dict[str, list[str]] = Field(default_factory=dict)
+    deployed_by: uuid.UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+    last_deployed_at: datetime | None = None
+    error_message: str | None = None
+    drift: dict[str, Any] | None = None
+
+
+class BundleRunRequest(BaseModel):
+    """Payload to trigger an ad-hoc pipeline execution for a deployed bundle."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    pipeline_name: str | None = Field(
+        None, description="Optional specific pipeline identifier to run; defaults to first"
+    )
+    conf: dict[str, Any] | None = Field(
+        default=None, description="Optional runtime parameters or Airflow DAG run conf"
+    )
+
+
+class BundleRunResponse(BaseModel):
+    """Response returned upon triggering a bundle pipeline execution."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    bundle_id: uuid.UUID
+    pipeline_name: str
+    dag_id: str
+    dag_run_id: str
+    status: str
+    execution_date: str | None = None
+
+
+class BundleDestroyResponse(BaseModel):
+    """Response returned upon tearing down / deleting a deployed bundle."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: uuid.UUID
+    bundle_name: str
+    target: str
+    status: str = "destroyed"
+    purged_resources: dict[str, list[str]] = Field(default_factory=dict)
+    message: str
