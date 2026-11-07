@@ -28,12 +28,14 @@ from backend.bundles.schemas import (
     VariableSpec,
     VectorIndexResource,
 )
+from backend.bundles.state_service import BundleStateService
 
 __all__ = [
     "BundleError",
     "BundleMetadata",
     "BundleParseError",
     "BundleSpec",
+    "BundleStateService",
     "BundleValidationError",
     "BundleVariableError",
     "CatalogResource",

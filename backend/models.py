@@ -217,6 +217,9 @@ class Workspace(Base):
     user_preferences: Mapped[list["UserWorkspacePreference"]] = relationship(
         back_populates="workspace", cascade="all, delete-orphan"
     )
+    bundles: Mapped[list["WorkspaceBundle"]] = relationship(
+        back_populates="workspace", cascade="all, delete-orphan"
+    )
 
 
 class WorkspaceMember(Base):
@@ -657,3 +660,44 @@ class UserWorkspacePreference(Base):
 
     user: Mapped["User"] = relationship(back_populates="workspace_preferences")
     workspace: Mapped["Workspace"] = relationship(back_populates="user_preferences")
+
+
+class WorkspaceBundle(Base):
+    __tablename__ = "workspace_bundles"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id", "bundle_name", "target", name="uq_workspace_bundle_target"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    bundle_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    target: Mapped[str] = mapped_column(String(64), nullable=False, default="dev", index=True)
+    version: Mapped[str] = mapped_column(String(64), nullable=False, default="0.1.0")
+    git_commit_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    deployed_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="deployed", index=True)
+    manifest_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    resources_map: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+    last_deployed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+
+    workspace: Mapped["Workspace"] = relationship(back_populates="bundles")
+    deployer: Mapped["User | None"] = relationship(foreign_keys=[deployed_by])
