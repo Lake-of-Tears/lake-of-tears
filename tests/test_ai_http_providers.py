@@ -376,6 +376,7 @@ def test_the_admin_description_lists_every_provider():
         "openai",
         "azure",
         "bedrock",
+        "vertex",
         "ollama",
         "openai_compatible",
     ]

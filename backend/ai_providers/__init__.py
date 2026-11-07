@@ -22,6 +22,7 @@ from ai_providers.registry import (
     public_provider_config,
     save_provider_config,
 )
+from ai_providers.vertex import VertexAIProvider
 
 __all__ = [
     "PROVIDERS",
@@ -31,6 +32,7 @@ __all__ = [
     "ProviderError",
     "ProviderInfo",
     "ProviderNotConfigured",
+    "VertexAIProvider",
     "build_provider",
     "get_active_provider",
     "load_provider_config",

@@ -44,6 +44,21 @@ from ai_providers.http_providers import (
     OpenAICompatibleProvider,
     OpenAIProvider,
 )
+from ai_providers.vertex import (
+    DEFAULT_CHAT_MODEL as VERTEX_CHAT_MODEL,
+)
+from ai_providers.vertex import (
+    DEFAULT_DIMENSION as VERTEX_DIMENSION,
+)
+from ai_providers.vertex import (
+    DEFAULT_EMBEDDING_MODEL as VERTEX_EMBEDDING_MODEL,
+)
+from ai_providers.vertex import (
+    DEFAULT_LOCATION as VERTEX_LOCATION,
+)
+from ai_providers.vertex import (
+    VertexAIProvider,
+)
 
 AI_PROVIDER_SETTING = "ai_provider"
 AI_PROVIDER_CONFIG_SETTING = "ai_provider_config"
@@ -222,6 +237,27 @@ def _build_bedrock(cfg: dict[str, Any]) -> AIProvider:
     )
 
 
+def _build_vertex(cfg: dict[str, Any]) -> AIProvider:
+    def on_fallback(failed_model: str, fallback_model: str, reason: str = ""):
+        try:
+            with _session(None) as session:
+                record_deprecation_warning(session, "vertex", failed_model, fallback_model, reason)
+        except Exception:
+            pass
+
+    return VertexAIProvider(
+        project_id=str(cfg.get("project_id") or ""),
+        location=str(cfg.get("location") or VERTEX_LOCATION),
+        service_account_json=str(cfg.get("service_account_json") or ""),
+        chat_model=str(cfg.get("chat_model") or VERTEX_CHAT_MODEL),
+        embedding_model=str(cfg.get("embedding_model") or VERTEX_EMBEDDING_MODEL),
+        dimension=int(cfg.get("dimension") or VERTEX_DIMENSION),
+        client=cfg.get("client"),
+        client_factory=cfg.get("client_factory"),
+        on_fallback=on_fallback,
+    )
+
+
 PROVIDERS: dict[str, ProviderSpec] = {
     "gemini": ProviderSpec(
         "gemini",
@@ -371,6 +407,52 @@ PROVIDERS: dict[str, ProviderSpec] = {
         ),
         _build_bedrock,
     ),
+    "vertex": ProviderSpec(
+        "vertex",
+        "Google Cloud Vertex AI",
+        (
+            FieldSpec(
+                "project_id",
+                "Google Cloud Project ID",
+                required=False,
+                placeholder="my-gcp-project-12345",
+                help="GCP Project ID. Leave blank to infer from Service Account JSON or ambient ADC / Workload Identity.",
+            ),
+            FieldSpec(
+                "location",
+                "Location / Region",
+                default=VERTEX_LOCATION,
+                placeholder="us-central1",
+                help="Google Cloud compute region where Vertex AI endpoints are accessed.",
+            ),
+            FieldSpec(
+                "service_account_json",
+                "Service Account Key JSON",
+                "secret",
+                help="Optional. Paste GCP service account JSON key (stored encrypted). Leave blank to use ambient GKE Workload Identity / ADC.",
+            ),
+            FieldSpec(
+                "chat_model",
+                "Chat model",
+                default=VERTEX_CHAT_MODEL,
+                help="Gemini model ID on Vertex AI (e.g. gemini-2.5-flash).",
+            ),
+            FieldSpec(
+                "embedding_model",
+                "Embedding model",
+                default=VERTEX_EMBEDDING_MODEL,
+                help="Vertex AI embedding model (e.g. text-embedding-005).",
+            ),
+            FieldSpec(
+                "dimension",
+                "Embedding dimension",
+                "int",
+                default=VERTEX_DIMENSION,
+                help="Length of each vector (768 for text-embedding-005).",
+            ),
+        ),
+        _build_vertex,
+    ),
     "ollama": ProviderSpec(
         "ollama",
         "Ollama (local models)",
@@ -487,6 +569,18 @@ def load_provider_config(
         env_defaults["api_version"] = os.getenv("AZURE_OPENAI_API_VERSION")
     elif name == "openai":
         env_defaults["api_key"] = env_defaults["api_key"] or os.getenv("OPENAI_API_KEY")
+    elif name == "vertex":
+        env_defaults["project_id"] = (
+            os.getenv("GCP_PROJECT_ID") or os.getenv("GOOGLE_CLOUD_PROJECT") or ""
+        )
+        env_defaults["location"] = (
+            os.getenv("GCP_LOCATION") or os.getenv("GOOGLE_CLOUD_LOCATION") or ""
+        )
+        env_defaults["service_account_json"] = (
+            os.getenv("GCP_SERVICE_ACCOUNT_JSON")
+            or os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+            or ""
+        )
     for field, value in env_defaults.items():
         if not cfg.get(field) and value:
             cfg[field] = value.strip() if isinstance(value, str) else value

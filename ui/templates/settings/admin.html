@@ -1302,13 +1302,26 @@
             {% if f.help %}<p class="text-[11px] text-gray-600 mb-2">{{ f.help }}</p>{% endif %}
             {% if f.kind == 'secret' %}
             {% set configured = p.config.get(f.name ~ '_configured') %}
+            {% if f.name == 'service_account_json' %}
+            <textarea id="ai-{{ p.name }}-{{ f.name }}" rows="3" name="cfg__{{ p.name }}__{{ f.name }}"
+                      autocomplete="off"
+                      placeholder="{% if configured %}Enter a new Service Account JSON to replace ({{ p.config.get(f.name ~ '_masked') }}){% else %}{ &quot;type&quot;: &quot;service_account&quot;, &quot;project_id&quot;: &quot;...&quot;, &quot;private_key&quot;: &quot;...&quot; }{% endif %}"
+                      class="w-full input-dark text-xs font-mono"
+                      style="background-color: var(--c-input-bg); border-color: var(--c-input-border);"></textarea>
+            {% else %}
             <input id="ai-{{ p.name }}-{{ f.name }}" type="password" name="cfg__{{ p.name }}__{{ f.name }}"
                    autocomplete="off"
                    placeholder="{% if configured %}Enter a new value to replace ({{ p.config.get(f.name ~ '_masked') }}){% else %}{{ f.placeholder or 'Not set' }}{% endif %}"
                    class="w-full input-dark text-sm font-mono"
                    style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+            {% endif %}
             {% if configured %}
             <p class="text-[11px] text-gray-600 mt-1">Stored value: <code class="text-gray-300">{{ p.config.get(f.name ~ '_masked') }}</code>. Leave blank to keep it.</p>
+            {% endif %}
+            {% if p.name == 'vertex' and f.name == 'service_account_json' %}
+            <div class="text-[11px] text-teal-300 p-2.5 rounded bg-teal-950/20 border border-teal-900/40 mt-1.5">
+              <span class="font-medium text-teal-200">GKE Workload Identity Note:</span> If Service Account Key JSON is left blank, Lake of Tears will automatically authenticate via Google Application Default Credentials (ADC) or GKE Workload Identity.
+            </div>
             {% endif %}
             {% elif f.kind == 'int' %}
             <input id="ai-{{ p.name }}-{{ f.name }}" type="number" min="1" max="65536" name="cfg__{{ p.name }}__{{ f.name }}"
@@ -2166,6 +2179,19 @@ const _curatedModels = {
     embedding_model: [
       { id: 'amazon.titan-embed-text-v2:0', tag: 'Recommended (1024d)' },
       { id: 'cohere.embed-english-v3', tag: 'Cohere' },
+    ],
+  },
+  vertex: {
+    chat_model: [
+      { id: 'gemini-2.5-flash', tag: 'Recommended' },
+      { id: 'gemini-2.5-pro', tag: 'High Reasoning' },
+      { id: 'gemini-2.0-flash', tag: 'Fast' },
+      { id: 'gemini-1.5-flash', tag: 'LTS Stable' },
+    ],
+    embedding_model: [
+      { id: 'text-embedding-005', tag: 'Recommended (768d)' },
+      { id: 'text-embedding-004', tag: '768d' },
+      { id: 'text-multilingual-embedding-002', tag: 'Multilingual (768d)' },
     ],
   },
   ollama: {
