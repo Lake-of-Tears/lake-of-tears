@@ -271,6 +271,10 @@
       .stat-card    { @apply card p-5 flex flex-col gap-1; }
     }
   </style>
+  <style>[x-cloak] { display: none !important; }</style>
+  <script defer src="/static/vendor/alpine-collapse.min.js"></script>
+  <script defer src="/static/vendor/alpine.min.js"></script>
+  <script src="/static/js/controllers/inactivity.js"></script>
   {% block head %}{% endblock %}
 </head>
 
@@ -289,8 +293,8 @@
 
     <!-- Workspace switcher -->
     {% if request.state.workspaces %}
-    <div class="px-2 py-2 border-b border-white/[0.07] shrink-0" id="ws-switcher-wrap">
-      <button onclick="toggleWs()" class="w-full flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-white/[0.06] transition-colors text-left">
+    <div class="px-2 py-2 border-b border-white/[0.07] shrink-0" id="ws-switcher-wrap" x-data="{ open: false }" @click.outside="open = false">
+      <button @click="open = !open" onclick="toggleWs()" class="w-full flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-white/[0.06] transition-colors text-left cursor-pointer">
         <div class="flex items-center gap-2 min-w-0">
           <span class="w-[18px] h-[18px] rounded bg-blue-600 shrink-0 flex items-center justify-center text-[9px] font-bold text-white">
             {{ (request.state.workspace.name[0] | upper) if request.state.workspace else 'W' }}
@@ -299,11 +303,11 @@
             {{ request.state.workspace.name if request.state.workspace else 'Select workspace' }}
           </span>
         </div>
-        <svg class="w-3 h-3 text-gray-500 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <svg class="w-3 h-3 text-gray-500 shrink-0 transition-transform duration-150" :class="{ 'rotate-180': open }" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" d="M8 9l4-4 4 4m0 6l-4 4-4-4"/>
         </svg>
       </button>
-      <div id="ws-dropdown" class="hidden mt-1 border rounded-xl shadow-xl py-1 text-[12px]">
+      <div id="ws-dropdown" :class="{ 'hidden': !open }" class="hidden mt-1 border rounded-xl shadow-xl py-1 text-[12px]">
         <div class="px-3 py-1.5 text-[10px] uppercase tracking-wider font-semibold menu-section-label font-mono">Switch workspace</div>
         {% for ws in request.state.workspaces %}
         <a href="/workspace/switch/{{ ws.id }}"
@@ -491,11 +495,11 @@
         <a href="https://github.com/Lake-of-Tears/lake-of-tears" target="_blank" class="text-gray-500 hover:text-gray-300 transition-colors hidden sm:block text-[13px]">GitHub</a>
 
         <!-- User avatar + dropdown -->
-        <div class="relative" id="user-menu-wrap">
-          <div class="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold text-white select-none cursor-pointer hover:ring-2 hover:ring-blue-400/40 transition-all" id="user-avatar" onclick="toggleUserMenu()">
+        <div class="relative" id="user-menu-wrap" x-data="{ open: false }" @click.outside="open = false">
+          <div class="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold text-white select-none cursor-pointer hover:ring-2 hover:ring-blue-400/40 transition-all" id="user-avatar" @click="open = !open" onclick="toggleUserMenu()">
             {{ (request.state.user.email[0] | upper) if request.state.user else 'U' }}
           </div>
-          <div id="user-menu" class="absolute right-0 top-9 w-56 border rounded-xl shadow-2xl py-1 hidden z-50 text-[13px] backdrop-blur-md">
+          <div id="user-menu" :class="{ 'hidden': !open }" class="absolute right-0 top-9 w-56 border rounded-xl shadow-2xl py-1 hidden z-50 text-[13px] backdrop-blur-md">
             <div class="px-3.5 py-2.5 border-b menu-divider">
               <div class="menu-user-name truncate font-medium text-[13px]">{{ request.state.user.display_name if request.state.user and request.state.user.display_name else (request.state.user.email if request.state.user else '') }}</div>
               <div class="menu-user-email text-[11px] truncate mt-0.5">{{ request.state.user.email if request.state.user else '' }}</div>
@@ -632,7 +636,11 @@
 
   {% if request.state.user %}
   <!-- Session inactivity timeout -->
-  <div id="inactivity-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-black/70">
+  <div id="inactivity-modal"
+       x-data="inactivityManager({{ request.state.session_config.session_inactivity_timeout_minutes | default(60) }}, {{ request.state.session_config.session_max_hours | default(24) }})"
+       :class="{ 'hidden': !warningActive }"
+       x-cloak
+       class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm">
     <div class="bg-[#1a1a1a] border border-white/10 rounded-xl shadow-2xl w-full max-w-sm p-6 text-center">
       <div class="w-10 h-10 rounded-full bg-amber-900/40 border border-amber-700/40 flex items-center justify-center mx-auto mb-4">
         <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -641,13 +649,13 @@
       </div>
       <h2 class="text-base font-semibold text-gray-200 mb-1">You've been inactive</h2>
       <p class="text-sm text-gray-400 mb-1">You'll be signed out in</p>
-      <p class="text-3xl font-bold text-amber-400 mb-5" id="inactivity-countdown">5:00</p>
+      <p class="text-3xl font-bold text-amber-400 mb-5" id="inactivity-countdown" x-text="countdownFormatted">5:00</p>
       <div class="flex gap-3 justify-center">
-        <button id="inactivity-stay-btn" type="button" onclick="stayLoggedIn()"
+        <button id="inactivity-stay-btn" type="button" @click="stayLoggedIn()" onclick="stayLoggedIn()"
           class="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-md transition-colors cursor-pointer">
           Stay signed in
         </button>
-        <button id="inactivity-signout-btn" type="button" onclick="signOutNow()"
+        <button id="inactivity-signout-btn" type="button" @click="signOutNow()" onclick="signOutNow()"
           class="px-5 py-2 border border-gray-700 text-gray-400 hover:text-gray-200 text-sm rounded-md transition-colors cursor-pointer">
           Sign out now
         </button>
