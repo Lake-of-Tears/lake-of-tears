@@ -1,7 +1,7 @@
 # 0003: Secret Management Architecture and External Vault Integrations
 
 - **Status:** Accepted and implemented across tickets #380, #381, #382, #383.
-- **Tickets:** #380 (Core Architecture, Models & Internal Vault), #381 (Azure Key Vault & AWS Secrets Manager Providers), #382 (Secret Consumption Runtime, SDK & Automatic Log Redaction), #383 (Superadmin Configuration Panel & Workspace Scopes UI).
+- **Tickets:** #380 (Core Architecture, Models & Internal Vault), #381 (Azure Key Vault & AWS Secrets Manager Providers), #382 (Secret Consumption Runtime, SDK & Automatic Log Redaction), #383 (Superadmin Configuration Panel & Workspace Scopes UI), #384 (Phase 2 External Providers: HashiCorp Vault & Google Cloud Secret Manager).
 - **Date:** 2026-11-05
 
 ## Context

@@ -4005,6 +4005,12 @@ async def settings_admin_vault_provider_save(request: Request, provider: str):
     config = {
         k[len(prefix) :]: str(v).strip() for k, v in form.multi_items() if k.startswith(prefix)
     }
+    if not config:
+        config = {
+            str(k): str(v).strip()
+            for k, v in form.multi_items()
+            if k not in ("enabled", "lake_token") and not str(k).startswith("_")
+        }
     payload = {"config": config}
     status_code, data = _backend_put(f"/api/admin/vault-providers/{provider}", token or "", payload)
     if status_code in (200, 201):

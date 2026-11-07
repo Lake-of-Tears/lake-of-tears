@@ -38,6 +38,14 @@ PROVIDER_METADATA = {
         "display_name": "AWS Secrets Manager",
         "supported": True,
     },
+    "hashicorp_vault": {
+        "display_name": "HashiCorp Vault",
+        "supported": True,
+    },
+    "gcp_secret_manager": {
+        "display_name": "Google Cloud Secret Manager",
+        "supported": True,
+    },
 }
 
 
@@ -47,11 +55,15 @@ def _normalize_provider(provider: str) -> str:
         return "azure_keyvault"
     if norm in ("aws", "aws_secrets_manager"):
         return "aws_secrets_manager"
+    if norm in ("vault", "hashicorp", "hashicorp_vault"):
+        return "hashicorp_vault"
+    if norm in ("gcp", "google", "gcp_secret_manager"):
+        return "gcp_secret_manager"
     if norm == "internal":
         return "internal"
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
-        detail=f"Unknown vault provider '{provider}'. Supported: internal, azure_keyvault, aws_secrets_manager",
+        detail=f"Unknown vault provider '{provider}'. Supported: internal, azure_keyvault, aws_secrets_manager, hashicorp_vault, gcp_secret_manager",
     )
 
 
@@ -118,6 +130,28 @@ def list_vault_providers(
         )
     )
 
+    # HashiCorp Vault
+    hashi_conf = get_vault_provider_config(db, "hashicorp_vault")
+    results.append(
+        VaultProviderStatusResponse(
+            provider="hashicorp_vault",
+            display_name="HashiCorp Vault",
+            is_configured=bool(hashi_conf.get("vault_url")),
+            config=mask_vault_provider_config("hashicorp_vault", hashi_conf),
+        )
+    )
+
+    # Google Cloud Secret Manager
+    gcp_conf = get_vault_provider_config(db, "gcp_secret_manager")
+    results.append(
+        VaultProviderStatusResponse(
+            provider="gcp_secret_manager",
+            display_name="Google Cloud Secret Manager",
+            is_configured=bool(gcp_conf.get("project_id")),
+            config=mask_vault_provider_config("gcp_secret_manager", gcp_conf),
+        )
+    )
+
     return results
 
 
@@ -142,6 +176,10 @@ def get_vault_provider(
         is_cfg = bool(conf.get("vault_url"))
     elif norm_provider == "aws_secrets_manager":
         is_cfg = bool(conf.get("region_name") or conf.get("aws_access_key_id"))
+    elif norm_provider == "hashicorp_vault":
+        is_cfg = bool(conf.get("vault_url"))
+    elif norm_provider == "gcp_secret_manager":
+        is_cfg = bool(conf.get("project_id"))
 
     return VaultProviderStatusResponse(
         provider=norm_provider,
@@ -170,7 +208,16 @@ def update_vault_provider_config(
     updated = dict(payload.config)
 
     # Preserve existing secrets if payload value is masked or unchanged
-    for secret_field in ("client_secret", "aws_secret_access_key", "aws_session_token"):
+    for secret_field in (
+        "client_secret",
+        "aws_secret_access_key",
+        "aws_session_token",
+        "token",
+        "secret_id",
+        "k8s_jwt",
+        "credentials_json",
+        "service_account_json",
+    ):
         if secret_field in updated:
             raw_val = str(updated[secret_field]).strip()
             if raw_val.startswith("••••••••") or not raw_val:
@@ -184,6 +231,10 @@ def update_vault_provider_config(
         is_cfg = bool(saved.get("vault_url"))
     elif norm_provider == "aws_secrets_manager":
         is_cfg = bool(saved.get("region_name") or saved.get("aws_access_key_id"))
+    elif norm_provider == "hashicorp_vault":
+        is_cfg = bool(saved.get("vault_url"))
+    elif norm_provider == "gcp_secret_manager":
+        is_cfg = bool(saved.get("project_id"))
 
     return VaultProviderStatusResponse(
         provider=norm_provider,
@@ -207,7 +258,16 @@ def test_vault_provider_connection(
     merged_conf = {**existing_conf, **incoming_conf}
 
     # Handle masked fields during testing
-    for secret_field in ("client_secret", "aws_secret_access_key", "aws_session_token"):
+    for secret_field in (
+        "client_secret",
+        "aws_secret_access_key",
+        "aws_session_token",
+        "token",
+        "secret_id",
+        "k8s_jwt",
+        "credentials_json",
+        "service_account_json",
+    ):
         if secret_field in merged_conf and str(merged_conf[secret_field]).startswith("••••••••"):
             merged_conf[secret_field] = existing_conf.get(secret_field, "")
 

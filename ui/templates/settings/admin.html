@@ -647,6 +647,12 @@
           <button type="button" onclick="switchVaultTab('aws')" id="tab-btn-aws" class="vault-tab-btn pb-2 border-b-2 border-transparent text-gray-400 hover:text-gray-200">
             AWS Secrets Manager
           </button>
+          <button type="button" onclick="switchVaultTab('hashicorp')" id="tab-btn-hashicorp" class="vault-tab-btn pb-2 border-b-2 border-transparent text-gray-400 hover:text-gray-200">
+            HashiCorp Vault
+          </button>
+          <button type="button" onclick="switchVaultTab('gcp')" id="tab-btn-gcp" class="vault-tab-btn pb-2 border-b-2 border-transparent text-gray-400 hover:text-gray-200">
+            GCP Secret Manager
+          </button>
         </div>
 
         <!-- Tab: Internal DB Vault -->
@@ -799,6 +805,175 @@
             </div>
           </form>
         </div>
+
+        <!-- Tab: HashiCorp Vault -->
+        {% set hashi = vault_providers | selectattr('provider', 'equalto', 'hashicorp_vault') | first %}
+        {% set hashi_cfg = hashi.config if hashi else {} %}
+        <div id="vault-tab-hashicorp" class="vault-tab-panel hidden space-y-4">
+          <form action="/settings/admin/vault-providers/hashicorp_vault" method="post" id="vault-hashicorp-form" class="space-y-4">
+            <div class="p-4 rounded-lg bg-white/[0.02] border border-white/[0.06] space-y-4">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h4 class="text-xs font-semibold text-gray-200">HashiCorp Vault Integration</h4>
+                  <p class="text-[11px] text-gray-500">Connect to HashiCorp Vault (or HCP Vault) using KV v1/v2 engines and AppRole, Token, or Kubernetes authentication.</p>
+                </div>
+                <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+                  <input type="checkbox" name="enabled" value="true" {% if hashi and hashi.enabled %}checked{% endif %} class="rounded bg-gray-900 border-gray-700 text-blue-600 focus:ring-0" />
+                  <span>Enable HashiCorp Vault</span>
+                </label>
+              </div>
+
+              <div class="space-y-3 pt-2">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-xs text-gray-400 font-medium mb-1">Vault Server URL <span class="text-red-400">*</span></label>
+                    <input type="url" name="vault_url" value="{{ hashi_cfg.vault_url or '' }}" placeholder="https://vault.internal.net:8200"
+                      class="w-full input-dark text-xs font-mono" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+                  </div>
+                  <div>
+                    <label class="block text-xs text-gray-400 font-medium mb-1">Namespace (HCP / Enterprise)</label>
+                    <input type="text" name="namespace" value="{{ hashi_cfg.namespace or '' }}" placeholder="admin (optional)"
+                      class="w-full input-dark text-xs font-mono" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label class="block text-xs text-gray-400 font-medium mb-1">Authentication Mode</label>
+                    <select name="auth_mode" class="w-full input-dark text-xs font-mono" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);">
+                      <option value="token" {% if hashi_cfg.auth_mode == 'token' or not hashi_cfg.auth_mode %}selected{% endif %}>Token Authentication</option>
+                      <option value="approle" {% if hashi_cfg.auth_mode == 'approle' %}selected{% endif %}>AppRole (Role ID & Secret ID)</option>
+                      <option value="kubernetes" {% if hashi_cfg.auth_mode == 'kubernetes' %}selected{% endif %}>Kubernetes Service Account</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="block text-xs text-gray-400 font-medium mb-1">KV Engine Mount Point</label>
+                    <input type="text" name="mount_point" value="{{ hashi_cfg.mount_point or 'secret' }}" placeholder="secret"
+                      class="w-full input-dark text-xs font-mono" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+                  </div>
+                  <div>
+                    <label class="block text-xs text-gray-400 font-medium mb-1">KV Version</label>
+                    <select name="kv_version" class="w-full input-dark text-xs font-mono" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);">
+                      <option value="2" {% if hashi_cfg.kv_version == 2 or not hashi_cfg.kv_version %}selected{% endif %}>KV Version 2 (Versioning / Metadata)</option>
+                      <option value="1" {% if hashi_cfg.kv_version == 1 %}selected{% endif %}>KV Version 1 (Legacy / Flat)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-xs text-gray-400 font-medium mb-1">Vault Token (for Token Auth)</label>
+                    <input type="password" name="token" autocomplete="off"
+                      placeholder="{% if hashi_cfg.token %}Masked ({{ hashi_cfg.token }}){% else %}s.xxxxxxxxxxxx{% endif %}"
+                      class="w-full input-dark text-xs font-mono" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+                    {% if hashi_cfg.token %}
+                    <p class="text-[10px] text-gray-500 mt-0.5">Leave blank to retain stored token.</p>
+                    {% endif %}
+                  </div>
+                  <div>
+                    <label class="block text-xs text-gray-400 font-medium mb-1">Secret Path Prefix (Optional)</label>
+                    <input type="text" name="prefix" value="{{ hashi_cfg.prefix or '' }}" placeholder="lake-of-tears/prod"
+                      class="w-full input-dark text-xs font-mono" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-xs text-gray-400 font-medium mb-1">AppRole Role ID</label>
+                    <input type="text" name="role_id" value="{{ hashi_cfg.role_id or '' }}" placeholder="00000000-0000-0000-0000-000000000000"
+                      class="w-full input-dark text-xs font-mono" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+                  </div>
+                  <div>
+                    <label class="block text-xs text-gray-400 font-medium mb-1">AppRole Secret ID</label>
+                    <input type="password" name="secret_id" autocomplete="off"
+                      placeholder="{% if hashi_cfg.secret_id %}Masked ({{ hashi_cfg.secret_id }}){% else %}00000000-0000-0000-0000-000000000000{% endif %}"
+                      class="w-full input-dark text-xs font-mono" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+                    {% if hashi_cfg.secret_id %}
+                    <p class="text-[10px] text-gray-500 mt-0.5">Leave blank to retain stored secret ID.</p>
+                    {% endif %}
+                  </div>
+                </div>
+
+                <div class="text-[11px] text-gray-500 p-2.5 rounded bg-purple-950/20 border border-purple-900/40 text-purple-300">
+                  <span class="font-medium text-purple-200">Enterprise & Kubernetes:</span> Supports HCP Vault namespaces, AppRole auth with automatic renewal, or in-cluster pod service account tokens via <code class="font-mono text-purple-200">/var/run/secrets/kubernetes.io/serviceaccount/token</code>.
+                </div>
+              </div>
+
+              <div class="flex items-center justify-end gap-2 pt-3 border-t border-white/[0.04]">
+                <button type="button" onclick="testVaultProvider('hashicorp_vault')" id="btn-test-hashicorp"
+                  class="text-xs px-3 py-1.5 rounded-md border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition-colors">
+                  Test Connection
+                </button>
+                <button type="submit" class="btn-primary text-xs px-3 py-1.5">
+                  Save Vault Settings
+                </button>
+              </div>
+
+              <div id="vault-test-status-hashicorp_vault" class="hidden text-xs p-3 rounded-md border" role="status"></div>
+            </div>
+          </form>
+        </div>
+
+        <!-- Tab: Google Cloud Secret Manager -->
+        {% set gcp = vault_providers | selectattr('provider', 'equalto', 'gcp_secret_manager') | first %}
+        {% set gcp_cfg = gcp.config if gcp else {} %}
+        <div id="vault-tab-gcp" class="vault-tab-panel hidden space-y-4">
+          <form action="/settings/admin/vault-providers/gcp_secret_manager" method="post" id="vault-gcp-form" class="space-y-4">
+            <div class="p-4 rounded-lg bg-white/[0.02] border border-white/[0.06] space-y-4">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h4 class="text-xs font-semibold text-gray-200">Google Cloud Secret Manager Integration</h4>
+                  <p class="text-[11px] text-gray-500">Allow workspaces to map secret scopes backed by Google Cloud Secret Manager (GCP).</p>
+                </div>
+                <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+                  <input type="checkbox" name="enabled" value="true" {% if gcp and gcp.enabled %}checked{% endif %} class="rounded bg-gray-900 border-gray-700 text-blue-600 focus:ring-0" />
+                  <span>Enable GCP Secret Manager</span>
+                </label>
+              </div>
+
+              <div class="space-y-3 pt-2">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-xs text-gray-400 font-medium mb-1">GCP Project ID <span class="text-red-400">*</span></label>
+                    <input type="text" name="project_id" value="{{ gcp_cfg.project_id or '' }}" placeholder="my-gcp-project-12345"
+                      class="w-full input-dark text-xs font-mono" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+                  </div>
+                  <div>
+                    <label class="block text-xs text-gray-400 font-medium mb-1">Secret Name Prefix (Optional)</label>
+                    <input type="text" name="prefix" value="{{ gcp_cfg.prefix or '' }}" placeholder="lake_of_tears_prod"
+                      class="w-full input-dark text-xs font-mono" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);" />
+                  </div>
+                </div>
+
+                <div>
+                  <label class="block text-xs text-gray-400 font-medium mb-1">Service Account Key JSON (Optional for Workload Identity)</label>
+                  <textarea name="credentials_json" rows="3" autocomplete="off"
+                    placeholder="{% if gcp_cfg.credentials_json %}Masked ({{ gcp_cfg.credentials_json }}){% else %}{ &quot;type&quot;: &quot;service_account&quot;, &quot;project_id&quot;: &quot;...&quot;, &quot;private_key&quot;: &quot;...&quot; }{% endif %}"
+                    class="w-full input-dark text-xs font-mono" style="background-color: var(--c-input-bg); border-color: var(--c-input-border);"></textarea>
+                  {% if gcp_cfg.credentials_json %}
+                  <p class="text-[10px] text-gray-500 mt-0.5">Leave blank to retain stored Service Account Key JSON.</p>
+                  {% endif %}
+                </div>
+
+                <div class="text-[11px] text-gray-500 p-2.5 rounded bg-teal-950/20 border border-teal-900/40 text-teal-300">
+                  <span class="font-medium text-teal-200">GKE Workload Identity Note:</span> If Service Account Key JSON is left blank, Lake of Tears will automatically authenticate via Google Application Default Credentials (ADC) or GKE Workload Identity.
+                </div>
+              </div>
+
+              <div class="flex items-center justify-end gap-2 pt-3 border-t border-white/[0.04]">
+                <button type="button" onclick="testVaultProvider('gcp_secret_manager')" id="btn-test-gcp"
+                  class="text-xs px-3 py-1.5 rounded-md border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition-colors">
+                  Test Connection
+                </button>
+                <button type="submit" class="btn-primary text-xs px-3 py-1.5">
+                  Save GCP Settings
+                </button>
+              </div>
+
+              <div id="vault-test-status-gcp_secret_manager" class="hidden text-xs p-3 rounded-md border" role="status"></div>
+            </div>
+          </form>
+        </div>
       </div>
     </div>
 
@@ -834,6 +1009,10 @@
                 <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-sky-950/60 text-sky-300 border border-sky-800/40">Azure Key Vault</span>
                 {% elif s.backend_type == 'aws_sm' or s.backend_type == 'aws_secrets_manager' %}
                 <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-amber-950/60 text-amber-300 border border-amber-800/40">AWS Secrets Manager</span>
+                {% elif s.backend_type == 'hashicorp_vault' or s.backend_type == 'vault' or s.backend_type == 'hashicorp' %}
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-purple-950/60 text-purple-300 border border-purple-800/40">HashiCorp Vault</span>
+                {% elif s.backend_type == 'gcp_secret_manager' or s.backend_type == 'gcp' or s.backend_type == 'google' %}
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-teal-950/60 text-teal-300 border border-teal-800/40">GCP Secret Manager</span>
                 {% else %}
                 <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-gray-800 text-gray-300 border border-gray-700">Internal DB</span>
                 {% endif %}
@@ -2207,9 +2386,25 @@ function switchVaultTab(tab) {
 }
 
 async function testVaultProvider(provider) {
-  const btn = document.getElementById(provider === 'azure_keyvault' ? 'btn-test-azure' : 'btn-test-aws');
+  let btnId = 'btn-test-azure';
+  let formId = 'vault-azure-form';
+  let providerLabel = 'Azure Key Vault';
+  if (provider === 'aws_secrets_manager') {
+    btnId = 'btn-test-aws';
+    formId = 'vault-aws-form';
+    providerLabel = 'AWS Secrets Manager';
+  } else if (provider === 'hashicorp_vault') {
+    btnId = 'btn-test-hashicorp';
+    formId = 'vault-hashicorp-form';
+    providerLabel = 'HashiCorp Vault';
+  } else if (provider === 'gcp_secret_manager') {
+    btnId = 'btn-test-gcp';
+    formId = 'vault-gcp-form';
+    providerLabel = 'Google Cloud Secret Manager';
+  }
+  const btn = document.getElementById(btnId);
   const statusBox = document.getElementById('vault-test-status-' + provider);
-  const form = document.getElementById(provider === 'azure_keyvault' ? 'vault-azure-form' : 'vault-aws-form');
+  const form = document.getElementById(formId);
   
   const formData = new FormData(form);
   const config = {};
@@ -2226,7 +2421,7 @@ async function testVaultProvider(provider) {
   };
 
   btn.disabled = true;
-  paint('info', 'Connecting to ' + (provider === 'azure_keyvault' ? 'Azure Key Vault' : 'AWS Secrets Manager') + '...');
+  paint('info', 'Connecting to ' + providerLabel + '...');
 
   try {
     const resp = await fetch('/settings/admin/vault-providers/' + provider + '/test', {
@@ -2267,9 +2462,29 @@ function updateVaultTestButtons() {
       ? 'text-xs px-3 py-1.5 rounded-md border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition-colors'
       : 'text-xs px-3 py-1.5 rounded-md border border-gray-800 text-gray-600 cursor-not-allowed transition-colors';
   }
+
+  const hashiForm = document.getElementById('vault-hashicorp-form');
+  const btnHashi = document.getElementById('btn-test-hashicorp');
+  if (hashiForm && btnHashi) {
+    const url = hashiForm.querySelector('input[name="vault_url"]')?.value?.trim();
+    btnHashi.disabled = !url;
+    btnHashi.className = url
+      ? 'text-xs px-3 py-1.5 rounded-md border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition-colors'
+      : 'text-xs px-3 py-1.5 rounded-md border border-gray-800 text-gray-600 cursor-not-allowed transition-colors';
+  }
+
+  const gcpForm = document.getElementById('vault-gcp-form');
+  const btnGcp = document.getElementById('btn-test-gcp');
+  if (gcpForm && btnGcp) {
+    const proj = gcpForm.querySelector('input[name="project_id"]')?.value?.trim();
+    btnGcp.disabled = !proj;
+    btnGcp.className = proj
+      ? 'text-xs px-3 py-1.5 rounded-md border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition-colors'
+      : 'text-xs px-3 py-1.5 rounded-md border border-gray-800 text-gray-600 cursor-not-allowed transition-colors';
+  }
 }
 
-document.querySelectorAll('#vault-azure-form input, #vault-aws-form input').forEach(inp => {
+document.querySelectorAll('#vault-azure-form input, #vault-aws-form input, #vault-hashicorp-form input, #vault-hashicorp-form select, #vault-gcp-form input, #vault-gcp-form textarea').forEach(inp => {
   inp.addEventListener('input', updateVaultTestButtons);
 });
 updateVaultTestButtons();

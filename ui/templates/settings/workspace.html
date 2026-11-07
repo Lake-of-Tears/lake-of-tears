@@ -926,6 +926,10 @@
               <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-sky-950/60 text-sky-300 border border-sky-800/40">Azure Key Vault</span>
               {% elif s.backend_type == 'aws_sm' or s.backend_type == 'aws_secrets_manager' %}
               <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-amber-950/60 text-amber-300 border border-amber-800/40">AWS Secrets Manager</span>
+              {% elif s.backend_type == 'hashicorp_vault' or s.backend_type == 'vault' or s.backend_type == 'hashicorp' %}
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-purple-950/60 text-purple-300 border border-purple-800/40">HashiCorp Vault</span>
+              {% elif s.backend_type == 'gcp_secret_manager' or s.backend_type == 'gcp' or s.backend_type == 'google' %}
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-teal-950/60 text-teal-300 border border-teal-800/40">GCP Secret Manager</span>
               {% else %}
               <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-gray-800 text-gray-300 border border-gray-700">Internal DB</span>
               {% endif %}
@@ -1002,6 +1006,8 @@
             <option value="internal">Internal Encrypted Database (AES-256-GCM)</option>
             <option value="azure_kv">Azure Key Vault (External Cloud)</option>
             <option value="aws_sm">AWS Secrets Manager (External Cloud)</option>
+            <option value="hashicorp_vault">HashiCorp Vault (External KMS / AppRole)</option>
+            <option value="gcp_secret_manager">Google Cloud Secret Manager (GCP KMS)</option>
           </select>
         </div>
 

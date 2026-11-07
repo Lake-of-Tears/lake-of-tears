@@ -73,6 +73,12 @@ document.addEventListener('alpine:init', () => {
           } else if (this.backendType.includes('aws')) {
             badge.textContent = 'AWS Secrets Manager';
             badge.className = 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-amber-950/60 text-amber-300 border border-amber-800/40';
+          } else if (this.backendType.includes('hashicorp') || this.backendType.includes('vault')) {
+            badge.textContent = 'HashiCorp Vault';
+            badge.className = 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-purple-950/60 text-purple-300 border border-purple-800/40';
+          } else if (this.backendType.includes('gcp') || this.backendType.includes('google')) {
+            badge.textContent = 'GCP Secret Manager';
+            badge.className = 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-teal-950/60 text-teal-300 border border-teal-800/40';
           } else {
             badge.textContent = 'Internal DB';
             badge.className = 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-gray-800 text-gray-300 border border-gray-700';

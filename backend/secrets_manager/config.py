@@ -12,7 +12,13 @@ from sqlalchemy.orm import Session
 
 logger = logging.getLogger("lake.secrets.config")
 
-SUPPORTED_PROVIDERS = ("internal", "azure_keyvault", "aws_secrets_manager")
+SUPPORTED_PROVIDERS = (
+    "internal",
+    "azure_keyvault",
+    "aws_secrets_manager",
+    "hashicorp_vault",
+    "gcp_secret_manager",
+)
 
 
 def _get_setting_key(provider: str) -> str:
@@ -21,6 +27,10 @@ def _get_setting_key(provider: str) -> str:
         return "vault_azure_config"
     if norm in ("aws", "aws_secrets_manager"):
         return "vault_aws_config"
+    if norm in ("vault", "hashicorp", "hashicorp_vault"):
+        return "vault_hashicorp_config"
+    if norm in ("gcp", "google", "gcp_secret_manager"):
+        return "vault_gcp_config"
     return f"vault_{norm}_config"
 
 
@@ -80,6 +90,11 @@ def mask_vault_provider_config(provider: str, config: dict[str, Any]) -> dict[st
         "client_secret",
         "aws_secret_access_key",
         "aws_session_token",
+        "token",
+        "secret_id",
+        "k8s_jwt",
+        "credentials_json",
+        "service_account_json",
     }
     for k in sensitive_keys:
         if k in masked and masked[k]:

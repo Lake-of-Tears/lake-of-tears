@@ -191,6 +191,90 @@ def test_admin_test_vault_provider_connection(test_tokens, mock_workspaces):
         assert "Successfully connected" in data["message"]
 
 
+def test_admin_save_hashicorp_and_gcp_provider_config(test_tokens, mock_workspaces):
+    """Superadmin saving HashiCorp Vault and GCP Secret Manager configurations puts config to backend."""
+    with (
+        mock.patch("ui.main._fetch_workspaces", return_value=mock_workspaces),
+        mock.patch("ui.main._backend_put", return_value=(200, {"success": True})) as mock_put,
+    ):
+        client = TestClient(app)
+
+        # 1. Save HashiCorp Vault
+        resp1 = client.post(
+            "/settings/admin/vault-providers/hashicorp_vault",
+            data={
+                "vault_url": "https://vault.internal:8200",
+                "auth_mode": "token",
+                "token": "s.vault-secret-token",
+                "mount_point": "secret",
+                "kv_version": "2",
+            },
+            cookies={"lake_token": test_tokens["superadmin"]},
+            follow_redirects=False,
+        )
+        assert resp1.status_code == 302
+        assert resp1.headers["location"] == "/settings/admin?saved=vault#vault-settings"
+        args, _ = mock_put.call_args
+        assert args[0] == "/api/admin/vault-providers/hashicorp_vault"
+        assert args[2]["config"]["vault_url"] == "https://vault.internal:8200"
+        assert args[2]["config"]["token"] == "s.vault-secret-token"
+
+        # 2. Save GCP Secret Manager
+        resp2 = client.post(
+            "/settings/admin/vault-providers/gcp_secret_manager",
+            data={
+                "project_id": "lot-gcp-prod",
+                "prefix": "lake_of_tears",
+                "credentials_json": '{"type": "service_account"}',
+            },
+            cookies={"lake_token": test_tokens["superadmin"]},
+            follow_redirects=False,
+        )
+        assert resp2.status_code == 302
+        assert resp2.headers["location"] == "/settings/admin?saved=vault#vault-settings"
+        args, _ = mock_put.call_args
+        assert args[0] == "/api/admin/vault-providers/gcp_secret_manager"
+        assert args[2]["config"]["project_id"] == "lot-gcp-prod"
+        assert args[2]["config"]["credentials_json"] == '{"type": "service_account"}'
+
+
+def test_admin_test_hashicorp_and_gcp_vault_provider_connection(test_tokens, mock_workspaces):
+    """Testing HashiCorp Vault and GCP connections via AJAX proxies test request to backend."""
+    with (
+        mock.patch("ui.main._fetch_workspaces", return_value=mock_workspaces),
+        mock.patch("httpx.Client") as mock_client_cls,
+    ):
+        mock_http_client = mock.MagicMock()
+        mock_response = mock.MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "success": True,
+            "message": "Connected successfully.",
+        }
+        mock_http_client.post.return_value = mock_response
+        mock_client_cls.return_value.__enter__.return_value = mock_http_client
+
+        client = TestClient(app)
+
+        # Test HashiCorp Vault
+        resp = client.post(
+            "/settings/admin/vault-providers/hashicorp_vault/test",
+            json={"config": {"vault_url": "https://vault.internal:8200"}},
+            cookies={"lake_token": test_tokens["superadmin"]},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+
+        # Test GCP Secret Manager
+        resp = client.post(
+            "/settings/admin/vault-providers/gcp_secret_manager/test",
+            json={"config": {"project_id": "my-gcp-project"}},
+            cookies={"lake_token": test_tokens["superadmin"]},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+
+
 # ── Workspace Secret Scopes UI Tests ──────────────────────────────────────────
 
 
@@ -204,7 +288,23 @@ def test_workspace_secret_scopes_list_renders(test_tokens, mock_workspaces):
             "backend_type": "internal",
             "key_count": 2,
             "user_permission": "MANAGE",
-        }
+        },
+        {
+            "id": "scope-def",
+            "name": "vault-credentials",
+            "workspace_id": "ws-123",
+            "backend_type": "hashicorp_vault",
+            "key_count": 1,
+            "user_permission": "WRITE",
+        },
+        {
+            "id": "scope-ghi",
+            "name": "gcp-credentials",
+            "workspace_id": "ws-123",
+            "backend_type": "gcp_secret_manager",
+            "key_count": 3,
+            "user_permission": "READ",
+        },
     ]
 
     with (
@@ -234,6 +334,10 @@ def test_workspace_secret_scopes_list_renders(test_tokens, mock_workspaces):
         assert "Secret Scopes" in html
         assert "etl-db-credentials" in html
         assert "Internal DB" in html
+        assert "vault-credentials" in html
+        assert "HashiCorp Vault" in html
+        assert "gcp-credentials" in html
+        assert "GCP Secret Manager" in html
         assert "Manage Keys" in html
         assert "Permissions" in html
 
