@@ -738,8 +738,8 @@ class UpdateSystemSettingsRequest(BaseModel):
     @field_validator("session_inactivity_timeout_minutes")
     @classmethod
     def valid_session_timeout(cls, v: int | None) -> int | None:
-        if v is not None and v != 0 and (v < 15 or v > 480):
-            raise ValueError("Inactivity timeout must be 0 (disabled) or 15–480 minutes")
+        if v is not None and (v < 0 or v > 1440):
+            raise ValueError("Inactivity timeout must be 0 (disabled) or 1–1440 minutes")
         return v
 
     @field_validator("session_max_hours")

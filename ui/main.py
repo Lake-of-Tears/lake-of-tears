@@ -228,6 +228,12 @@ def _get_session_config() -> dict:
     return {"session_inactivity_timeout_minutes": 60, "session_max_hours": 24}
 
 
+def _invalidate_session_config_cache() -> None:
+    global _SESSION_CONFIG_CACHE, _SESSION_CONFIG_FETCHED_AT
+    _SESSION_CONFIG_CACHE = None
+    _SESSION_CONFIG_FETCHED_AT = 0.0
+
+
 def _fetch_workspaces(token: str) -> list[dict] | None:
     try:
         with httpx.Client(timeout=3) as client:
@@ -3713,6 +3719,7 @@ async def settings_admin_get(request: Request):
             "vault_error": request.query_params.get("vault_error"),
             "services_overview": services_overview,
             "saved": request.query_params.get("saved"),
+            "settings_error": request.query_params.get("settings_error"),
         },
     )
 
@@ -3768,10 +3775,15 @@ async def settings_admin_catalog_settings(
     if not user or user.get("role") != "superadmin":
         return RedirectResponse(url="/", status_code=302)
     token = request.cookies.get("lake_token")
-    _backend_patch(
+    res, err = _backend_patch_with_error(
         "/api/admin/settings", token, {"catalog_soft_delete_days": catalog_soft_delete_days}
     )
-    return RedirectResponse(url="/settings/admin?saved=1", status_code=302)
+    if err:
+        return RedirectResponse(
+            url=f"/settings/admin?settings_error={urllib.parse.quote(err)}#platform",
+            status_code=302,
+        )
+    return RedirectResponse(url="/settings/admin?saved=1#platform", status_code=302)
 
 
 @app.post("/settings/admin/workspace-settings")
@@ -3783,12 +3795,17 @@ async def settings_admin_workspace_settings(
     if not user or user.get("role") != "superadmin":
         return RedirectResponse(url="/", status_code=302)
     token = request.cookies.get("lake_token")
-    _backend_patch(
+    res, err = _backend_patch_with_error(
         "/api/admin/settings",
         token,
         {"workspace_inactive_grace_period_days": workspace_inactive_grace_period_days},
     )
-    return RedirectResponse(url="/settings/admin?saved=1", status_code=302)
+    if err:
+        return RedirectResponse(
+            url=f"/settings/admin?settings_error={urllib.parse.quote(err)}#platform",
+            status_code=302,
+        )
+    return RedirectResponse(url="/settings/admin?saved=1#platform", status_code=302)
 
 
 @app.post("/settings/admin/session-settings")
@@ -3801,7 +3818,7 @@ async def settings_admin_session_settings(
     if not user or user.get("role") != "superadmin":
         return RedirectResponse(url="/", status_code=302)
     token = request.cookies.get("lake_token")
-    _backend_patch(
+    res, err = _backend_patch_with_error(
         "/api/admin/settings",
         token,
         {
@@ -3809,7 +3826,13 @@ async def settings_admin_session_settings(
             "session_max_hours": session_max_hours,
         },
     )
-    return RedirectResponse(url="/settings/admin?saved=1", status_code=302)
+    if err:
+        return RedirectResponse(
+            url=f"/settings/admin?settings_error={urllib.parse.quote(err)}#platform",
+            status_code=302,
+        )
+    _invalidate_session_config_cache()
+    return RedirectResponse(url="/settings/admin?saved=session_saved#platform", status_code=302)
 
 
 @app.post("/settings/admin/sessions/{session_id}/revoke")
