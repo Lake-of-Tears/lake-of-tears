@@ -1571,6 +1571,55 @@
   </div>
 </div>
 
+<!-- Restore Collision Resolution Modal -->
+<div id="restore-conflict-modal" class="hidden fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onclick="if(event.target === this) closeRestoreConflictModal()">
+  <div class="bg-[#18181b] border border-yellow-500/30 rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
+    <div class="flex items-start gap-3">
+      <div class="w-10 h-10 rounded-full bg-yellow-950/60 border border-yellow-500/40 flex items-center justify-center text-yellow-400 shrink-0">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+        </svg>
+      </div>
+      <div>
+        <h3 class="text-base font-semibold text-gray-100">Name Collision Detected</h3>
+        <p class="text-xs text-gray-400 mt-0.5" id="conflict-error-msg">An active table with this name already exists.</p>
+      </div>
+    </div>
+
+    <div class="bg-black/40 p-3.5 rounded-lg border border-white/[0.06] text-xs space-y-3">
+      <div>
+        <label class="block text-[11px] font-medium text-gray-300 mb-1.5">Option 1: Restore as copy with new name</label>
+        <div class="flex items-center gap-2">
+          <input type="text" id="conflict-new-name-input" class="input-dark text-xs px-2.5 py-1.5 w-full bg-black/50 border border-gray-700 rounded-lg focus:border-cyan-400 focus:outline-none" />
+          <button type="button" onclick="submitRestoreConflictResolution('rename')" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium text-xs shrink-0 flex items-center gap-1 transition-colors">
+            <span>Restore Copy</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="relative flex py-1 items-center">
+        <div class="flex-grow border-t border-gray-800"></div>
+        <span class="flex-shrink mx-2 text-[10px] text-gray-500 uppercase font-mono">Or</span>
+        <div class="flex-grow border-t border-gray-800"></div>
+      </div>
+
+      <div class="flex items-center justify-between gap-3 pt-1">
+        <div>
+          <div class="font-medium text-gray-200">Option 2: Replace active table</div>
+          <div class="text-[10px] text-gray-500">Safely moves currently active table to trash</div>
+        </div>
+        <button type="button" onclick="submitRestoreConflictResolution('replace')" class="px-3 py-1.5 bg-amber-950/60 hover:bg-amber-900 border border-amber-600/50 text-amber-300 rounded-lg font-medium text-xs shrink-0 transition-colors">
+          Replace Active
+        </button>
+      </div>
+    </div>
+
+    <div class="flex items-center justify-end gap-2 pt-2 border-t border-white/[0.08]">
+      <button type="button" onclick="closeRestoreConflictModal()" class="btn-ghost text-xs px-3 py-2 border border-gray-700 hover:border-gray-600 text-gray-300 rounded-lg">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const HAS_AI_CONFIGURED = {{ 'true' if has_ai else 'false' }};
 const CURRENT_WORKSPACE_ID = "{{ request.state.workspace.id if request.state.workspace else '' }}";
@@ -1766,6 +1815,17 @@ function initCatalogDragAndDrop() {
         return;
       }
 
+      // Shared workspace boundary preservation: strictly disallow dragging across different shared workspaces
+      if (draggedSection === 'shared') {
+        const targetWs = card.getAttribute('data-shared-workspace-id');
+        const draggedWs = draggedCatalogCard.getAttribute('data-shared-workspace-id');
+        if (targetWs && draggedWs && targetWs !== draggedWs) {
+          e.dataTransfer.dropEffect = 'none';
+          clearDropIndicators();
+          return;
+        }
+      }
+
       e.dataTransfer.dropEffect = 'move';
       const rect = card.getBoundingClientRect();
       const isTop = (e.clientY - rect.top) < (rect.height / 2);
@@ -1792,6 +1852,13 @@ function initCatalogDragAndDrop() {
       const targetSection = card.getAttribute('data-section');
       const draggedSection = draggedCatalogCard.getAttribute('data-section');
       if (targetSection !== draggedSection) return;
+
+      // Shared workspace boundary preservation: strictly disallow dragging across different shared workspaces
+      if (draggedSection === 'shared') {
+        const targetWs = card.getAttribute('data-shared-workspace-id');
+        const draggedWs = draggedCatalogCard.getAttribute('data-shared-workspace-id');
+        if (targetWs && draggedWs && targetWs !== draggedWs) return;
+      }
 
       const rect = card.getBoundingClientRect();
       const isTop = (e.clientY - rect.top) < (rect.height / 2);
@@ -3490,23 +3557,65 @@ async function loadTrashItems() {
   }
 }
 
-async function restoreTrashAsset(assetId, name) {
+let currentConflictTarget = null;
+
+async function restoreTrashAsset(assetId, name, resolutionPayload = null) {
   try {
-    const resp = await fetch(`/api/catalog/trash/${assetId}/restore`, {
+    const opts = {
       method: 'POST',
-      credentials: 'include'
-    });
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' }
+    };
+    if (resolutionPayload) {
+      opts.body = JSON.stringify(resolutionPayload);
+    }
+    const resp = await fetch(`/api/catalog/trash/${assetId}/restore`, opts);
     const res = await resp.json();
     if (!resp.ok || !res.ok) {
+      if (resp.status === 409) {
+        const errorMsg = res.error || res.detail || (typeof res === 'string' ? res : 'An active table with this name already exists.');
+        openRestoreConflictModal(assetId, name, errorMsg);
+        return;
+      }
       showCatalogToast(res.error || res.detail || 'Failed to restore asset', 'error');
       return;
     }
+    closeRestoreConflictModal();
     showCatalogToast(res.message || `Restored ${name}`, 'success');
     loadTrashItems();
     setTimeout(() => window.location.reload(), 1200);
   } catch (err) {
     showCatalogToast(`Restore error: ${err.message}`, 'error');
   }
+}
+
+function openRestoreConflictModal(assetId, name, errorMsg) {
+  currentConflictTarget = { assetId, name };
+  const modal = document.getElementById('restore-conflict-modal');
+  const errorEl = document.getElementById('conflict-error-msg');
+  const inputEl = document.getElementById('conflict-new-name-input');
+
+  if (errorEl) errorEl.textContent = errorMsg || 'An active table with this name already exists.';
+  if (inputEl) inputEl.value = `${name} (restored)`;
+  if (modal) modal.classList.remove('hidden');
+}
+
+function closeRestoreConflictModal() {
+  const modal = document.getElementById('restore-conflict-modal');
+  if (modal) modal.classList.add('hidden');
+  currentConflictTarget = null;
+}
+
+function submitRestoreConflictResolution(strategy) {
+  if (!currentConflictTarget) return;
+  const { assetId, name } = currentConflictTarget;
+  let payload = { strategy: strategy };
+  if (strategy === 'rename') {
+    const inputEl = document.getElementById('conflict-new-name-input');
+    const newName = inputEl ? inputEl.value.trim() : '';
+    payload.new_name = newName || `${name} (restored)`;
+  }
+  restoreTrashAsset(assetId, name, payload);
 }
 
 let pendingPurgeTarget = { assetId: '', name: '' };

@@ -129,6 +129,7 @@ from schemas import (
     RequestAccessRequest,
     ResetPasswordRequest,
     ResetPasswordVerifyResponse,
+    RestoreAssetRequest,
     ReviewAccessRequest,
     SharedCatalogSettingsItem,
     SystemSettingResponse,
@@ -3177,6 +3178,7 @@ def get_catalog_trash(
 @app.post("/api/catalogs/trash/{asset_id}/restore")
 def restore_catalog_asset(
     asset_id: str,
+    req: RestoreAssetRequest | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     ctx: tuple[Workspace, str] = Depends(get_catalog_workspace_and_role),
@@ -3192,7 +3194,16 @@ def restore_catalog_asset(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid asset ID")
     import catalog_trash_service
 
-    return catalog_trash_service.restore_asset(db, asset_uuid, ws)
+    strategy = req.strategy if req else None
+    new_name = req.new_name if req else None
+    return catalog_trash_service.restore_asset(
+        db,
+        asset_uuid,
+        ws,
+        user_id=current_user.id,
+        strategy=strategy,
+        new_name=new_name,
+    )
 
 
 @app.post("/api/catalog/trash/{asset_id}/purge")

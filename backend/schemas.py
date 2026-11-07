@@ -552,6 +552,11 @@ class DeletedCatalogAssetResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class RestoreAssetRequest(BaseModel):
+    strategy: str | None = None  # None | 'rename' | 'replace'
+    new_name: str | None = None
+
+
 class AssetDependency(BaseModel):
     id: str
     name: str

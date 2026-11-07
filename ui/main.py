@@ -1489,16 +1489,49 @@ async def ui_restore_catalog_asset(request: Request, asset_id: str):
     ws_slug = (ws.get("slug") if ws and isinstance(ws, dict) else None) or request.cookies.get(
         "lake_workspace_slug"
     )
-    res, err = _backend_post_with_error(
-        f"/api/catalog/trash/{asset_id}/restore",
-        token or "",
-        {},
-        workspace_id=ws_id,
-        workspace_slug=ws_slug,
-    )
-    if err:
-        return JSONResponse({"ok": False, "error": err}, status_code=400)
-    return JSONResponse(res or {"ok": True})
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{BACKEND_URL}/api/catalog/trash/{asset_id}/restore",
+                json=body,
+                headers=_build_backend_headers(token or "", ws_id, ws_slug),
+            )
+        try:
+            data = resp.json()
+        except Exception:
+            data = {"detail": resp.text}
+
+        if resp.status_code == 409:
+            err_msg = ""
+            if isinstance(data, dict):
+                err_msg = str(data.get("detail") or data.get("error") or "")
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "conflict": True,
+                    "error": err_msg or "An asset with this name already exists",
+                    "asset_id": asset_id,
+                },
+                status_code=409,
+            )
+
+        if resp.status_code >= 400:
+            err_msg = ""
+            if isinstance(data, dict):
+                err_msg = str(data.get("detail") or data.get("error") or "")
+            return JSONResponse(
+                {"ok": False, "error": err_msg or "Failed to restore asset"},
+                status_code=resp.status_code,
+            )
+
+        return JSONResponse(data if isinstance(data, dict) else {"ok": True})
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
 
 @app.post("/api/catalog/trash/{asset_id}/purge")
