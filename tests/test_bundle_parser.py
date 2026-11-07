@@ -246,7 +246,9 @@ def test_parse_bundle_file(tmp_path):
     assert yaml_spec_from_file.bundle.name == "telemetry-lake"
 
     # Also test the shipped example bundle
-    example_path = Path(__file__).parent.parent / "examples" / "bundles" / "customer360" / "lake.toon"
+    example_path = (
+        Path(__file__).parent.parent / "examples" / "bundles" / "customer360" / "lake.toon"
+    )
     if example_path.exists():
         example_spec = parse_bundle_file(example_path)
         assert example_spec.bundle.name == "customer360-medallion"
