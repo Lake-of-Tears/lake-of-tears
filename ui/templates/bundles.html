@@ -255,6 +255,7 @@
   <!-- SLIDE-OVER DETAILS & TOPOLOGY DRAWER                                      -->
   <!-- ══════════════════════════════════════════════════════════════════════════ -->
   <div
+    id="bundle-drawer"
     x-show="drawerOpen"
     x-transition:enter="transition ease-out duration-300"
     x-transition:enter-start="opacity-0"
@@ -292,7 +293,7 @@
             <p class="text-xs text-gray-400 mt-1" x-text="selectedBundle?.description || 'Declarative bundle asset specification'"></p>
           </div>
 
-          <button @click="closeDrawer()" class="text-gray-400 hover:text-white p-1 rounded-md hover:bg-white/[0.06] transition-colors">
+          <button @click="closeDrawer()" aria-label="Close drawer" class="text-gray-400 hover:text-white p-1 rounded-md hover:bg-white/[0.06] transition-colors">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
             </svg>

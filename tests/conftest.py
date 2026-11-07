@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-repo_root = Path(__file__).parents[1]
+repo_root = Path(__file__).resolve().parents[1]
 ui_dir = str(repo_root / "ui")
 backend_dir = str(repo_root / "backend")
 

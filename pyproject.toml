@@ -16,3 +16,8 @@ indent-style = "space"
 [tool.bandit]
 exclude_dirs = [".venv/"]
 skips = ["B101", "B608"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = [".venv", ".bare", "main/tests"]
+

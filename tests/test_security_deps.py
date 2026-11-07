@@ -127,7 +127,8 @@ def test_fastapi_multipart_form_data_handling():
 
 
 def test_starlette_template_response_signature_compatibility():
-    templates = Jinja2Templates(directory="ui/templates")
+    template_dir = Path(__file__).resolve().parents[1] / "ui" / "templates"
+    templates = Jinja2Templates(directory=str(template_dir))
     req = Request({"type": "http", "method": "GET", "path": "/login", "headers": []})
 
     resp = templates.TemplateResponse(

@@ -169,6 +169,43 @@ jobs:
       - name: Run unit tests
         run: pytest tests/ -v
 
+  e2e-angler:
+    name: "E2E: Angler CLI & Playwright"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Checkout Angler CLI
+        uses: actions/checkout@v7
+        with:
+          repository: "Lake-of-Tears/angler"
+          path: "angler-src"
+
+      - name: Build Angler CLI
+        run: |
+          cd angler-src
+          go build -o /usr/local/bin/angler .
+          angler version
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies & Playwright
+        run: |
+          pip install pytest==8.3.3 pandas playwright pytest-playwright -r ui/requirements.txt -r backend/requirements.txt
+          playwright install --with-deps chromium
+
+      - name: Run Angler Playwright E2E Tests
+        env:
+          ANGLER_BIN: /usr/local/bin/angler
+        run: |
+          pytest tests/test_e2e_bundles_angler.py -v
+
   summary:
     name: CI Summary & Deployment Tag
     runs-on: ubuntu-24.04
@@ -182,6 +219,7 @@ jobs:
       - docker-build-airflow
       - helm-lint
       - test
+      - e2e-angler
     if: always()
     steps:
       - uses: actions/checkout@v7
@@ -197,6 +235,7 @@ jobs:
           AIRFLOW_RESULT: ${{ needs.docker-build-airflow.result }}
           HELM_RESULT: ${{ needs.helm-lint.result }}
           TEST_RESULT: ${{ needs.test.result }}
+          E2E_ANGLER_RESULT: ${{ needs.e2e-angler.result }}
         run: |
           # 1. Compute standardized build tag
           APP_VERSION=$(grep '^appVersion:' deploy/helm/lake-of-tears/Chart.yaml | awk '{print $2}' | tr -d '"' | tr -d "'")
@@ -226,11 +265,12 @@ jobs:
           BUILD_AIRFLOW_STATUS=$(format_status "$AIRFLOW_RESULT")
           HELM_STATUS=$(format_status "$HELM_RESULT")
           TEST_STATUS=$(format_status "$TEST_RESULT")
+          E2E_ANGLER_STATUS=$(format_status "$E2E_ANGLER_RESULT")
 
           # Check if all upstream jobs succeeded
           ALL_SUCCESS=true
           for res in "$LINT_RESULT" "$SAST_RESULT" "$DEPS_RESULT" "$DOCKER_SEC_RESULT" \
-                     "$BACKEND_RESULT" "$UI_RESULT" "$AIRFLOW_RESULT" "$HELM_RESULT" "$TEST_RESULT"; do
+                     "$BACKEND_RESULT" "$UI_RESULT" "$AIRFLOW_RESULT" "$HELM_RESULT" "$TEST_RESULT" "$E2E_ANGLER_RESULT"; do
             if [ "$res" != "success" ]; then
               ALL_SUCCESS=false
               break
@@ -280,6 +320,7 @@ jobs:
           | **Docker: Airflow** | $BUILD_AIRFLOW_STATUS | Built image \`lake-of-tears-airflow:ci\` |
           | **Helm Validation** | $HELM_STATUS | Chart syntax lint & local values template render |
           | **Unit Test Suite** | $TEST_STATUS | Pytest automated test execution |
+          | **Angler & Playwright E2E** | $E2E_ANGLER_STATUS | Full Angler CLI suite & UI bundle lifecycle |
 
           ### 🚀 Deploy with this Build Tag
           To deploy or upgrade a Kubernetes deployment using this build tag:

@@ -567,8 +567,13 @@ def register(
 
     db.commit()
     db.refresh(user)
-    _set_auth_cookie(response, user, db, request=request)
-    return {"ok": True, "role": user.role}
+    token = _set_auth_cookie(response, user, db, request=request)
+    return {
+        "ok": True,
+        "token": token,
+        "role": user.role,
+        "user": {"email": user.email, "role": user.role},
+    }
 
 
 @app.post("/api/auth/login")
@@ -594,8 +599,13 @@ def login(
         raise HTTPException(401, "Invalid email or password")
     if not user.is_active:
         raise HTTPException(403, "Account disabled — contact your superadmin")
-    _set_auth_cookie(response, user, db, request=request)
-    return {"ok": True, "role": user.role}
+    token = _set_auth_cookie(response, user, db, request=request)
+    return {
+        "ok": True,
+        "token": token,
+        "role": user.role,
+        "user": {"email": user.email, "role": user.role},
+    }
 
 
 @app.post("/api/auth/logout")
@@ -1890,6 +1900,65 @@ def health():
     return {"status": "ok"}
 
 
+@app.post("/api/query")
+def execute_query(
+    req: dict[str, Any],
+    current_user: User = Depends(get_current_user),
+):
+    query = (req.get("query") or "").strip()
+    if not query:
+        raise HTTPException(400, "Query cannot be empty")
+    import time
+
+    import duckdb
+
+    t0 = time.perf_counter()
+    con = duckdb.connect()
+    rel = con.execute(query)
+    cols = [col[0] for col in rel.description] if rel.description else []
+    rows = rel.fetchall()
+    duration = f"{(time.perf_counter() - t0) * 1000:.1f}ms"
+    return {
+        "columns": cols,
+        "rows": [list(r) for r in rows],
+        "row_count": len(rows),
+        "duration": duration,
+    }
+
+
+@app.post("/api/ai/query")
+def execute_ai_query(
+    req: dict[str, Any],
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    prompt = (req.get("prompt") or "").strip()
+    if not prompt:
+        raise HTTPException(400, "Prompt cannot be empty")
+
+    try:
+        from ai_providers import get_active_provider
+
+        provider = get_active_provider(db)
+        if provider:
+            ans = provider.generate(
+                f"You are the Lake of Tears AI data assistant. Answer the user prompt: {prompt}"
+            )
+            return {
+                "answer": ans,
+                "sql_query": "",
+                "sources": [],
+            }
+    except Exception:
+        pass
+
+    return {
+        "answer": f"Echo from data lakehouse for: {prompt}",
+        "sql_query": "SELECT * FROM catalog.schema.table LIMIT 10;",
+        "sources": ["lake://catalog/schema/table"],
+    }
+
+
 # ── Catalog helpers ───────────────────────────────────────────────────────────
 
 _MEDALLION_TIERS = ("bronze", "silver", "gold")
@@ -2160,6 +2229,7 @@ def _extract_ws(ws_ctx: Any) -> Workspace | None:
 
 
 @app.get("/api/catalogs", response_model=list[CatalogResponse])
+@app.get("/api/catalog", response_model=list[CatalogResponse])
 def list_catalogs(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),

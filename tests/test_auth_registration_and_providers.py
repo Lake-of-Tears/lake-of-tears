@@ -1070,6 +1070,8 @@ def test_login_and_register_with_local_domain():
             json={"email": "admin@lake.local", "password": "ValidPassword123!"},
         )
         assert res.status_code == 200
-        assert res.json() == {"ok": True, "role": "admin"}
+        data = res.json()
+        assert data.get("ok") is True
+        assert data.get("role") == "admin"
     finally:
         backend_main.app.dependency_overrides.clear()

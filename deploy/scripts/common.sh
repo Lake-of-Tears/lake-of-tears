@@ -50,6 +50,8 @@ log_header() {
 
 # Resolve a Python environment with PyYAML and lifecycle modules available
 resolve_python() {
+    export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
+
     # 1. Active virtualenv
     if [[ -n "${VIRTUAL_ENV:-}" && -x "${VIRTUAL_ENV}/bin/python" ]]; then
         if "${VIRTUAL_ENV}/bin/python" -c "import yaml; import pipeline.shared.lifecycle" >/dev/null 2>&1; then
