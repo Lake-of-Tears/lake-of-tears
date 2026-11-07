@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Catalog — Lake of Tears{% endblock %}
+{% block head %}
+<script src="/static/js/controllers/catalog.js"></script>
+{% endblock %}
 
 {% block content %}
 {% set has_ai = (has_ai or (ai_info is defined and ai_info and ai_info.provider and (ai_info.provider|lower not in ('none', '', 'null')))) %}
@@ -394,7 +397,7 @@
       <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
       Native Workspace Catalogs ({{ catalogs | length }})
     </div>
-    <div class="flex flex-col gap-2" id="catalog-list">
+    <div class="flex flex-col gap-2" id="catalog-list" x-data="catalogReorderManager('{{ request.state.workspace.id if request.state.workspace else '' }}')">
     {% for catalog in catalogs %}
     <div class="card catalog-card native-catalog-card transition-all duration-200"
          id="catalog-{{ catalog.id }}"
@@ -957,7 +960,7 @@
 </div>
 
 <!-- Table detail side panel -->
-<div id="table-panel" class="fixed inset-y-0 right-0 w-[600px] max-w-[95vw] bg-[#161616] border-l border-white/[0.08] shadow-2xl z-50 hidden transition-all duration-150" style="display:none;flex-direction:column">
+<div id="table-panel" x-data="tableDetailsDrawerManager()" :class="{ 'w-[92vw]': isMaximized, 'w-[600px]': !isMaximized }" class="fixed inset-y-0 right-0 w-[600px] max-w-[95vw] bg-[#161616] border-l border-white/[0.08] shadow-2xl z-50 hidden transition-all duration-150" style="display:none;flex-direction:column">
   <!-- Header -->
   <div class="px-5 py-4 border-b border-white/[0.08] shrink-0 space-y-3">
     <div class="flex items-start justify-between">
@@ -1094,6 +1097,9 @@
     </form>
   </div>
 </div>
+
+<!-- Catalog Creation Wizards & Action Modals (Alpine.js) -->
+<div id="catalog-wizards-container" x-data="catalogWizardsManager()">
 
 <!-- Create Schema Modal -->
 <div id="create-schema-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
@@ -1493,8 +1499,10 @@
     </div>
   </div>
 </div>
+</div><!-- /#catalog-wizards-container -->
 
-<!-- Recently Deleted (Trash) Slide-Over Drawer -->
+<!-- Recently Deleted (Trash) Slide-Over Drawer (Alpine.js) -->
+<div id="catalog-trash-container" x-data="trashDrawerManager()">
 <div id="trash-drawer" class="fixed inset-y-0 right-0 w-[560px] max-w-[95vw] bg-[#161616] border-l border-white/[0.08] shadow-2xl z-50 hidden transition-all duration-150 flex flex-col">
   <!-- Header -->
   <div class="px-5 py-4 border-b border-white/[0.08] shrink-0 space-y-2">
@@ -1619,10 +1627,15 @@
     </div>
   </div>
 </div>
+</div><!-- /#catalog-trash-container -->
 
 <script>
-const HAS_AI_CONFIGURED = {{ 'true' if has_ai else 'false' }};
-const CURRENT_WORKSPACE_ID = "{{ request.state.workspace.id if request.state.workspace else '' }}";
+window.HAS_AI_CONFIGURED = {{ 'true' if has_ai else 'false' }};
+window.CURRENT_WORKSPACE_ID = "{{ request.state.workspace.id if request.state.workspace else '' }}";
+window.CURRENT_WORKSPACE_SLUG = "{{ request.state.workspace.slug if request.state.workspace else 'default' }}";
+window.LOT_CATALOGS_DATA = {{ catalogs | tojson }};
+const HAS_AI_CONFIGURED = window.HAS_AI_CONFIGURED;
+const CURRENT_WORKSPACE_ID = window.CURRENT_WORKSPACE_ID;
 let wasDraggingCatalog = false;
 
 function showCatalogToast(message, type = 'info') {
