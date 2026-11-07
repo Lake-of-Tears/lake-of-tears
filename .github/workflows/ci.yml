@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   lint:
-    name: Code Quality (Ruff)
+    name: "Stage 1: Code Quality (Ruff)"
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -33,8 +33,25 @@ jobs:
       - name: Check formatting
         run: ruff format --check .
 
+  helm-lint:
+    name: "Stage 1: Helm Chart Validation"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: azure/setup-helm@v5
+        with:
+          version: "3.15.0"
+
+      - name: Lint Helm chart
+        run: helm lint deploy/helm/lake-of-tears --namespace lake-of-tears
+
+      - name: Template validation (local values)
+        run: helm template test deploy/helm/lake-of-tears --namespace lake-of-tears -f deploy/helm/values-local.example.yaml > /dev/null
+
   security-sast:
-    name: "Security: SAST (Bandit)"
+    name: "Stage 2: Security SAST (Bandit)"
+    needs: [lint]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -50,7 +67,8 @@ jobs:
         run: bandit -r backend/ pipeline/ ui/ -ll -c pyproject.toml
 
   security-deps:
-    name: "Security: Dependencies (pip-audit)"
+    name: "Stage 2: Security Dependencies (pip-audit)"
+    needs: [lint]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -66,7 +84,8 @@ jobs:
         run: pip-audit -r backend/requirements.txt -r ui/requirements.txt
 
   security-docker:
-    name: "Security: Dockerfiles (Trivy)"
+    name: "Stage 2: Security Dockerfiles (Trivy)"
+    needs: [lint]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -85,76 +104,9 @@ jobs:
           trivy config ui/Dockerfile --severity HIGH,CRITICAL --exit-code 1
           trivy config deploy/airflow/Dockerfile --severity HIGH,CRITICAL --exit-code 1
 
-  docker-build-backend:
-    name: "Build Image: Backend"
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: docker/setup-buildx-action@v4
-
-      - name: Build Backend image
-        uses: docker/build-push-action@v7
-        with:
-          context: backend/
-          push: false
-          tags: lake-of-tears-backend:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  docker-build-ui:
-    name: "Build Image: UI"
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: docker/setup-buildx-action@v4
-
-      - name: Build UI image
-        uses: docker/build-push-action@v7
-        with:
-          context: ui/
-          push: false
-          tags: lake-of-tears-ui:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  docker-build-airflow:
-    name: "Build Image: Airflow"
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: docker/setup-buildx-action@v4
-
-      - name: Build Airflow image
-        uses: docker/build-push-action@v7
-        with:
-          context: deploy/airflow
-          file: deploy/airflow/Dockerfile
-          push: false
-          tags: lake-of-tears-airflow:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  helm-lint:
-    name: "Helm: Chart Validation"
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: azure/setup-helm@v5
-        with:
-          version: "3.15.0"
-
-      - name: Lint Helm chart
-        run: helm lint deploy/helm/lake-of-tears --namespace lake-of-tears
-
-      - name: Template validation (local values)
-        run: helm template test deploy/helm/lake-of-tears --namespace lake-of-tears -f deploy/helm/values-local.example.yaml > /dev/null
-
   test:
-    name: Unit Tests (Pytest)
+    name: "Stage 2: Unit Tests (Pytest)"
+    needs: [lint]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -170,7 +122,8 @@ jobs:
         run: pytest tests/ -v
 
   e2e-angler:
-    name: "E2E: Angler CLI & Playwright"
+    name: "Stage 3: E2E Angler CLI & Playwright"
+    needs: [test]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -206,20 +159,75 @@ jobs:
         run: |
           pytest tests/test_e2e_bundles_angler.py -v
 
+  docker-build-backend:
+    name: "Stage 4: Build Image Backend"
+    needs: [test, e2e-angler, security-sast, security-deps, security-docker]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build Backend image
+        uses: docker/build-push-action@v7
+        with:
+          context: backend/
+          push: false
+          tags: lake-of-tears-backend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  docker-build-ui:
+    name: "Stage 4: Build Image UI"
+    needs: [test, e2e-angler, security-sast, security-deps, security-docker]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build UI image
+        uses: docker/build-push-action@v7
+        with:
+          context: ui/
+          push: false
+          tags: lake-of-tears-ui:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  docker-build-airflow:
+    name: "Stage 4: Build Image Airflow"
+    needs: [test, e2e-angler, security-sast, security-deps, security-docker]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build Airflow image
+        uses: docker/build-push-action@v7
+        with:
+          context: deploy/airflow
+          file: deploy/airflow/Dockerfile
+          push: false
+          tags: lake-of-tears-airflow:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   summary:
-    name: CI Summary & Deployment Tag
+    name: "Stage 5: CI Summary & Deployment Tag"
     runs-on: ubuntu-24.04
     needs:
       - lint
+      - helm-lint
       - security-sast
       - security-deps
       - security-docker
+      - test
+      - e2e-angler
       - docker-build-backend
       - docker-build-ui
       - docker-build-airflow
-      - helm-lint
-      - test
-      - e2e-angler
     if: always()
     steps:
       - uses: actions/checkout@v7
@@ -227,15 +235,15 @@ jobs:
       - name: Generate Build Tag, Push Git Release Tag, and Render Summary
         env:
           LINT_RESULT: ${{ needs.lint.result }}
+          HELM_RESULT: ${{ needs.helm-lint.result }}
           SAST_RESULT: ${{ needs.security-sast.result }}
           DEPS_RESULT: ${{ needs.security-deps.result }}
           DOCKER_SEC_RESULT: ${{ needs.security-docker.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          E2E_ANGLER_RESULT: ${{ needs.e2e-angler.result }}
           BACKEND_RESULT: ${{ needs.docker-build-backend.result }}
           UI_RESULT: ${{ needs.docker-build-ui.result }}
           AIRFLOW_RESULT: ${{ needs.docker-build-airflow.result }}
-          HELM_RESULT: ${{ needs.helm-lint.result }}
-          TEST_RESULT: ${{ needs.test.result }}
-          E2E_ANGLER_RESULT: ${{ needs.e2e-angler.result }}
         run: |
           # 1. Compute standardized build tag
           APP_VERSION=$(grep '^appVersion:' deploy/helm/lake-of-tears/Chart.yaml | awk '{print $2}' | tr -d '"' | tr -d "'")
@@ -257,20 +265,20 @@ jobs:
           }
 
           LINT_STATUS=$(format_status "$LINT_RESULT")
+          HELM_STATUS=$(format_status "$HELM_RESULT")
           SAST_STATUS=$(format_status "$SAST_RESULT")
           DEPS_STATUS=$(format_status "$DEPS_RESULT")
           DOCKER_SEC_STATUS=$(format_status "$DOCKER_SEC_RESULT")
+          TEST_STATUS=$(format_status "$TEST_RESULT")
+          E2E_ANGLER_STATUS=$(format_status "$E2E_ANGLER_RESULT")
           BUILD_BACKEND_STATUS=$(format_status "$BACKEND_RESULT")
           BUILD_UI_STATUS=$(format_status "$UI_RESULT")
           BUILD_AIRFLOW_STATUS=$(format_status "$AIRFLOW_RESULT")
-          HELM_STATUS=$(format_status "$HELM_RESULT")
-          TEST_STATUS=$(format_status "$TEST_RESULT")
-          E2E_ANGLER_STATUS=$(format_status "$E2E_ANGLER_RESULT")
 
           # Check if all upstream jobs succeeded
           ALL_SUCCESS=true
-          for res in "$LINT_RESULT" "$SAST_RESULT" "$DEPS_RESULT" "$DOCKER_SEC_RESULT" \
-                     "$BACKEND_RESULT" "$UI_RESULT" "$AIRFLOW_RESULT" "$HELM_RESULT" "$TEST_RESULT" "$E2E_ANGLER_RESULT"; do
+          for res in "$LINT_RESULT" "$HELM_RESULT" "$SAST_RESULT" "$DEPS_RESULT" "$DOCKER_SEC_RESULT" \
+                     "$TEST_RESULT" "$E2E_ANGLER_RESULT" "$BACKEND_RESULT" "$UI_RESULT" "$AIRFLOW_RESULT"; do
             if [ "$res" != "success" ]; then
               ALL_SUCCESS=false
               break
@@ -308,19 +316,19 @@ jobs:
           | **Triggered By** | \`${{ github.actor }}\` via \`${{ github.event_name }}\` |
           | **Git Release Tag** | $TAG_RELEASED |
 
-          ### 🚦 Pipeline Execution Status
-          | Job Stage | Status | Details |
-          |---|:---:|---|
-          | **Code Quality** | $LINT_STATUS | Ruff Python linting & formatting checks |
-          | **Security: SAST** | $SAST_STATUS | Bandit static application security scan |
-          | **Security: Dependencies** | $DEPS_STATUS | pip-audit vulnerability audit |
-          | **Security: Dockerfiles** | $DOCKER_SEC_STATUS | Trivy configuration scan (backend, ui, airflow) |
-          | **Docker: Backend** | $BUILD_BACKEND_STATUS | Built image \`lake-of-tears-backend:ci\` |
-          | **Docker: UI** | $BUILD_UI_STATUS | Built image \`lake-of-tears-ui:ci\` |
-          | **Docker: Airflow** | $BUILD_AIRFLOW_STATUS | Built image \`lake-of-tears-airflow:ci\` |
-          | **Helm Validation** | $HELM_STATUS | Chart syntax lint & local values template render |
-          | **Unit Test Suite** | $TEST_STATUS | Pytest automated test execution |
-          | **Angler & Playwright E2E** | $E2E_ANGLER_STATUS | Full Angler CLI suite & UI bundle lifecycle |
+          ### 🚦 Pipeline Execution Status (5-Stage Tiered Architecture)
+          | Stage | Job | Status | Details |
+          |---|---|:---:|---|
+          | **1. Quality** | **Code Quality (Ruff)** | $LINT_STATUS | Ruff Python linting & formatting checks |
+          | **1. Quality** | **Helm Validation** | $HELM_STATUS | Chart syntax lint & local values template render |
+          | **2. Security & Tests** | **Security: SAST** | $SAST_STATUS | Bandit static application security scan |
+          | **2. Security & Tests** | **Security: Dependencies** | $DEPS_STATUS | pip-audit vulnerability audit |
+          | **2. Security & Tests** | **Security: Dockerfiles** | $DOCKER_SEC_STATUS | Trivy configuration scan (backend, ui, airflow) |
+          | **2. Security & Tests** | **Unit Test Suite** | $TEST_STATUS | Pytest automated test execution (986 tests) |
+          | **3. Integration** | **Angler & Playwright E2E** | $E2E_ANGLER_STATUS | Full Angler CLI suite & UI bundle lifecycle |
+          | **4. Packaging** | **Docker: Backend** | $BUILD_BACKEND_STATUS | Built image \`lake-of-tears-backend:ci\` |
+          | **4. Packaging** | **Docker: UI** | $BUILD_UI_STATUS | Built image \`lake-of-tears-ui:ci\` |
+          | **4. Packaging** | **Docker: Airflow** | $BUILD_AIRFLOW_STATUS | Built image \`lake-of-tears-airflow:ci\` |
 
           ### 🚀 Deploy with this Build Tag
           To deploy or upgrade a Kubernetes deployment using this build tag:
