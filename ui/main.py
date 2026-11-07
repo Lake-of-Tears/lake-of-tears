@@ -975,7 +975,8 @@ EXAMPLE_QUESTIONS = [
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    if AUTH_ENABLED and not request.query_params.get("reset_token"):
+    reason = request.query_params.get("reason")
+    if AUTH_ENABLED and not request.query_params.get("reset_token") and not reason:
         token = request.cookies.get("lake_token")
         if token:
             try:
@@ -994,15 +995,21 @@ async def login_page(request: Request):
     except Exception:
         pass
 
-    return templates.TemplateResponse(
+    resp = templates.TemplateResponse(
         request=request,
         name="login.html",
         context={
             "request": request,
             "registration_enabled": registration_enabled,
             "bootstrap_active": bootstrap_active,
+            "reason_code": reason,
         },
     )
+    if reason:
+        resp.delete_cookie("lake_token")
+        resp.delete_cookie(_WORKSPACE_COOKIE)
+        resp.delete_cookie("lake_workspace")
+    return resp
 
 
 @app.get("/logout")
@@ -1014,10 +1021,71 @@ async def logout(request: Request):
             _backend_post("/api/auth/logout", token, {})
         except Exception:
             pass
-    resp = RedirectResponse(url="/login", status_code=302)
+    reason = request.query_params.get("reason")
+    target = f"/login?reason={reason}" if reason else "/login"
+    resp = RedirectResponse(url=target, status_code=302)
     resp.delete_cookie("lake_token")
     resp.delete_cookie(_WORKSPACE_COOKIE)
+    resp.delete_cookie("lake_workspace")
     return resp
+
+
+@app.post("/api/auth/logout")
+async def ui_api_auth_logout(request: Request):
+    token = request.cookies.get("lake_token")
+    if not token:
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+    if token:
+        try:
+            _backend_post("/api/auth/logout", token, {})
+        except Exception:
+            pass
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie("lake_token")
+    resp.delete_cookie(_WORKSPACE_COOKIE)
+    resp.delete_cookie("lake_workspace")
+    return resp
+
+
+@app.post("/api/auth/refresh")
+async def ui_api_auth_refresh(request: Request):
+    token = request.cookies.get("lake_token")
+    if not token:
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(
+                f"{BACKEND_URL}/api/auth/refresh",
+                headers={"Authorization": f"Bearer {token}"},
+                cookies={"lake_token": token},
+            )
+        if resp.status_code == 200:
+            res = JSONResponse(resp.json(), status_code=200)
+            new_cookie = resp.cookies.get("lake_token")
+            if new_cookie:
+                res.set_cookie(
+                    "lake_token",
+                    new_cookie,
+                    httponly=True,
+                    samesite="lax",
+                )
+            return res
+        detail = "Session refresh failed"
+        try:
+            detail = resp.json().get("detail", detail)
+        except Exception:
+            pass
+        raise HTTPException(status_code=resp.status_code, detail=detail)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.get("/", response_class=HTMLResponse)
