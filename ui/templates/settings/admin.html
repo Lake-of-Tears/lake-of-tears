@@ -1,6 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Admin Panel — Lake of Tears{% endblock %}
 
+{% block head %}
+<script src="/static/js/controllers/admin.js"></script>
+{% endblock %}
+
 {% block content %}
 <div class="max-w-6xl space-y-6">
   <!-- Header -->
@@ -30,15 +34,19 @@
   {% endif %}
 
   <!-- Horizontal Navigation Tabs -->
-  <div class="border-b border-white/[0.08] flex items-center gap-1 overflow-x-auto no-scrollbar">
-    <a href="#services" onclick="switchAdminTab('services')" id="admin-tab-btn-services"
+  <div class="border-b border-white/[0.08] flex items-center gap-1 overflow-x-auto no-scrollbar"
+       x-data="adminTabsManager()"
+       @hashchange.window="resolveInitialTab((window.location.hash || '').replace('#', ''))">
+    <a href="#services" @click.prevent="switchTab('services')" onclick="switchAdminTab('services')" id="admin-tab-btn-services"
+      :class="tabClass('services')"
       class="admin-tab-btn flex items-center gap-2 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap border-blue-500 text-blue-400">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/>
       </svg>
       Services & Infrastructure
     </a>
-    <a href="#users" onclick="switchAdminTab('users')" id="admin-tab-btn-users"
+    <a href="#users" @click.prevent="switchTab('users')" onclick="switchAdminTab('users')" id="admin-tab-btn-users"
+      :class="tabClass('users')"
       class="admin-tab-btn flex items-center gap-2 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap border-transparent text-gray-400 hover:text-gray-200">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/>
@@ -46,7 +54,8 @@
       Users & Access
       <span class="text-[10px] px-1.5 py-0.2 rounded bg-white/[0.06] text-gray-400">{{ users | length }}</span>
     </a>
-    <a href="#workspaces" onclick="switchAdminTab('workspaces')" id="admin-tab-btn-workspaces"
+    <a href="#workspaces" @click.prevent="switchTab('workspaces')" onclick="switchAdminTab('workspaces')" id="admin-tab-btn-workspaces"
+      :class="tabClass('workspaces')"
       class="admin-tab-btn flex items-center gap-2 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap border-transparent text-gray-400 hover:text-gray-200">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
@@ -54,7 +63,8 @@
       Workspaces
       <span class="text-[10px] px-1.5 py-0.2 rounded bg-white/[0.06] text-gray-400">{{ workspaces | length }}</span>
     </a>
-    <a href="#vaults" onclick="switchAdminTab('vaults')" id="admin-tab-btn-vaults"
+    <a href="#vaults" @click.prevent="switchTab('vaults')" onclick="switchAdminTab('vaults')" id="admin-tab-btn-vaults"
+      :class="tabClass('vaults')"
       class="admin-tab-btn flex items-center gap-2 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap border-transparent text-gray-400 hover:text-gray-200">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
@@ -64,7 +74,8 @@
       <span class="text-[10px] px-1.5 py-0.2 rounded bg-blue-950/60 text-blue-300 border border-blue-800/40">{{ all_scopes | length }}</span>
       {% endif %}
     </a>
-    <a href="#platform" onclick="switchAdminTab('platform')" id="admin-tab-btn-platform"
+    <a href="#platform" @click.prevent="switchTab('platform')" onclick="switchAdminTab('platform')" id="admin-tab-btn-platform"
+      :class="tabClass('platform')"
       class="admin-tab-btn flex items-center gap-2 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap border-transparent text-gray-400 hover:text-gray-200">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
@@ -80,7 +91,9 @@
   <!-- ========================================================================= -->
   <!-- TAB 1: SERVICES & INFRASTRUCTURE                                         -->
   <!-- ========================================================================= -->
-  <div id="admin-panel-services" class="admin-panel space-y-6">
+  <div id="admin-panel-services"
+       x-data="servicesManager({{ (services_overview.services | default([])) | tojson if services_overview and services_overview.services else '[]' }})"
+       class="admin-panel space-y-6">
     <!-- Controls & Health Header -->
     <div class="card p-6">
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -102,7 +115,8 @@
         <div class="flex items-center gap-3">
           <!-- 10s Auto-Poll Toggle -->
           <label class="flex items-center gap-2 text-xs text-gray-400 cursor-pointer select-none">
-            <input type="checkbox" id="services-autopoll-toggle" checked onchange="toggleAutoPoll(this.checked)"
+            <input type="checkbox" id="services-autopoll-toggle" checked
+              @change="toggleAutoPoll($event.target.checked)" onchange="toggleAutoPoll(this.checked)"
               class="rounded bg-gray-900 border-gray-700 text-blue-600 focus:ring-0 focus:ring-offset-0 w-3.5 h-3.5" />
             <span class="flex items-center gap-1">
               <span id="autopoll-pulse-dot" class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
@@ -111,9 +125,9 @@
           </label>
 
           <!-- Refresh Button -->
-          <button type="button" onclick="refreshServices(true)" id="services-refresh-btn"
-            class="text-xs px-3 py-1.5 rounded-md border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition-colors flex items-center gap-1.5">
-            <svg id="services-refresh-spinner" class="w-3.5 h-3.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <button type="button" @click="refresh(true)" onclick="refreshServices(true)" id="services-refresh-btn"
+            class="text-xs px-3 py-1.5 rounded-md border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition-colors flex items-center gap-1.5 cursor-pointer">
+            <svg id="services-refresh-spinner" :class="{ 'animate-spin': isRefreshing }" class="w-3.5 h-3.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
             <span>Refresh</span>
