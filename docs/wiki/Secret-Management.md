@@ -27,6 +27,8 @@ flowchart TD
         Internal["Internal DB Vault<br/>(AES-256-GCM Envelope Encryption)"]
         Azure["Azure Key Vault<br/>(Managed Identity / Service Principal)"]
         AWS["AWS Secrets Manager<br/>(IAM / IRSA / STS AssumeRole)"]
+        Hashi["HashiCorp Vault<br/>(KV v1/v2 · AppRole / Token / K8s)"]
+        GCP["GCP Secret Manager<br/>(Workload Identity / Service Account)"]
     end
 
     NB --> SDK
@@ -54,6 +56,8 @@ Every secret scope is backed by a specific vault provider. When creating a scope
 | **Internal DB Vault** | `internal` | PostgreSQL (`secret_keys` table) with AES-256-GCM envelope encryption | In-cluster platform master key | Default self-hosted setups; zero external cloud dependencies |
 | **Azure Key Vault** | `azure_kv` / `azure_keyvault` | Microsoft Azure Key Vault HSM / Software | DefaultAzureCredential (Workload Identity) or Service Principal | Enterprise Azure deployments & hybrid clouds |
 | **AWS Secrets Manager** | `aws_sm` / `aws_secrets_manager` | Amazon Web Services Secrets Manager | IAM Role, EKS IRSA, AssumeRole STS, or static keys | Enterprise AWS deployments & EKS clusters |
+| **HashiCorp Vault** | `hashicorp_vault` / `vault` | HashiCorp Vault (KV v1 / KV v2 engines) | Token, AppRole (`role_id` & `secret_id`), or Kubernetes SA | Enterprise on-premise, HCP Vault, and multi-cloud |
+| **GCP Secret Manager** | `gcp_secret_manager` / `gcp` | Google Cloud Secret Manager | Workload Identity (GKE / ADC) or Service Account Key JSON | Google Cloud workloads and GKE clusters |
 
 ---
 
@@ -218,6 +222,29 @@ Platform superadmins can configure enterprise cloud providers at **Settings $\ri
    - **Static IAM Credentials:** Enter the **Access Key ID** and **Secret Access Key**.
 4. **Test Connection:** The **Test Connection** button is enabled once region and valid credentials or role are present. Click to perform live STS validation.
 5. Click **Save AWS Vault**.
+
+### HashiCorp Vault Configuration
+1. Open **Settings** $\rightarrow$ **Admin Panel** and select the **HashiCorp Vault** tab.
+2. Enter the **Vault Server URL** (e.g., `https://vault.internal.net:8200`).
+3. Configure KV Engine:
+   - **KV Version:** Version 2 (default) or Version 1.
+   - **Mount Point:** Path of the secret engine mount (defaults to `secret`).
+   - **Namespace (Optional):** Specify namespace for HCP Vault or Vault Enterprise (e.g. `admin` or `engineering`).
+4. Select Authentication Mode:
+   - **Token Authentication:** Enter Vault Token.
+   - **AppRole Authentication:** Enter **Role ID** and **Secret ID** (and optional custom mount point).
+   - **Kubernetes Service Account:** Authenticates via pod's in-cluster service account JWT token.
+5. Click **Test Connection** to verify Vault reachability, auth, and seal status.
+6. Click **Save Vault Settings**.
+
+### Google Cloud Secret Manager Configuration
+1. Open **Settings** $\rightarrow$ **Admin Panel** and select the **GCP Secret Manager** tab.
+2. Enter the **GCP Project ID** (e.g., `my-company-project`).
+3. Authentication options:
+   - **Workload Identity / ADC (Recommended):** Leave Service Account Key JSON blank to authenticate automatically via GKE Workload Identity or Application Default Credentials.
+   - **Service Account Key JSON:** Paste the full Service Account Key JSON object.
+4. Click **Test Connection** to verify project access and permissions.
+5. Click **Save GCP Settings**.
 
 ### Cross-Workspace Audit Inventory
 The superadmin panel includes a **Cross-Workspace Secret Scopes** audit table:

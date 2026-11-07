@@ -6,6 +6,8 @@ from secrets_manager.config import (
     mask_vault_provider_config,
     set_vault_provider_config,
 )
+from secrets_manager.gcp_sm import GCPSecretManagerProvider
+from secrets_manager.hashicorp_vault import HashiCorpVaultProvider
 from secrets_manager.internal import InternalSecretProvider
 from secrets_manager.redaction import (
     RedactingStream,
@@ -26,6 +28,8 @@ __all__ = [
     "AWSSecretsManagerProvider",
     "AzureKeyVaultProvider",
     "BaseSecretProvider",
+    "GCPSecretManagerProvider",
+    "HashiCorpVaultProvider",
     "InternalSecretProvider",
     "RedactingStream",
     "SecretManagerService",
