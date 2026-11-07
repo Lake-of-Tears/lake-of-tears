@@ -291,3 +291,63 @@ def test_deprecation_warning_lifecycle(admin):
     assert get_deprecation_warning(admin.db) is None
     resp2 = admin.get(BASE + "/deprecation-warning")
     assert resp2.json()["warning"] is None
+
+
+def test_vertex_admin_save_and_describe(admin):
+    resp = admin.put(
+        BASE,
+        json={
+            "provider": "vertex",
+            "config": {
+                "project_id": "lot-vertex-prod",
+                "location": "us-central1",
+                "service_account_json": '{"type":"service_account","project_id":"lot-vertex-prod"}',
+                "chat_model": "gemini-2.5-flash",
+                "embedding_model": "text-embedding-005",
+                "dimension": 768,
+            },
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["active"] == "vertex"
+
+    vertex_spec = next(p for p in data["providers"] if p["name"] == "vertex")
+    assert vertex_spec["label"] == "Google Cloud Vertex AI"
+    assert vertex_spec["configured"] is True
+    assert vertex_spec["config"]["project_id"] == "lot-vertex-prod"
+    assert vertex_spec["config"]["location"] == "us-central1"
+    assert vertex_spec["config"]["service_account_json_configured"] is True
+    # Ensure raw secret is masked and never returned in plaintext
+    assert '{"type":"service_account"' not in json.dumps(data)
+
+
+def test_vertex_test_connection_endpoint(admin, monkeypatch):
+    class _MockVertex:
+        name = "vertex"
+
+        def test_connection(self):
+            return {
+                "ok": True,
+                "provider": "vertex",
+                "message": "Connected to vertex",
+                "chat": {"ok": True, "model": "gemini-2.5-flash", "latency_ms": 120},
+                "embedding": {
+                    "ok": True,
+                    "model": "text-embedding-005",
+                    "dimension": 768,
+                    "latency_ms": 65,
+                },
+            }
+
+    monkeypatch.setattr(ai_admin_router, "build_provider", lambda name, cfg: _MockVertex())
+    resp = admin.post(
+        BASE + "/test",
+        json={"provider": "vertex", "config": {"project_id": "lot-test-proj"}},
+    )
+    assert resp.status_code == 200
+    res = resp.json()
+    assert res["ok"] is True
+    assert res["provider"] == "vertex"
+    assert res["chat"]["ok"] is True
+    assert res["embedding"]["dimension"] == 768

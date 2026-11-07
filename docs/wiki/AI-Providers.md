@@ -12,6 +12,7 @@ Lake of Tears uses a language model and an embedding model for AI Query, the SQL
 | OpenAI | OpenAI | API key | Defaults `gpt-4o-mini`, `text-embedding-3-small`, 1536 dimensions. |
 | Azure AI Foundry | Your Azure tenant | API key | Models are addressed by *deployment name*. Entra ID is not supported yet. |
 | Amazon Bedrock | Your AWS account | IAM role, or access key and secret | Chat through the Converse API; Titan or Cohere embeddings. |
+| Google Cloud Vertex AI | Your Google Cloud project | Workload Identity / ADC, or Service Account JSON | Enterprise Gemini and text-embedding models inside your GCP project. |
 | Ollama | Your own machine or network | None, or a bearer token | Fully offline. Run locally or as a Kubernetes service. |
 | OpenAI-compatible server | Wherever it runs | Optional bearer token | vLLM, LocalAI, LM Studio, Groq, DeepSeek and others. `/v1` is added if missing. |
 
@@ -25,6 +26,7 @@ flowchart LR
     reg --> g[Gemini]
     reg --> o[OpenAI / Azure]
     reg --> b[Bedrock]
+    reg --> v[Vertex AI]
     reg --> l[Ollama / OpenAI-compatible]
     be --- db[(system_settings<br/>encrypted)]
 ```
@@ -62,6 +64,16 @@ Region, chat model id, embedding model id and an optional dimension (Titan v2 al
 - **Static keys:** enter the access key id and the secret (and a session token for temporary credentials). Entering only one of the two is rejected.
 - The Helm chart does not create a service account yet, so an EKS role (IRSA) needs one added to the backend deployment.
 
+### Google Cloud Vertex AI
+Project ID, location/region, optional Service Account Key JSON, chat model, embedding model, and dimension.
+- **Dual-Mode Authentication:**
+  - **GKE Workload Identity / ADC (Recommended on GCP):** Leave the Service Account Key JSON blank. Lake of Tears will automatically authenticate via Google Application Default Credentials or the pod's Kubernetes service account mapped to a GCP IAM Service Account.
+  - **Service Account Key JSON:** Paste your GCP service account JSON key. Stored encrypted at rest in PostgreSQL.
+- **IAM Permissions Required:** The service account requires the `Vertex AI User` role (`roles/aiplatform.user`) on the target project, with the Vertex AI API (`aiplatform.googleapis.com`) enabled.
+- **Default Models:** Chat defaults to `gemini-2.5-flash`, embedding to `text-embedding-005` (768 dimensions).
+- **Self-Healing Fallback Chain:** If a configured Gemini model is deprecated or unavailable, Lake of Tears automatically falls back along the candidate chain (`gemini-2.5-flash` -> `gemini-2.0-flash` -> `gemini-1.5-flash`) and displays an alert banner in the Admin Panel with a 1-click **Migrate** option.
+- **Model Discovery:** Click **Discover Models** to query the Vertex AI Publisher API / Model Garden for all active Gemini chat and text embedding models available in your project/region.
+
 ### Ollama (offline)
 ```bash
 # If running Ollama locally or in your Kubernetes cluster
@@ -93,3 +105,5 @@ The search query is built by `vector_search_sql(dimension, has_model_column)`, w
 | Chat works but embeddings fail with a dimension error | The configured dimension differs from what the model returns. Clear the dimension field to auto-detect it. |
 | AI Query finds nothing after switching provider | Only rows made by the active model are searched. Re-embed the data. |
 | Bedrock: "no AWS credentials" | Attach an IAM role to the workload or enter an access key id and secret. |
+| Vertex AI: "project_id is required" | Set the Project ID in Settings, Admin Panel or provide a Service Account Key JSON containing `project_id`. |
+| Vertex AI: 403 PermissionDenied | Ensure the service account has `roles/aiplatform.user` and the Vertex AI API (`aiplatform.googleapis.com`) is enabled in your GCP project. |

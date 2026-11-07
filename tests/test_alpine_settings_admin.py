@@ -92,3 +92,13 @@ def test_workspace_template_alpine_declarative_bindings():
     assert ":class=\"{ 'hidden': !createScope.isOpen }\"" in workspace_html
     assert ":class=\"{ 'hidden': !keysDrawer.isOpen }\"" in workspace_html
     assert ":class=\"{ 'hidden': !aclModal.isOpen }\"" in workspace_html
+
+
+def test_admin_template_vertex_ai_elements():
+    admin_html = (repo_root / "ui" / "templates" / "settings" / "admin.html").read_text(
+        encoding="utf-8"
+    )
+    assert "vertex:" in admin_html
+    assert "text-embedding-005" in admin_html
+    assert "GKE Workload Identity Note" in admin_html
+    assert "service_account_json" in admin_html
