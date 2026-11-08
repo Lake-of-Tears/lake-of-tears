@@ -276,7 +276,6 @@ _BUNDLE_TASK_RUNNER_CODE = '''def _run_bundle_task(**kwargs):
 '''
 
 
-
 def generate_bundle_dag_code(
     workspace_slug: str,
     bundle_name: str,

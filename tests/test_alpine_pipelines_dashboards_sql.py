@@ -113,17 +113,17 @@ def test_pipelines_drawer_header_alignment_and_controls():
 
     # Header layout and spacing
     assert 'id="inspector-drawer-header"' in pipelines_html
-    assert 'gap-4' in pipelines_html
-    assert 'min-w-0' in pipelines_html
+    assert "gap-4" in pipelines_html
+    assert "min-w-0" in pipelines_html
 
     # Hierarchy: Display name input is primary with status badge, dag_id is secondary with truncation
     assert 'id="drawer-name-input"' in pipelines_html
     assert 'id="drawer-status-badge"' in pipelines_html
     assert 'id="drawer-dag-id"' in pipelines_html
-    assert 'truncate max-w-[240px]' in pipelines_html or 'truncate' in pipelines_html
+    assert "truncate max-w-[240px]" in pipelines_html or "truncate" in pipelines_html
 
     # Drawer width responsiveness
-    assert 'lg:max-w-3xl' in pipelines_html or 'max-w-2xl' in pipelines_html
+    assert "lg:max-w-3xl" in pipelines_html or "max-w-2xl" in pipelines_html
 
     # Color swatch and action buttons
     assert 'id="drawer-color-swatch"' in pipelines_html
@@ -133,7 +133,9 @@ def test_pipelines_drawer_header_alignment_and_controls():
 
 
 def test_pipelines_controller_full_form_and_drawer_actions():
-    pipelines_js = (repo_root / "ui" / "static" / "js" / "controllers" / "pipelines.js").read_text(encoding="utf-8")
+    pipelines_js = (repo_root / "ui" / "static" / "js" / "controllers" / "pipelines.js").read_text(
+        encoding="utf-8"
+    )
 
     # Metadata saving
     assert "savePipelineMetadata" in pipelines_js
@@ -153,4 +155,3 @@ def test_pipelines_controller_full_form_and_drawer_actions():
     assert "activeDrawerTab" in pipelines_js
     assert "drawer-tab-runs" in pipelines_js
     assert "drawer-tab-logs" in pipelines_js
-

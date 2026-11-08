@@ -354,19 +354,18 @@ async def list_workspace_dags(
 
                 bundle_info = bundle_map.get(dag_id)
                 is_bundle = is_bundle_tag or (bundle_info is not None)
-                b_name = (bundle_info.get("bundle_name") if bundle_info else None) or tag_bundle_name
+                b_name = (
+                    bundle_info.get("bundle_name") if bundle_info else None
+                ) or tag_bundle_name
                 b_id = bundle_info.get("bundle_id") if bundle_info else None
-                b_target = (bundle_info.get("bundle_target") if bundle_info else None) or tag_bundle_target
+                b_target = (
+                    bundle_info.get("bundle_target") if bundle_info else None
+                ) or tag_bundle_target
                 b_version = bundle_info.get("bundle_version") if bundle_info else None
 
                 # Notebook detection: strictly when tagged notebook or known notebook path, and NOT a bundle pipeline
-                is_nb = (
-                    not is_bundle
-                    and (
-                        "notebook" in tags
-                        or "notebooks" in tags
-                        or bool(nb_path)
-                    )
+                is_nb = not is_bundle and (
+                    "notebook" in tags or "notebooks" in tags or bool(nb_path)
                 )
 
                 meta = meta_map.get(dag_id)
@@ -488,18 +487,13 @@ async def get_dag_details(
             is_bundle = is_bundle_tag or (bundle_info is not None)
             b_name = (bundle_info.get("bundle_name") if bundle_info else None) or tag_bundle_name
             b_id = bundle_info.get("bundle_id") if bundle_info else None
-            b_target = (bundle_info.get("bundle_target") if bundle_info else None) or tag_bundle_target
+            b_target = (
+                bundle_info.get("bundle_target") if bundle_info else None
+            ) or tag_bundle_target
             b_version = bundle_info.get("bundle_version") if bundle_info else None
 
             # Notebook detection: strictly when tagged notebook or known notebook path, and NOT a bundle pipeline
-            is_nb = (
-                not is_bundle
-                and (
-                    "notebook" in tags
-                    or "notebooks" in tags
-                    or bool(nb_path)
-                )
-            )
+            is_nb = not is_bundle and ("notebook" in tags or "notebooks" in tags or bool(nb_path))
 
             meta_map = get_pipeline_metadata_map(workspace_id, db) if workspace_id and db else {}
             meta = meta_map.get(dag_id)
@@ -1355,9 +1349,7 @@ def get_bundle_pipeline_map(
         from models import WorkspaceBundle
 
         bundles = (
-            db.query(WorkspaceBundle)
-            .filter(WorkspaceBundle.workspace_id == workspace_id)
-            .all()
+            db.query(WorkspaceBundle).filter(WorkspaceBundle.workspace_id == workspace_id).all()
         )
         bundle_map: dict[str, dict[str, Any]] = {}
         for b in bundles:

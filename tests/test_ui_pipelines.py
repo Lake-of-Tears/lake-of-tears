@@ -598,7 +598,9 @@ async def test_ui_patch_pipeline_schedule_proxy():
 
 def test_pipelines_template_lab_badge_and_banner_rendering():
     """Verify pipelines.html renders cyan LAB badge and Lake Asset Bundle banner with deep link."""
-    html_content = (Path(__file__).parents[1] / "ui" / "templates" / "pipelines.html").read_text(encoding="utf-8")
+    html_content = (Path(__file__).parents[1] / "ui" / "templates" / "pipelines.html").read_text(
+        encoding="utf-8"
+    )
 
     # Table view LAB badge
     assert "is_bundle_pipeline" in html_content

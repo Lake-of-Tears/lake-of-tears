@@ -378,6 +378,7 @@ def test_workspace_manifest_and_search_includes_asset_bundles():
         patch.object(main, "_backend_get_async") as mock_backend_get_async,
         patch.object(notebook_proxy, "scan_workspace_filesystem", return_value=[]),
     ):
+
         async def _mock_async_get(path, tok, workspace_id=None, workspace_slug=None):
             if "bundles" in path:
                 return mock_bundles
@@ -397,7 +398,9 @@ def test_workspace_manifest_and_search_includes_asset_bundles():
         assert bundle_items[0]["category"] == "Asset Bundles"
 
         # Check navigation page
-        nav_items = [i for i in items if i.get("type") == "page" and i.get("title") == "Asset Bundles"]
+        nav_items = [
+            i for i in items if i.get("type") == "page" and i.get("title") == "Asset Bundles"
+        ]
         assert len(nav_items) == 1
         assert nav_items[0]["url"] == "/bundles"
 
@@ -410,6 +413,7 @@ def test_workspace_manifest_and_search_includes_asset_bundles():
         ),
         patch.object(main, "_backend_get") as mock_backend_get_sync,
     ):
+
         def _mock_sync_get(path, tok, workspace_id=None, workspace_slug=None):
             if "bundles" in path:
                 return mock_bundles
@@ -439,4 +443,3 @@ def test_workspace_manifest_and_search_includes_asset_bundles():
         results3 = resp3.json()["results"]
         b_res3 = [r for r in results3 if r.get("type") == "bundle"]
         assert len(b_res3) == 1
-

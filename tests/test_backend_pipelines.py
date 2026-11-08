@@ -1306,9 +1306,7 @@ async def test_pipeline_bundle_vs_notebook_detection():
     mock_bundle.bundle_name = "pubmed-lake"
     mock_bundle.target = "dev"
     mock_bundle.version = "0.1.0"
-    mock_bundle.resources_map = {
-        "pipelines": ["ws_default_pubmed_lake_pubmed_pipeline"]
-    }
+    mock_bundle.resources_map = {"pipelines": ["ws_default_pubmed_lake_pubmed_pipeline"]}
 
     mock_db.query.return_value.filter.return_value.all.return_value = [mock_bundle]
 
@@ -1354,7 +1352,9 @@ async def test_pipeline_bundle_vs_notebook_detection():
         patch.object(pipeline_service, "get_pipeline_metadata_map", return_value={}),
     ):
         mock_instance = AsyncMock()
-        mock_instance.get.return_value = MagicMock(status_code=200, json=lambda: {"dags": matching_dags, "total_entries": 3})
+        mock_instance.get.return_value = MagicMock(
+            status_code=200, json=lambda: {"dags": matching_dags, "total_entries": 3}
+        )
         mock_client.return_value.__aenter__.return_value = mock_instance
 
         results = await pipeline_service.list_workspace_dags(
@@ -1366,7 +1366,9 @@ async def test_pipeline_bundle_vs_notebook_detection():
         assert len(results) == 3
 
         # LAB pipeline verification
-        lab_dag = next(r for r in results if r["dag_id"] == "ws_default_pubmed_lake_pubmed_pipeline")
+        lab_dag = next(
+            r for r in results if r["dag_id"] == "ws_default_pubmed_lake_pubmed_pipeline"
+        )
         assert lab_dag["is_bundle_pipeline"] is True
         assert lab_dag["is_notebook_job"] is False
         assert lab_dag["bundle_name"] == "pubmed-lake"
@@ -1382,4 +1384,3 @@ async def test_pipeline_bundle_vs_notebook_detection():
         gen_dag = next(r for r in results if r["dag_id"] == "ws_default_generic_pipeline")
         assert gen_dag["is_bundle_pipeline"] is False
         assert gen_dag["is_notebook_job"] is False
-

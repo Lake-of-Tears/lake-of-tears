@@ -108,7 +108,9 @@ def test_ai_enrich_endpoints_mounted_and_controller_updated():
     assert resp.status_code != 404
 
     # Verify catalog.js references valid endpoints and resolves table_name
-    catalog_js = (repo_root / "ui" / "static" / "js" / "controllers" / "catalog.js").read_text(encoding="utf-8")
+    catalog_js = (repo_root / "ui" / "static" / "js" / "controllers" / "catalog.js").read_text(
+        encoding="utf-8"
+    )
     assert "/api/catalog/ai/generate-description" in catalog_js
     assert "/api/ai/generate-description" in catalog_js
     assert "name: tableName" in catalog_js
@@ -116,8 +118,8 @@ def test_ai_enrich_endpoints_mounted_and_controller_updated():
 
 
 def test_ai_semantic_description_generation_and_schema_compatibility():
-    from schemas import GenerateDescriptionRequest
     import ai_service
+    from schemas import GenerateDescriptionRequest
 
     # Verify GenerateDescriptionRequest accepts table_name without error
     req = GenerateDescriptionRequest(
@@ -141,7 +143,10 @@ def test_ai_semantic_description_generation_and_schema_compatibility():
         sample_rows=req.sample_rows,
     )
     assert res["ok"] is True
-    assert "pubmed" in res["description"].lower() or "dataset" in res["description"].lower() or "table" in res["description"].lower()
+    assert (
+        "pubmed" in res["description"].lower()
+        or "dataset" in res["description"].lower()
+        or "table" in res["description"].lower()
+    )
     assert "pmid" in res["column_descriptions"]
     assert "title" in res["column_descriptions"]
-

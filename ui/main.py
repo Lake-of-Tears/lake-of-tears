@@ -4938,7 +4938,6 @@ async def api_workspace_manifest(request: Request):
         b_name = b.get("bundle_name", "")
         b_target = b.get("target") or "dev"
         b_version = b.get("version") or "0.1.0"
-        b_status = b.get("status") or "active"
         res_map = b.get("resources_map") or {}
         res_count = b.get("resources_count") or sum(len(v) for v in res_map.values())
         b_desc = b.get("description")
@@ -4979,7 +4978,11 @@ async def api_workspace_manifest(request: Request):
     nav_pages = [
         {"title": "Dashboard", "subtitle": "System overview & metrics", "url": "/"},
         {"title": "Catalog", "subtitle": "Datasets & schemas", "url": "/catalog"},
-        {"title": "Asset Bundles", "subtitle": "Declarative Lake Asset Bundles (LABs)", "url": "/bundles"},
+        {
+            "title": "Asset Bundles",
+            "subtitle": "Declarative Lake Asset Bundles (LABs)",
+            "url": "/bundles",
+        },
         {"title": "Storage", "subtitle": "MinIO S3 data lake buckets", "url": "/storage"},
         {"title": "SQL Editor", "subtitle": "DuckDB SQL queries", "url": "/sql"},
         {"title": "Visualizations", "subtitle": "Apache Superset dashboards", "url": "/dashboards"},
@@ -5263,7 +5266,9 @@ async def api_workspace_search(request: Request, q: str = ""):
             effective_ws_id = str(ws_id) if ws_id and ws_id != "default" else None
             ws_slug = ws.get("slug") if ws else None
             bundles_data = _backend_get(
-                f"/api/bundles?workspace_slug={urllib.parse.quote(ws_slug)}" if ws_slug else "/api/bundles",
+                f"/api/bundles?workspace_slug={urllib.parse.quote(ws_slug)}"
+                if ws_slug
+                else "/api/bundles",
                 token,
                 workspace_id=effective_ws_id,
                 workspace_slug=ws_slug,
@@ -5299,7 +5304,9 @@ async def api_workspace_search(request: Request, q: str = ""):
                     for res_type, r_items in res_map.items():
                         if isinstance(r_items, list):
                             for r_item in r_items:
-                                r_str = str(r_item.get("name") if isinstance(r_item, dict) else r_item).lower()
+                                r_str = str(
+                                    r_item.get("name") if isinstance(r_item, dict) else r_item
+                                ).lower()
                                 if query in r_str:
                                     res_match = f"{res_type}: {r_str}"
                                     break
@@ -5348,7 +5355,11 @@ async def api_workspace_search(request: Request, q: str = ""):
     nav_pages = [
         {"title": "Dashboard", "subtitle": "System overview & metrics", "url": "/"},
         {"title": "Catalog", "subtitle": "Datasets & schemas", "url": "/catalog"},
-        {"title": "Asset Bundles", "subtitle": "Declarative Lake Asset Bundles (LABs)", "url": "/bundles"},
+        {
+            "title": "Asset Bundles",
+            "subtitle": "Declarative Lake Asset Bundles (LABs)",
+            "url": "/bundles",
+        },
         {"title": "Storage", "subtitle": "MinIO S3 data lake buckets", "url": "/storage"},
         {"title": "SQL Editor", "subtitle": "DuckDB SQL queries", "url": "/sql"},
         {"title": "Visualizations", "subtitle": "Apache Superset dashboards", "url": "/dashboards"},

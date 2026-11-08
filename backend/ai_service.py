@@ -1500,7 +1500,9 @@ def generate_semantic_description(
 
         sample_ctx = ""
         if sample_rows and isinstance(sample_rows, list):
-            sample_ctx = "\nSample Data Rows (up to 3):\n" + json.dumps(sample_rows[:3], default=str)
+            sample_ctx = "\nSample Data Rows (up to 3):\n" + json.dumps(
+                sample_rows[:3], default=str
+            )
 
         prompt = (
             f"You are a semantic metadata curator for Lake of Tears.\n"

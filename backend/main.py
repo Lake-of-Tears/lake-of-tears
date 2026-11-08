@@ -3040,13 +3040,17 @@ def update_table(
         else None
     )
     if not schema:
-        schema = db.query(CatalogSchema).filter_by(slug=str(schema_id), catalog_id=catalog.id).first()
+        schema = (
+            db.query(CatalogSchema).filter_by(slug=str(schema_id), catalog_id=catalog.id).first()
+        )
     table = None
     if schema:
         if tbl_uuid:
             table = db.query(CatalogTable).filter_by(id=tbl_uuid, schema_id=schema.id).first()
         if not table:
-            table = db.query(CatalogTable).filter_by(slug=str(table_id), schema_id=schema.id).first()
+            table = (
+                db.query(CatalogTable).filter_by(slug=str(table_id), schema_id=schema.id).first()
+            )
     if not table:
         raise HTTPException(404, "Table not found")
     if req.description is not None:
@@ -3115,13 +3119,17 @@ def sync_table_vector_index_endpoint(
         else None
     )
     if not schema:
-        schema = db.query(CatalogSchema).filter_by(slug=str(schema_id), catalog_id=catalog.id).first()
+        schema = (
+            db.query(CatalogSchema).filter_by(slug=str(schema_id), catalog_id=catalog.id).first()
+        )
     table = None
     if schema:
         if tbl_uuid:
             table = db.query(CatalogTable).filter_by(id=tbl_uuid, schema_id=schema.id).first()
         if not table:
-            table = db.query(CatalogTable).filter_by(slug=str(table_id), schema_id=schema.id).first()
+            table = (
+                db.query(CatalogTable).filter_by(slug=str(table_id), schema_id=schema.id).first()
+            )
     if not table:
         raise HTTPException(404, "Table not found")
 
