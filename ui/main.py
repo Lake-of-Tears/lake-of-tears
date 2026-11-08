@@ -1375,6 +1375,8 @@ async def catalog_table_status(
 
 
 @app.patch("/catalog/{catalog_id}/schemas/{schema_id}/tables/{table_id}")
+@app.patch("/api/catalogs/{catalog_id}/schemas/{schema_id}/tables/{table_id}")
+@app.patch("/api/catalog/{catalog_id}/schemas/{schema_id}/tables/{table_id}")
 async def catalog_update_table_metadata(
     request: Request,
     catalog_id: str,
@@ -2604,26 +2606,52 @@ async def api_catalog_ai_prompt_to_table(request: Request):
 
 
 @app.post("/api/catalog/ai/generate-description")
+@app.post("/api/ai/generate-description")
+@app.post("/api/catalog/ai/enrich-table")
+@app.post("/api/ai/enrich-table")
 async def api_catalog_ai_generate_description(request: Request):
     token = _get_request_token(request)
     if not token and AUTH_ENABLED:
         return JSONResponse({"ok": False, "error": "Not authenticated"}, status_code=401)
-    body = await request.json()
-    res = _backend_post("/api/ai/generate-description", token, body)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    ws = getattr(request.state, "workspace", None)
+    ws_id = (
+        (str(ws["id"]) if ws and isinstance(ws, dict) and "id" in ws else None)
+        or request.cookies.get("lake_workspace_id")
+        or request.cookies.get("lake_active_workspace")
+    )
+    ws_slug = (ws.get("slug") if ws and isinstance(ws, dict) else None) or request.cookies.get(
+        "lake_workspace_slug"
+    )
+    if not body.get("name") and body.get("table_name"):
+        body["name"] = body["table_name"]
+
+    res, err = _backend_post_with_error(
+        "/api/ai/generate-description",
+        token,
+        body,
+        workspace_id=ws_id,
+        workspace_slug=ws_slug,
+        timeout=30.0,
+    )
     if not res:
         try:
             import ai_service
 
             res = ai_service.generate_semantic_description(
                 asset_type=body.get("asset_type", "table"),
-                name=body.get("name", ""),
+                name=body.get("name") or body.get("table_name", ""),
                 catalog_name=body.get("catalog_name"),
                 schema_name=body.get("schema_name"),
                 columns=body.get("columns"),
                 model=body.get("model"),
+                sample_rows=body.get("sample_rows"),
             )
         except Exception as exc:
-            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+            return JSONResponse({"ok": False, "error": err or str(exc)}, status_code=500)
     return JSONResponse(res)
 
 
@@ -4734,10 +4762,27 @@ async def api_workspace_manifest(request: Request):
             return fs_items
         return await notebook_proxy.search_workspace_items(ws_slug, query="", subpath="")
 
-    catalogs_raw, pipelines_raw, nb_items = await asyncio.gather(
+    async def _fetch_bundles():
+        if not token:
+            return []
+        effective_ws_id = str(ws_id) if ws_id and ws_id != "default" else None
+        data = await _backend_get_async(
+            f"/api/bundles?workspace_slug={urllib.parse.quote(ws_slug)}",
+            token,
+            workspace_id=effective_ws_id,
+            workspace_slug=ws_slug,
+        )
+        if data and isinstance(data, dict):
+            return data.get("bundles", [])
+        if isinstance(data, list):
+            return data
+        return []
+
+    catalogs_raw, pipelines_raw, nb_items, bundles_raw = await asyncio.gather(
         _fetch_catalogs(),
         _fetch_pipelines(),
         _fetch_notebooks(),
+        _fetch_bundles(),
         return_exceptions=True,
     )
 
@@ -4750,6 +4795,9 @@ async def api_workspace_manifest(request: Request):
     if isinstance(nb_items, Exception):
         logger.warning("Error fetching notebooks for manifest: %s", nb_items)
         nb_items = []
+    if isinstance(bundles_raw, Exception):
+        logger.warning("Error fetching bundles for manifest: %s", bundles_raw)
+        bundles_raw = []
 
     items: list[dict[str, Any]] = []
 
@@ -4884,7 +4932,35 @@ async def api_workspace_manifest(request: Request):
             }
         )
 
-    # 4. Storage Sources
+    # 4. Lake Asset Bundles (LABs)
+    for b in bundles_raw:
+        b_id = str(b.get("id", ""))
+        b_name = b.get("bundle_name", "")
+        b_target = b.get("target") or "dev"
+        b_version = b.get("version") or "0.1.0"
+        b_status = b.get("status") or "active"
+        res_map = b.get("resources_map") or {}
+        res_count = b.get("resources_count") or sum(len(v) for v in res_map.values())
+        b_desc = b.get("description")
+        sub = f"Asset Bundle ({b_target}) • v{b_version} • {res_count} resources"
+        if b_desc:
+            sub = f"Asset Bundle ({b_target}) • v{b_version} • {b_desc}"
+
+        items.append(
+            {
+                "category": "Asset Bundles",
+                "title": b_name,
+                "subtitle": sub,
+                "url": f"/bundles?open={urllib.parse.quote(b_id)}",
+                "type": "bundle",
+                "bundle_id": b_id,
+                "bundle_name": b_name,
+                "target": b_target,
+                "path": b_name,
+            }
+        )
+
+    # 5. Storage Sources
     for src in SOURCES:
         src_label = SOURCE_LABELS.get(src, src.title())
         src_desc = f"MinIO S3 prefix: raw/{src}/"
@@ -4899,10 +4975,11 @@ async def api_workspace_manifest(request: Request):
             }
         )
 
-    # 5. Application Navigation Pages
+    # 6. Application Navigation Pages
     nav_pages = [
         {"title": "Dashboard", "subtitle": "System overview & metrics", "url": "/"},
         {"title": "Catalog", "subtitle": "Datasets & schemas", "url": "/catalog"},
+        {"title": "Asset Bundles", "subtitle": "Declarative Lake Asset Bundles (LABs)", "url": "/bundles"},
         {"title": "Storage", "subtitle": "MinIO S3 data lake buckets", "url": "/storage"},
         {"title": "SQL Editor", "subtitle": "DuckDB SQL queries", "url": "/sql"},
         {"title": "Visualizations", "subtitle": "Apache Superset dashboards", "url": "/dashboards"},
@@ -5179,7 +5256,79 @@ async def api_workspace_search(request: Request, q: str = ""):
                 }
             )
 
-    # 4. Storage Sources (S3 / MinIO)
+    # 4. Lake Asset Bundles (LABs)
+    try:
+        if token:
+            ws_id = ws.get("id") if ws else None
+            effective_ws_id = str(ws_id) if ws_id and ws_id != "default" else None
+            ws_slug = ws.get("slug") if ws else None
+            bundles_data = _backend_get(
+                f"/api/bundles?workspace_slug={urllib.parse.quote(ws_slug)}" if ws_slug else "/api/bundles",
+                token,
+                workspace_id=effective_ws_id,
+                workspace_slug=ws_slug,
+            )
+            bundles_list = []
+            if bundles_data and isinstance(bundles_data, dict):
+                bundles_list = bundles_data.get("bundles", [])
+            elif isinstance(bundles_data, list):
+                bundles_list = bundles_data
+
+            for b in bundles_list:
+                b_id = str(b.get("id", ""))
+                b_name = b.get("bundle_name", "")
+                b_target = b.get("target") or "dev"
+                b_version = b.get("version") or "0.1.0"
+                b_status = b.get("status") or "active"
+                b_desc = b.get("description") or ""
+                res_map = b.get("resources_map") or {}
+                res_count = b.get("resources_count") or sum(len(v) for v in res_map.values())
+
+                direct_match = (
+                    not query
+                    or query in b_name.lower()
+                    or query in b_name.replace("-", "_").lower()
+                    or query in b_name.replace("_", "-").lower()
+                    or query in b_desc.lower()
+                    or query in b_target.lower()
+                    or query in b_status.lower()
+                )
+
+                res_match = None
+                if not direct_match and query and res_map:
+                    for res_type, r_items in res_map.items():
+                        if isinstance(r_items, list):
+                            for r_item in r_items:
+                                r_str = str(r_item.get("name") if isinstance(r_item, dict) else r_item).lower()
+                                if query in r_str:
+                                    res_match = f"{res_type}: {r_str}"
+                                    break
+                            if res_match:
+                                break
+
+                if direct_match or res_match:
+                    sub = f"Asset Bundle ({b_target}) • v{b_version} • {res_count} resources"
+                    if res_match:
+                        sub = f"Asset Bundle ({b_target}) • Matched {res_match} • {res_count} resources"
+                    elif b_desc:
+                        sub = f"Asset Bundle ({b_target}) • v{b_version} • {b_desc}"
+
+                    results.append(
+                        {
+                            "category": "Asset Bundles",
+                            "title": b_name,
+                            "subtitle": sub,
+                            "url": f"/bundles?open={urllib.parse.quote(b_id)}",
+                            "type": "bundle",
+                            "bundle_id": b_id,
+                            "bundle_name": b_name,
+                            "path": b_name,
+                        }
+                    )
+    except Exception as exc:
+        logger.warning("Error searching bundles in workspace search: %s", exc)
+
+    # 5. Storage Sources (S3 / MinIO)
     for src in SOURCES:
         src_label = SOURCE_LABELS.get(src, src.title())
         src_desc = f"MinIO S3 prefix: raw/{src}/"
@@ -5195,10 +5344,11 @@ async def api_workspace_search(request: Request, q: str = ""):
                 }
             )
 
-    # 5. Application Pages
+    # 6. Application Pages
     nav_pages = [
         {"title": "Dashboard", "subtitle": "System overview & metrics", "url": "/"},
         {"title": "Catalog", "subtitle": "Datasets & schemas", "url": "/catalog"},
+        {"title": "Asset Bundles", "subtitle": "Declarative Lake Asset Bundles (LABs)", "url": "/bundles"},
         {"title": "Storage", "subtitle": "MinIO S3 data lake buckets", "url": "/storage"},
         {"title": "SQL Editor", "subtitle": "DuckDB SQL queries", "url": "/sql"},
         {"title": "Visualizations", "subtitle": "Apache Superset dashboards", "url": "/dashboards"},

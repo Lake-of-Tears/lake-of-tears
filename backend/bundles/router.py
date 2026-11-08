@@ -173,24 +173,36 @@ def list_bundles(
     )
 
     bundles = BundleStateService.list_bundles(db, ws.id, status=status_filter)
-    items = [
-        BundleItemResponse(
-            id=b.id,
-            workspace_id=b.workspace_id,
-            bundle_name=b.bundle_name,
-            target=b.target,
-            status=b.status,
-            version=b.version,
-            manifest_format="toon",
-            commit_hash=b.git_commit_sha,
-            resources_count=sum(len(v) for v in (b.resources_map or {}).values()),
-            deployed_by=b.deployed_by,
-            created_at=b.created_at,
-            updated_at=b.updated_at,
-            last_deployed_at=b.last_deployed_at,
+    items = []
+    for b in bundles:
+        res_map = b.resources_map or {}
+        cat_count = len(res_map.get("catalogs", []))
+        tbl_count = len(res_map.get("tables", []))
+        pip_count = len(res_map.get("pipelines", []))
+        dash_count = len(res_map.get("dashboards", []))
+        total_res = sum(len(v) for v in res_map.values())
+        items.append(
+            BundleItemResponse(
+                id=b.id,
+                workspace_id=b.workspace_id,
+                bundle_name=b.bundle_name,
+                target=b.target,
+                status=b.status,
+                version=b.version,
+                manifest_format="toon",
+                commit_hash=b.git_commit_sha,
+                resources_count=total_res,
+                resources_map=res_map,
+                catalogs_count=cat_count,
+                tables_count=tbl_count,
+                pipelines_count=pip_count,
+                dashboards_count=dash_count,
+                deployed_by=b.deployed_by,
+                created_at=b.created_at,
+                updated_at=b.updated_at,
+                last_deployed_at=b.last_deployed_at,
+            )
         )
-        for b in bundles
-    ]
 
     return BundleListResponse(bundles=items, total=len(items))
 
@@ -228,6 +240,13 @@ def get_bundle(
         except Exception as exc:
             logger.warning("Drift detection error for bundle %s: %s", bundle.id, exc)
 
+    res_map = bundle.resources_map or {}
+    total_res = sum(len(v) for v in res_map.values())
+    cat_count = len(res_map.get("catalogs", []))
+    tbl_count = len(res_map.get("tables", []))
+    pip_count = len(res_map.get("pipelines", []))
+    dash_count = len(res_map.get("dashboards", []))
+
     return BundleDetailResponse(
         id=bundle.id,
         workspace_id=bundle.workspace_id,
@@ -240,7 +259,12 @@ def get_bundle(
         if bundle.manifest_snapshot
         else "",
         commit_hash=bundle.git_commit_sha,
-        resources_map=bundle.resources_map or {},
+        resources_map=res_map,
+        resources_count=total_res,
+        catalogs_count=cat_count,
+        tables_count=tbl_count,
+        pipelines_count=pip_count,
+        dashboards_count=dash_count,
         deployed_by=bundle.deployed_by,
         created_at=bundle.created_at,
         updated_at=bundle.updated_at,

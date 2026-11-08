@@ -312,3 +312,12 @@ resources:
         assert data["valid"] is True
         assert data["model"] == "gemini-2.5-flash"
         assert "ecom-lake" in data["manifest"]
+
+
+def test_bundles_controller_open_query_deep_link():
+    """Verify ui/static/js/controllers/bundles.js supports ?open=<bundle_name_or_id> deep link."""
+    js_content = (Path(__file__).parents[1] / "ui" / "static" / "js" / "controllers" / "bundles.js").read_text(encoding="utf-8")
+
+    assert "urlParams.get('open')" in js_content or "urlParams.get(\"open\")" in js_content
+    assert "openDrawer" in js_content
+    assert "targetBundle" in js_content

@@ -89,3 +89,59 @@ def test_catalog_template_alpine_declarative_bindings():
     assert 'id="table-panel"' in catalog_html
     assert 'id="catalog-wizards-container"' in catalog_html
     assert 'id="catalog-trash-container"' in catalog_html
+
+
+def test_ai_enrich_endpoints_mounted_and_controller_updated():
+    client = TestClient(ui_main.app)
+
+    # Check endpoints exist (not 404)
+    resp = client.post("/api/catalog/ai/generate-description", json={})
+    assert resp.status_code != 404
+
+    resp = client.post("/api/ai/generate-description", json={})
+    assert resp.status_code != 404
+
+    resp = client.post("/api/catalog/ai/enrich-table", json={})
+    assert resp.status_code != 404
+
+    resp = client.post("/api/ai/enrich-table", json={})
+    assert resp.status_code != 404
+
+    # Verify catalog.js references valid endpoints and resolves table_name
+    catalog_js = (repo_root / "ui" / "static" / "js" / "controllers" / "catalog.js").read_text(encoding="utf-8")
+    assert "/api/catalog/ai/generate-description" in catalog_js
+    assert "/api/ai/generate-description" in catalog_js
+    assert "name: tableName" in catalog_js
+    assert "table_name: tableName" in catalog_js
+
+
+def test_ai_semantic_description_generation_and_schema_compatibility():
+    from schemas import GenerateDescriptionRequest
+    import ai_service
+
+    # Verify GenerateDescriptionRequest accepts table_name without error
+    req = GenerateDescriptionRequest(
+        asset_type="table",
+        table_name="pubmed_articles",
+        catalog_name="default",
+        schema_name="bronze",
+        columns=[{"name": "pmid", "type": "VARCHAR"}, {"name": "title", "type": "VARCHAR"}],
+        sample_rows=[{"pmid": "12345", "title": "Example Study"}],
+    )
+    assert req.name == "pubmed_articles"
+    assert req.table_name == "pubmed_articles"
+
+    # Test heuristic fallback generation
+    res = ai_service.generate_semantic_description(
+        asset_type=req.asset_type,
+        name=req.name,
+        catalog_name=req.catalog_name,
+        schema_name=req.schema_name,
+        columns=req.columns,
+        sample_rows=req.sample_rows,
+    )
+    assert res["ok"] is True
+    assert "pubmed" in res["description"].lower() or "dataset" in res["description"].lower() or "table" in res["description"].lower()
+    assert "pmid" in res["column_descriptions"]
+    assert "title" in res["column_descriptions"]
+

@@ -594,3 +594,18 @@ async def test_ui_patch_pipeline_schedule_proxy():
         assert res.status_code == 200
         assert res.json()["schedule_interval"] == "@daily"
         assert mock_patch.called
+
+
+def test_pipelines_template_lab_badge_and_banner_rendering():
+    """Verify pipelines.html renders cyan LAB badge and Lake Asset Bundle banner with deep link."""
+    html_content = (Path(__file__).parents[1] / "ui" / "templates" / "pipelines.html").read_text(encoding="utf-8")
+
+    # Table view LAB badge
+    assert "is_bundle_pipeline" in html_content
+    assert "bg-cyan-500/10 text-cyan-400" in html_content
+    assert ">LAB<" in html_content
+
+    # Drawer banner for LAB
+    assert "Lake Asset Bundle (LAB)" in html_content
+    assert "Open Asset Bundle" in html_content
+    assert "/bundles?open=" in html_content

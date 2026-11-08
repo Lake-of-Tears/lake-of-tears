@@ -346,3 +346,97 @@ def test_backward_compatibility_workspace_search():
         data = resp.json()
         assert data["query"] == "catalog"
         assert "results" in data
+
+
+def test_workspace_manifest_and_search_includes_asset_bundles():
+    """Verify that both /api/workspace/manifest and /api/workspace/search include Lake Asset Bundles (LABs)."""
+    token, workspaces, cookies = _make_auth_cookie(role="member")
+    mock_bundle_id = "d21101de-d427-4605-8d40-85a9ec643e8b"
+    mock_bundles = {
+        "bundles": [
+            {
+                "id": mock_bundle_id,
+                "bundle_name": "pubmed-lake",
+                "target": "dev",
+                "status": "active",
+                "version": "0.1.0",
+                "description": "Daily PubMed ingestion and enrichment bundle",
+                "resources_count": 5,
+                "resources_map": {
+                    "catalogs": ["pubmed_catalog"],
+                    "pipelines": ["ws_default_pubmed_lake_pubmed_pipeline"],
+                },
+            }
+        ],
+        "total": 1,
+    }
+
+    # 1. Test /api/workspace/manifest
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_fetch_workspaces", return_value=workspaces),
+        patch.object(main, "_backend_get_async") as mock_backend_get_async,
+        patch.object(notebook_proxy, "scan_workspace_filesystem", return_value=[]),
+    ):
+        async def _mock_async_get(path, tok, workspace_id=None, workspace_slug=None):
+            if "bundles" in path:
+                return mock_bundles
+            return []
+
+        mock_backend_get_async.side_effect = _mock_async_get
+
+        resp = client.get("/api/workspace/manifest", cookies=cookies)
+        assert resp.status_code == 200
+        data = resp.json()
+        items = data["items"]
+        bundle_items = [i for i in items if i.get("type") == "bundle"]
+        assert len(bundle_items) == 1
+        assert bundle_items[0]["title"] == "pubmed-lake"
+        assert bundle_items[0]["bundle_id"] == mock_bundle_id
+        assert f"/bundles?open={mock_bundle_id}" in bundle_items[0]["url"]
+        assert bundle_items[0]["category"] == "Asset Bundles"
+
+        # Check navigation page
+        nav_items = [i for i in items if i.get("type") == "page" and i.get("title") == "Asset Bundles"]
+        assert len(nav_items) == 1
+        assert nav_items[0]["url"] == "/bundles"
+
+    # 2. Test /api/workspace/search
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_fetch_workspaces", return_value=workspaces),
+        patch.object(
+            notebook_proxy, "search_workspace_items", new_callable=AsyncMock, return_value=[]
+        ),
+        patch.object(main, "_backend_get") as mock_backend_get_sync,
+    ):
+        def _mock_sync_get(path, tok, workspace_id=None, workspace_slug=None):
+            if "bundles" in path:
+                return mock_bundles
+            return []
+
+        mock_backend_get_sync.side_effect = _mock_sync_get
+
+        # Search by exact name
+        resp = client.get("/api/workspace/search?q=pubmed-lake", cookies=cookies)
+        assert resp.status_code == 200
+        results = resp.json()["results"]
+        b_res = [r for r in results if r.get("type") == "bundle"]
+        assert len(b_res) == 1
+        assert b_res[0]["title"] == "pubmed-lake"
+        assert b_res[0]["bundle_id"] == mock_bundle_id
+
+        # Search by slugified name with underscore
+        resp2 = client.get("/api/workspace/search?q=pubmed_lake", cookies=cookies)
+        assert resp2.status_code == 200
+        results2 = resp2.json()["results"]
+        b_res2 = [r for r in results2 if r.get("type") == "bundle"]
+        assert len(b_res2) == 1
+
+        # Search by pipeline inside bundle
+        resp3 = client.get("/api/workspace/search?q=pubmed_pipeline", cookies=cookies)
+        assert resp3.status_code == 200
+        results3 = resp3.json()["results"]
+        b_res3 = [r for r in results3 if r.get("type") == "bundle"]
+        assert len(b_res3) == 1
+

@@ -1292,3 +1292,94 @@ def test_pipeline_schedule_patch_viewer_forbidden():
             assert resp.status_code == 403
     finally:
         backend_main.app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_pipeline_bundle_vs_notebook_detection():
+    """Verify Lake Asset Bundle pipelines are identified with LAB metadata and NOT misclassified as notebook jobs."""
+    ws_id = uuid.uuid4()
+    mock_db = MagicMock()
+
+    # Create mock bundle in db
+    mock_bundle = MagicMock()
+    mock_bundle.id = uuid.uuid4()
+    mock_bundle.bundle_name = "pubmed-lake"
+    mock_bundle.target = "dev"
+    mock_bundle.version = "0.1.0"
+    mock_bundle.resources_map = {
+        "pipelines": ["ws_default_pubmed_lake_pubmed_pipeline"]
+    }
+
+    mock_db.query.return_value.filter.return_value.all.return_value = [mock_bundle]
+
+    # Test get_bundle_pipeline_map
+    bundle_map = pipeline_service.get_bundle_pipeline_map(ws_id, mock_db)
+    assert "ws_default_pubmed_lake_pubmed_pipeline" in bundle_map
+    assert bundle_map["ws_default_pubmed_lake_pubmed_pipeline"]["bundle_name"] == "pubmed-lake"
+    assert bundle_map["ws_default_pubmed_lake_pubmed_pipeline"]["bundle_target"] == "dev"
+
+    # Mock Airflow response with 3 DAGs:
+    # 1. LAB pipeline
+    # 2. Notebook pipeline with notebook_path
+    # 3. Regular custom workspace DAG
+    matching_dags = [
+        {
+            "dag_id": "ws_default_pubmed_lake_pubmed_pipeline",
+            "tags": [
+                {"name": "workspace:default"},
+                {"name": "bundle:pubmed-lake"},
+                {"name": "target:dev"},
+                {"name": "lake_asset_bundle"},
+            ],
+            "is_paused": False,
+            "schedule_interval": "0 6 * * *",
+        },
+        {
+            "dag_id": "ws_default_analysis_notebook",
+            "tags": [{"name": "notebook:notebooks/analysis.ipynb"}],
+            "is_paused": False,
+            "schedule_interval": "@daily",
+        },
+        {
+            "dag_id": "ws_default_generic_pipeline",
+            "tags": [{"name": "etl"}],
+            "is_paused": False,
+            "schedule_interval": None,
+        },
+    ]
+
+    with (
+        patch("pipeline_service.httpx.AsyncClient") as mock_client,
+        patch.object(pipeline_service, "_fetch_latest_dag_run", return_value=None),
+        patch.object(pipeline_service, "get_pipeline_metadata_map", return_value={}),
+    ):
+        mock_instance = AsyncMock()
+        mock_instance.get.return_value = MagicMock(status_code=200, json=lambda: {"dags": matching_dags, "total_entries": 3})
+        mock_client.return_value.__aenter__.return_value = mock_instance
+
+        results = await pipeline_service.list_workspace_dags(
+            workspace_slug="default",
+            workspace_id=ws_id,
+            db=mock_db,
+        )
+
+        assert len(results) == 3
+
+        # LAB pipeline verification
+        lab_dag = next(r for r in results if r["dag_id"] == "ws_default_pubmed_lake_pubmed_pipeline")
+        assert lab_dag["is_bundle_pipeline"] is True
+        assert lab_dag["is_notebook_job"] is False
+        assert lab_dag["bundle_name"] == "pubmed-lake"
+        assert lab_dag["bundle_target"] == "dev"
+
+        # Notebook pipeline verification
+        nb_dag = next(r for r in results if r["dag_id"] == "ws_default_analysis_notebook")
+        assert nb_dag["is_bundle_pipeline"] is False
+        assert nb_dag["is_notebook_job"] is True
+        assert nb_dag["notebook_path"] == "notebooks/analysis.ipynb"
+
+        # Generic pipeline verification - NOT a notebook and NOT a bundle
+        gen_dag = next(r for r in results if r["dag_id"] == "ws_default_generic_pipeline")
+        assert gen_dag["is_bundle_pipeline"] is False
+        assert gen_dag["is_notebook_job"] is False
+

@@ -363,6 +363,11 @@ class BundleItemResponse(BaseModel):
     manifest_format: str
     commit_hash: str | None = None
     resources_count: int = 0
+    resources_map: dict[str, list[Any]] = Field(default_factory=dict)
+    catalogs_count: int = 0
+    tables_count: int = 0
+    pipelines_count: int = 0
+    dashboards_count: int = 0
     deployed_by: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
@@ -392,7 +397,12 @@ class BundleDetailResponse(BaseModel):
     manifest_format: str
     manifest_raw: str
     commit_hash: str | None = None
-    resources_map: dict[str, list[str]] = Field(default_factory=dict)
+    resources_map: dict[str, list[Any]] = Field(default_factory=dict)
+    resources_count: int = 0
+    catalogs_count: int = 0
+    tables_count: int = 0
+    pipelines_count: int = 0
+    dashboards_count: int = 0
     deployed_by: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime

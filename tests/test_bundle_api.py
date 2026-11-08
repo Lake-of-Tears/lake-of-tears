@@ -564,6 +564,11 @@ def test_list_bundles_endpoint(client_admin: TestClient, test_setup: dict):
     assert item["target"] == "dev"
     assert item["status"] == "active"
     assert item["resources_count"] > 0
+    assert "resources_map" in item
+    assert item["catalogs_count"] == len(item["resources_map"].get("catalogs", []))
+    assert item["tables_count"] == len(item["resources_map"].get("tables", []))
+    assert item["pipelines_count"] == len(item["resources_map"].get("pipelines", []))
+    assert item["dashboards_count"] == len(item["resources_map"].get("dashboards", []))
 
     # Test filtering by status
     resp_filtered = client_admin.get(f"/api/bundles?workspace_slug={ws.slug}&status=active")

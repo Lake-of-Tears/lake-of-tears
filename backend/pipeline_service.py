@@ -314,6 +314,7 @@ async def list_workspace_dags(
                             existing_dag_ids.add(py_file.stem)
 
             meta_map = get_pipeline_metadata_map(workspace_id, db) if workspace_id and db else {}
+            bundle_map = get_bundle_pipeline_map(workspace_id, db) if workspace_id and db else {}
 
             results = []
             for dag in matching_dags:
@@ -332,12 +333,6 @@ async def list_workspace_dags(
 
                 last_run = await _fetch_latest_dag_run(client, api_base, auth, dag_id)
 
-                is_nb = (
-                    "notebook" in tags
-                    or "notebooks" in tags
-                    or dag_id.startswith(f"ws_{workspace_slug}_")
-                )
-
                 nb_path = None
                 for t in tags:
                     if t.startswith("notebook:"):
@@ -345,6 +340,34 @@ async def list_workspace_dags(
                         break
                 if not nb_path and dag_id in KNOWN_PIPELINE_NOTEBOOKS:
                     nb_path = KNOWN_PIPELINE_NOTEBOOKS[dag_id]
+
+                # Extract bundle tags and metadata
+                tag_bundle_name = None
+                tag_bundle_target = None
+                is_bundle_tag = "lake_asset_bundle" in tags
+                for t in tags:
+                    if t.startswith("bundle:"):
+                        tag_bundle_name = t[len("bundle:") :]
+                        is_bundle_tag = True
+                    elif t.startswith("target:"):
+                        tag_bundle_target = t[len("target:") :]
+
+                bundle_info = bundle_map.get(dag_id)
+                is_bundle = is_bundle_tag or (bundle_info is not None)
+                b_name = (bundle_info.get("bundle_name") if bundle_info else None) or tag_bundle_name
+                b_id = bundle_info.get("bundle_id") if bundle_info else None
+                b_target = (bundle_info.get("bundle_target") if bundle_info else None) or tag_bundle_target
+                b_version = bundle_info.get("bundle_version") if bundle_info else None
+
+                # Notebook detection: strictly when tagged notebook or known notebook path, and NOT a bundle pipeline
+                is_nb = (
+                    not is_bundle
+                    and (
+                        "notebook" in tags
+                        or "notebooks" in tags
+                        or bool(nb_path)
+                    )
+                )
 
                 meta = meta_map.get(dag_id)
                 color_hex = meta.color_hex if meta else get_default_color_for_dag(dag_id)
@@ -373,6 +396,11 @@ async def list_workspace_dags(
                         "tags": tags,
                         "is_notebook_job": is_nb,
                         "notebook_path": nb_path,
+                        "is_bundle_pipeline": is_bundle,
+                        "bundle_name": b_name,
+                        "bundle_id": b_id,
+                        "bundle_target": b_target,
+                        "bundle_version": b_version,
                         "last_run": last_run,
                     }
                 )
@@ -435,11 +463,7 @@ async def get_dag_details(
 
             schedule = cron_val or dag.get("timetable_description") or "None (Manual)"
 
-            is_nb = (
-                "notebook" in tags
-                or "notebooks" in tags
-                or dag_id.startswith(f"ws_{workspace_slug}_")
-            )
+            bundle_map = get_bundle_pipeline_map(workspace_id, db) if workspace_id and db else {}
 
             nb_path = None
             for t in tags:
@@ -448,6 +472,34 @@ async def get_dag_details(
                     break
             if not nb_path and dag_id in KNOWN_PIPELINE_NOTEBOOKS:
                 nb_path = KNOWN_PIPELINE_NOTEBOOKS[dag_id]
+
+            # Extract bundle tags and metadata
+            tag_bundle_name = None
+            tag_bundle_target = None
+            is_bundle_tag = "lake_asset_bundle" in tags
+            for t in tags:
+                if t.startswith("bundle:"):
+                    tag_bundle_name = t[len("bundle:") :]
+                    is_bundle_tag = True
+                elif t.startswith("target:"):
+                    tag_bundle_target = t[len("target:") :]
+
+            bundle_info = bundle_map.get(dag_id)
+            is_bundle = is_bundle_tag or (bundle_info is not None)
+            b_name = (bundle_info.get("bundle_name") if bundle_info else None) or tag_bundle_name
+            b_id = bundle_info.get("bundle_id") if bundle_info else None
+            b_target = (bundle_info.get("bundle_target") if bundle_info else None) or tag_bundle_target
+            b_version = bundle_info.get("bundle_version") if bundle_info else None
+
+            # Notebook detection: strictly when tagged notebook or known notebook path, and NOT a bundle pipeline
+            is_nb = (
+                not is_bundle
+                and (
+                    "notebook" in tags
+                    or "notebooks" in tags
+                    or bool(nb_path)
+                )
+            )
 
             meta_map = get_pipeline_metadata_map(workspace_id, db) if workspace_id and db else {}
             meta = meta_map.get(dag_id)
@@ -476,6 +528,11 @@ async def get_dag_details(
                 "tags": tags,
                 "is_notebook_job": is_nb,
                 "notebook_path": nb_path,
+                "is_bundle_pipeline": is_bundle,
+                "bundle_name": b_name,
+                "bundle_id": b_id,
+                "bundle_target": b_target,
+                "bundle_version": b_version,
                 "last_run": last_run,
                 "fileloc": dag.get("fileloc"),
                 "max_active_runs": dag.get("max_active_runs"),
@@ -1285,6 +1342,36 @@ def get_pipeline_metadata_map(workspace_id: uuid.UUID | None, db: Session | None
         return {row.dag_id: row for row in rows}
     except Exception as exc:
         logger.warning("Failed to query pipeline_metadata: %s", exc)
+        return {}
+
+
+def get_bundle_pipeline_map(
+    workspace_id: uuid.UUID | None, db: Session | None
+) -> dict[str, dict[str, Any]]:
+    """Build a mapping from pipeline dag_id to bundle metadata."""
+    if not workspace_id or not db:
+        return {}
+    try:
+        from models import WorkspaceBundle
+
+        bundles = (
+            db.query(WorkspaceBundle)
+            .filter(WorkspaceBundle.workspace_id == workspace_id)
+            .all()
+        )
+        bundle_map: dict[str, dict[str, Any]] = {}
+        for b in bundles:
+            res_map = b.resources_map or {}
+            for p_dag in res_map.get("pipelines", []):
+                bundle_map[p_dag] = {
+                    "bundle_id": str(b.id),
+                    "bundle_name": b.bundle_name,
+                    "bundle_target": b.target,
+                    "bundle_version": b.version,
+                }
+        return bundle_map
+    except Exception as exc:
+        logger.warning("Failed to query workspace_bundles for pipeline map: %s", exc)
         return {}
 
 

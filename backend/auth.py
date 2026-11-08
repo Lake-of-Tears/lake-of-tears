@@ -850,6 +850,7 @@ def get_workspace_context(
     x_workspace_slug: str | None = Header(None, alias="X-Workspace-Slug"),
     x_workspace_id: str | None = Header(None, alias="X-Workspace-Id"),
     lake_workspace_id: str | None = Cookie(None),
+    lake_workspace_slug: str | None = Cookie(None),
     lake_active_workspace: str | None = Cookie(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -875,7 +876,7 @@ def get_workspace_context(
         s = str(val).strip()
         return s if s else None
 
-    slug = _clean(workspace_slug) or _clean(x_workspace_slug)
+    slug = _clean(workspace_slug) or _clean(x_workspace_slug) or _clean(lake_workspace_slug)
     raw_id = (
         _clean(workspace_id)
         or _clean(x_workspace_id)
@@ -894,7 +895,7 @@ def get_workspace_context(
         ws = (
             db.query(Workspace).filter(Workspace.slug == slug, Workspace.status == "active").first()
         )
-    elif raw_id:
+    if not ws and raw_id:
         try:
             ws_uuid = uuid.UUID(str(raw_id))
             ws = (
@@ -904,6 +905,12 @@ def get_workspace_context(
             )
         except (ValueError, TypeError):
             ws = None
+        if not ws:
+            ws = (
+                db.query(Workspace)
+                .filter(Workspace.slug == str(raw_id), Workspace.status == "active")
+                .first()
+            )
 
     if not ws:
         raise HTTPException(404, "Workspace not found")
@@ -1073,6 +1080,7 @@ def get_ai_workspace_and_role(
     x_workspace_id: str | None = None,
     x_workspace_slug: str | None = None,
     lake_workspace_id: str | None = None,
+    lake_workspace_slug: str | None = None,
     lake_active_workspace: str | None = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -1085,6 +1093,7 @@ def get_ai_workspace_and_role(
         x_workspace_slug=x_workspace_slug,
         x_workspace_id=x_workspace_id,
         lake_workspace_id=lake_workspace_id,
+        lake_workspace_slug=lake_workspace_slug,
         lake_active_workspace=lake_active_workspace,
         current_user=current_user,
         db=db,

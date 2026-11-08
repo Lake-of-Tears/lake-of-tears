@@ -955,7 +955,7 @@
       let prefixLabel = null;
       let allowedTypes = null;
 
-      // Check prefix triggers: # (catalog), / (notebooks), > (navigation), % (pipelines)
+      // Check prefix triggers: # (catalog), / (notebooks), > (navigation), % (pipelines), @ or ! or b: (asset bundles)
       if (q.startsWith('#')) {
         prefixMode = '#';
         prefixLabel = 'Catalogs & Tables';
@@ -976,6 +976,11 @@
         prefixLabel = 'Airflow Pipelines';
         allowedTypes = new Set(['pipeline']);
         q = q.slice(1).trim();
+      } else if (q.startsWith('@') || q.startsWith('!') || q.startsWith('b:')) {
+        prefixMode = q.startsWith('b:') ? 'b:' : q[0];
+        prefixLabel = 'Asset Bundles (LABs)';
+        allowedTypes = new Set(['bundle']);
+        q = q.startsWith('b:') ? q.slice(2).trim() : q.slice(1).trim();
       }
 
       workspaceActivePrefixFilter = prefixLabel;
@@ -1197,6 +1202,16 @@
         }
       }
 
+      // If already on the bundles page, seamlessly open drawer without full reload
+      if (window.location.pathname.startsWith('/bundles') && item.type === 'bundle') {
+        const bundleId = item.bundle_id || item.id || item.path;
+        if (bundleId && typeof window.openBundleDrawer === 'function') {
+          window.openBundleDrawer(bundleId);
+          window.history.pushState({}, '', item.url);
+          return;
+        }
+      }
+
       window.location.href = item.url;
     }
 
@@ -1291,6 +1306,9 @@
         } else if (item.type === 'pipeline') {
           badgeColor = 'bg-purple-900/40 text-purple-300 border border-purple-800/40';
           iconSvg = `<svg class="w-4 h-4 text-purple-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>`;
+        } else if (item.type === 'bundle') {
+          badgeColor = 'bg-cyan-900/40 text-cyan-300 border border-cyan-800/40';
+          iconSvg = `<svg class="w-4 h-4 text-cyan-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>`;
         } else if (item.type === 'storage') {
           badgeColor = 'bg-cyan-900/40 text-cyan-300 border border-cyan-800/40';
           iconSvg = `<svg class="w-4 h-4 text-cyan-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg>`;

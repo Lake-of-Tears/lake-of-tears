@@ -325,6 +325,7 @@ document.addEventListener('alpine:init', () => {
     enrichInFlight: new Set(),
 
     init() {
+      window._alpineTableDetailsDrawer = this;
       window.showTable = (catIdent, schIdent, tableIdent, table) => this.showTable(catIdent, schIdent, tableIdent, table);
       window.openTablePanel = (el) => this.openFromElement(el);
       window.closePanel = () => this.close();
@@ -376,6 +377,15 @@ document.addEventListener('alpine:init', () => {
       this.currentCatIdent = catIdent;
       this.currentSchIdent = schIdent;
       this.currentTableIdent = tableIdent;
+
+      // Sync window globals for legacy script compatibility
+      window.currentTableData = table;
+      window.currentCatId = this.currentCatId;
+      window.currentSchId = this.currentSchId;
+      window.currentTableId = this.currentTableId;
+      window.currentCatIdent = catIdent;
+      window.currentSchIdent = schIdent;
+      window.currentTableIdent = tableIdent;
 
       const displayName = table.name || tableIdent;
       const titleEl = document.getElementById('panel-title');
@@ -948,39 +958,69 @@ document.addEventListener('alpine:init', () => {
         if (window.showCatalogToast) window.showCatalogToast('No AI provider configured. Configure an LLM in Settings → Admin Panel.', 'warning');
         return;
       }
-      if (!this.currentTableData || this.enrichInFlight.has(this.currentTableId)) return;
+      const tableData = this.currentTableData || window.currentTableData;
+      const tableId = this.currentTableId || window.currentTableId;
+      if (!tableData || this.enrichInFlight.has(tableId)) return;
 
       const ctx = {
-        catId: this.currentCatId, schId: this.currentSchId, tableId: this.currentTableId,
-        catIdent: this.currentCatIdent, schIdent: this.currentSchIdent, tableIdent: this.currentTableIdent,
-        table: this.currentTableData
+        catId: this.currentCatId || window.currentCatId || '',
+        schId: this.currentSchId || window.currentSchId || '',
+        tableId: tableId,
+        catIdent: this.currentCatIdent || window.currentCatIdent || 'default',
+        schIdent: this.currentSchIdent || window.currentSchIdent || 'default',
+        tableIdent: this.currentTableIdent || window.currentTableIdent || '',
+        table: tableData
       };
 
       this.enrichInFlight.add(ctx.tableId);
       this.syncEnrichButton();
 
       const sampleRows = (this.sampleDataCache[`${ctx.schIdent}.${ctx.tableIdent}`] || {}).rows || [];
+      const tableName = ctx.table.name || ctx.tableIdent;
       const payload = JSON.stringify({
         asset_type: 'table',
-        table_name: ctx.table.name || ctx.tableIdent,
+        name: tableName,
+        table_name: tableName,
         catalog_name: ctx.catIdent,
         schema_name: ctx.schIdent,
         columns: ctx.table.column_defs || [],
         sample_rows: sampleRows.slice(0, 5)
       });
 
+      const wsSlug = (document.cookie.match(/(?:^|;\s*)lake_workspace_slug=([^;]+)/) || [])[1] || 'default';
+      const reqHeaders = {
+        'Content-Type': 'application/json',
+        'X-Workspace-Slug': wsSlug
+      };
+
       try {
-        let resp = await fetch('/api/ai/enrich-table', {
+        let resp = await fetch('/api/catalog/ai/generate-description', {
           method: 'POST',
           credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
+          headers: reqHeaders,
           body: payload
         });
+        if (!resp.ok && resp.status === 404) {
+          resp = await fetch('/api/ai/generate-description', {
+            method: 'POST',
+            credentials: 'include',
+            headers: reqHeaders,
+            body: payload
+          });
+        }
         if (!resp.ok && resp.status === 404) {
           resp = await fetch('/api/catalog/ai/enrich-table', {
             method: 'POST',
             credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
+            headers: reqHeaders,
+            body: payload
+          });
+        }
+        if (!resp.ok && resp.status === 404) {
+          resp = await fetch('/api/ai/enrich-table', {
+            method: 'POST',
+            credentials: 'include',
+            headers: reqHeaders,
             body: payload
           });
         }
@@ -996,13 +1036,14 @@ document.addEventListener('alpine:init', () => {
           }
 
           if (this.currentTableId === ctx.tableId) {
+            this.currentTableData = ctx.table;
             this.renderColumnsTab(ctx.table);
             this.renderDetailsTab(ctx.table, ctx.catIdent, ctx.schIdent, ctx.tableIdent);
           }
           const rowEl = document.querySelector(`[data-table-id="${ctx.tableId}"]`);
           if (rowEl) rowEl.setAttribute('data-table', JSON.stringify(ctx.table));
 
-          const saveResp = await fetch(
+          let saveResp = await fetch(
             `/catalog/${ctx.catId}/schemas/${ctx.schId}/tables/${ctx.tableId}`,
             {
               method: 'PATCH',
@@ -1014,6 +1055,20 @@ document.addEventListener('alpine:init', () => {
               })
             }
           );
+          if (!saveResp.ok && saveResp.status === 404) {
+            saveResp = await fetch(
+              `/api/catalogs/${ctx.catId}/schemas/${ctx.schId}/tables/${ctx.tableId}`,
+              {
+                method: 'PATCH',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  description: ctx.table.description,
+                  column_defs: ctx.table.column_defs || null
+                })
+              }
+            );
+          }
           const saved = await saveResp.json().catch(() => ({}));
           const label = ctx.tableIdent ? ` (${ctx.tableIdent})` : '';
           if (saveResp.ok && saved.ok) {

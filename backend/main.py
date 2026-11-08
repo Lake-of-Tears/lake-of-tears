@@ -3030,13 +3030,23 @@ def update_table(
     tbl_uuid = _as_uuid(table_id)
     catalog = db.query(Catalog).filter(Catalog.id == cat_uuid).first() if cat_uuid else None
     if not catalog:
+        catalog = db.query(Catalog).filter(Catalog.slug == str(catalog_id)).first()
+    if not catalog:
         raise HTTPException(404, "Catalog not found")
     _assert_catalog_access(db, catalog, current_user, "write", ws=ws)
-    table = (
-        db.query(CatalogTable).filter_by(id=tbl_uuid, schema_id=sch_uuid).first()
-        if (tbl_uuid and sch_uuid)
+    schema = (
+        db.query(CatalogSchema).filter_by(id=sch_uuid, catalog_id=catalog.id).first()
+        if sch_uuid
         else None
     )
+    if not schema:
+        schema = db.query(CatalogSchema).filter_by(slug=str(schema_id), catalog_id=catalog.id).first()
+    table = None
+    if schema:
+        if tbl_uuid:
+            table = db.query(CatalogTable).filter_by(id=tbl_uuid, schema_id=schema.id).first()
+        if not table:
+            table = db.query(CatalogTable).filter_by(slug=str(table_id), schema_id=schema.id).first()
     if not table:
         raise HTTPException(404, "Table not found")
     if req.description is not None:
@@ -3095,13 +3105,23 @@ def sync_table_vector_index_endpoint(
     tbl_uuid = _as_uuid(table_id)
     catalog = db.query(Catalog).filter(Catalog.id == cat_uuid).first() if cat_uuid else None
     if not catalog:
+        catalog = db.query(Catalog).filter(Catalog.slug == str(catalog_id)).first()
+    if not catalog:
         raise HTTPException(404, "Catalog not found")
     _assert_catalog_access(db, catalog, current_user, "write", ws=ws)
-    table = (
-        db.query(CatalogTable).filter_by(id=tbl_uuid, schema_id=sch_uuid).first()
-        if (tbl_uuid and sch_uuid)
+    schema = (
+        db.query(CatalogSchema).filter_by(id=sch_uuid, catalog_id=catalog.id).first()
+        if sch_uuid
         else None
     )
+    if not schema:
+        schema = db.query(CatalogSchema).filter_by(slug=str(schema_id), catalog_id=catalog.id).first()
+    table = None
+    if schema:
+        if tbl_uuid:
+            table = db.query(CatalogTable).filter_by(id=tbl_uuid, schema_id=schema.id).first()
+        if not table:
+            table = db.query(CatalogTable).filter_by(slug=str(table_id), schema_id=schema.id).first()
     if not table:
         raise HTTPException(404, "Table not found")
 

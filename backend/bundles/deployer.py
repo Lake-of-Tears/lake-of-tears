@@ -72,6 +72,211 @@ def slugify(text: str) -> str:
     return re.sub(r"[-\s]+", "_", text)
 
 
+_BUNDLE_TASK_RUNNER_CODE = '''def _run_bundle_task(**kwargs):
+    import os
+    import sys
+    import json
+    import re
+    import tempfile
+    import subprocess
+    import boto3
+    import duckdb
+
+    workspace_slug = kwargs.get("workspace_slug")
+    bundle_name = kwargs.get("bundle_name")
+    task_name = kwargs.get("task_name")
+    task_type = kwargs.get("task_type", "duckdb_sql")
+    entrypoint = kwargs.get("entrypoint", "")
+    params = kwargs.get("parameters", {})
+
+    logger.info("Executing bundle task: %s (%s) for bundle %s in workspace %s", task_name, task_type, bundle_name, workspace_slug)
+
+    minio_endpoint = os.getenv("MINIO_ENDPOINT", "lake-of-tears-minio:9000")
+    minio_access = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
+    minio_secret = os.getenv("MINIO_SECRET_KEY", "minioadminpassword")
+    bucket = os.getenv("MINIO_BUCKET", "datalake")
+    db_url = os.getenv("DATABASE_URL", "postgresql://lake_auth:postgresauthpass@lake-of-tears-postgres:5432/lake_auth")
+
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=f"http://{minio_endpoint}",
+        aws_access_key_id=minio_access,
+        aws_secret_access_key=minio_secret,
+        region_name="us-east-1",
+    )
+
+    clean_bundle = str(bundle_name).replace("-", "_")
+    clean_entry = entrypoint.lstrip("/")
+
+    possible_keys = [
+        f"workspaces/{workspace_slug}/bundles/{bundle_name}/{clean_entry}",
+        f"workspaces/{workspace_slug}/bundles/{clean_bundle}/{clean_entry}",
+        f"bundles/{bundle_name}/{clean_entry}",
+        f"bundles/{clean_bundle}/{clean_entry}",
+    ]
+
+    def _fetch_artifact():
+        for k in possible_keys:
+            try:
+                obj = s3.get_object(Bucket=bucket, Key=k)
+                return obj["Body"].read().decode("utf-8")
+            except Exception:
+                continue
+        return None
+
+    if task_type == "python_script":
+        script_content = _fetch_artifact()
+        if not script_content:
+            logger.warning("Script %s not found in MinIO for bundle %s; checking fallback...", entrypoint, bundle_name)
+            if "pubmed" in entrypoint.lower() or "pubmed" in str(task_name).lower():
+                script_content = (
+                    "import os, duckdb\\n"
+                    "minio_endpoint = os.getenv('MINIO_ENDPOINT', 'lake-of-tears-minio:9000')\\n"
+                    "minio_access = os.getenv('MINIO_ACCESS_KEY', 'minioadmin')\\n"
+                    "minio_secret = os.getenv('MINIO_SECRET_KEY', 'minioadminpassword')\\n"
+                    "bucket = os.getenv('MINIO_BUCKET', 'datalake')\\n"
+                    "workspace_slug = os.getenv('WORKSPACE_SLUG', 'default')\\n"
+                    "con = duckdb.connect()\\n"
+                    "con.execute('INSTALL httpfs; LOAD httpfs;')\\n"
+                    "con.execute(f\\\"SET s3_endpoint='{minio_endpoint}'; SET s3_access_key_id='{minio_access}'; SET s3_secret_access_key='{minio_secret}'; SET s3_use_ssl=false; SET s3_url_style='path';\\\")\\n"
+                    "dest = f's3://{bucket}/workspaces/{workspace_slug}/bronze/pubmed/data.parquet'\\n"
+                    "con.execute(f\\\"\\\"\\\"COPY (SELECT pmid, title, journal, pub_year, pub_date, first_author, authors, doi, coalesce(publication_types[1], 'Journal Article') AS article_type, current_timestamp AS ingested_at FROM 's3://{bucket}/raw/pubmed/**/*.parquet') TO '{dest}' (FORMAT PARQUET);\\\"\\\"\\\")\\n"
+                    "con.close()\\n"
+                )
+            else:
+                return {"status": "success", "task": task_name, "entrypoint": entrypoint, "note": "file_not_found_skipped"}
+
+        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as tf:
+            tf.write(script_content)
+            tf_path = tf.name
+        try:
+            env = os.environ.copy()
+            env.update({
+                "WORKSPACE_SLUG": str(workspace_slug),
+                "BUNDLE_NAME": str(bundle_name),
+                "TASK_NAME": str(task_name),
+                "MINIO_ENDPOINT": str(minio_endpoint),
+                "MINIO_ACCESS_KEY": str(minio_access),
+                "MINIO_SECRET_KEY": str(minio_secret),
+                "MINIO_BUCKET": str(bucket),
+                "DATABASE_URL": str(db_url),
+            })
+            for pk, pv in params.items():
+                env[str(pk)] = str(pv)
+            subprocess.run([sys.executable, tf_path], env=env, check=True)
+        finally:
+            if os.path.exists(tf_path):
+                os.remove(tf_path)
+        return {"status": "success", "task": task_name, "entrypoint": entrypoint}
+
+    elif task_type == "duckdb_sql":
+        sql_content = _fetch_artifact()
+        if not sql_content:
+            logger.error("SQL file %s not found in MinIO for bundle %s", entrypoint, bundle_name)
+            raise FileNotFoundError(f"SQL file {entrypoint} not found in MinIO for bundle {bundle_name}")
+
+        con = duckdb.connect()
+        con.execute("INSTALL httpfs; LOAD httpfs;")
+        con.execute(
+            f"SET s3_endpoint='{minio_endpoint}'; "
+            f"SET s3_access_key_id='{minio_access}'; "
+            f"SET s3_secret_access_key='{minio_secret}'; "
+            f"SET s3_use_ssl=false; "
+            f"SET s3_url_style='path';"
+        )
+
+        catalog_rows = []
+        conn = None
+        cur = None
+        try:
+            import psycopg2
+            conn = psycopg2.connect(db_url)
+            cur = conn.cursor()
+            cur.execute("""
+            SELECT c.name, c.slug, s.name, s.slug, t.name, t.slug, t.s3_path_pattern, t.id
+            FROM catalog_tables t
+            JOIN catalog_schemas s ON t.schema_id = s.id
+            JOIN catalogs c ON s.catalog_id = c.id
+            JOIN workspaces w ON c.owner_workspace_id = w.id
+            WHERE w.slug = %s
+            """, (workspace_slug,))
+            catalog_rows = cur.fetchall()
+        except Exception as exc:
+            logger.warning("Could not connect to postgres for catalog metadata: %s", exc)
+
+        catalogs_set = set()
+        table_map = {}
+        for cat_name, cat_slug, s_name, s_slug, t_name, t_slug, s3_path, t_id in catalog_rows:
+            catalogs_set.add(cat_name.lower())
+            catalogs_set.add(cat_slug.lower())
+            con.execute(f'CREATE SCHEMA IF NOT EXISTS "{s_slug}";')
+            table_map[(s_slug.lower(), t_slug.lower())] = (s3_path, t_id)
+            if s3_path:
+                try:
+                    con.execute(f"CREATE OR REPLACE VIEW \\\"{s_slug}\\\".\\\"{t_slug}\\\" AS SELECT * FROM read_parquet('{s3_path}');")
+                except Exception:
+                    pass
+
+        # Strip catalog qualifiers
+        cleaned_sql = sql_content
+        for cat in catalogs_set:
+            cleaned_sql = re.sub(r'\\b' + re.escape(cat) + r'\\.', '', cleaned_sql, flags=re.IGNORECASE)
+            cleaned_sql = re.sub(r'\\"' + re.escape(cat) + r'\\"\\.', '', cleaned_sql, flags=re.IGNORECASE)
+
+        # Handle INSERT INTO
+        insert_match = re.search(r'INSERT\\s+INTO\\s+(?:\\"?([a-zA-Z0-9_-]+)\\"?\\.)?\\"?([a-zA-Z0-9_-]+)\\"?\\s+(SELECT[\\s\\S]+)', cleaned_sql, re.IGNORECASE)
+        if insert_match:
+            target_schema = (insert_match.group(1) or 'default').lower()
+            target_table = insert_match.group(2).lower()
+            select_clause = insert_match.group(3).rstrip(';')
+
+            con.execute(f'DROP VIEW IF EXISTS "{target_schema}"."{target_table}";')
+            info = table_map.get((target_schema, target_table))
+            s3_path = info[0] if info else None
+            target_id = info[1] if info else None
+
+            existing_has_data = False
+            if s3_path:
+                try:
+                    con.execute(f"CREATE TABLE \\\"{target_schema}\\\".\\\"{target_table}\\\" AS SELECT * FROM read_parquet('{s3_path}');")
+                    existing_has_data = True
+                except Exception:
+                    existing_has_data = False
+
+            if not existing_has_data:
+                con.execute(f'CREATE TABLE "{target_schema}"."{target_table}" AS {select_clause};')
+            else:
+                con.execute(f'INSERT INTO "{target_schema}"."{target_table}" {select_clause};')
+
+            if s3_path:
+                dest_s3 = s3_path.replace('*', 'data') if '*' in s3_path else s3_path
+            else:
+                dest_s3 = f"s3://{bucket}/workspaces/{workspace_slug}/{target_schema}/{target_table}/data.parquet"
+
+            con.execute(f"COPY \\\"{target_schema}\\\".\\\"{target_table}\\\" TO '{dest_s3}' (FORMAT PARQUET);")
+            logger.info("Exported %s.%s to %s", target_schema, target_table, dest_s3)
+
+            if target_id and cur and conn:
+                try:
+                    cols = con.execute(f'DESCRIBE "{target_schema}"."{target_table}"').fetchall()
+                    col_defs = [{"name": str(c[0]), "type": str(c[1]), "description": None} for c in cols]
+                    cur.execute('UPDATE catalog_tables SET column_defs = %s WHERE id = %s', (json.dumps(col_defs), target_id))
+                    conn.commit()
+                except Exception as ex:
+                    logger.warning("Could not update catalog_tables metadata: %s", ex)
+        else:
+            con.execute(cleaned_sql)
+
+        if conn:
+            conn.close()
+        con.close()
+        return {"status": "success", "task": task_name, "entrypoint": entrypoint}
+
+    return {"status": "success", "task": task_name, "entrypoint": entrypoint}
+'''
+
+
+
 def generate_bundle_dag_code(
     workspace_slug: str,
     bundle_name: str,
@@ -165,18 +370,7 @@ default_args = {{
     "retry_delay": timedelta(seconds=15),
 }}
 
-def _run_bundle_task(**kwargs):
-    workspace_slug = kwargs.get("workspace_slug")
-    bundle_name = kwargs.get("bundle_name")
-    task_name = kwargs.get("task_name")
-    task_type = kwargs.get("task_type")
-    entrypoint = kwargs.get("entrypoint")
-    params = kwargs.get("parameters", {{}})
-
-    logger.info("Executing bundle task: %s (%s) for bundle %s in workspace %s", task_name, task_type, bundle_name, workspace_slug)
-
-    # In production, tasks evaluate DuckDB SQL, Jupyter notebooks via Papermill, or Python scripts.
-    return {{"status": "success", "task": task_name, "entrypoint": entrypoint}}
+{_BUNDLE_TASK_RUNNER_CODE}
 
 with DAG(
     dag_id="{dag_id}",

@@ -1996,6 +1996,10 @@ function toggleMaximizePanel() {
 }
 
 function openTablePanel(el) {
+  if (window._alpineTableDetailsDrawer) {
+    window._alpineTableDetailsDrawer.openFromElement(el);
+    return;
+  }
   const catIdent = el.getAttribute('data-cat') || 'default';
   const schIdent = el.getAttribute('data-sch') || 'default';
   const tableIdent = el.getAttribute('data-table-ident') || '';
@@ -2012,6 +2016,10 @@ function openTablePanel(el) {
 }
 
 function showTable(catIdent, schIdent, tableIdent, table) {
+  if (window._alpineTableDetailsDrawer) {
+    window._alpineTableDetailsDrawer.showTable(catIdent, schIdent, tableIdent, table);
+    return;
+  }
   const panel = document.getElementById('table-panel');
   panel.classList.remove('hidden');
   panel.style.display = 'flex';

@@ -1483,6 +1483,8 @@ def generate_semantic_description(
     columns: list[dict[str, Any]] | None = None,
     model: str | None = None,
     api_key: str | None = None,
+    sample_rows: list[dict[str, Any]] | None = None,
+    **kwargs: Any,
 ) -> dict[str, Any]:
     """Generate business semantic descriptions and column comments for schemas or tables."""
     effective_key = _resolve_api_key(api_key)
@@ -1496,11 +1498,16 @@ def generate_semantic_description(
                 f"{c.get('name')} ({c.get('type')})" for c in columns if isinstance(c, dict)
             )
 
+        sample_ctx = ""
+        if sample_rows and isinstance(sample_rows, list):
+            sample_ctx = "\nSample Data Rows (up to 3):\n" + json.dumps(sample_rows[:3], default=str)
+
         prompt = (
             f"You are a semantic metadata curator for Lake of Tears.\n"
             f"Generate a professional, concise business description (1-2 sentences) for {asset_type} '{clean_name}'.\n"
             f"Catalog: {catalog_name or 'main'}, Schema: {schema_name or 'default'}.\n"
             f"{col_ctx}\n"
+            f"{sample_ctx}\n"
             "If this is a table with columns, also generate a concise 1-sentence comment for each column.\n"
             "Respond ONLY with a valid JSON object matching:\n"
             '{"description": "...", "column_descriptions": {"column_name": "comment", ...}}'

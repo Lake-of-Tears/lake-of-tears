@@ -95,7 +95,8 @@ document.addEventListener('alpine:init', () => {
       this.isLoading = true;
       try {
         const queryParams = new URLSearchParams();
-        if (this.workspaceSlug) queryParams.set('workspace_slug', this.workspaceSlug);
+        const wsSlug = this.workspaceSlug || window.CURRENT_WORKSPACE_SLUG || '';
+        if (wsSlug) queryParams.set('workspace_slug', wsSlug);
         if (this.statusFilter !== 'all') queryParams.set('status', this.statusFilter);
 
         const resp = await fetch(`/api/bundles?${queryParams.toString()}`);
@@ -103,6 +104,18 @@ document.addEventListener('alpine:init', () => {
           const data = await resp.json();
           this.bundles = data.bundles || [];
           this.totalBundles = data.total || this.bundles.length;
+
+          // Check for ?open=<bundle_name_or_id> deep link from Pipelines or external links
+          const urlParams = new URLSearchParams(window.location.search);
+          const openTarget = urlParams.get('open');
+          if (openTarget && !this.drawerOpen) {
+            const targetBundle = this.resolveTargetBundle(openTarget);
+            if (targetBundle) {
+              this.openDrawer(targetBundle.id);
+            } else if (window.showToast) {
+              window.showToast(`Bundle "${openTarget}" not found in this workspace`, 'warning');
+            }
+          }
         } else {
           console.error('Failed to load bundles:', resp.statusText);
         }
@@ -111,6 +124,50 @@ document.addEventListener('alpine:init', () => {
       } finally {
         this.isLoading = false;
       }
+    },
+
+    resolveTargetBundle(openTarget) {
+      if (!openTarget || !this.bundles || !this.bundles.length) return null;
+      const target = String(openTarget).trim().toLowerCase();
+      const targetNorm = target.replace(/[-_]/g, '');
+
+      // 1. Direct ID match
+      let match = this.bundles.find(b => String(b.id).toLowerCase() === target);
+      if (match) return match;
+
+      // 2. Direct bundle_name match
+      match = this.bundles.find(b => b.bundle_name && b.bundle_name.toLowerCase() === target);
+      if (match) return match;
+
+      // 3. Normalized bundle_name match (hyphens vs underscores)
+      match = this.bundles.find(b => {
+        if (!b.bundle_name) return false;
+        return b.bundle_name.replace(/[-_]/g, '').toLowerCase() === targetNorm;
+      });
+      if (match) return match;
+
+      // 4. Resource / pipeline match (e.g. openTarget is a DAG ID or resource ID)
+      match = this.bundles.find(b => {
+        const resMap = b.resources_map || {};
+        for (const [resType, items] of Object.entries(resMap)) {
+          if (!Array.isArray(items)) continue;
+          for (const item of items) {
+            const itemVal = typeof item === 'object' ? (item.name || item.id || '') : String(item);
+            if (!itemVal) continue;
+            const itemStr = itemVal.toLowerCase();
+            if (itemStr === target || target === itemStr || target.includes(itemStr) || itemStr.includes(target)) {
+              return true;
+            }
+          }
+        }
+        const bSlug = (b.bundle_name || '').replace(/[-_]/g, '').toLowerCase();
+        if (bSlug && targetNorm.includes(bSlug)) {
+          return true;
+        }
+        return false;
+      });
+
+      return match || null;
     },
 
     get filteredBundles() {
@@ -186,22 +243,35 @@ document.addEventListener('alpine:init', () => {
     // ── Drawer Actions ─────────────────────────────────────────────────────────
 
     async openDrawer(bundleId) {
+      if (!bundleId) return;
       this.drawerOpen = true;
-      this.selectedBundle = null;
-      this.driftReport = null;
+
+      // Fast optimistic preloading from local bundles gallery
+      const local = (this.bundles || []).find(b => String(b.id) === String(bundleId));
+      if (local) {
+        this.selectedBundle = { ...local };
+      } else if (!this.selectedBundle) {
+        this.selectedBundle = { id: bundleId, bundle_name: 'Loading Bundle...' };
+      }
+
+      this.driftReport = this.selectedBundle.drift || null;
       this.activeDrawerTab = 'overview';
       this.activeRunResult = null;
 
       try {
         const queryParams = new URLSearchParams();
-        if (this.workspaceSlug) queryParams.set('workspace_slug', this.workspaceSlug);
+        const wsSlug = this.workspaceSlug || window.CURRENT_WORKSPACE_SLUG || '';
+        if (wsSlug) queryParams.set('workspace_slug', wsSlug);
         queryParams.set('include_drift', 'true');
 
         const resp = await fetch(`/api/bundles/${bundleId}?${queryParams.toString()}`);
         if (resp.ok) {
-          this.selectedBundle = await resp.json();
-          this.driftReport = this.selectedBundle.drift;
-          this.manifestFormatted = this.selectedBundle.manifest_raw || '';
+          const detailed = await resp.json();
+          this.selectedBundle = detailed;
+          this.driftReport = detailed.drift;
+          this.manifestFormatted = detailed.manifest_raw || '';
+        } else {
+          console.warn('Bundle details fetch returned status:', resp.status);
         }
       } catch (err) {
         console.error('Error opening bundle drawer:', err);
@@ -213,6 +283,11 @@ document.addEventListener('alpine:init', () => {
       this.selectedBundle = null;
       this.driftReport = null;
       this.activeRunResult = null;
+      const url = new URL(window.location.href);
+      if (url.searchParams.has('open')) {
+        url.searchParams.delete('open');
+        window.history.replaceState({}, '', url.pathname + (url.searchParams.toString() ? '?' + url.searchParams.toString() : ''));
+      }
     },
 
     setDrawerTab(tab) {

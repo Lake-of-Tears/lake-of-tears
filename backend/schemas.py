@@ -925,11 +925,21 @@ class TableFromPromptResponse(BaseModel):
 
 class GenerateDescriptionRequest(BaseModel):
     asset_type: str = "table"  # "schema" | "table"
-    name: str
+    name: str = ""
+    table_name: str | None = None
     catalog_name: str | None = None
     schema_name: str | None = None
     columns: list[dict[str, Any]] | None = None
+    sample_rows: list[dict[str, Any]] | None = None
     model: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def resolve_name(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if not data.get("name") and data.get("table_name"):
+                data["name"] = data["table_name"]
+        return data
 
 
 class GenerateDescriptionResponse(BaseModel):

@@ -45,14 +45,17 @@ def _resolve_ai_context(
     x_workspace_id: str | None = Header(None, alias="X-Workspace-Id"),
     lake_active_workspace: str | None = Cookie(None),
     lake_workspace_id: str | None = Cookie(None),
+    lake_workspace_slug: str | None = Cookie(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> tuple[Workspace, str, User]:
-    slug = workspace_slug or x_workspace_slug
-    ws_id = x_workspace_id or lake_active_workspace or lake_workspace_id
+    slug = workspace_slug or x_workspace_slug or lake_workspace_slug
+    ws_id = x_workspace_id or lake_workspace_id
     ws, role = get_ai_workspace_and_role(
         workspace_id=ws_id,
         workspace_slug=slug,
+        lake_workspace_slug=lake_workspace_slug,
+        lake_active_workspace=lake_active_workspace,
         current_user=current_user,
         db=db,
         require_write=False,
@@ -176,17 +179,20 @@ def table_from_prompt(
 
 
 @router.post("/generate-description", response_model=GenerateDescriptionResponse)
+@router.post("/enrich-table", response_model=GenerateDescriptionResponse)
 def generate_description(
     req: GenerateDescriptionRequest,
     ctx: tuple[Workspace, str, User] = Depends(_resolve_ai_context),
 ) -> GenerateDescriptionResponse:
     """Auto-generate semantic business descriptions and column comments for catalog assets."""
+    target_name = req.name or req.table_name or ""
     result = ai_service.generate_semantic_description(
         asset_type=req.asset_type,
-        name=req.name,
+        name=target_name,
         catalog_name=req.catalog_name,
         schema_name=req.schema_name,
         columns=req.columns,
+        sample_rows=req.sample_rows,
         model=req.model,
     )
     return GenerateDescriptionResponse(**result)
