@@ -84,27 +84,25 @@ Lake of Tears is a self-hosted data platform inspired by Databricks — one URL,
 
 Lake of Tears is standardized 100% on Kubernetes and Helm across all environments (local development, staging, and production).
 
+### Local Kubernetes Quickstart (One-Command Setup)
+
+On a local developer workstation (OrbStack, Docker Desktop, minikube, kind, or k3s) with `docker`, `kubectl`, and `helm` installed, run a single command to verify cluster connectivity (auto-starting OrbStack Kubernetes if stopped), install `ingress-nginx` if missing, build the local container images, and deploy the Helm chart:
+
 ```bash
 git clone https://github.com/Lake-of-Tears/lake-of-tears.git
 cd lake-of-tears
 
-# 1. Build local images
-docker build -t lake-of-tears-backend:latest ./backend
-docker build -t lake-of-tears-ui:latest ./ui
-docker build -t lake-of-tears-airflow:latest ./deploy/airflow
+# Option A: One-command local workstation setup (Recommended for local dev)
+./lot setup-local
+# (or directly: bash deploy/scripts/setup-local.sh)
 
-# 2. Deploy locally via Helm into the lake-of-tears namespace
-# Option A: One-Command Lifecycle CLI (Recommended)
-./lot install --auto-generate-secrets
+# Option B: Unified TOON lifecycle installer (with local image build & secret generation)
+./lot install --build --ensure-ingress --auto-generate-secrets
 
-# Option B: Direct TOON process substitution
-# cp lake-of-tears.example.toon lake-of-tears.local.toon
-# helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
-#   --namespace lake-of-tears \
-#   --create-namespace \
-#   -f <(python scripts/toon2helm.py -i lake-of-tears.local.toon)
-
-# Option C: Standard Helm values override
+# Option C: Manual image build + Helm values override
+# docker build -t lake-of-tears-backend:latest ./backend
+# docker build -t lake-of-tears-ui:latest ./ui
+# docker build -t lake-of-tears-airflow:latest ./deploy/airflow
 # helm upgrade --install lake-of-tears ./deploy/helm/lake-of-tears \
 #   --namespace lake-of-tears \
 #   --create-namespace \

@@ -11,6 +11,8 @@ source "${SCRIPT_DIR}/common.sh"
 CONFIG_PATH=""
 NAMESPACE="lake-of-tears"
 AUTO_GEN_SECRETS="false"
+BUILD_IMAGES="false"
+ENSURE_INGRESS="false"
 FORCE="false"
 SKIP_HEALTH="false"
 TIMEOUT="10m"
@@ -25,6 +27,8 @@ Install or upgrade Lake of Tears on Kubernetes using Helm and TOON configuration
 Options:
   -c, --config <path>          Path to .toon configuration file
   -n, --namespace <name>       Target Kubernetes namespace (default: lake-of-tears)
+      --build                  Build local Docker images (backend, ui, airflow) before deploying
+      --ensure-ingress         Check for nginx IngressClass and auto-install ingress-nginx if missing
       --auto-generate-secrets  Automatically generate random credentials for changeme-* placeholders
       --dry-run                Simulate Helm installation without making cluster changes
       --skip-health-check      Skip post-deployment /api/health verification
@@ -34,6 +38,7 @@ Options:
 
 Examples:
   $(basename "$0")
+  $(basename "$0") --build --ensure-ingress --auto-generate-secrets
   $(basename "$0") --dry-run
   $(basename "$0") --config /etc/lake-of-tears/lake-of-tears.toon
   $(basename "$0") --auto-generate-secrets --namespace lot-dev
@@ -51,6 +56,14 @@ while [[ $# -gt 0 ]]; do
         -n|--namespace)
             NAMESPACE="$2"
             shift 2
+            ;;
+        --build)
+            BUILD_IMAGES="true"
+            shift
+            ;;
+        --ensure-ingress)
+            ENSURE_INGRESS="true"
+            shift
             ;;
         --auto-generate-secrets)
             AUTO_GEN_SECRETS="true"
@@ -87,6 +100,16 @@ log_header "Lake of Tears — Platform Installation"
 
 # 1. Prerequisite checks
 check_prerequisites || exit 1
+
+# 1a. Optional ingress-nginx controller setup
+if [[ "${ENSURE_INGRESS}" == "true" && -z "${DRY_RUN}" ]]; then
+    ensure_ingress_nginx || exit 1
+fi
+
+# 1b. Optional local container image build
+if [[ "${BUILD_IMAGES}" == "true" && -z "${DRY_RUN}" ]]; then
+    build_local_images || exit 1
+fi
 
 # 2. Config discovery
 log_info "Resolving TOON configuration..."

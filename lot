@@ -14,6 +14,7 @@ Usage:
   ./lot <command> [options]
 
 Commands:
+  setup-local One-command local Kubernetes setup (OrbStack/Docker, ingress-nginx, image builds & Helm deploy)
   install     Deploy or upgrade Lake of Tears on Kubernetes using Helm & TOON
   update      Check for or apply TrueNAS-style platform updates
   destroy     Teardown release and manage persistent volume data retention
@@ -24,7 +25,8 @@ Commands:
 Run './lot <command> --help' for options specific to any command.
 
 Examples:
-  ./lot install --auto-generate-secrets
+  ./lot setup-local
+  ./lot install --build --auto-generate-secrets
   ./lot update --check-only
   ./lot update --train edge
   ./lot status
@@ -41,6 +43,9 @@ COMMAND="$1"
 shift
 
 case "${COMMAND}" in
+    setup-local)
+        exec "${SCRIPT_DIR}/deploy/scripts/setup-local.sh" "$@"
+        ;;
     install)
         exec "${SCRIPT_DIR}/deploy/scripts/install.sh" "$@"
         ;;

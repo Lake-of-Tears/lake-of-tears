@@ -130,6 +130,78 @@ ensure_python_runtime() {
     return 1
 }
 
+# Ensure Kubernetes cluster connectivity, auto-starting OrbStack k8s if stopped
+ensure_cluster_connectivity() {
+    if kubectl cluster-info >/dev/null 2>&1; then
+        return 0
+    fi
+
+    if command -v orbctl >/dev/null 2>&1; then
+        log_warn "Kubernetes cluster is not reachable. Attempting to start OrbStack Kubernetes (orbctl start k8s)..."
+        if orbctl start k8s >/dev/null 2>&1; then
+            local retries=15
+            while (( retries > 0 )); do
+                if kubectl cluster-info >/dev/null 2>&1; then
+                    log_success "OrbStack Kubernetes cluster started and is reachable."
+                    return 0
+                fi
+                sleep 2
+                (( retries-- ))
+            done
+        fi
+    fi
+
+    log_error "Cannot connect to Kubernetes cluster. Ensure KUBECONFIG is set or your local cluster (OrbStack, Docker Desktop, minikube, kind) is running."
+    return 1
+}
+
+# Ensure ingress-nginx controller is installed on the cluster
+ensure_ingress_nginx() {
+    log_info "Checking for nginx IngressClass..."
+    if kubectl get ingressclass nginx >/dev/null 2>&1; then
+        log_success "IngressClass 'nginx' is already installed."
+        return 0
+    fi
+
+    log_info "IngressClass 'nginx' not found. Installing ingress-nginx via Helm..."
+    helm upgrade --install ingress-nginx ingress-nginx \
+        --repo https://kubernetes.github.io/ingress-nginx \
+        --namespace ingress-nginx \
+        --create-namespace \
+        --wait \
+        --timeout 180s
+
+    log_success "ingress-nginx controller installed and ready."
+    return 0
+}
+
+# Build the three Lake of Tears local container images
+build_local_images() {
+    if ! command -v docker >/dev/null 2>&1; then
+        log_error "docker is not installed or not in PATH. Please install Docker or OrbStack."
+        return 1
+    fi
+
+    if ! docker info >/dev/null 2>&1; then
+        log_error "Docker daemon is not running. Please start Docker or OrbStack and try again."
+        return 1
+    fi
+
+    log_info "Building local container image: lake-of-tears-backend:latest..."
+    docker build -t lake-of-tears-backend:latest "${REPO_ROOT}/backend"
+    log_success "Built lake-of-tears-backend:latest"
+
+    log_info "Building local container image: lake-of-tears-ui:latest..."
+    docker build -t lake-of-tears-ui:latest "${REPO_ROOT}/ui"
+    log_success "Built lake-of-tears-ui:latest"
+
+    log_info "Building local container image: lake-of-tears-airflow:latest..."
+    docker build -t lake-of-tears-airflow:latest "${REPO_ROOT}/deploy/airflow"
+    log_success "Built lake-of-tears-airflow:latest"
+
+    return 0
+}
+
 # Verify required CLI tools and cluster connectivity
 check_prerequisites() {
     log_info "Verifying deployment prerequisites..."
@@ -149,11 +221,8 @@ check_prerequisites() {
     # Check Python runtime
     ensure_python_runtime || return 1
 
-    # Check Kubernetes cluster access
-    if ! kubectl cluster-info >/dev/null 2>&1; then
-        log_error "Cannot connect to Kubernetes cluster. Ensure KUBECONFIG is set or your cluster is running."
-        return 1
-    fi
+    # Check Kubernetes cluster access (with OrbStack auto-start fallback)
+    ensure_cluster_connectivity || return 1
 
     log_success "All prerequisites satisfied (kubectl, helm, cluster connectivity, python)."
     return 0

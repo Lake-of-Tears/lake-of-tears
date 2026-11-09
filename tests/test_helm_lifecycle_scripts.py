@@ -199,6 +199,111 @@ def test_destroy_script_purge_safety():
     assert "Purging data in a non-interactive shell requires the --force flag" in proc.stderr
 
 
+def test_setup_local_and_install_help():
+    """Verify ./lot setup-local --help and ./lot install --help flags."""
+    proc_local = subprocess.run(
+        [str(REPO_ROOT / "lot"), "setup-local", "--help"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "One-command local Kubernetes setup for Lake of Tears." in proc_local.stdout
+    assert "--skip-build" in proc_local.stdout
+    assert "--skip-ingress" in proc_local.stdout
+
+    proc_install = subprocess.run(
+        [str(REPO_ROOT / "lot"), "install", "--help"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "--build" in proc_install.stdout
+    assert "--ensure-ingress" in proc_install.stdout
+
+
+def test_setup_local_end_to_end_with_mock_tools(tmp_path: Path):
+    """Verify setup-local.sh orchestrates OrbStack start, ingress-nginx install, image builds, and Helm deploy."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log_file = tmp_path / "commands.log"
+    cluster_state = tmp_path / "cluster_running"
+
+    # Mock orbctl: marks cluster as running when 'orbctl start k8s' is called
+    orbctl_script = bin_dir / "orbctl"
+    orbctl_script.write_text(
+        f"#!/usr/bin/env bash\n"
+        f'echo "orbctl $*" >> "{log_file}"\n'
+        f'if [[ "$1" == "start" && "$2" == "k8s" ]]; then\n'
+        f'  touch "{cluster_state}"\n'
+        f"  exit 0\n"
+        f"fi\n"
+        f"exit 1\n"
+    )
+    orbctl_script.chmod(0o755)
+
+    # Mock kubectl: fails cluster-info until orbctl starts k8s; fails get ingressclass nginx to trigger install
+    kubectl_script = bin_dir / "kubectl"
+    kubectl_script.write_text(
+        f"#!/usr/bin/env bash\n"
+        f'echo "kubectl $*" >> "{log_file}"\n'
+        f'if [[ "$1" == "cluster-info" ]]; then\n'
+        f'  [[ -f "{cluster_state}" ]] && exit 0 || exit 1\n'
+        f"fi\n"
+        f'if [[ "$1" == "get" && "$2" == "ingressclass" && "$3" == "nginx" ]]; then\n'
+        f"  exit 1\n"
+        f"fi\n"
+        f"exit 0\n"
+    )
+    kubectl_script.chmod(0o755)
+
+    # Mock docker
+    docker_script = bin_dir / "docker"
+    docker_script.write_text(
+        f"#!/usr/bin/env bash\n" f'echo "docker $*" >> "{log_file}"\n' f"exit 0\n"
+    )
+    docker_script.chmod(0o755)
+
+    # Mock helm
+    helm_script = bin_dir / "helm"
+    helm_script.write_text(f"#!/usr/bin/env bash\n" f'echo "helm $*" >> "{log_file}"\n' f"exit 0\n")
+    helm_script.chmod(0o755)
+
+    values_file = tmp_path / "values-local.yaml"
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+
+    proc = subprocess.run(
+        [
+            str(REPO_ROOT / "deploy" / "scripts" / "setup-local.sh"),
+            "--values",
+            str(values_file),
+            "--namespace",
+            "lot-local-test",
+            "--skip-health-check",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+    )
+
+    assert "LAKE OF TEARS — LOCAL KUBERNETES READY" in proc.stdout
+    assert values_file.is_file()
+
+    logged = log_file.read_text()
+    # 1. Verified OrbStack auto-start was triggered when cluster-info initially failed
+    assert "orbctl start k8s" in logged
+    # 2. Verified ingress-nginx was auto-installed via Helm when ingressclass nginx was missing
+    assert "helm upgrade --install ingress-nginx ingress-nginx" in logged
+    # 3. Verified all 3 local Docker images were built
+    assert "docker build -t lake-of-tears-backend:latest" in logged
+    assert "docker build -t lake-of-tears-ui:latest" in logged
+    assert "docker build -t lake-of-tears-airflow:latest" in logged
+    # 4. Verified Helm release deployment
+    assert "helm upgrade --install lake-of-tears" in logged
+    assert "--namespace lot-local-test" in logged
+
+
 def sys_python() -> str:
     """Helper to return active virtualenv Python."""
     venv_py = REPO_ROOT / ".venv" / "bin" / "python"
