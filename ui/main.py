@@ -214,15 +214,21 @@ def _ai_client(api_key: str | None = None) -> ai_gateway_client.GatewayClient:
 def _get_session_config() -> dict:
     global _SESSION_CONFIG_CACHE, _SESSION_CONFIG_FETCHED_AT
     now = time.monotonic()
-    if _SESSION_CONFIG_CACHE is not None and now - _SESSION_CONFIG_FETCHED_AT < _SESSION_CONFIG_TTL:
+    if (
+        _SESSION_CONFIG_CACHE is not None
+        and isinstance(_SESSION_CONFIG_CACHE, dict)
+        and now - _SESSION_CONFIG_FETCHED_AT < _SESSION_CONFIG_TTL
+    ):
         return _SESSION_CONFIG_CACHE
     try:
         with httpx.Client(timeout=3) as client:
             resp = client.get(f"{BACKEND_URL}/api/admin/settings/public")
         if resp.status_code == 200:
-            _SESSION_CONFIG_CACHE = resp.json()
-            _SESSION_CONFIG_FETCHED_AT = now
-            return _SESSION_CONFIG_CACHE
+            data = resp.json()
+            if isinstance(data, dict) and not hasattr(data, "_mock_name"):
+                _SESSION_CONFIG_CACHE = data
+                _SESSION_CONFIG_FETCHED_AT = now
+                return _SESSION_CONFIG_CACHE
     except Exception:
         pass
     return {"session_inactivity_timeout_minutes": 60, "session_max_hours": 24}
