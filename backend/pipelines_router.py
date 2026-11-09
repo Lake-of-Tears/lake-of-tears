@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import base64
+import json
 import logging
+import re
+import uuid
 from typing import Any
 
 import pipeline_service
@@ -11,12 +15,16 @@ from fastapi import (
     Cookie,
     Depends,
     Header,
+    HTTPException,
     Query,
+    Request,
+    Response,
     status,
 )
-from models import User
+from models import User, generate_webhook_secret
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from webhooks_router import SENSITIVE_HEADERS, _resolve_workspace_or_404, _verify_webhook_auth
 
 logger = logging.getLogger("lake.backend.pipelines.router")
 
@@ -51,6 +59,7 @@ class PipelineSettingsRequest(BaseModel):
     display_label: str | None = None
     description: str | None = None
     is_visible_on_timeline: bool | None = None
+    webhook_enabled: bool | None = None
 
 
 # ── Dependency Context Resolution ─────────────────────────────────────────────
@@ -255,6 +264,8 @@ async def get_pipeline_settings(
         else dag_id.replace("_", " ").title(),
         "description": meta.description if meta and meta.description is not None else "",
         "is_visible_on_timeline": meta.is_visible_on_timeline if meta else True,
+        "webhook_enabled": bool(meta.webhook_enabled) if meta else False,
+        "webhook_url": f"/api/v1/pipelines/{ws.slug}/{dag_id}/webhook",
         "palette": pipeline_service.DEFAULT_PALETTE,
     }
 
@@ -289,6 +300,7 @@ async def update_pipeline_settings(
         display_label=req.display_label,
         description=req.description,
         is_visible_on_timeline=req.is_visible_on_timeline,
+        webhook_enabled=req.webhook_enabled,
         user_id=current_user.id,
         db=db,
     )
@@ -423,6 +435,140 @@ async def trigger_pipeline(
         triggered_by=current_user.email,
         is_superadmin=is_superadmin,
     )
+
+
+@router.api_route(
+    "/{workspace_slug}/{dag_id}/webhook",
+    methods=["GET", "POST"],
+    status_code=status.HTTP_201_CREATED,
+)
+@router.api_route(
+    "/{dag_id}/webhook",
+    methods=["GET", "POST"],
+    status_code=status.HTTP_201_CREATED,
+)
+async def handle_pipeline_webhook(
+    request: Request,
+    dag_id: str,
+    workspace_slug: str | None = None,
+    validation_token: str | None = Query(None, alias="validationToken"),
+    token: str | None = Query(None),
+    x_lake_webhook_secret: str | None = Header(None, alias="X-Lake-Webhook-Secret"),
+    x_lake_signature: str | None = Header(None, alias="X-Lake-Signature"),
+    x_hub_signature_256: str | None = Header(None, alias="X-Hub-Signature-256"),
+    x_workspace_slug: str | None = Header(None, alias="X-Workspace-Slug"),
+    lake_active_workspace: str | None = Cookie(None),
+    db: Session = Depends(get_db),
+):
+    """Native webhook trigger for pipelines.
+
+    Supports unauthenticated-by-cookie HTTP requests verified via:
+    1. Microsoft Graph validation handshake (?validationToken=...)
+    2. Header: X-Lake-Webhook-Secret
+    3. Query parameter: ?token=...
+    4. HMAC-SHA256 signature headers (X-Hub-Signature-256, X-Lake-Signature)
+    """
+    # 1. Handle Microsoft Graph change notification subscription validation handshake
+    if validation_token:
+        return Response(content=validation_token, media_type="text/plain", status_code=200)
+
+    # 2. Resolve workspace
+    target_ws = workspace_slug or x_workspace_slug or lake_active_workspace
+    if not target_ws:
+        match = re.match(r"^ws_([a-zA-Z0-9_-]+?)_", dag_id)
+        if match:
+            target_ws = match.group(1)
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Workspace identifier required (via URL path, query, or X-Workspace-Slug header)",
+            )
+
+    ws = _resolve_workspace_or_404(target_ws, db)
+
+    # Ensure workspace has a webhook secret
+    if not ws.webhook_secret:
+        ws.webhook_secret = generate_webhook_secret()
+        db.commit()
+
+    # 3. Authenticate incoming webhook request
+    raw_body = await request.body()
+    signature_header = x_lake_signature or x_hub_signature_256
+
+    is_authenticated = _verify_webhook_auth(
+        raw_body=raw_body,
+        secret=ws.webhook_secret,
+        header_secret=x_lake_webhook_secret,
+        query_token=token,
+        signature_header=signature_header,
+    )
+    if not is_authenticated:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing webhook secret/signature",
+        )
+
+    # 4. Check if webhook trigger is enabled for this pipeline
+    meta_map = pipeline_service.get_pipeline_metadata_map(ws.id, db)
+    meta = meta_map.get(dag_id)
+    if meta and not meta.webhook_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Webhook trigger is disabled for pipeline '{dag_id}'",
+        )
+
+    # 5. Parse payload and unwrap Pub/Sub notifications if present
+    try:
+        payload_data = json.loads(raw_body) if raw_body else {}
+    except Exception:
+        payload_data = {"raw_text": raw_body.decode("utf-8", errors="replace")}
+
+    if (
+        isinstance(payload_data, dict)
+        and "message" in payload_data
+        and isinstance(payload_data["message"], dict)
+    ):
+        msg = payload_data["message"]
+        if "data" in msg and isinstance(msg["data"], str):
+            try:
+                decoded_bytes = base64.b64decode(msg["data"])
+                try:
+                    payload_data["unwrapped_data"] = json.loads(decoded_bytes.decode("utf-8"))
+                except Exception:
+                    payload_data["unwrapped_data"] = decoded_bytes.decode("utf-8", errors="replace")
+            except Exception as b64_err:
+                logger.debug("Could not b64decode Pub/Sub message data: %s", b64_err)
+
+    clean_headers = {
+        k.lower(): v for k, v in request.headers.items() if k.lower() not in SENSITIVE_HEADERS
+    }
+
+    event_id = str(uuid.uuid4())
+    conf = {
+        "triggered_by": "webhook",
+        "webhook_event_id": event_id,
+        "webhook_payload": payload_data,
+        "webhook_headers": clean_headers,
+    }
+
+    # 6. Trigger DAG run asynchronously
+    run_info = await pipeline_service.trigger_dag_run(
+        workspace_slug=ws.slug,
+        dag_id=dag_id,
+        conf=conf,
+        triggered_by="webhook",
+        is_superadmin=True,
+    )
+
+    return {
+        "status": "queued",
+        "dag_id": dag_id,
+        "dag_run_id": run_info.get("dag_run_id"),
+        "state": run_info.get("state", "queued"),
+        "execution_date": run_info.get("execution_date"),
+        "workspace_slug": ws.slug,
+        "event_id": event_id,
+    }
 
 
 @router.get("/{dag_id}/runs")

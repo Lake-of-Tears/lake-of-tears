@@ -703,6 +703,43 @@
           <div id="drawer-schedule-permission-hint" class="hidden text-[10px] text-amber-400/90 italic"></div>
         </div>
 
+        <!-- Webhook Trigger Card -->
+        <div id="drawer-webhook-card" class="p-3 rounded-lg bg-black/20 border border-white/[0.06] space-y-2.5">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <label class="text-[10px] font-medium text-purple-400 uppercase tracking-wider flex items-center gap-1">
+                <span>⚡</span> Webhook Trigger
+              </label>
+              <span id="drawer-webhook-status-badge" class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-purple-500/10 text-purple-300 border border-purple-500/20">Disabled</span>
+            </div>
+            <label class="inline-flex items-center gap-2 cursor-pointer text-xs text-gray-400">
+              <input type="checkbox" id="drawer-webhook-toggle" onchange="onDrawerWebhookToggleChange()" class="sr-only peer">
+              <div class="w-7 h-4 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-purple-600 relative"></div>
+            </label>
+          </div>
+
+          <div id="drawer-webhook-details" class="space-y-2 hidden">
+            <div>
+              <div class="text-[10px] text-gray-400 mb-1">Webhook Receiver URL</div>
+              <div class="flex items-center gap-1.5">
+                <input id="drawer-webhook-url-input" type="text" readonly
+                       class="input-dark text-xs font-mono w-full py-1.5 px-2 rounded-lg bg-[#181818] border border-white/10 text-gray-200 select-all focus:outline-none" />
+                <button type="button" onclick="copyDrawerWebhookUrl()"
+                        title="Copy Webhook URL"
+                        class="px-2.5 py-1.5 rounded-lg bg-purple-600/20 border border-purple-500/30 text-purple-300 hover:text-white hover:bg-purple-600/30 text-xs font-medium transition-colors shrink-0 flex items-center gap-1">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/>
+                  </svg>
+                  <span>Copy</span>
+                </button>
+              </div>
+            </div>
+            <div class="text-[11px] text-gray-500">
+              Authenticate via header <code class="text-purple-300 font-mono">X-Lake-Webhook-Secret</code>, query param <code class="text-purple-300 font-mono">?token=...</code>, or HMAC-SHA256 signature.
+            </div>
+          </div>
+        </div>
+
         <!-- Notebook Job Link (Dynamic) -->
         <div id="drawer-notebook-link-wrap" class="hidden"></div>
 
@@ -2109,12 +2146,33 @@
             <p class="text-[11px] text-gray-500 truncate max-w-xs mt-0.5">${p.description || 'No description provided'}</p>
           </td>
 
-          <!-- Schedule -->
+          <!-- Schedule & Triggers -->
           <td class="py-3 px-4">
-            <span class="inline-flex items-center gap-1 font-mono text-[11px] text-gray-400 bg-white/[0.03] px-2 py-0.5 rounded border border-white/[0.06]">
-              <svg class="w-3 h-3 text-gray-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-              ${p.schedule_interval}
-            </span>
+            <div class="flex flex-col items-start gap-1">
+              ${(p.schedule_interval && !['None', 'none', 'null', '@webhook', 'webhook'].includes(p.schedule_interval)) ? `
+                <span class="inline-flex items-center gap-1 font-mono text-[11px] text-gray-400 bg-white/[0.03] px-2 py-0.5 rounded border border-white/[0.06]">
+                  <svg class="w-3 h-3 text-gray-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                  ${p.schedule_interval}
+                </span>
+              ` : (!p.webhook_enabled ? `
+                <span class="inline-flex items-center gap-1 font-mono text-[11px] text-gray-500 bg-white/[0.02] px-2 py-0.5 rounded border border-white/[0.04]">
+                  None
+                </span>
+              ` : '')}
+              ${p.webhook_enabled ? `
+                <div class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-300 border border-purple-500/20 text-[10px] font-mono shadow-[0_0_8px_rgba(168,85,247,0.15)] group hover:border-purple-500/40 transition-all">
+                  <span class="text-amber-400 font-bold">⚡</span>
+                  <span class="font-semibold tracking-wide">Webhook</span>
+                  <button type="button" onclick="copyWebhookUrl(event, '${p.webhook_url || `/api/v1/pipelines/${p.dag_id}/webhook`}')"
+                          title="Copy Webhook URL: ${p.webhook_url || `/api/v1/pipelines/${p.dag_id}/webhook`}"
+                          class="p-0.5 ml-0.5 text-purple-400 hover:text-white rounded hover:bg-purple-500/30 transition-colors">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/>
+                    </svg>
+                  </button>
+                </div>
+              ` : ''}
+            </div>
           </td>
 
           <!-- Last Run -->
@@ -2673,6 +2731,75 @@
         deleteBtn.classList.add('hidden');
       }
     }
+
+    const webhookToggle = document.getElementById('drawer-webhook-toggle');
+    const webhookStatusBadge = document.getElementById('drawer-webhook-status-badge');
+    const webhookDetails = document.getElementById('drawer-webhook-details');
+    const webhookUrlInput = document.getElementById('drawer-webhook-url-input');
+
+    const webhookEnabled = p ? Boolean(p.webhook_enabled) : false;
+    const webhookUrl = (p && p.webhook_url) ? `${window.location.origin}${p.webhook_url}` : `${window.location.origin}/api/v1/pipelines/${dagId}/webhook`;
+
+    if (webhookToggle) webhookToggle.checked = webhookEnabled;
+    if (webhookUrlInput) webhookUrlInput.value = webhookUrl;
+    if (webhookStatusBadge) {
+      webhookStatusBadge.textContent = webhookEnabled ? 'Enabled' : 'Disabled';
+      webhookStatusBadge.className = webhookEnabled
+        ? 'px-1.5 py-0.5 rounded text-[10px] font-mono bg-purple-500/10 text-purple-300 border border-purple-500/20'
+        : 'px-1.5 py-0.5 rounded text-[10px] font-mono bg-gray-500/10 text-gray-400 border border-gray-500/20';
+    }
+    if (webhookDetails) {
+      if (webhookEnabled) webhookDetails.classList.remove('hidden');
+      else webhookDetails.classList.add('hidden');
+    }
+  }
+
+  function onDrawerWebhookToggleChange() {
+    const toggle = document.getElementById('drawer-webhook-toggle');
+    const enabled = toggle ? toggle.checked : false;
+    const statusBadge = document.getElementById('drawer-webhook-status-badge');
+    const details = document.getElementById('drawer-webhook-details');
+    if (statusBadge) {
+      statusBadge.textContent = enabled ? 'Enabled' : 'Disabled';
+      statusBadge.className = enabled
+        ? 'px-1.5 py-0.5 rounded text-[10px] font-mono bg-purple-500/10 text-purple-300 border border-purple-500/20'
+        : 'px-1.5 py-0.5 rounded text-[10px] font-mono bg-gray-500/10 text-gray-400 border border-gray-500/20';
+    }
+    if (details) {
+      if (enabled) details.classList.remove('hidden');
+      else details.classList.add('hidden');
+    }
+  }
+
+  function copyDrawerWebhookUrl() {
+    const input = document.getElementById('drawer-webhook-url-input');
+    if (!input || !input.value) return;
+    copyWebhookUrl(null, input.value.replace(window.location.origin, ''));
+  }
+
+  function copyWebhookUrl(event, path) {
+    if (event) event.stopPropagation();
+    const url = path.startsWith('http') ? path : `${window.location.origin}${path}`;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(() => {
+        showToast('Webhook trigger URL copied to clipboard', 'success');
+      }).catch(() => {
+        _fallbackCopy(url);
+      });
+    } else {
+      _fallbackCopy(url);
+    }
+  }
+
+  function _fallbackCopy(text) {
+    const el = document.createElement('textarea');
+    el.value = text;
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand('copy');
+    document.body.removeChild(el);
+    showToast('Webhook trigger URL copied to clipboard', 'success');
+  }
   }
 
   async function togglePipelinePauseFromDrawer() {
@@ -2715,10 +2842,13 @@
         originalDrawerSchedule = schedData.schedule_interval;
       }
 
+      const webhookToggle = document.getElementById('drawer-webhook-toggle');
+      const webhook_enabled = webhookToggle ? webhookToggle.checked : undefined;
+
       const res = await fetch(`/api/pipelines/${dagId}/settings`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ display_label, description }),
+        body: JSON.stringify({ display_label, description, webhook_enabled }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -2736,6 +2866,9 @@
         if (description !== null) p.description = description;
         if (scheduleChanged) {
           p.schedule_interval = originalDrawerSchedule;
+        }
+        if (webhook_enabled !== undefined) {
+          p.webhook_enabled = webhook_enabled;
         }
       }
       if (timelineData && timelineData.pipelines) {

@@ -7,12 +7,13 @@ import json
 import logging
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 from auth import get_current_user
 from database import get_db
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from models import User, Workspace, WorkspaceMember, generate_webhook_secret
 from schemas import WebhookIngestResponse, WebhookSecretResponse
 from sqlalchemy.orm import Session
@@ -137,21 +138,29 @@ def _check_workspace_access(
         )
 
 
-@router.post(
+@router.api_route(
     "/{workspace_slug}",
+    methods=["GET", "POST"],
     status_code=status.HTTP_202_ACCEPTED,
     response_model=WebhookIngestResponse,
 )
 async def ingest_webhook_event(
     workspace_slug: str,
     request: Request,
+    validation_token: str | None = Query(None, alias="validationToken"),
     token: str | None = Query(None),
+    trigger_pipeline: str | None = Query(None),
     x_lake_webhook_secret: str | None = Header(None, alias="X-Lake-Webhook-Secret"),
     x_lake_signature: str | None = Header(None, alias="X-Lake-Signature"),
     x_hub_signature_256: str | None = Header(None, alias="X-Hub-Signature-256"),
+    x_lake_trigger_pipeline: str | None = Header(None, alias="X-Lake-Trigger-Pipeline"),
     db: Session = Depends(get_db),
-) -> WebhookIngestResponse:
-    """Accept and buffer incoming webhook events into MinIO for a workspace."""
+) -> Any:
+    """Accept and buffer incoming webhook events into MinIO for a workspace, with optional immediate pipeline trigger."""
+    if validation_token:
+        # Microsoft Graph change notification subscription validation handshake
+        return Response(content=validation_token, media_type="text/plain", status_code=200)
+
     ws = _resolve_workspace_or_404(workspace_slug, db)
 
     # Ensure workspace has a secret configured
@@ -230,11 +239,44 @@ async def ingest_webhook_event(
             detail=f"Storage buffering failed: {exc}",
         ) from exc
 
+    target_pipeline = trigger_pipeline or x_lake_trigger_pipeline
+    triggered_pipe = None
+    dag_run_id = None
+    if target_pipeline:
+        try:
+            import pipeline_service
+
+            conf = {
+                "triggered_by": "webhook_ingest",
+                "buffered_s3_uri": f"s3://{MINIO_BUCKET}/{s3_key}",
+                "event_id": event_id,
+                "received_at": received_at.isoformat(),
+                "payload": payload_data,
+            }
+            run_res = await pipeline_service.trigger_dag_run(
+                workspace_slug=ws.slug,
+                dag_id=target_pipeline,
+                conf=conf,
+                triggered_by="webhook_ingest",
+                is_superadmin=True,
+            )
+            triggered_pipe = target_pipeline
+            dag_run_id = run_res.get("dag_run_id")
+        except Exception as run_exc:
+            logger.warning(
+                "Webhook ingest buffered successfully, but trigger of pipeline '%s' failed: %s",
+                target_pipeline,
+                run_exc,
+            )
+            triggered_pipe = target_pipeline
+
     return WebhookIngestResponse(
         status="accepted",
         event_id=event_id,
         workspace_slug=ws.slug,
         received_at=received_at,
+        triggered_pipeline=triggered_pipe,
+        dag_run_id=dag_run_id,
     )
 
 

@@ -201,6 +201,12 @@ def normalize_bundle_dict(data: dict[str, Any]) -> dict[str, Any]:
     raw_pipelines = _normalize_resource_list(raw_resources.get("pipelines"))
     for pipe in raw_pipelines:
         p_copy = dict(pipe)
+        sched = p_copy.get("schedule")
+        if sched and str(sched).strip().lower() in ("@webhook", "webhook"):
+            p_copy["webhook_enabled"] = True
+            p_copy["schedule"] = None
+        if "webhook_enabled" in p_copy:
+            p_copy["webhook_enabled"] = bool(p_copy["webhook_enabled"])
         if "tasks" in p_copy:
             p_copy["tasks"] = _normalize_tasks(p_copy["tasks"])
         norm_resources["pipelines"].append(p_copy)

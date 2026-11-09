@@ -163,7 +163,71 @@ _BUNDLE_TASK_RUNNER_CODE = '''def _run_bundle_task(**kwargs):
             })
             for pk, pv in params.items():
                 env[str(pk)] = str(pv)
-            subprocess.run([sys.executable, tf_path], env=env, check=True)
+
+            py_executable = sys.executable
+            req_spec = kwargs.get("requirements")
+            req_content = None
+            if req_spec:
+                req_spec_clean = str(req_spec).strip()
+                possible_req_keys = [
+                    f"workspaces/{workspace_slug}/bundles/{bundle_name}/{req_spec_clean.lstrip('/')}",
+                    f"workspaces/{workspace_slug}/bundles/{clean_bundle}/{req_spec_clean.lstrip('/')}",
+                    f"bundles/{bundle_name}/{req_spec_clean.lstrip('/')}",
+                    f"bundles/{clean_bundle}/{req_spec_clean.lstrip('/')}",
+                ]
+                for rk in possible_req_keys:
+                    try:
+                        robj = s3.get_object(Bucket=bucket, Key=rk)
+                        req_content = robj["Body"].read().decode("utf-8")
+                        break
+                    except Exception:
+                        pass
+                if not req_content and "\\n" not in req_spec_clean and not req_spec_clean.endswith(".txt"):
+                    req_content = req_spec_clean.replace(",", "\\n")
+
+            if not req_content:
+                for rk in [f"workspaces/{workspace_slug}/bundles/{bundle_name}/requirements.txt", f"bundles/{bundle_name}/requirements.txt"]:
+                    try:
+                        robj = s3.get_object(Bucket=bucket, Key=rk)
+                        req_content = robj["Body"].read().decode("utf-8")
+                        break
+                    except Exception:
+                        pass
+
+            if req_content and req_content.strip():
+                import hashlib
+                import venv
+                venv_dir = os.path.join(tempfile.gettempdir(), "lake_bundle_venvs", str(clean_bundle))
+                venv_py = os.path.join(venv_dir, "bin", "python")
+                hash_file = os.path.join(venv_dir, ".requirements_hash")
+                req_hash = hashlib.sha256(req_content.encode("utf-8")).hexdigest()
+
+                needs_install = True
+                if os.path.exists(venv_py) and os.path.exists(hash_file):
+                    try:
+                        with open(hash_file) as hf:
+                            if hf.read().strip() == req_hash:
+                                needs_install = False
+                    except Exception:
+                        pass
+
+                if needs_install:
+                    logger.info("Setting up cached virtualenv for bundle %s in %s", bundle_name, venv_dir)
+                    try:
+                        venv.create(venv_dir, with_pip=True, clear=not os.path.exists(venv_py))
+                        req_tf = os.path.join(venv_dir, "requirements.txt")
+                        with open(req_tf, "w") as rf:
+                            rf.write(req_content)
+                        subprocess.run([venv_py, "-m", "pip", "install", "-q", "-r", req_tf], check=True)
+                        with open(hash_file, "w") as hf:
+                            hf.write(req_hash)
+                    except Exception as venv_exc:
+                        logger.warning("Failed setting up virtualenv for %s: %s; falling back to host python", bundle_name, venv_exc)
+
+                if os.path.exists(venv_py):
+                    py_executable = venv_py
+
+            subprocess.run([py_executable, tf_path], env=env, check=True)
         finally:
             if os.path.exists(tf_path):
                 os.remove(tf_path)
@@ -331,6 +395,7 @@ def generate_bundle_dag_code(
             "task_name": "{task.name}",
             "task_type": "{task_type}",
             "entrypoint": "{entrypoint}",
+            "requirements": "{task.requirements or ''}",
             "parameters": {params_json},
         }},
         execution_timeout=timedelta(seconds={timeout_sec}),
@@ -998,6 +1063,7 @@ class BundleDeployer:
                     display_label=pipe_res.name,
                     description=pipe_res.description,
                     color_hex="#10B981",
+                    webhook_enabled=bool(pipe_res.webhook_enabled),
                     user_id=user.id,
                     db=db,
                 )

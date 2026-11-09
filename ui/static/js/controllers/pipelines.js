@@ -245,10 +245,13 @@ document.addEventListener('alpine:init', () => {
           window.originalDrawerSchedule = schedData.schedule_interval;
         }
 
+        const webhookToggle = document.getElementById('drawer-webhook-toggle');
+        const webhook_enabled = webhookToggle ? webhookToggle.checked : undefined;
+
         const res = await fetch(`/api/pipelines/${encodeURIComponent(targetDagId)}/settings`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ display_label, description }),
+          body: JSON.stringify({ display_label, description, webhook_enabled }),
         });
         const data = await res.json();
         if (!res.ok) {
@@ -269,6 +272,9 @@ document.addEventListener('alpine:init', () => {
           if (description !== null) p.description = description;
           if (scheduleChanged) {
             p.schedule_interval = window.originalDrawerSchedule;
+          }
+          if (webhook_enabled !== undefined) {
+            p.webhook_enabled = webhook_enabled;
           }
           if (typeof window.renderDrawerDetails === 'function') {
             window.renderDrawerDetails(targetDagId, p);

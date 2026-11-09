@@ -169,6 +169,9 @@ class PipelineTask(BaseModel):
         "duckdb_sql", description="Task type: duckdb_sql, python_script, notebook, bash"
     )
     entrypoint: str = Field(..., description="Path to script, notebook, or SQL query file")
+    requirements: str | None = Field(
+        None, description="Path to requirements.txt or comma-separated packages"
+    )
     upstream_tasks: list[str] = Field(
         default_factory=list, description="Names of upstream dependency tasks"
     )
@@ -201,6 +204,9 @@ class PipelineResource(BaseModel):
     name: str = Field(..., description="Pipeline / DAG identifier")
     description: str | None = Field(None, description="Pipeline purpose description")
     schedule: str | None = Field(None, description="Cron schedule expression (e.g. '0 2 * * *')")
+    webhook_enabled: bool = Field(
+        False, description="Whether pipeline accepts direct inbound webhook triggers"
+    )
     compute: str | None = Field(None, description="Target compute cluster/worker queue")
     tasks: list[PipelineTask] = Field(default_factory=list, description="Ordered or DAG task list")
     tags: list[str] = Field(default_factory=list, description="Pipeline tags")
