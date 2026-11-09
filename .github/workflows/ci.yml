@@ -296,8 +296,12 @@ jobs:
               TAG_RELEASED="✅ Tag already exists (\`$BUILD_TAG\`)"
             else
               git tag -a "$BUILD_TAG" -m "Automated build release $BUILD_TAG from CI run #${{ github.run_number }}"
-              git push origin "$BUILD_TAG"
-              TAG_RELEASED="🚀 Released & Pushed to Git (\`$BUILD_TAG\`)"
+              if git push origin "$BUILD_TAG" 2>/dev/null; then
+                TAG_RELEASED="🚀 Released & Pushed to Git (\`$BUILD_TAG\`)"
+              else
+                echo "Notice: Skipping remote tag push (GITHUB_TOKEN is read-only under organization policy)"
+                TAG_RELEASED="🏷️ Generated (\`$BUILD_TAG\`) — read-only token"
+              fi
             fi
           elif [ "$ALL_SUCCESS" != "true" ]; then
             TAG_RELEASED="❌ Build Failed (No Tag Created)"
