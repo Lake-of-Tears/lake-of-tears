@@ -63,9 +63,19 @@ def test_get_storage_page_renders_native_template():
         assert 'id="delete-modal"' in response.text
         assert "s3://datalake" in response.text
 
+        # Verify platform-native branding and no leaked engine jargon
+        assert "Lake storage explorer, Parquet schema inspector, and interactive SQL query interface." in response.text
+        assert "Query in SQL Editor" in response.text
+        assert "Query folder in SQL Editor" in response.text
+        assert "This notebook was executed and archived to lake storage." in response.text
+        assert "Standard object stored in lake storage bucket" in response.text
+        assert "The object will be permanently removed from storage." in response.text
+        assert "MinIO" not in response.text
+        assert "DuckDB" not in response.text
 
-def test_storage_page_superadmin_escape_hatch():
-    # 1. Non-superadmin should NOT see the external console link
+
+def test_storage_page_no_minio_console_link_even_for_superadmin():
+    # Neither regular users nor superadmins should see the removed MinIO Admin Console link
     user_token, mock_workspaces = _create_auth_cookie(role="member", global_role="user")
     mock_stats = {
         "ok": True,
@@ -88,7 +98,6 @@ def test_storage_page_superadmin_escape_hatch():
         assert resp.status_code == 200
         assert "MinIO Admin Console" not in resp.text
 
-    # 2. Superadmin SHOULD see the external console link
     admin_token, mock_workspaces = _create_auth_cookie(role="admin", global_role="superadmin")
     with (
         patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
@@ -99,7 +108,9 @@ def test_storage_page_superadmin_escape_hatch():
             cookies={"lake_token": admin_token, main._WORKSPACE_COOKIE: "ws-1"},
         )
         assert resp.status_code == 200
-        assert "MinIO Admin Console" in resp.text
+        assert "MinIO Admin Console" not in resp.text
+        assert "MinIO" not in resp.text
+        assert "DuckDB" not in resp.text
 
 
 def test_sql_editor_prefills_query_param():

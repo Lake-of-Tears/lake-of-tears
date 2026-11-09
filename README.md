@@ -491,7 +491,6 @@ For full details on TOON syntax, deep parameter mappings, and zero-disk streamin
 | `SUPERSET_SECRET_KEY` | no | auto | Superset Flask secret key |
 | `AIRFLOW_PASSWORD` | yes | — | Airflow admin password (web UI and REST API); applied on start |
 | `AIRFLOW_SECRET_KEY` | no | auto | Airflow Flask secret key |
-| `MINIO_CONSOLE_URL` | no | `http://minio.localhost` | URL for the "Open MinIO Console" link in the Storage page |
 
 **Configuration & Helm Values**
 

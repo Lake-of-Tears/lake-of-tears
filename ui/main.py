@@ -99,7 +99,6 @@ MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "datalake")
-MINIO_CONSOLE_URL = os.getenv("MINIO_CONSOLE_URL", "http://localhost:9001")
 SUPERSET_URL = os.getenv("SUPERSET_URL", "http://localhost:8088")
 JUPYTER_TOKEN = os.getenv("JUPYTER_TOKEN", "")
 
@@ -1797,7 +1796,6 @@ async def storage(request: Request):
             "request": request,
             "stats": stats,
             "page": "storage",
-            "minio_console_url": MINIO_CONSOLE_URL,
             "minio_bucket": MINIO_BUCKET,
             "is_superadmin": is_superadmin,
             "user_role": user_role,
@@ -4968,7 +4966,7 @@ async def api_workspace_manifest(request: Request):
     # 5. Storage Sources
     for src in SOURCES:
         src_label = SOURCE_LABELS.get(src, src.title())
-        src_desc = f"MinIO S3 prefix: raw/{src}/"
+        src_desc = f"Lake storage prefix: raw/{src}/"
         items.append(
             {
                 "category": "Storage",
@@ -4989,7 +4987,7 @@ async def api_workspace_manifest(request: Request):
             "subtitle": "Declarative Lake Asset Bundles (LABs)",
             "url": "/bundles",
         },
-        {"title": "Storage", "subtitle": "MinIO S3 data lake buckets", "url": "/storage"},
+        {"title": "Storage", "subtitle": "Lake storage buckets & objects", "url": "/storage"},
         {"title": "SQL Editor", "subtitle": "DuckDB SQL queries", "url": "/sql"},
         {"title": "Visualizations", "subtitle": "Apache Superset dashboards", "url": "/dashboards"},
         {"title": "Pipelines", "subtitle": "Apache Airflow DAGs", "url": "/pipelines"},
@@ -5344,7 +5342,7 @@ async def api_workspace_search(request: Request, q: str = ""):
     # 5. Storage Sources (S3 / MinIO)
     for src in SOURCES:
         src_label = SOURCE_LABELS.get(src, src.title())
-        src_desc = f"MinIO S3 prefix: raw/{src}/"
+        src_desc = f"Lake storage prefix: raw/{src}/"
         if not query or query in src.lower() or query in src_label.lower():
             results.append(
                 {
@@ -5366,7 +5364,7 @@ async def api_workspace_search(request: Request, q: str = ""):
             "subtitle": "Declarative Lake Asset Bundles (LABs)",
             "url": "/bundles",
         },
-        {"title": "Storage", "subtitle": "MinIO S3 data lake buckets", "url": "/storage"},
+        {"title": "Storage", "subtitle": "Lake storage buckets & objects", "url": "/storage"},
         {"title": "SQL Editor", "subtitle": "DuckDB SQL queries", "url": "/sql"},
         {"title": "Visualizations", "subtitle": "Apache Superset dashboards", "url": "/dashboards"},
         {"title": "Pipelines", "subtitle": "Apache Airflow DAGs", "url": "/pipelines"},

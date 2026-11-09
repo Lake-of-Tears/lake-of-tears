@@ -14,7 +14,7 @@
         </span>
       </div>
       <p class="text-sm text-gray-400 mt-1">
-        Native MinIO object lake explorer, Parquet schema inspector, and DuckDB analytical interface.
+        Lake storage explorer, Parquet schema inspector, and interactive SQL query interface.
       </p>
     </div>
 
@@ -34,18 +34,6 @@
         </svg>
         Refresh
       </button>
-
-      {% if is_superadmin and minio_console_url %}
-      <!-- Superadmin-only escape hatch to legacy MinIO Console -->
-      <a href="{{ minio_console_url }}" target="_blank"
-         class="btn-ghost text-xs gap-1.5 text-gray-500 hover:text-gray-300"
-         title="Open external MinIO server console (Superadmin only)">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
-        </svg>
-        MinIO Admin Console
-      </a>
-      {% endif %}
     </div>
   </div>
 
@@ -314,7 +302,7 @@
               <span id="modal-nb-status-badge" class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-900/30 text-emerald-400 border border-emerald-800/40">Executed Successfully</span>
             </div>
             <p class="text-gray-400 leading-relaxed">
-              This Jupyter Notebook was executed and archived to MinIO object storage. You can download the completed notebook file to view all code cells, markdown descriptions, charts, and execution outputs in JupyterLab or VS Code.
+              This notebook was executed and archived to lake storage. You can download the completed notebook file to view all code cells, markdown descriptions, charts, and execution outputs in JupyterLab or VS Code.
             </p>
           </div>
         </div>
@@ -346,7 +334,7 @@
       <!-- Generic File Section -->
       <div id="modal-generic-section" class="hidden space-y-4">
         <div class="p-4 rounded-lg bg-gray-800/40 border border-gray-700/60 text-xs text-gray-400">
-          Standard object stored in MinIO S3 bucket <span class="font-mono text-gray-300">{{ minio_bucket|default('datalake') }}</span>. Download the object to view its raw contents locally.
+          Standard object stored in lake storage bucket <span class="font-mono text-gray-300">{{ minio_bucket|default('datalake') }}</span>. Download the object to view its raw contents locally.
         </div>
       </div>
 
@@ -371,7 +359,7 @@
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
           </svg>
-          Query in DuckDB
+          Query in SQL Editor
         </a>
       </div>
     </div>
@@ -399,7 +387,7 @@
     </div>
 
     <p class="text-xs text-gray-500">
-      This action is irreversible. The object will be permanently removed from MinIO storage.
+      This action is irreversible. The object will be permanently removed from storage.
     </p>
 
     <div class="flex items-center justify-end gap-3 pt-2 border-t border-gray-800">
@@ -663,7 +651,7 @@
           <td class="px-5 py-3 text-right text-gray-500 tabular-nums">—</td>
           <td class="px-5 py-3 text-right">
             <div class="flex items-center justify-end gap-1.5 opacity-80 group-hover:opacity-100 transition-opacity">
-              <a href="/sql?q=${folderQuerySql}" class="btn-ghost text-[11px] py-1 px-2 text-blue-400 hover:text-blue-300" title="Query all Parquet files in folder with DuckDB">
+              <a href="/sql?q=${folderQuerySql}" class="btn-ghost text-[11px] py-1 px-2 text-blue-400 hover:text-blue-300" title="Query folder in SQL Editor">
                 <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
                 </svg>
@@ -725,7 +713,7 @@
                 <button onclick="inspectObject('${escapeHtml(f.key)}', true, false)" class="btn-ghost text-[11px] py-1 px-2 text-emerald-400 hover:text-emerald-300" title="Inspect Parquet schema and metadata">
                   Schema
                 </button>
-                <a href="/sql?q=${fileQuerySql}" class="btn-ghost text-[11px] py-1 px-2 text-blue-400 hover:text-blue-300" title="Query in DuckDB">
+                <a href="/sql?q=${fileQuerySql}" class="btn-ghost text-[11px] py-1 px-2 text-blue-400 hover:text-blue-300" title="Query in SQL Editor">
                   Query
                 </a>
               ` : f.is_notebook ? `
