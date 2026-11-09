@@ -64,7 +64,10 @@ def test_get_storage_page_renders_native_template():
         assert "s3://datalake" in response.text
 
         # Verify platform-native branding and no leaked engine jargon
-        assert "Lake storage explorer, Parquet schema inspector, and interactive SQL query interface." in response.text
+        assert (
+            "Lake storage explorer, Parquet schema inspector, and interactive SQL query interface."
+            in response.text
+        )
         assert "Query in SQL Editor" in response.text
         assert "Query folder in SQL Editor" in response.text
         assert "This notebook was executed and archived to lake storage." in response.text
