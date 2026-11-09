@@ -92,8 +92,15 @@ def test_rendered_page_inline_scripts_syntax(route: str):
         algorithm="HS256",
     )
     mock_workspaces = [{"id": "ws-1", "name": "Default", "slug": "default", "my_role": "owner"}]
+    clean_session_config = {"session_inactivity_timeout_minutes": 60, "session_max_hours": 24}
 
-    with patch.object(main, "_fetch_workspaces", return_value=mock_workspaces):
+    # Ensure isolated session config so prior tests' httpx mocks do not pollute state
+    main._SESSION_CONFIG_CACHE = clean_session_config
+
+    with (
+        patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
+        patch.object(main, "_get_session_config", return_value=clean_session_config),
+    ):
         response = client.get(
             route,
             cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},

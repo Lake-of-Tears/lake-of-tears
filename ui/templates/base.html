@@ -641,7 +641,7 @@
   {% if request.state.user %}
   <!-- Session inactivity timeout -->
   <div id="inactivity-modal"
-       x-data="inactivityManager({{ request.state.session_config.session_inactivity_timeout_minutes | default(60) }}, {{ request.state.session_config.session_max_hours | default(24) }})"
+       x-data="inactivityManager({{ (request.state.session_config.session_inactivity_timeout_minutes if request.state.session_config and request.state.session_config.session_inactivity_timeout_minutes is number else 60) | default(60) }}, {{ (request.state.session_config.session_max_hours if request.state.session_config and request.state.session_config.session_max_hours is number else 24) | default(24) }})"
        :class="{ 'hidden': !warningActive }"
        x-cloak
        class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm">
@@ -669,10 +669,10 @@
 
   <script>
     (function() {
-      const _rawTimeout = {{ request.state.session_config.session_inactivity_timeout_minutes | default(60) }};
+      const _rawTimeout = {{ (request.state.session_config.session_inactivity_timeout_minutes if request.state.session_config and request.state.session_config.session_inactivity_timeout_minutes is number else 60) | default(60) }};
       const _TIMEOUT_MINS = Number.isFinite(Number(_rawTimeout)) ? Number(_rawTimeout) : 60;
       const _TIMEOUT_MS  = _TIMEOUT_MINS * 60 * 1000;
-      const _MAX_SESS_MS = (Number({{ request.state.session_config.session_max_hours | default(24) }}) || 24) * 3600 * 1000;
+      const _MAX_SESS_MS = (Number({{ (request.state.session_config.session_max_hours if request.state.session_config and request.state.session_config.session_max_hours is number else 24) | default(24) }}) || 24) * 3600 * 1000;
 
       // Adapt warning window: up to 5 minutes, scaled down so it never exceeds 25% of timeout (minimum 15s)
       const _WARN_MS = (_TIMEOUT_MS > 0)
