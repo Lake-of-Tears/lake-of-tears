@@ -728,3 +728,44 @@ def test_angler_bundle_e2e_lifecycle(server, angler_binary, page, tmp_path):
         or empty_state_text.is_visible()
         or not page.locator("h3", has_text="lake-analytics").is_visible()
     )
+
+
+def test_playwright_all_ui_routes_smoke_zero_page_errors(server, page):
+    """Smoke test ensuring every core UI page loads without uncaught JavaScript exceptions or SyntaxErrors."""
+    core_routes = [
+        "/pipelines",
+        "/bundles",
+        "/catalog",
+        "/dashboards",
+        "/sql",
+        "/notebooks",
+        "/ingest",
+        "/settings/workspace",
+        "/settings/admin",
+    ]
+
+    page_errors: list[str] = []
+
+    def on_page_error(err):
+        page_errors.append(str(err))
+
+    page.on("pageerror", on_page_error)
+
+    def mock_backend_get(path, token, workspace_id=None, workspace_slug=None):
+        if "trash" in path or "catalogs" in path:
+            return []
+        return {}
+
+    with patch.object(ui_main, "_backend_get", side_effect=mock_backend_get):
+        for route in core_routes:
+            page_errors.clear()
+            target_url = f"{server.url}{route}"
+            response = page.goto(target_url, wait_until="domcontentloaded", timeout=10000)
+            assert (
+                response is not None and response.status < 400
+            ), f"Failed loading {route}: status {response.status if response else 'None'}"
+            # Give Alpine.js and inline scripts time to initialize
+            page.wait_for_timeout(300)
+            assert (
+                not page_errors
+            ), f"Uncaught JavaScript exception on route '{route}': {page_errors}"
