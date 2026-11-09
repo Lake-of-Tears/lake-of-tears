@@ -5905,6 +5905,48 @@ async def ui_trigger_pipeline(request: Request, dag_id: str):
         return JSONResponse({"error": str(exc)}, status_code=502)
 
 
+@app.api_route("/api/pipelines/{workspace_slug}/{dag_id}/webhook", methods=["GET", "POST"])
+@app.api_route("/api/v1/pipelines/{workspace_slug}/{dag_id}/webhook", methods=["GET", "POST"])
+@app.api_route("/api/pipelines/{dag_id}/webhook", methods=["GET", "POST"])
+@app.api_route("/api/v1/pipelines/{dag_id}/webhook", methods=["GET", "POST"])
+async def ui_pipeline_webhook(request: Request, dag_id: str, workspace_slug: str | None = None):
+    ws = getattr(request.state, "workspace", None)
+    slug = workspace_slug or (ws.get("slug") if ws else None)
+    target_path = (
+        f"/api/v1/pipelines/{slug}/{dag_id}/webhook"
+        if slug
+        else f"/api/v1/pipelines/{dag_id}/webhook"
+    )
+
+    fwd_headers = {
+        k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")
+    }
+    raw_body = await request.body()
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.request(
+                method=request.method,
+                url=f"{BACKEND_URL}{target_path}",
+                params=dict(request.query_params),
+                content=raw_body,
+                headers=fwd_headers,
+                cookies=request.cookies,
+            )
+            content_type = resp.headers.get("content-type", "")
+            if "text/plain" in content_type:
+                return Response(
+                    content=resp.text, media_type="text/plain", status_code=resp.status_code
+                )
+            try:
+                return JSONResponse(resp.json(), status_code=resp.status_code)
+            except Exception:
+                return Response(
+                    content=resp.content, media_type=content_type, status_code=resp.status_code
+                )
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
 @app.get("/api/pipelines/{dag_id}/runs")
 @app.get("/api/v1/pipelines/{dag_id}/runs")
 async def ui_get_pipeline_runs(request: Request, dag_id: str, limit: int = 25):

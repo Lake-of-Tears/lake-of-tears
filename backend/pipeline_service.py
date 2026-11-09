@@ -389,6 +389,8 @@ async def list_workspace_dags(
                         "description": description,
                         "color_hex": color_hex,
                         "is_visible_on_timeline": meta.is_visible_on_timeline if meta else True,
+                        "webhook_enabled": bool(meta.webhook_enabled) if meta else False,
+                        "webhook_url": f"/api/v1/pipelines/{workspace_slug}/{dag_id}/webhook",
                         "is_paused": dag.get("is_paused", False),
                         "schedule_interval": schedule,
                         "next_dagrun": dag.get("next_dagrun"),
@@ -516,6 +518,8 @@ async def get_dag_details(
                 "description": description,
                 "color_hex": color_hex,
                 "is_visible_on_timeline": meta.is_visible_on_timeline if meta else True,
+                "webhook_enabled": bool(meta.webhook_enabled) if meta else False,
+                "webhook_url": f"/api/v1/pipelines/{workspace_slug}/{dag_id}/webhook",
                 "is_paused": dag.get("is_paused", False),
                 "schedule_interval": schedule,
                 "next_dagrun": dag.get("next_dagrun"),
@@ -1374,6 +1378,7 @@ def upsert_pipeline_metadata(
     display_label: str | None = None,
     description: str | None = None,
     is_visible_on_timeline: bool | None = None,
+    webhook_enabled: bool | None = None,
     user_id: uuid.UUID | None = None,
     db: Session | None = None,
 ) -> dict[str, Any]:
@@ -1401,6 +1406,7 @@ def upsert_pipeline_metadata(
             is_visible_on_timeline=True
             if is_visible_on_timeline is None
             else is_visible_on_timeline,
+            webhook_enabled=bool(webhook_enabled) if webhook_enabled is not None else False,
             updated_by=user_id,
             updated_at=datetime.now(UTC),
         )
@@ -1414,6 +1420,8 @@ def upsert_pipeline_metadata(
             row.description = description
         if is_visible_on_timeline is not None:
             row.is_visible_on_timeline = is_visible_on_timeline
+        if webhook_enabled is not None:
+            row.webhook_enabled = webhook_enabled
         row.updated_by = user_id
         row.updated_at = datetime.now(UTC)
 
@@ -1425,6 +1433,7 @@ def upsert_pipeline_metadata(
         "display_label": row.display_label,
         "description": row.description,
         "is_visible_on_timeline": row.is_visible_on_timeline,
+        "webhook_enabled": row.webhook_enabled,
     }
 
 

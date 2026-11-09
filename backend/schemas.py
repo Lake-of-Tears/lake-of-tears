@@ -1104,6 +1104,8 @@ class WebhookIngestResponse(BaseModel):
     event_id: str
     workspace_slug: str
     received_at: datetime
+    triggered_pipeline: str | None = None
+    dag_run_id: str | None = None
 
 
 class SecretScopeCreate(BaseModel):
