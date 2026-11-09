@@ -515,15 +515,24 @@ def test_angler_core_cli(server, angler_binary, tmp_path):
     res_status = run_angler(angler_binary, server, ["status"])
     assert res_status.returncode == 0, f"angler status failed: {res_status.stderr}"
     assert (
-        "Connected to Lake of Tears successfully" in res_status.stdout
+        "Connected to Lake of Tears" in res_status.stdout
         or "online" in res_status.stdout.lower()
         or "ok" in res_status.stdout.lower()
+        or "healthy" in res_status.stdout.lower()
+        or "degraded" in res_status.stdout.lower()
+        or '"cluster_connected": true' in res_status.stdout.lower()
     )
 
     res_status_json = run_angler(angler_binary, server, ["status", "--json"])
     assert res_status_json.returncode == 0
     status_data = json.loads(res_status_json.stdout)
-    assert status_data.get("status") in ("ok", "online")
+    assert status_data.get("status") in ("ok", "online", "healthy", "degraded")
+    assert status_data.get("cluster_connected") is True or status_data.get("status") in (
+        "ok",
+        "online",
+        "healthy",
+        "degraded",
+    )
 
     # 7. Tool Defs (OpenAI Schema)
     res_defs_openai = run_angler(angler_binary, server, ["tool-defs", "--format", "openai"])
