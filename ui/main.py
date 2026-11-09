@@ -338,14 +338,17 @@ app.add_middleware(AuthMiddleware)
 
 
 def _s3_client():
+    from botocore.config import Config
+
     clean_endpoint, use_ssl = duckdb_pool.parse_s3_endpoint_and_ssl(MINIO_ENDPOINT)
     scheme = "https" if use_ssl else "http"
     return boto3.client(
         "s3",
         endpoint_url=f"{scheme}://{clean_endpoint}",
-        aws_access_key_id=MINIO_ACCESS_KEY,
-        aws_secret_access_key=MINIO_SECRET_KEY,
+        aws_access_key_id=MINIO_ACCESS_KEY or "minioadmin",
+        aws_secret_access_key=MINIO_SECRET_KEY or "minioadmin",
         region_name=os.getenv("AWS_REGION", os.getenv("MINIO_REGION", "us-east-1")),
+        config=Config(connect_timeout=2, read_timeout=3, retries={"max_attempts": 1}),
     )
 
 

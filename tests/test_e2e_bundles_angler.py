@@ -756,7 +756,23 @@ def test_playwright_all_ui_routes_smoke_zero_page_errors(server, page):
             return []
         return {}
 
-    with patch.object(ui_main, "_backend_get", side_effect=mock_backend_get):
+    mock_bucket_stats = {
+        "ok": True,
+        "workspace": "default",
+        "total_objects": 0,
+        "total_size": "0 B",
+        "raw_objects": 0,
+        "raw_size": "0 B",
+        "embeddings_objects": 0,
+        "embeddings_size": "0 B",
+        "prefix_stats": {},
+        "sources": [],
+    }
+
+    with (
+        patch.object(ui_main, "_backend_get", side_effect=mock_backend_get),
+        patch.object(ui_main, "_get_bucket_stats", return_value=mock_bucket_stats),
+    ):
         for route in core_routes:
             page_errors.clear()
             target_url = f"{server.url}{route}"
