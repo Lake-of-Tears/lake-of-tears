@@ -32,7 +32,9 @@ def test_base_html_defines_semantic_css_tokens_for_dark_and_light_themes():
     for token in required_tokens:
         # Each token must appear at least twice: once in :root (dark) and once in html[data-theme="light"]
         occurrences = base_html.count(f"{token}:")
-        assert occurrences >= 2, f"Expected semantic token {token} in both dark and light scopes, found {occurrences}"
+        assert (
+            occurrences >= 2
+        ), f"Expected semantic token {token} in both dark and light scopes, found {occurrences}"
 
 
 def test_base_html_dispatches_theme_change_event_and_exposes_helpers():
@@ -111,4 +113,6 @@ def test_page_by_page_light_theme_coverage():
     ]
     for rel_path in expected_templates:
         content = (TEMPLATES_DIR / rel_path).read_text(encoding="utf-8")
-        assert 'html[data-theme="light"]' in content, f"Missing html[data-theme='light'] coverage in {rel_path}"
+        assert (
+            'html[data-theme="light"]' in content
+        ), f"Missing html[data-theme='light'] coverage in {rel_path}"
