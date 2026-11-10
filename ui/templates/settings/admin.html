@@ -3,6 +3,14 @@
 
 {% block head %}
 <script src="/static/js/controllers/admin.js"></script>
+<style>
+  html[data-theme="light"] .admin-tab-btn.border-transparent {
+    color: var(--text-secondary) !important;
+  }
+  html[data-theme="light"] .admin-tab-btn.border-transparent:hover {
+    color: var(--text-primary) !important;
+  }
+</style>
 {% endblock %}
 
 {% block content %}

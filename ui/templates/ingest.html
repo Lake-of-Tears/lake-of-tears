@@ -1,5 +1,16 @@
 {% extends "base.html" %}
 {% block title %}Add Data — Lake of Tears{% endblock %}
+{% block head %}
+<style>
+  html[data-theme="light"] #dropzone {
+    background-color: var(--surface-card) !important;
+    border-color: var(--border-strong) !important;
+  }
+  html[data-theme="light"] #dropzone:hover {
+    background-color: var(--surface-muted) !important;
+  }
+</style>
+{% endblock %}
 {% block content %}
 
 <div class="max-w-6xl mx-auto space-y-6">

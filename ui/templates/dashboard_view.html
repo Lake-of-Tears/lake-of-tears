@@ -23,6 +23,12 @@
     color: #e4e4e7 !important;
     font-size: 11px !important;
   }
+  html[data-theme="light"] .echarts-tooltip-custom {
+    background: #ffffff !important;
+    border: 1px solid #e5e7eb !important;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1) !important;
+    color: #111827 !important;
+  }
 </style>
 {% endblock %}
 
@@ -507,15 +513,27 @@
 
     const chart = echarts.init(chartDiv);
     echartsInstances[widget.id] = chart;
+    const themeCfg = (typeof getLakeEChartsThemeConfig === 'function')
+      ? getLakeEChartsThemeConfig()
+      : {
+          textColor: '#a1a1aa',
+          axisLabelColor: '#a1a1aa',
+          axisLineColor: '#3f3f46',
+          splitLineColor: '#27272a',
+          tooltipBg: '#18181b',
+          tooltipBorder: '#27272a',
+          tooltipText: '#f4f4f5',
+        };
+    const isLight = (typeof getLakeTheme === 'function') && getLakeTheme() === 'light';
 
     let option = {
       color: ECHARTS_THEME_COLORS,
       tooltip: {
         trigger: widget.type === 'pie' ? 'item' : 'axis',
         className: 'echarts-tooltip-custom',
-        backgroundColor: '#18181b',
-        borderColor: '#27272a',
-        textStyle: { color: '#f4f4f5', fontSize: 11 },
+        backgroundColor: themeCfg.tooltipBg,
+        borderColor: themeCfg.tooltipBorder,
+        textStyle: { color: themeCfg.tooltipText, fontSize: 11 },
       },
     };
 
@@ -527,13 +545,13 @@
         xAxis: {
           type: 'category',
           data: data.categories || [],
-          axisLine: { lineStyle: { color: '#3f3f46' } },
-          axisLabel: { color: '#a1a1aa', fontSize: 10 },
+          axisLine: { lineStyle: { color: themeCfg.axisLineColor } },
+          axisLabel: { color: themeCfg.axisLabelColor, fontSize: 10 },
         },
         yAxis: {
           type: 'value',
-          splitLine: { lineStyle: { color: '#27272a', type: 'dashed' } },
-          axisLabel: { color: '#a1a1aa', fontSize: 10 },
+          splitLine: { lineStyle: { color: themeCfg.splitLineColor, type: 'dashed' } },
+          axisLabel: { color: themeCfg.axisLabelColor, fontSize: 10 },
         },
         series: (data.series || []).map(s => ({
           name: s.name,
@@ -557,13 +575,13 @@
         xAxis: {
           type: 'category',
           data: data.categories || [],
-          axisLine: { lineStyle: { color: '#3f3f46' } },
-          axisLabel: { color: '#a1a1aa', fontSize: 10 },
+          axisLine: { lineStyle: { color: themeCfg.axisLineColor } },
+          axisLabel: { color: themeCfg.axisLabelColor, fontSize: 10 },
         },
         yAxis: {
           type: 'value',
-          splitLine: { lineStyle: { color: '#27272a', type: 'dashed' } },
-          axisLabel: { color: '#a1a1aa', fontSize: 10 },
+          splitLine: { lineStyle: { color: themeCfg.splitLineColor, type: 'dashed' } },
+          axisLabel: { color: themeCfg.axisLabelColor, fontSize: 10 },
         },
         series: (data.series || []).map(s => ({
           name: s.name,
@@ -578,7 +596,7 @@
         ...option,
         legend: {
           bottom: 0,
-          textStyle: { color: '#a1a1aa', fontSize: 10 },
+          textStyle: { color: themeCfg.axisLabelColor, fontSize: 10 },
           itemWidth: 10,
           itemHeight: 10,
         },
@@ -588,12 +606,12 @@
           avoidLabelOverlap: true,
           itemStyle: {
             borderRadius: 6,
-            borderColor: '#18181b',
+            borderColor: isLight ? '#ffffff' : '#18181b',
             borderWidth: 2,
           },
           label: { show: false },
           emphasis: {
-            label: { show: true, fontSize: 12, fontWeight: 'bold', color: '#fff' }
+            label: { show: true, fontSize: 12, fontWeight: 'bold', color: isLight ? '#111827' : '#fff' }
           },
           data: data.series || [],
         }],

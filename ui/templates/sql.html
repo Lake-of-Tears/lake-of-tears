@@ -2,6 +2,21 @@
 {% block title %}SQL Editor — Lake of Tears{% endblock %}
 {% block head %}
 <script src="/static/js/controllers/sql.js"></script>
+<style>
+  html[data-theme="light"] #sqlReferenceSidebar,
+  html[data-theme="light"] #queryHistoryDrawer {
+    background-color: var(--surface-card) !important;
+    border-color: var(--border-default) !important;
+  }
+  html[data-theme="light"] #monacoEditorContainer {
+    background-color: var(--surface-card) !important;
+  }
+  html[data-theme="light"] #sqlResultsTable thead th {
+    background-color: var(--surface-muted) !important;
+    color: var(--text-secondary) !important;
+    border-bottom-color: var(--border-default) !important;
+  }
+</style>
 {% endblock %}
 {% block content %}
 {% set has_ai = (ai_info is defined and ai_info and ai_info.provider) %}
@@ -585,6 +600,43 @@ if (typeof require !== "undefined") {
       },
     });
 
+    // Custom light theme matching Lake of Tears Light Mode
+    monaco.editor.defineTheme("lake-light", {
+      base: "vs",
+      inherit: true,
+      rules: [
+        { token: "keyword", foreground: "1d4ed8", fontStyle: "bold" },
+        { token: "string", foreground: "15803d" },
+        { token: "number", foreground: "b45309" },
+        { token: "comment", foreground: "6b7280", fontStyle: "italic" },
+        { token: "delimiter", foreground: "475569" },
+        { token: "operator", foreground: "be185d" },
+      ],
+      colors: {
+        "editor.background": "#ffffff",
+        "editor.foreground": "#111827",
+        "editorLineNumber.foreground": "#9ca3af",
+        "editorLineNumber.activeForeground": "#374151",
+        "editor.lineHighlightBackground": "#f8fafc",
+        "editorCursor.foreground": "#2563eb",
+        "editor.selectionBackground": "#bfdbfe88",
+        "editor.inactiveSelectionBackground": "#e2e8f066",
+      },
+    });
+
+    function resolveMonacoTheme() {
+      const isLight = (typeof getLakeTheme === "function")
+        ? getLakeTheme() === "light"
+        : document.documentElement.getAttribute("data-theme") === "light";
+      return isLight ? "lake-light" : "lake-dark";
+    }
+
+    function syncMonacoTheme() {
+      if (typeof monaco !== "undefined" && monaco.editor) {
+        monaco.editor.setTheme(resolveMonacoTheme());
+      }
+    }
+
     // Register Document Formatting Edit Provider for SQL
     monaco.languages.registerDocumentFormattingEditProvider("sql", {
       provideDocumentFormattingEdits: function (model, options, token) {
@@ -610,7 +662,7 @@ if (typeof require !== "undefined") {
     monacoEditor = monaco.editor.create(container, {
       value: initialVal,
       language: "sql",
-      theme: "lake-dark",
+      theme: resolveMonacoTheme(),
       automaticLayout: true,
       fontSize: 13,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
@@ -624,6 +676,21 @@ if (typeof require !== "undefined") {
       fixedOverflowWidgets: true,
       suggestOnTriggerCharacters: true,
     });
+
+    window.addEventListener("lake:theme-change", syncMonacoTheme);
+    if (typeof MutationObserver !== "undefined") {
+      const monacoThemeObserver = new MutationObserver((mutations) => {
+        for (const m of mutations) {
+          if (m.type === "attributes" && m.attributeName === "data-theme") {
+            syncMonacoTheme();
+          }
+        }
+      });
+      monacoThemeObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["data-theme"],
+      });
+    }
 
     monacoEditor.onDidChangeModelContent(() => {
       if (textarea) textarea.value = monacoEditor.getValue();

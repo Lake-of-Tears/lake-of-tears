@@ -1,5 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Account Settings — Lake of Tears{% endblock %}
+{% block head %}
+<style>
+  html[data-theme="light"] .card {
+    background-color: var(--surface-card) !important;
+    border-color: var(--border-default) !important;
+  }
+</style>
+{% endblock %}
 
 {% block content %}
 <div class="max-w-2xl">

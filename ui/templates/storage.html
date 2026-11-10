@@ -1,5 +1,24 @@
 {% extends "base.html" %}
 {% block title %}Storage Explorer — Lake of Tears{% endblock %}
+{% block head %}
+<style>
+  html[data-theme="light"] #preview-drawer,
+  html[data-theme="light"] #upload-modal > div,
+  html[data-theme="light"] #delete-modal > div {
+    background-color: var(--surface-elevated) !important;
+    border-color: var(--border-default) !important;
+    color: var(--text-primary) !important;
+  }
+  html[data-theme="light"] #breadcrumb-container a,
+  html[data-theme="light"] #breadcrumb-container button {
+    color: var(--text-secondary) !important;
+  }
+  html[data-theme="light"] #breadcrumb-container a:hover,
+  html[data-theme="light"] #breadcrumb-container button:hover {
+    color: var(--text-primary) !important;
+  }
+</style>
+{% endblock %}
 {% block content %}
 
 <div class="max-w-7xl mx-auto space-y-6 pb-12">

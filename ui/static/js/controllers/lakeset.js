@@ -421,21 +421,38 @@ document.addEventListener('alpine:init', () => {
       if (typeof echarts !== 'undefined') {
         container.innerHTML = '';
         const chart = echarts.init(container);
+        const themeCfg = typeof getLakeEChartsThemeConfig === 'function'
+          ? getLakeEChartsThemeConfig()
+          : {
+              textColor: '#d1d5db',
+              axisLabelColor: '#9ca3af',
+              axisLineColor: 'rgba(255,255,255,0.08)',
+              splitLineColor: '#1f2937',
+              tooltipBg: 'rgba(17,24,39,0.95)',
+              tooltipBorder: 'rgba(255,255,255,0.1)',
+              tooltipText: '#f3f4f6',
+            };
+        const isLight = typeof getLakeTheme === 'function' && getLakeTheme() === 'light';
         if (cType === 'pie') {
           chart.setOption({
             backgroundColor: 'transparent',
-            tooltip: { trigger: 'item' },
+            tooltip: {
+              trigger: 'item',
+              backgroundColor: themeCfg.tooltipBg,
+              borderColor: themeCfg.tooltipBorder,
+              textStyle: { color: themeCfg.tooltipText },
+            },
             legend: {
               bottom: 0,
-              textStyle: { color: '#9ca3af', fontSize: 11 },
+              textStyle: { color: themeCfg.axisLabelColor, fontSize: 11 },
             },
             series: [
               {
                 type: 'pie',
                 radius: ['38%', '68%'],
                 center: ['50%', '45%'],
-                itemStyle: { borderRadius: 4, borderColor: '#111827', borderWidth: 2 },
-                label: { color: '#d1d5db', fontSize: 11 },
+                itemStyle: { borderRadius: 4, borderColor: isLight ? '#ffffff' : '#111827', borderWidth: 2 },
+                label: { color: themeCfg.textColor, fontSize: 11 },
                 data: d.series || [
                   { name: 'Bronze', value: 450 },
                   { name: 'Silver', value: 310 },
@@ -462,13 +479,19 @@ document.addEventListener('alpine:init', () => {
           );
           chart.setOption({
             backgroundColor: 'transparent',
-            tooltip: { trigger: 'axis' },
+            tooltip: {
+              trigger: 'axis',
+              backgroundColor: themeCfg.tooltipBg,
+              borderColor: themeCfg.tooltipBorder,
+              textStyle: { color: themeCfg.tooltipText },
+            },
             grid: { left: 56, right: 20, top: 24, bottom: 64 },
             xAxis: {
               type: 'category',
               data: cats,
+              axisLine: { lineStyle: { color: themeCfg.axisLineColor } },
               axisLabel: {
-                color: '#9ca3af',
+                color: themeCfg.axisLabelColor,
                 fontSize: 10,
                 rotate: cats.length > 5 ? 22 : 0,
                 formatter: (val) => (val && val.length > 20 ? val.slice(0, 18) + '…' : val),
@@ -476,8 +499,8 @@ document.addEventListener('alpine:init', () => {
             },
             yAxis: {
               type: 'value',
-              axisLabel: { color: '#9ca3af', fontSize: 11 },
-              splitLine: { lineStyle: { color: '#1f2937' } },
+              axisLabel: { color: themeCfg.axisLabelColor, fontSize: 11 },
+              splitLine: { lineStyle: { color: themeCfg.splitLineColor } },
             },
             series: seriesArr,
           });

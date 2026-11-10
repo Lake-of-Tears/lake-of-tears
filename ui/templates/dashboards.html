@@ -2,6 +2,12 @@
 {% block title %}Dashboards · Lake of Tears{% endblock %}
 {% block head %}
 <script src="/static/js/controllers/dashboards.js"></script>
+<style>
+  html[data-theme="light"] #dashboards-gallery .card {
+    background-color: var(--surface-card) !important;
+    border-color: var(--border-default) !important;
+  }
+</style>
 {% endblock %}
 
 {% block content %}

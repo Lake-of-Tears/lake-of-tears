@@ -1,5 +1,16 @@
 {% extends "base.html" %}
 {% block title %}AI Query &amp; Genie Analyst — Lake of Tears{% endblock %}
+{% block head %}
+<style>
+  html[data-theme="light"] #genieChatThread {
+    background-color: var(--surface-card) !important;
+    border-color: var(--border-default) !important;
+  }
+  html[data-theme="light"] .prose-invert {
+    color: var(--text-primary) !important;
+  }
+</style>
+{% endblock %}
 {% block content %}
 
 <!-- Apache ECharts for Genie Auto-Visualizations -->
@@ -407,15 +418,35 @@ function renderGenieEChart(el, turn) {
 
   const chart = echarts.init(el);
   const xLabels = rows.map(r => String(r[xIdx] ?? ""));
+  const themeCfg = (typeof getLakeEChartsThemeConfig === "function")
+    ? getLakeEChartsThemeConfig()
+    : {
+        textColor: "#d1d5db",
+        axisLabelColor: "#9ca3af",
+        axisLineColor: "rgba(255,255,255,0.08)",
+        splitLineColor: "#1f2937",
+        tooltipBg: "rgba(17,24,39,0.95)",
+        tooltipBorder: "rgba(255,255,255,0.1)",
+        tooltipText: "#f3f4f6"
+      };
 
   if (cfg.type === "pie") {
     const yIdx = Math.max(0, cols.indexOf(yCols[0]));
     chart.setOption({
       backgroundColor: "transparent",
-      tooltip: { trigger: "item" },
+      tooltip: {
+        trigger: "item",
+        backgroundColor: themeCfg.tooltipBg,
+        borderColor: themeCfg.tooltipBorder,
+        textStyle: { color: themeCfg.tooltipText }
+      },
+      legend: {
+        textStyle: { color: themeCfg.textColor }
+      },
       series: [{
         type: "pie",
         radius: ["40%", "70%"],
+        label: { color: themeCfg.textColor },
         data: rows.map(r => ({ name: String(r[xIdx] ?? ""), value: Number(r[yIdx]) || 0 }))
       }]
     });
@@ -434,10 +465,24 @@ function renderGenieEChart(el, turn) {
 
   chart.setOption({
     backgroundColor: "transparent",
-    tooltip: { trigger: "axis" },
+    tooltip: {
+      trigger: "axis",
+      backgroundColor: themeCfg.tooltipBg,
+      borderColor: themeCfg.tooltipBorder,
+      textStyle: { color: themeCfg.tooltipText }
+    },
     grid: { left: 48, right: 20, top: 24, bottom: 28 },
-    xAxis: { type: "category", data: xLabels, axisLabel: { color: "#9ca3af", fontSize: 10 } },
-    yAxis: { type: "value", axisLabel: { color: "#9ca3af", fontSize: 10 }, splitLine: { lineStyle: { color: "#1f2937" } } },
+    xAxis: {
+      type: "category",
+      data: xLabels,
+      axisLine: { lineStyle: { color: themeCfg.axisLineColor } },
+      axisLabel: { color: themeCfg.axisLabelColor, fontSize: 10 }
+    },
+    yAxis: {
+      type: "value",
+      axisLabel: { color: themeCfg.axisLabelColor, fontSize: 10 },
+      splitLine: { lineStyle: { color: themeCfg.splitLineColor } }
+    },
     series: series
   });
 }

@@ -7,6 +7,12 @@
   window.USER_ROLE = "{{ my_role }}";
 </script>
 <script src="/static/js/controllers/bundles.js?v=20261108_2"></script>
+<style>
+  html[data-theme="light"] #bundles-container .card {
+    background-color: var(--surface-card) !important;
+    border-color: var(--border-default) !important;
+  }
+</style>
 {% endblock %}
 
 {% block content %}

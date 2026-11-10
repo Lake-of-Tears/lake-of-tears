@@ -3,6 +3,12 @@
 
 {% block head %}
 <script src="/static/js/controllers/workspace-secrets.js"></script>
+<style>
+  html[data-theme="light"] .card {
+    background-color: var(--surface-card) !important;
+    border-color: var(--border-default) !important;
+  }
+</style>
 {% endblock %}
 
 {% block content %}

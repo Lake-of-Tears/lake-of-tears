@@ -40,6 +40,24 @@
   .CodeMirror-selected {
     background: rgba(59, 130, 246, 0.3) !important;
   }
+  html[data-theme="light"] .CodeMirror {
+    background: #ffffff !important;
+    color: #111827 !important;
+    border: 1px solid #e5e7eb;
+  }
+  html[data-theme="light"] .CodeMirror-gutters {
+    background: #f9fafb !important;
+    border-right: 1px solid #e5e7eb !important;
+  }
+  html[data-theme="light"] .CodeMirror-linenumber {
+    color: #9ca3af !important;
+  }
+  html[data-theme="light"] .CodeMirror-selected {
+    background: rgba(59, 130, 246, 0.18) !important;
+  }
+  html[data-theme="light"] .prose-invert {
+    color: #111827 !important;
+  }
   .cell-focused {
     border-color: #3b82f6 !important;
     box-shadow: 0 0 0 1px #3b82f6;
@@ -53,16 +71,16 @@
   }
   .dataframe-table th, .dataframe-table td {
     padding: 6px 12px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
     text-align: left;
   }
   .dataframe-table th {
-    background: #1f2937;
-    color: #9ca3af;
+    background: var(--surface-muted, #1f2937);
+    color: var(--text-secondary, #9ca3af);
     font-weight: 600;
   }
   .dataframe-table tr:hover {
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--surface-hover, rgba(255, 255, 255, 0.02));
   }
 </style>
 {% endblock %}
@@ -1654,9 +1672,10 @@ function createCellElement(cell, idx) {
   setTimeout(() => {
     const textarea = document.getElementById(`textarea-${idx}`);
     if (textarea) {
+      const initialCmTheme = (typeof getLakeTheme === 'function' && getLakeTheme() === 'light') ? 'default' : 'dracula';
       const cm = CodeMirror.fromTextArea(textarea, {
         mode: isCode ? 'python' : 'markdown',
-        theme: 'dracula',
+        theme: initialCmTheme,
         lineNumbers: isCode,
         readOnly: IS_VIEWER,
         autoCloseBrackets: true,
@@ -1674,6 +1693,33 @@ function createCellElement(cell, idx) {
   }, 0);
 
   return cellDiv;
+}
+
+function syncCodeMirrorTheme() {
+  const isLight = (typeof getLakeTheme === 'function')
+    ? getLakeTheme() === 'light'
+    : document.documentElement.getAttribute('data-theme') === 'light';
+  const cmTheme = isLight ? 'default' : 'dracula';
+  Object.values(codeMirrorInstances || {}).forEach(cm => {
+    if (cm && typeof cm.setOption === 'function') {
+      cm.setOption('theme', cmTheme);
+    }
+  });
+}
+
+window.addEventListener('lake:theme-change', syncCodeMirrorTheme);
+if (typeof MutationObserver !== 'undefined') {
+  const cmThemeObserver = new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      if (m.type === 'attributes' && m.attributeName === 'data-theme') {
+        syncCodeMirrorTheme();
+      }
+    }
+  });
+  cmThemeObserver.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['data-theme'],
+  });
 }
 
 function setActiveCell(idx) {
