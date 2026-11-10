@@ -7,12 +7,13 @@ import uuid
 from typing import Any
 
 import ai_service
-from auth import get_current_user, get_user_accessible_workspaces
+from auth import get_current_user, get_user_accessible_workspaces, is_effective_superadmin
 from database import get_db
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import StreamingResponse
-from models import User
+from models import CatalogTable, User
 from pydantic import BaseModel, ConfigDict, Field
+from schemas import VectorChunkResult, VectorRetrieveRequest, VectorRetrieveResponse
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger("lake.backend.ai.openai_compat")
@@ -418,3 +419,360 @@ def create_embeddings(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Embedding generation failed: {exc}",
         ) from exc
+
+
+class OpenAIVectorStoreSearchRequest(BaseModel):
+    query: str | list[str]
+    max_num_results: int = Field(default=10, ge=1, le=50)
+    top_k: int | None = None
+    score_threshold: float | None = None
+    ranking_options: dict[str, Any] | None = None
+    filters: dict[str, Any] | None = None
+    rewrite_query: bool = False
+
+
+def execute_vector_retrieve_request(
+    req: VectorRetrieveRequest,
+    current_user: User,
+    db: Session,
+) -> VectorRetrieveResponse:
+    """Shared RBAC-enforced vector retrieval implementation for /retrieve and /vector_stores/{id}/search."""
+    query_str = (req.query or "").strip()
+    if not query_str:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="query cannot be empty.",
+        )
+
+    cat_filter = (req.catalog or req.catalog_slug or "").strip() or None
+    sch_filter = (req.schema_name or req.schema_slug or "").strip() or None
+    tbl_filter = (req.table or req.table_slug or "").strip() or None
+
+    scope = ai_service.resolve_user_ai_scope(
+        db=db,
+        user=current_user,
+        workspace_slug=req.workspace_slug,
+        catalog_filter=cat_filter,
+        schema_filter=sch_filter,
+        table_filter=tbl_filter,
+    )
+
+    if tbl_filter and not scope["is_superadmin"]:
+        tf_lower = tbl_filter.lower()
+        found_in_authorized = any(
+            (tbl.get("slug") or "").lower() == tf_lower
+            or (tbl.get("name") or "").lower() == tf_lower
+            for cat in scope["catalogs"]
+            for sch in (cat.get("schemas") or [])
+            for tbl in (sch.get("tables") or [])
+        )
+        if not found_in_authorized:
+            exists_in_db = (
+                db.query(CatalogTable)
+                .filter((CatalogTable.slug == tbl_filter) | (CatalogTable.name == tbl_filter))
+                .first()
+            )
+            if exists_in_db:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Forbidden: You do not have permission to access table '{tbl_filter}'.",
+                )
+
+    has_granular_filter = bool(cat_filter or sch_filter or tbl_filter)
+    raw = ai_service.retrieve_vector_chunks(
+        query=query_str,
+        workspace_slug=scope["primary_workspace"].slug,
+        catalogs=scope["catalogs"],
+        allowed_patterns=scope["allowed_patterns"],
+        catalog_slug=cat_filter,
+        schema_slug=sch_filter,
+        table_slug=tbl_filter,
+        top_k=req.top_k,
+        score_threshold=req.score_threshold,
+        include_workspace_pattern=(bool(req.workspace_slug) and not has_granular_filter),
+    )
+
+    if not raw.get("ok"):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=raw.get("error") or "Vector retrieval failed",
+        )
+
+    chunk_items = [
+        VectorChunkResult(
+            id=str(c["id"]),
+            chunk_id=str(c.get("chunk_id") or c["id"]),
+            row_id=c.get("row_id"),
+            text=str(c["text"]),
+            page_content=str(c["page_content"]),
+            score=float(c["score"]),
+            source=str(c["source"]),
+            ingested_at=c.get("ingested_at"),
+            metadata=dict(c.get("metadata") or {}),
+        )
+        for c in raw.get("chunks", [])
+    ]
+    return VectorRetrieveResponse(
+        ok=True,
+        query=query_str,
+        model=raw.get("model"),
+        dimension=raw.get("dimension"),
+        total_results=len(chunk_items),
+        results=chunk_items,
+        error=None,
+    )
+
+
+@router.post("/retrieve", response_model=VectorRetrieveResponse)
+@router.post("/vector/search", response_model=VectorRetrieveResponse)
+def retrieve_vectors_endpoint(
+    req: VectorRetrieveRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> VectorRetrieveResponse:
+    """Permission-aware semantic vector chunk retrieval endpoint for RAG pipelines and external harnesses."""
+    return execute_vector_retrieve_request(req=req, current_user=current_user, db=db)
+
+
+@router.get("/vector_stores")
+def list_openai_vector_stores(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """List caller-accessible workspaces and vector-indexed catalog tables as OpenAI vector_store objects."""
+    now_ts = int(time.time())
+    is_super = is_effective_superadmin(current_user)
+    workspaces = get_user_accessible_workspaces(db, current_user)
+
+    stores: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
+    if is_super:
+        stores.append(
+            {
+                "id": "all",
+                "object": "vector_store",
+                "created_at": now_ts,
+                "name": "All Lake of Tears Workspaces & Catalogs",
+                "status": "completed",
+                "usage_bytes": 0,
+                "file_counts": {
+                    "in_progress": 0,
+                    "completed": len(workspaces),
+                    "failed": 0,
+                    "cancelled": 0,
+                    "total": len(workspaces),
+                },
+                "metadata": {"scope": "all"},
+            }
+        )
+        seen_ids.add("all")
+
+    for ws in workspaces:
+        if ws.slug not in seen_ids:
+            seen_ids.add(ws.slug)
+            stores.append(
+                {
+                    "id": ws.slug,
+                    "object": "vector_store",
+                    "created_at": now_ts,
+                    "name": f"Workspace: {ws.name} ({ws.slug})",
+                    "status": "completed",
+                    "usage_bytes": 0,
+                    "file_counts": {
+                        "in_progress": 0,
+                        "completed": 1,
+                        "failed": 0,
+                        "cancelled": 0,
+                        "total": 1,
+                    },
+                    "metadata": {"workspace_slug": ws.slug},
+                }
+            )
+
+        ws_cats = ai_service.get_workspace_catalogs_from_db(
+            db,
+            ws.id,
+            user_id=None if is_super else current_user.id,
+        )
+        for cat in ws_cats:
+            cat_slug = str(cat.get("slug") or cat.get("name") or ws.slug)
+            for sch in cat.get("schemas") or []:
+                sch_slug = str(sch.get("slug") or sch.get("name") or "default")
+                for tbl in sch.get("tables") or []:
+                    tbl_slug = str(tbl.get("slug") or tbl.get("name") or "")
+                    vec_cfg = tbl.get("vector_index") or {}
+                    if not tbl_slug:
+                        continue
+                    has_vec = isinstance(vec_cfg, dict) and bool(
+                        (vec_cfg.get("s3_vector_path") or "").strip()
+                        or vec_cfg.get("enabled")
+                        or vec_cfg.get("status") == "ready"
+                    )
+                    if not has_vec:
+                        continue
+                    vs_id = f"{ws.slug}:{cat_slug}.{sch_slug}.{tbl_slug}"
+                    if vs_id not in seen_ids:
+                        seen_ids.add(vs_id)
+                        stores.append(
+                            {
+                                "id": vs_id,
+                                "object": "vector_store",
+                                "created_at": now_ts,
+                                "name": f"{cat_slug}.{sch_slug}.{tbl_slug}",
+                                "status": "completed",
+                                "usage_bytes": 0,
+                                "file_counts": {
+                                    "in_progress": 0,
+                                    "completed": 1,
+                                    "failed": 0,
+                                    "cancelled": 0,
+                                    "total": 1,
+                                },
+                                "metadata": {
+                                    "workspace_slug": ws.slug,
+                                    "catalog": cat_slug,
+                                    "schema": sch_slug,
+                                    "table": tbl_slug,
+                                },
+                            }
+                        )
+
+    return {
+        "object": "list",
+        "data": stores,
+        "first_id": stores[0]["id"] if stores else None,
+        "last_id": stores[-1]["id"] if stores else None,
+        "has_more": False,
+    }
+
+
+def _parse_vector_store_identifier(
+    vector_store_id: str,
+    filters: dict[str, Any] | None = None,
+) -> tuple[str | None, str | None, str | None, str | None]:
+    """Resolve an OpenAI vector_store_id and optional filters into (workspace_slug, catalog, schema, table)."""
+    raw_id = (vector_store_id or "").strip()
+    ws_slug: str | None = None
+    cat_filter: str | None = None
+    sch_filter: str | None = None
+    tbl_filter: str | None = None
+
+    if raw_id in ("", "all", "*"):
+        ws_slug = None
+    elif ":" in raw_id:
+        ws_part, rest = raw_id.split(":", 1)
+        ws_slug = ws_part.strip() or None
+        if ws_slug in ("all", "*"):
+            ws_slug = None
+        parts = [p.strip() for p in rest.split(".") if p.strip()]
+        if len(parts) >= 1:
+            cat_filter = parts[0]
+        if len(parts) >= 2:
+            sch_filter = parts[1]
+        if len(parts) >= 3:
+            tbl_filter = ".".join(parts[2:])
+    elif "." in raw_id:
+        parts = [p.strip() for p in raw_id.split(".") if p.strip()]
+        if len(parts) >= 1:
+            cat_filter = parts[0]
+        if len(parts) >= 2:
+            sch_filter = parts[1]
+        if len(parts) >= 3:
+            tbl_filter = ".".join(parts[2:])
+    else:
+        ws_slug = raw_id
+
+    if isinstance(filters, dict):
+        # Support both direct dict filters {"catalog": "...", "schema": "...", "table": "..."}
+        # and OpenAI compound/comparison filter objects {"key": "catalog", "type": "eq", "value": "..."}
+        if "key" in filters and "value" in filters:
+            k = str(filters.get("key") or "").strip().lower()
+            v = str(filters.get("value") or "").strip()
+            if v:
+                if k in ("workspace", "workspace_slug"):
+                    ws_slug = v
+                elif k in ("catalog", "catalog_slug"):
+                    cat_filter = v
+                elif k in ("schema", "schema_name", "schema_slug"):
+                    sch_filter = v
+                elif k in ("table", "table_name", "table_slug"):
+                    tbl_filter = v
+        else:
+            if filters.get("workspace_slug") or filters.get("workspace"):
+                ws_slug = str(filters.get("workspace_slug") or filters.get("workspace")).strip()
+            if filters.get("catalog") or filters.get("catalog_slug"):
+                cat_filter = str(filters.get("catalog") or filters.get("catalog_slug")).strip()
+            if filters.get("schema") or filters.get("schema_name") or filters.get("schema_slug"):
+                sch_filter = str(
+                    filters.get("schema")
+                    or filters.get("schema_name")
+                    or filters.get("schema_slug")
+                ).strip()
+            if filters.get("table") or filters.get("table_slug"):
+                tbl_filter = str(filters.get("table") or filters.get("table_slug")).strip()
+
+    return ws_slug, cat_filter, sch_filter, tbl_filter
+
+
+@router.post("/vector_stores/{vector_store_id:path}/search")
+def search_openai_vector_store(
+    vector_store_id: str,
+    req: OpenAIVectorStoreSearchRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """OpenAI Vector Store Search API (`POST /v1/vector_stores/{vector_store_id}/search`) with RBAC."""
+    if isinstance(req.query, list):
+        query_str = " ".join(str(q).strip() for q in req.query if str(q).strip())
+    else:
+        query_str = str(req.query or "").strip()
+
+    ws_slug, cat_filter, sch_filter, tbl_filter = _parse_vector_store_identifier(
+        vector_store_id, req.filters
+    )
+    top_k = req.top_k if req.top_k is not None else req.max_num_results
+    score_threshold = req.score_threshold
+    if score_threshold is None and isinstance(req.ranking_options, dict):
+        raw_thresh = req.ranking_options.get("score_threshold")
+        if raw_thresh is not None:
+            score_threshold = float(raw_thresh)
+
+    retrieve_req = VectorRetrieveRequest(
+        query=query_str,
+        top_k=top_k,
+        score_threshold=score_threshold,
+        workspace_slug=ws_slug,
+        catalog=cat_filter,
+        schema_name=sch_filter,
+        table=tbl_filter,
+    )
+    retrieve_resp = execute_vector_retrieve_request(
+        req=retrieve_req,
+        current_user=current_user,
+        db=db,
+    )
+
+    data = [
+        {
+            "file_id": item.source,
+            "filename": item.source,
+            "score": item.score,
+            "attributes": {
+                "workspace_slug": item.metadata.get("workspace_slug"),
+                "catalog": item.metadata.get("catalog_slug"),
+                "schema": item.metadata.get("schema_slug"),
+                "table": item.metadata.get("table_slug"),
+                "ingested_at": item.ingested_at,
+            },
+            "content": [{"type": "text", "text": item.text}],
+        }
+        for item in retrieve_resp.results
+    ]
+    return {
+        "object": "vector_store.search_results.page",
+        "search_query": query_str,
+        "data": data,
+        "has_more": False,
+        "next_page": None,
+    }

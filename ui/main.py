@@ -7640,3 +7640,75 @@ async def ui_openai_embeddings(request: Request):
             )
     except Exception as exc:
         return JSONResponse({"detail": str(exc)}, status_code=502)
+
+
+@app.post("/api/v1/retrieve")
+@app.post("/api/v1/vector/search")
+@app.post("/api/ai/retrieve")
+@app.post("/api/ai/vector/search")
+@app.post("/v1/retrieve")
+async def ui_vector_retrieve_proxy(request: Request):
+    headers = _build_proxy_auth_headers(request)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                f"{BACKEND_URL}/api/v1/retrieve",
+                json=body,
+                headers=headers,
+                cookies=request.cookies,
+            )
+            return JSONResponse(
+                resp.json() if resp.content else {},
+                status_code=resp.status_code,
+            )
+    except Exception as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=502)
+
+
+@app.get("/api/v1/vector_stores")
+@app.get("/api/ai/v1/vector_stores")
+@app.get("/v1/vector_stores")
+async def ui_openai_list_vector_stores(request: Request):
+    headers = _build_proxy_auth_headers(request)
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"{BACKEND_URL}/api/v1/vector_stores",
+                headers=headers,
+                cookies=request.cookies,
+            )
+            return JSONResponse(
+                resp.json() if resp.content else {},
+                status_code=resp.status_code,
+            )
+    except Exception as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=502)
+
+
+@app.post("/api/v1/vector_stores/{vector_store_id:path}/search")
+@app.post("/api/ai/v1/vector_stores/{vector_store_id:path}/search")
+@app.post("/v1/vector_stores/{vector_store_id:path}/search")
+async def ui_openai_search_vector_store(vector_store_id: str, request: Request):
+    headers = _build_proxy_auth_headers(request)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                f"{BACKEND_URL}/api/v1/vector_stores/{vector_store_id}/search",
+                json=body,
+                headers=headers,
+                cookies=request.cookies,
+            )
+            return JSONResponse(
+                resp.json() if resp.content else {},
+                status_code=resp.status_code,
+            )
+    except Exception as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=502)
