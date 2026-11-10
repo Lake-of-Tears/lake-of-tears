@@ -996,6 +996,43 @@ class AnomalyDetectRequest(BaseModel):
     contamination: float = 0.05
 
 
+class VectorRetrieveRequest(BaseModel):
+    query: str
+    top_k: int = 5
+    score_threshold: float | None = None
+    workspace_slug: str | None = None
+    catalog: str | None = None
+    catalog_slug: str | None = None
+    schema_name: str | None = Field(default=None, alias="schema", serialization_alias="schema")
+    schema_slug: str | None = None
+    table: str | None = None
+    table_slug: str | None = None
+
+    model_config = {"populate_by_name": True}
+
+
+class VectorChunkResult(BaseModel):
+    id: str
+    chunk_id: str | None = None
+    row_id: int | None = None
+    text: str
+    page_content: str
+    score: float
+    source: str
+    ingested_at: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class VectorRetrieveResponse(BaseModel):
+    ok: bool
+    query: str
+    model: str | None = None
+    dimension: int | None = None
+    total_results: int = 0
+    results: list[VectorChunkResult] = Field(default_factory=list)
+    error: str | None = None
+
+
 # ── Statement Execution API (/api/sql/statements) ─────────────────────────────
 
 

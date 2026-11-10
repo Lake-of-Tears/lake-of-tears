@@ -896,6 +896,8 @@ def resolve_user_ai_scope(
     user: Any,
     workspace_slug: str | None = None,
     catalog_filter: str | None = None,
+    schema_filter: str | None = None,
+    table_filter: str | None = None,
 ) -> dict[str, Any]:
     """Resolve authorized workspaces, catalogs, and S3 vector patterns for a user."""
     from auth import get_user_accessible_workspaces, is_effective_superadmin
@@ -986,8 +988,12 @@ def resolve_user_ai_scope(
                 )
         all_catalogs = filtered_cats
 
+    sf = schema_filter.strip().lower() if schema_filter and schema_filter.strip() else None
+    tf = table_filter.strip().lower() if table_filter and table_filter.strip() else None
+    has_granular_filter = bool((catalog_filter and catalog_filter.strip()) or sf or tf)
+
     allowed_patterns: list[str] = []
-    if not (catalog_filter and catalog_filter.strip()):
+    if not has_granular_filter:
         for w in target_workspaces:
             pat = (
                 f"s3://{MINIO_BUCKET}/workspaces/{_safe_identifier(w.slug)}/embeddings/**/*.parquet"
@@ -997,7 +1003,15 @@ def resolve_user_ai_scope(
 
     for cat in all_catalogs:
         for sch in cat.get("schemas") or []:
+            sch_slug = (sch.get("slug") or sch.get("name") or "").lower()
+            sch_name = (sch.get("name") or "").lower()
+            if sf and sf not in (sch_slug, sch_name):
+                continue
             for tbl in sch.get("tables") or []:
+                tbl_slug = (tbl.get("slug") or tbl.get("name") or "").lower()
+                tbl_name = (tbl.get("name") or "").lower()
+                if tf and tf not in (tbl_slug, tbl_name):
+                    continue
                 vec_cfg = tbl.get("vector_index") or {}
                 if isinstance(vec_cfg, dict):
                     vpath = (vec_cfg.get("s3_vector_path") or "").strip()
@@ -1754,47 +1768,154 @@ def infer_chart_config(
     }
 
 
-def run_rag_search(
-    question: str,
+def _parse_source_metadata(
+    source_str: str,
+    default_workspace_slug: str,
+    catalog_lookup: dict[str, dict[str, str]],
+) -> dict[str, str]:
+    """Parse a vector chunk `source` string into structured catalog/schema/table metadata."""
+    clean_src = (source_str or "").strip()
+    lower_src = clean_src.lower()
+    if lower_src in catalog_lookup:
+        info = catalog_lookup[lower_src]
+        return {
+            "source": clean_src,
+            "workspace_slug": info.get("workspace_slug") or default_workspace_slug,
+            "catalog_slug": info.get("catalog_slug") or default_workspace_slug,
+            "schema_slug": info.get("schema_slug") or "default",
+            "table_slug": info.get("table_slug") or clean_src,
+        }
+
+    parts = [p.strip() for p in clean_src.split(".") if p.strip()]
+    if len(parts) >= 3:
+        cat_slug, sch_slug, tbl_slug = parts[0], parts[1], ".".join(parts[2:])
+        match = catalog_lookup.get(f"{cat_slug}.{sch_slug}.{tbl_slug}".lower())
+        ws_slug = (match or {}).get("workspace_slug") or cat_slug or default_workspace_slug
+        return {
+            "source": clean_src,
+            "workspace_slug": ws_slug,
+            "catalog_slug": cat_slug,
+            "schema_slug": sch_slug,
+            "table_slug": tbl_slug,
+        }
+    if len(parts) == 2:
+        sch_slug, tbl_slug = parts[0], parts[1]
+        match = catalog_lookup.get(f"{sch_slug}.{tbl_slug}".lower())
+        ws_slug = (match or {}).get("workspace_slug") or default_workspace_slug
+        cat_slug = (match or {}).get("catalog_slug") or default_workspace_slug
+        return {
+            "source": clean_src,
+            "workspace_slug": ws_slug,
+            "catalog_slug": cat_slug,
+            "schema_slug": sch_slug,
+            "table_slug": tbl_slug,
+        }
+    return {
+        "source": clean_src,
+        "workspace_slug": default_workspace_slug,
+        "catalog_slug": default_workspace_slug,
+        "schema_slug": "default",
+        "table_slug": clean_src or "unknown",
+    }
+
+
+def retrieve_vector_chunks(
+    query: str,
     api_key: str | None = None,
     workspace_slug: str = "default",
     catalogs: list[dict[str, Any]] | None = None,
     allowed_patterns: list[str] | None = None,
+    catalog_slug: str | None = None,
+    schema_slug: str | None = None,
+    table_slug: str | None = None,
     top_k: int = 5,
+    score_threshold: float | None = None,
     include_workspace_pattern: bool = True,
+    _client: Any = None,
 ) -> dict[str, Any]:
-    """Execute semantic vector search over active workspace (and shared catalog) embeddings and synthesize a grounded answer."""
+    """Retrieve permission-scoped semantic vector chunks across authorized workspace/catalog Parquet indices."""
     effective_key = _resolve_api_key(api_key)
     if not effective_key:
-        return {"ok": False, "error": GEMINI_KEY_NOT_CONFIGURED_MSG, "snippets": []}
+        return {
+            "ok": False,
+            "query": query,
+            "model": None,
+            "dimension": None,
+            "chunks": [],
+            "snippets": [],
+            "error": GEMINI_KEY_NOT_CONFIGURED_MSG,
+        }
     try:
-        client = _client_for(effective_key)
-        # The active provider decides the embedding model and dimension; only stored vectors made
-        # by the same model (and of the same length) are compared.
+        client = _client if _client is not None else _client_for(effective_key)
         embed_resp = client.models.embed_content(
-            contents=question, config={"task_type": "RETRIEVAL_QUERY"}
+            contents=query, config={"task_type": "RETRIEVAL_QUERY"}
         )
         q_vec = embed_resp.embeddings[0].values
+        embed_model = getattr(embed_resp, "model", None)
+        embed_dim = getattr(embed_resp, "dimension", len(q_vec))
 
         clean_ws = _safe_identifier(workspace_slug) if workspace_slug else "default"
-        active_pattern = f"s3://{MINIO_BUCKET}/workspaces/{clean_ws}/embeddings/**/*.parquet"
-        patterns: list[str] = [active_pattern] if include_workspace_pattern else []
+        cf = catalog_slug.strip().lower() if catalog_slug and catalog_slug.strip() else None
+        sf = schema_slug.strip().lower() if schema_slug and schema_slug.strip() else None
+        tf = table_slug.strip().lower() if table_slug and table_slug.strip() else None
+        has_granular_filter = bool(cf or sf or tf)
 
+        active_pattern = f"s3://{MINIO_BUCKET}/workspaces/{clean_ws}/embeddings/**/*.parquet"
+        patterns: list[str] = (
+            [active_pattern] if (include_workspace_pattern and not has_granular_filter) else []
+        )
+
+        catalog_lookup: dict[str, dict[str, str]] = {}
         if catalogs:
             for cat in catalogs:
+                c_slug = str(cat.get("slug") or cat.get("name") or clean_ws)
+                c_name = str(cat.get("name") or c_slug)
+                c_ws = str(cat.get("owner_workspace_slug") or clean_ws)
                 for sch in cat.get("schemas") or []:
+                    s_slug = str(sch.get("slug") or sch.get("name") or "default")
+                    s_name = str(sch.get("name") or s_slug)
                     for tbl in sch.get("tables") or []:
+                        t_slug = str(tbl.get("slug") or tbl.get("name") or "")
+                        t_name = str(tbl.get("name") or t_slug)
+                        meta_entry = {
+                            "workspace_slug": c_ws,
+                            "catalog_slug": c_slug,
+                            "schema_slug": s_slug,
+                            "table_slug": t_slug,
+                        }
+                        catalog_lookup[f"{c_slug}.{s_slug}.{t_slug}".lower()] = meta_entry
+                        catalog_lookup[f"{c_name}.{s_name}.{t_name}".lower()] = meta_entry
+                        catalog_lookup[f"{s_slug}.{t_slug}".lower()] = meta_entry
+                        if t_slug:
+                            catalog_lookup[t_slug.lower()] = meta_entry
+
+                        if cf and cf not in (c_slug.lower(), c_name.lower()):
+                            continue
+                        if sf and sf not in (s_slug.lower(), s_name.lower()):
+                            continue
+                        if tf and tf not in (t_slug.lower(), t_name.lower()):
+                            continue
+
                         vec_cfg = tbl.get("vector_index") or {}
                         if isinstance(vec_cfg, dict):
                             vpath = (vec_cfg.get("s3_vector_path") or "").strip()
-                            if vpath and vpath not in patterns:
-                                patterns.append(vpath)
+                            if vpath:
+                                catalog_lookup[vpath.lower()] = meta_entry
+                                if vpath not in patterns:
+                                    patterns.append(vpath)
+
         if allowed_patterns:
             for pat in allowed_patterns:
                 if pat and pat not in patterns:
                     patterns.append(pat)
 
         limit_k = max(1, min(int(top_k or 5), 50))
+        sql_limit = (
+            max(limit_k * 4, 50)
+            if (has_granular_filter or score_threshold is not None)
+            else limit_k
+        )
+
         con = create_duckdb_connection(register_ai=False)
         try:
             valid_patterns: list[str] = []
@@ -1826,22 +1947,128 @@ def run_rag_search(
                 }
                 has_model = "model" in columns
                 params = (
-                    [q_vec, target_pattern] + ([embed_resp.model] if has_model else []) + [limit_k]
+                    [q_vec, target_pattern] + ([embed_model] if has_model else []) + [sql_limit]
                 )
-                rows = con.execute(
-                    vector_search_sql(embed_resp.dimension, has_model), params
-                ).fetchall()
+                rows = con.execute(vector_search_sql(embed_dim, has_model), params).fetchall()
         finally:
             con.close()
 
+        chunks: list[dict[str, Any]] = []
+        snippets: list[dict[str, Any]] = []
+        for idx, r in enumerate(rows):
+            src_str = str(r[0] or "")
+            ingested_str = str(r[1] or "")
+            content_str = str(r[2] or "")
+            score_val = round(float(r[3]), 4)
+
+            if score_threshold is not None and score_val < float(score_threshold):
+                continue
+
+            parsed_meta = _parse_source_metadata(src_str, clean_ws, catalog_lookup)
+            if cf and parsed_meta["catalog_slug"].lower() != cf:
+                continue
+            if sf and parsed_meta["schema_slug"].lower() != sf:
+                continue
+            if tf and parsed_meta["table_slug"].lower() != tf:
+                continue
+
+            metadata = {
+                "source": src_str,
+                "workspace_slug": parsed_meta["workspace_slug"],
+                "catalog_slug": parsed_meta["catalog_slug"],
+                "schema_slug": parsed_meta["schema_slug"],
+                "table_slug": parsed_meta["table_slug"],
+                "ingested_at": ingested_str,
+            }
+            chunk_id = f"{src_str}:{idx}" if src_str else f"chunk:{idx}"
+            chunks.append(
+                {
+                    "id": chunk_id,
+                    "chunk_id": chunk_id,
+                    "row_id": idx,
+                    "text": content_str,
+                    "page_content": content_str,
+                    "summary": content_str,
+                    "score": score_val,
+                    "source": src_str,
+                    "ingested_at": ingested_str,
+                    "metadata": metadata,
+                }
+            )
+            snippets.append(
+                {
+                    "source": src_str,
+                    "ingested_at": ingested_str,
+                    "summary": content_str,
+                    "score": score_val,
+                    "metadata": metadata,
+                }
+            )
+            if len(chunks) >= limit_k:
+                break
+
+        return {
+            "ok": True,
+            "query": query,
+            "model": embed_model,
+            "dimension": embed_dim,
+            "chunks": chunks,
+            "snippets": snippets,
+            "error": None,
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "query": query,
+            "model": None,
+            "dimension": None,
+            "chunks": [],
+            "snippets": [],
+            "error": str(exc),
+        }
+
+
+def run_rag_search(
+    question: str,
+    api_key: str | None = None,
+    workspace_slug: str = "default",
+    catalogs: list[dict[str, Any]] | None = None,
+    allowed_patterns: list[str] | None = None,
+    top_k: int = 5,
+    include_workspace_pattern: bool = True,
+) -> dict[str, Any]:
+    """Execute semantic vector search over active workspace (and shared catalog) embeddings and synthesize a grounded answer."""
+    effective_key = _resolve_api_key(api_key)
+    if not effective_key:
+        return {"ok": False, "error": GEMINI_KEY_NOT_CONFIGURED_MSG, "snippets": []}
+    try:
+        client = _client_for(effective_key)
+        clean_ws = _safe_identifier(workspace_slug) if workspace_slug else "default"
+        retrieval = retrieve_vector_chunks(
+            query=question,
+            api_key=effective_key,
+            workspace_slug=workspace_slug,
+            catalogs=catalogs,
+            allowed_patterns=allowed_patterns,
+            top_k=top_k,
+            include_workspace_pattern=include_workspace_pattern,
+            _client=client,
+        )
+        if not retrieval.get("ok"):
+            return {
+                "ok": False,
+                "error": retrieval.get("error") or "Vector retrieval failed",
+                "snippets": [],
+            }
+
         snippets = [
             {
-                "source": r[0],
-                "ingested_at": str(r[1]),
-                "summary": r[2],
-                "score": round(float(r[3]), 4),
+                "source": s["source"],
+                "ingested_at": s["ingested_at"],
+                "summary": s["summary"],
+                "score": s["score"],
             }
-            for r in rows
+            for s in retrieval.get("snippets", [])
         ]
         if snippets:
             context_text = "\n\n".join(
@@ -1867,6 +2094,9 @@ def run_rag_search(
         return {"ok": True, "answer": (answer or "").strip(), "snippets": snippets}
     except Exception as exc:
         return {"ok": False, "error": str(exc), "snippets": []}
+
+
+run_vector_rag = run_rag_search
 
 
 def run_genie_chat(

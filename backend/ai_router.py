@@ -27,6 +27,8 @@ from schemas import (
     SqlGenerateResponse,
     TableFromPromptRequest,
     TableFromPromptResponse,
+    VectorRetrieveRequest,
+    VectorRetrieveResponse,
 )
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -364,3 +366,16 @@ def cancel_genie_chat(
             if event:
                 event.set()
     return {"ok": True, "cancelled": True}
+
+
+@router.post("/retrieve", response_model=VectorRetrieveResponse)
+@router.post("/vector/search", response_model=VectorRetrieveResponse)
+def retrieve_vectors_ai_route(
+    req: VectorRetrieveRequest,
+    current_user: User = Depends(get_current_user),
+    db: Any = Depends(get_db),
+) -> VectorRetrieveResponse:
+    """Permission-aware vector chunk retrieval under /api/ai/retrieve."""
+    from openai_compat_router import execute_vector_retrieve_request
+
+    return execute_vector_retrieve_request(req=req, current_user=current_user, db=db)
