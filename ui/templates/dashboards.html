@@ -255,20 +255,23 @@
     try {
       const wsQuery = currentWorkspaceSlug ? `?workspace_slug=${encodeURIComponent(currentWorkspaceSlug)}` : '';
       // 1. Fetch stats
-      const statsResp = await fetch(`/api/dashboards/stats${wsQuery}`);
+      const statsResp = await fetch(`/api/dashboards/stats${wsQuery}`, { credentials: 'include' });
       if (statsResp.ok) {
         const stats = await statsResp.json();
-        document.getElementById('stat-total').textContent = stats.total_dashboards;
-        document.getElementById('stat-published').textContent = stats.published_dashboards;
-        document.getElementById('stat-charts').textContent = stats.total_charts;
+        const statTotal = document.getElementById('stat-total');
+        const statPub = document.getElementById('stat-published');
+        const statCharts = document.getElementById('stat-charts');
+        if (statTotal) statTotal.textContent = stats.total_dashboards;
+        if (statPub) statPub.textContent = stats.published_dashboards;
+        if (statCharts) statCharts.textContent = stats.total_charts;
         const engineBadge = document.getElementById('stat-engine-badge');
-        const engineLabel = document.getElementById('stat-engine');
-        engineLabel.textContent = 'Native ECharts';
-        engineBadge.innerHTML = '<span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span><span class="text-sm font-semibold text-gray-200">Native ECharts</span>';
+        if (engineBadge) {
+          engineBadge.innerHTML = '<span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span><span class="text-sm font-semibold text-gray-200" id="stat-engine">Native ECharts</span>';
+        }
       }
 
       // 2. Fetch list
-      const resp = await fetch(`/api/dashboards${wsQuery}`);
+      const resp = await fetch(`/api/dashboards${wsQuery}`, { credentials: 'include' });
       if (resp.ok) {
         allDashboards = await resp.json();
         renderDashboards();

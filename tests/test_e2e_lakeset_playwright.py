@@ -422,9 +422,16 @@ def test_e2e_lakeset_search_filter_and_sqllab_tab(lakeset_page, lakeset_server):
 
 
 def test_e2e_dashboards_create_modal_and_redirect(lakeset_page, lakeset_server):
-    """Verify clicking 'Create Dashboard' on /dashboards creates the dashboard and redirects to /dashboards/{id}."""
+    """Verify clicking 'Refresh' and 'Create Dashboard' on /dashboards works without errors."""
     page = lakeset_page
     page.goto("/dashboards", wait_until="networkidle")
+
+    # Click Refresh button multiple times and ensure no error toast appears
+    page.locator("#btn-refresh").click()
+    page.wait_for_timeout(300)
+    page.locator("#btn-refresh").click()
+    page.wait_for_timeout(300)
+    assert page.locator("text=Error connecting to dashboards API").count() == 0
 
     # Click 'New Dashboard' button to open create modal
     page.locator("button:has-text('New Dashboard')").click()
