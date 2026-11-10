@@ -872,17 +872,145 @@ def get_workspace_catalogs_from_db(
                     "tables": tables_list,
                 }
             )
+        owner_ws = getattr(c, "owner_workspace", None)
+        owner_ws_slug = getattr(owner_ws, "slug", None) if owner_ws else None
         result.append(
             {
                 "id": str(c.id),
                 "name": c.name,
                 "slug": c.slug,
                 "description": c.description,
-                "is_default": c.is_default,
+                "is_default": getattr(c, "is_default", False),
+                "owner_workspace_id": str(
+                    getattr(c, "owner_workspace_id", None) or getattr(c, "workspace_id", "")
+                ),
+                "owner_workspace_slug": owner_ws_slug if isinstance(owner_ws_slug, str) else None,
                 "schemas": schemas_list,
             }
         )
     return result
+
+
+def resolve_user_ai_scope(
+    db: Session,
+    user: Any,
+    workspace_slug: str | None = None,
+    catalog_filter: str | None = None,
+) -> dict[str, Any]:
+    """Resolve authorized workspaces, catalogs, and S3 vector patterns for a user."""
+    from auth import get_user_accessible_workspaces, is_effective_superadmin
+    from fastapi import HTTPException
+    from models import Catalog, Workspace
+
+    is_super = is_effective_superadmin(user)
+    accessible_workspaces = get_user_accessible_workspaces(db, user)
+    accessible_ws_ids = {str(w.id) for w in accessible_workspaces}
+
+    if workspace_slug and workspace_slug.strip():
+        clean_slug = workspace_slug.strip()
+        ws = (
+            db.query(Workspace)
+            .filter(Workspace.slug == clean_slug, Workspace.status == "active")
+            .first()
+        )
+        if not ws:
+            try:
+                import uuid as _uuid
+
+                ws_uuid = _uuid.UUID(clean_slug)
+                ws = (
+                    db.query(Workspace)
+                    .filter(Workspace.id == ws_uuid, Workspace.status == "active")
+                    .first()
+                )
+            except (ValueError, TypeError):
+                ws = None
+        if not ws:
+            raise HTTPException(404, f"Workspace '{clean_slug}' not found")
+        if str(ws.id) not in accessible_ws_ids:
+            raise HTTPException(
+                403, f"Forbidden: You do not have permission to access workspace '{ws.slug}'."
+            )
+        target_workspaces = [ws]
+        primary_ws = ws
+    else:
+        if not accessible_workspaces:
+            raise HTTPException(
+                403, "Forbidden: User does not have access to any active workspaces."
+            )
+        target_workspaces = accessible_workspaces
+        primary_ws = next(
+            (w for w in accessible_workspaces if w.slug == "default"),
+            accessible_workspaces[0],
+        )
+
+    all_catalogs: list[dict[str, Any]] = []
+    seen_cat_ids: set[str] = set()
+    for w in target_workspaces:
+        ws_cats = get_workspace_catalogs_from_db(
+            db,
+            w.id,
+            user_id=None if is_super else user.id,
+        )
+        for cat in ws_cats:
+            cid = str(cat.get("id", ""))
+            if cid and cid not in seen_cat_ids:
+                seen_cat_ids.add(cid)
+                if not cat.get("owner_workspace_slug"):
+                    cat["owner_workspace_slug"] = w.slug
+                all_catalogs.append(cat)
+
+    if catalog_filter and catalog_filter.strip():
+        cf = catalog_filter.strip().lower()
+        filtered_cats = [
+            c
+            for c in all_catalogs
+            if (c.get("slug") or "").lower() == cf
+            or (c.get("name") or "").lower() == cf
+            or str(c.get("id") or "").lower() == cf
+        ]
+        if not filtered_cats:
+            exists_in_db = (
+                db.query(Catalog)
+                .filter(
+                    Catalog.deleted_at.is_(None),
+                    (Catalog.slug == catalog_filter.strip())
+                    | (Catalog.name == catalog_filter.strip()),
+                )
+                .first()
+            )
+            if exists_in_db:
+                raise HTTPException(
+                    403,
+                    f"Forbidden: You do not have permission to access catalog '{catalog_filter.strip()}'.",
+                )
+        all_catalogs = filtered_cats
+
+    allowed_patterns: list[str] = []
+    if not (catalog_filter and catalog_filter.strip()):
+        for w in target_workspaces:
+            pat = (
+                f"s3://{MINIO_BUCKET}/workspaces/{_safe_identifier(w.slug)}/embeddings/**/*.parquet"
+            )
+            if pat not in allowed_patterns:
+                allowed_patterns.append(pat)
+
+    for cat in all_catalogs:
+        for sch in cat.get("schemas") or []:
+            for tbl in sch.get("tables") or []:
+                vec_cfg = tbl.get("vector_index") or {}
+                if isinstance(vec_cfg, dict):
+                    vpath = (vec_cfg.get("s3_vector_path") or "").strip()
+                    if vpath and vpath not in allowed_patterns:
+                        allowed_patterns.append(vpath)
+
+    return {
+        "is_superadmin": is_super,
+        "primary_workspace": primary_ws,
+        "target_workspaces": target_workspaces,
+        "catalogs": all_catalogs,
+        "allowed_patterns": allowed_patterns,
+    }
 
 
 def build_schema_prompt_context(catalogs: list[dict[str, Any]] | None = None) -> str:
@@ -1632,6 +1760,8 @@ def run_rag_search(
     workspace_slug: str = "default",
     catalogs: list[dict[str, Any]] | None = None,
     allowed_patterns: list[str] | None = None,
+    top_k: int = 5,
+    include_workspace_pattern: bool = True,
 ) -> dict[str, Any]:
     """Execute semantic vector search over active workspace (and shared catalog) embeddings and synthesize a grounded answer."""
     effective_key = _resolve_api_key(api_key)
@@ -1648,7 +1778,7 @@ def run_rag_search(
 
         clean_ws = _safe_identifier(workspace_slug) if workspace_slug else "default"
         active_pattern = f"s3://{MINIO_BUCKET}/workspaces/{clean_ws}/embeddings/**/*.parquet"
-        patterns: list[str] = [active_pattern]
+        patterns: list[str] = [active_pattern] if include_workspace_pattern else []
 
         if catalogs:
             for cat in catalogs:
@@ -1661,9 +1791,10 @@ def run_rag_search(
                                 patterns.append(vpath)
         if allowed_patterns:
             for pat in allowed_patterns:
-                if pat and "embeddings" in pat and pat not in patterns:
+                if pat and pat not in patterns:
                     patterns.append(pat)
 
+        limit_k = max(1, min(int(top_k or 5), 50))
         con = create_duckdb_connection(register_ai=False)
         try:
             valid_patterns: list[str] = []
@@ -1694,7 +1825,9 @@ def run_rag_search(
                     ).description
                 }
                 has_model = "model" in columns
-                params = [q_vec, target_pattern] + ([embed_resp.model] if has_model else []) + [5]
+                params = (
+                    [q_vec, target_pattern] + ([embed_resp.model] if has_model else []) + [limit_k]
+                )
                 rows = con.execute(
                     vector_search_sql(embed_resp.dimension, has_model), params
                 ).fetchall()
@@ -1748,6 +1881,8 @@ def run_genie_chat(
     allowed_patterns: list[str] | None = None,
     is_superadmin: bool = False,
     progress_callback: Any = None,
+    top_k: int = 5,
+    include_workspace_pattern: bool = True,
 ) -> dict[str, Any]:
     """Execute the Databricks Genie-style conversational data analyst loop:
     Question -> Schema Discovery -> SQL Synthesis -> DuckDB Execution (with 1-step self-correction) ->
@@ -1790,6 +1925,8 @@ def run_genie_chat(
             workspace_slug=workspace_slug,
             catalogs=catalogs,
             allowed_patterns=allowed_patterns,
+            top_k=top_k,
+            include_workspace_pattern=include_workspace_pattern,
         )
         if not rag_res.get("ok"):
             _report("rag_search", f"Semantic search failed: {rag_res.get('error')}", "error")
@@ -1971,6 +2108,8 @@ def run_genie_chat(
             workspace_slug=workspace_slug,
             catalogs=catalogs,
             allowed_patterns=allowed_patterns,
+            top_k=top_k,
+            include_workspace_pattern=include_workspace_pattern,
         )
         if rag_res.get("ok"):
             snippets = rag_res.get("snippets", [])

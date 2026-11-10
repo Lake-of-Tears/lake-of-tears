@@ -95,6 +95,7 @@ from models import (
 )
 from notebooks_router import router as notebooks_router
 from oauth import enabled_providers, get_auth_overview, get_oauth_redirect, handle_oauth_callback
+from openai_compat_router import router as openai_compat_router
 from pipelines_router import router as pipelines_router
 
 try:
@@ -243,6 +244,9 @@ app.include_router(
 )
 app.include_router(bundles_router, prefix="/api/v1/bundles", tags=["bundles"])
 app.include_router(bundles_router, prefix="/api/bundles", tags=["bundles"])
+app.include_router(openai_compat_router, prefix="/api/v1", tags=["openai-compat"])
+app.include_router(openai_compat_router, prefix="/api/ai/v1", tags=["openai-compat"])
+app.include_router(openai_compat_router, prefix="/v1", tags=["openai-compat"])
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

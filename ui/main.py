@@ -176,6 +176,7 @@ _PUBLIC_PREFIXES = (
     "/login",
     "/logout",
     "/api/",
+    "/v1/",
     "/health",
     "/static/",
     "/favicon.ico",
@@ -7514,3 +7515,128 @@ resources:
             "valid": True,
         }
     )
+
+
+# ---------------------------------------------------------------------------
+# OpenAI-Compatible Gateway Proxy Routes (/api/v1/models, /api/v1/chat/completions, /api/v1/embeddings)
+# ---------------------------------------------------------------------------
+
+
+def _build_proxy_auth_headers(request: Request) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    auth_hdr = request.headers.get("Authorization")
+    api_key_hdr = request.headers.get("X-API-Key")
+    if auth_hdr:
+        headers["Authorization"] = auth_hdr
+    elif api_key_hdr:
+        headers["X-API-Key"] = api_key_hdr
+    else:
+        cookie_tok = request.cookies.get("lake_token")
+        if cookie_tok:
+            headers["Authorization"] = f"Bearer {cookie_tok}"
+
+    for hdr_name in (
+        "X-On-Behalf-Of",
+        "X-Lot-User-Email",
+        "X-Workspace-Slug",
+        "X-Workspace-Id",
+    ):
+        val = request.headers.get(hdr_name)
+        if val:
+            headers[hdr_name] = val
+    return headers
+
+
+@app.get("/api/v1/models")
+@app.get("/api/ai/v1/models")
+@app.get("/v1/models")
+async def ui_openai_list_models(request: Request):
+    headers = _build_proxy_auth_headers(request)
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"{BACKEND_URL}/api/v1/models",
+                headers=headers,
+                cookies=request.cookies,
+            )
+            return JSONResponse(
+                resp.json() if resp.content else {},
+                status_code=resp.status_code,
+            )
+    except Exception as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=502)
+
+
+@app.post("/api/v1/chat/completions")
+@app.post("/api/ai/v1/chat/completions")
+@app.post("/v1/chat/completions")
+async def ui_openai_chat_completions(request: Request):
+    headers = _build_proxy_auth_headers(request)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
+
+    if body.get("stream"):
+
+        async def _proxy_stream():
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                async with client.stream(
+                    "POST",
+                    f"{BACKEND_URL}/api/v1/chat/completions",
+                    json=body,
+                    headers=headers,
+                    cookies=request.cookies,
+                ) as resp:
+                    async for chunk in resp.aiter_bytes():
+                        yield chunk
+
+        return StreamingResponse(
+            _proxy_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(
+                f"{BACKEND_URL}/api/v1/chat/completions",
+                json=body,
+                headers=headers,
+                cookies=request.cookies,
+            )
+            return JSONResponse(
+                resp.json() if resp.content else {},
+                status_code=resp.status_code,
+            )
+    except Exception as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=502)
+
+
+@app.post("/api/v1/embeddings")
+@app.post("/api/ai/v1/embeddings")
+@app.post("/v1/embeddings")
+async def ui_openai_embeddings(request: Request):
+    headers = _build_proxy_auth_headers(request)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                f"{BACKEND_URL}/api/v1/embeddings",
+                json=body,
+                headers=headers,
+                cookies=request.cookies,
+            )
+            return JSONResponse(
+                resp.json() if resp.content else {},
+                status_code=resp.status_code,
+            )
+    except Exception as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=502)
