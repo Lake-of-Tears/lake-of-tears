@@ -2471,10 +2471,14 @@ async def lakeset_reverse_proxy(request: Request, path: str):
     # Interactive embedded studio views (Explore, SQL Lab, Welcome/Dashboards) render self-contained
     # DuckDB + ECharts BI studio when accessed via /lakeset/proxy/... unless raw API proxy is requested
     clean_path = (path or "").strip("/").lower()
-    if request.method == "GET" and not os.getenv("SUPERSET_INTERNAL_URL") and (
-        clean_path.startswith("superset/explore")
-        or clean_path.startswith("sqllab")
-        or clean_path.startswith("superset/welcome")
+    if (
+        request.method == "GET"
+        and not os.getenv("SUPERSET_INTERNAL_URL")
+        and (
+            clean_path.startswith("superset/explore")
+            or clean_path.startswith("sqllab")
+            or clean_path.startswith("superset/welcome")
+        )
     ):
         html = _render_lakeset_embedded_studio_html(
             path=path,

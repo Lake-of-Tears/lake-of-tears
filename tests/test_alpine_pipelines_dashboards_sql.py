@@ -164,9 +164,7 @@ def test_all_alpine_controllers_dom_id_contract():
     templates_dir = repo_root / "ui" / "templates"
     controllers_dir = repo_root / "ui" / "static" / "js" / "controllers"
 
-    templates_text = "\n".join(
-        p.read_text(encoding="utf-8") for p in templates_dir.rglob("*.html")
-    )
+    templates_text = "\n".join(p.read_text(encoding="utf-8") for p in templates_dir.rglob("*.html"))
     template_ids = set(re.findall(r'id=["\']([^"\'{]+)["\']', templates_text))
 
     mismatches: dict[str, list[str]] = {}
@@ -177,9 +175,9 @@ def test_all_alpine_controllers_dom_id_contract():
         if missing:
             mismatches[js_path.name] = missing
 
-    assert not mismatches, (
-        f"JS controllers reference DOM IDs missing from HTML templates: {mismatches}"
-    )
+    assert (
+        not mismatches
+    ), f"JS controllers reference DOM IDs missing from HTML templates: {mismatches}"
 
 
 def test_no_alpine_window_wrapper_self_recursion():
@@ -193,7 +191,6 @@ def test_no_alpine_window_wrapper_self_recursion():
         if re.search(r"window\.[A-Za-z0-9_]+\s*!==\s*this\.[A-Za-z0-9_]+", js_text):
             offenders.append(js_path.name)
 
-    assert not offenders, (
-        f"Controllers contain self-recursive `window.fn !== this.fn` checks: {offenders}"
-    )
-
+    assert (
+        not offenders
+    ), f"Controllers contain self-recursive `window.fn !== this.fn` checks: {offenders}"

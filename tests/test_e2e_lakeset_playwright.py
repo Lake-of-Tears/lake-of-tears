@@ -331,9 +331,9 @@ def lakeset_page(lakeset_server):
         yield pg
         context.close()
         browser.close()
-        assert not uncaught_page_errors, (
-            f"Uncaught JavaScript pageerror(s) detected during E2E test: {uncaught_page_errors}"
-        )
+        assert (
+            not uncaught_page_errors
+        ), f"Uncaught JavaScript pageerror(s) detected during E2E test: {uncaught_page_errors}"
 
 
 def test_e2e_lakeset_sidebar_sync_and_semantic_inspector(lakeset_page, lakeset_server):
@@ -472,5 +472,3 @@ def test_e2e_dashboards_create_modal_and_redirect(lakeset_page, lakeset_server):
     assert "/dashboards/" in page.url
     page.locator("#dash-title", has_text="TEst").wait_for(state="visible", timeout=5000)
     assert page.locator("#dash-title", has_text="TEst").is_visible()
-
-

@@ -158,7 +158,7 @@ jobs:
         env:
           ANGLER_BIN: /usr/local/bin/angler
         run: |
-          pytest tests/test_e2e_bundles_angler.py -v
+          pytest tests/test_e2e_bundles_angler.py tests/test_e2e_lakeset_playwright.py -v
 
   docker-build-backend:
     name: "Stage 4: Build Image Backend"
