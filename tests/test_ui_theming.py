@@ -38,15 +38,28 @@ def test_base_html_defines_semantic_css_tokens_for_dark_and_light_themes():
 
 
 def test_base_html_dispatches_theme_change_event_and_exposes_helpers():
-    """Phase 1 (#459): Verify getLakeTheme, getLakeEChartsThemeConfig, syncLakeEChartsTheme, and lake:theme-change."""
+    """Phase 1 (#459): Verify getLakeTheme, getLakeEChartsThemeConfig, syncLakeEChartsTheme, auto switcher, and lake:theme-change."""
     base_html = (TEMPLATES_DIR / "base.html").read_text(encoding="utf-8")
 
+    assert '<meta name="color-scheme" content="light dark" />' in base_html
+    assert "function resolveAutoTheme()" in base_html
+    assert "window.resolveAutoTheme = resolveAutoTheme;" in base_html
+    assert "function syncAutoThemeIfNeeded()" in base_html
+    assert "window._lakeDarkMql" in base_html
+    assert "window._lakeLightMql" in base_html
     assert "function getLakeTheme()" in base_html
     assert "window.getLakeTheme = getLakeTheme;" in base_html
     assert "function getLakeEChartsThemeConfig(isLight)" in base_html
     assert "function syncLakeEChartsTheme(isLight)" in base_html
     assert "new CustomEvent('lake:theme-change'" in base_html
     assert ":not(.keep-dark)" in base_html
+    assert 'html[data-theme="light"] .stat-card' in base_html
+    assert 'html[data-theme="light"] [class^="bg-blue-950"]' in base_html
+    assert 'html[data-theme="light"] [class^="bg-emerald-950"]' in base_html
+    assert 'html[data-theme="light"] [class^="bg-amber-950"]' in base_html
+    assert 'html[data-theme="light"] [class^="bg-cyan-950"]' in base_html
+    assert 'html[data-theme="light"] [class^="bg-purple-950"]' in base_html
+    assert 'html[data-theme="light"] [class^="bg-red-950"]' in base_html
 
 
 def test_sql_editor_monaco_dynamic_light_and_dark_theme_sync():

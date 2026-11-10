@@ -1758,24 +1758,32 @@
         const formattedTime = runDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 
         if (isActual) {
+          const isLight = (document.documentElement.getAttribute('data-theme') === 'light');
           const state = r.state || 'unknown';
-          let bgStyle = `background-color: ${colorHex}25; border-color: ${colorHex}88; color: #fff;`;
-          let dotColor = 'bg-gray-400';
-          let stateBadge = `<span class="text-[9px] opacity-75 truncate uppercase hidden sm:inline">${state}</span>`;
+          const textColor = isLight ? '#111827' : '#ffffff';
+          let bgStyle = `background-color: ${colorHex}${isLight ? '20' : '25'}; border-color: ${colorHex}${isLight ? 'aa' : '88'}; color: ${textColor};`;
+          let dotColor = isLight ? 'bg-gray-500' : 'bg-gray-400';
+          let stateBadge = `<span class="text-[9px] opacity-80 truncate uppercase hidden sm:inline">${state}</span>`;
           let extraClasses = '';
 
           if (state === 'success') {
-            dotColor = 'bg-emerald-400';
+            dotColor = isLight ? 'bg-emerald-600' : 'bg-emerald-400';
           } else if (state === 'running') {
-            dotColor = 'bg-blue-400 animate-pulse';
+            dotColor = isLight ? 'bg-blue-600 animate-pulse' : 'bg-blue-400 animate-pulse';
             extraClasses = 'ring-1 ring-blue-400/50 shadow-[0_0_8px_rgba(59,130,246,0.3)]';
           } else if (state === 'failed') {
-            dotColor = 'bg-rose-400';
-            bgStyle = 'background-color: rgba(225, 29, 72, 0.22); border-color: rgba(244, 63, 94, 0.85); color: #fecdd3;';
-            extraClasses = 'ring-1 ring-rose-500/60 shadow-[0_0_10px_rgba(244,63,94,0.4)]';
-            stateBadge = '<span class="text-[9px] font-bold text-rose-300 truncate uppercase">FAILED</span>';
+            dotColor = isLight ? 'bg-rose-600' : 'bg-rose-400';
+            bgStyle = isLight
+              ? 'background-color: #ffe4e6; border-color: #fb7185; color: #9f1239;'
+              : 'background-color: rgba(225, 29, 72, 0.22); border-color: rgba(244, 63, 94, 0.85); color: #fecdd3;';
+            extraClasses = isLight
+              ? 'ring-1 ring-rose-400/50'
+              : 'ring-1 ring-rose-500/60 shadow-[0_0_10px_rgba(244,63,94,0.4)]';
+            stateBadge = isLight
+              ? '<span class="text-[9px] font-bold text-rose-800 truncate uppercase">FAILED</span>'
+              : '<span class="text-[9px] font-bold text-rose-300 truncate uppercase">FAILED</span>';
           } else if (state === 'queued') {
-            dotColor = 'bg-amber-400';
+            dotColor = isLight ? 'bg-amber-600' : 'bg-amber-400';
           }
 
           const runTooltip = `Pipeline: ${dagId}&#10;Run ID: ${r.dag_run_id}&#10;Status: ${state.toUpperCase()}&#10;Time: ${runDate.toLocaleString()}&#10;Duration: ${durationSec > 0 ? Math.round(durationSec) + 's' : 'In Progress'}&#10;Click to inspect run & logs`;
