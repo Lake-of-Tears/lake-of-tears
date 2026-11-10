@@ -224,6 +224,114 @@ def create_lakeset_guest_token(
     }
 
 
+def _execute_live_duckdb_explore(
+    sql: str,
+    matched_ds: dict[str, Any] | None,
+    authorized_datasets: list[dict[str, Any]],
+    chart_type: str,
+    metric_label: str,
+) -> dict[str, Any] | None:
+    """Attempt to execute the analytical SQL query directly against DuckDB + MinIO S3 Parquet."""
+    import os
+
+    try:
+        import duckdb
+    except ImportError:
+        return None
+
+    try:
+        con = duckdb.connect(":memory:")
+        try:
+            con.execute("LOAD httpfs;")
+        except Exception:
+            con.execute("INSTALL httpfs; LOAD httpfs;")
+
+        raw_ep = os.getenv("MINIO_ENDPOINT", "lake-of-tears-minio:9000").strip()
+        use_ssl = raw_ep.startswith("https://")
+        clean_ep = raw_ep.replace("http://", "").replace("https://", "").rstrip("/")
+        ak = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
+        sk = os.getenv("MINIO_SECRET_KEY", "minioadminpassword")
+
+        con.execute(f"SET s3_endpoint='{clean_ep}';")
+        con.execute(f"SET s3_access_key_id='{ak}';")
+        con.execute(f"SET s3_secret_access_key='{sk}';")
+        con.execute(f"SET s3_use_ssl={'true' if use_ssl else 'false'};")
+        con.execute("SET s3_url_style='path';")
+
+        datasets_to_mount = [matched_ds] if matched_ds else authorized_datasets[:15]
+        exec_sql = sql
+        for ds in datasets_to_mount:
+            if not ds:
+                continue
+            sch = ds["schema_slug"]
+            tbl = ds["table_name"]
+            s3_path = ds["s3_path_pattern"].replace("'", "''")
+            con.execute(f'CREATE SCHEMA IF NOT EXISTS "{sch}";')
+            con.execute(
+                f'CREATE OR REPLACE VIEW "{sch}"."{tbl}" AS '
+                f"SELECT * FROM read_parquet('{s3_path}', union_by_name=true);"
+            )
+            full_name = ds.get("full_name")
+            if full_name and full_name in exec_sql:
+                exec_sql = exec_sql.replace(full_name, f"{sch}.{tbl}")
+
+        rows = con.execute(exec_sql).fetchall()
+        con.close()
+        if not rows:
+            return None
+
+        c_type = (chart_type or "bar").lower()
+        if c_type == "kpi":
+            first_row = rows[0]
+            raw_val = first_row[-1] if len(first_row) > 1 else first_row[0]
+            if isinstance(raw_val, int):
+                val_str = f"{raw_val:,}"
+            elif isinstance(raw_val, float):
+                val_str = f"{raw_val:,.2f}"
+            else:
+                val_str = str(raw_val)
+            return {
+                "value": val_str,
+                "trend": f"Live DuckDB Lakehouse ({len(rows)} group(s))",
+            }
+
+        if c_type == "pie":
+            series_data = []
+            for r in rows[:12]:
+                label = str(r[0] if r[0] is not None else "Unknown")[:42]
+                val = float(r[1]) if len(r) > 1 and r[1] is not None else 1.0
+                series_data.append({"name": label, "value": round(val, 2)})
+            return {"series": series_data}
+
+        categories: list[str] = []
+        values: list[float] = []
+        for r in rows:
+            label = str(r[0] if r[0] is not None else "Unknown")
+            if len(label) > 38:
+                label = label[:35] + "..."
+            categories.append(label)
+            if len(r) > 1 and r[1] is not None:
+                try:
+                    values.append(round(float(r[1]), 2))
+                except (ValueError, TypeError):
+                    values.append(0.0)
+            else:
+                values.append(1.0)
+
+        return {
+            "categories": categories,
+            "series": [
+                {
+                    "name": metric_label,
+                    "data": values,
+                }
+            ],
+        }
+    except Exception as exc:
+        logger.debug("Live DuckDB explore query fallback (%s): %s", sql, exc)
+        return None
+
+
 @router.post("/explore-data")
 def explore_lakeset_dataset(
     req: LakesetExploreRequest,
@@ -257,29 +365,72 @@ def explore_lakeset_dataset(
     cols = matched_ds.get("columns", []) if matched_ds else []
     dim = req.dimension
     if not dim and cols:
-        dim = cols[0]["column_name"]
+        preferred_dims = (
+            "journal",
+            "category",
+            "overall_status",
+            "study_type",
+            "article_type",
+            "grade",
+            "purpose",
+            "loan_status",
+            "source",
+            "event_type",
+            "severity",
+            "status",
+            "tier",
+            "pub_year",
+            "year",
+        )
+        col_names_map = {c["column_name"].lower(): c["column_name"] for c in cols}
+        for p_dim in preferred_dims:
+            if p_dim in col_names_map:
+                dim = col_names_map[p_dim]
+                break
+        if not dim:
+            dim = cols[0]["column_name"]
     dim = dim or "category"
 
-    metric_col = req.metric or "count"
-    agg = (req.metric_agg or "count").upper()
+    metric_col = (req.metric or "count").strip()
+    agg = (req.metric_agg or "count").upper().strip()
     view_name = matched_ds["sql_view"] if matched_ds else "lakehouse.events"
 
     if req.sql and req.sql.strip():
         generated_sql = req.sql.strip()
-    elif metric_col == "count" or agg == "COUNT":
+        exec_sql = generated_sql
+        metric_label = metric_col
+    elif metric_col.lower() == "count" or agg == "COUNT":
         generated_sql = (
             f'SELECT "{dim}" AS "{dim}", COUNT(*) AS "count" '
             f"FROM {view_name} "
+            f'WHERE "{dim}" IS NOT NULL '
             f'GROUP BY "{dim}" ORDER BY "count" DESC LIMIT {req.limit}'
         )
+        exec_sql = generated_sql
+        metric_label = "Row Count"
     else:
         generated_sql = (
             f'SELECT "{dim}" AS "{dim}", {agg}("{metric_col}") AS "{metric_col}" '
             f"FROM {view_name} "
+            f'WHERE "{dim}" IS NOT NULL '
             f'GROUP BY "{dim}" ORDER BY "{metric_col}" DESC LIMIT {req.limit}'
         )
+        exec_sql = (
+            f'SELECT "{dim}" AS "{dim}", {agg}(TRY_CAST("{metric_col}" AS DOUBLE)) AS "{metric_col}" '
+            f"FROM {view_name} "
+            f'WHERE "{dim}" IS NOT NULL '
+            f'GROUP BY "{dim}" ORDER BY 2 DESC NULLS LAST LIMIT {req.limit}'
+        )
+        metric_label = f"{agg}({metric_col})"
 
-    widget_data = headless_superset.execute_widget_query(
+    live_data = _execute_live_duckdb_explore(
+        sql=exec_sql,
+        matched_ds=matched_ds,
+        authorized_datasets=authorized_datasets,
+        chart_type=req.chart_type or "bar",
+        metric_label=metric_label,
+    )
+    widget_data = live_data or headless_superset.execute_widget_query(
         {
             "type": req.chart_type or "bar",
             "dimension": dim,

@@ -104,20 +104,27 @@ def _build_columns_and_metrics(
         is_dttm = _is_temporal_type(c_type)
         is_num = _is_numeric_type(c_type)
 
+        c_lower = c_name.lower()
+        is_dim_like = (
+            c_lower in ("id", "pmid", "year", "pub_year", "issue_year", "month", "day")
+            or c_lower.endswith("_id")
+            or c_lower.endswith("_year")
+        )
+
         columns.append(
             {
                 "column_name": c_name,
                 "type": c_type,
                 "description": c_desc,
                 "verbose_name": col.get("verbose_name") or c_name,
-                "groupby": not is_num,
+                "groupby": (not is_num) or is_dim_like,
                 "filterable": True,
                 "is_dttm": is_dttm,
                 "nullable": bool(col.get("nullable", True)),
             }
         )
 
-        if is_num and not c_name.lower().endswith("_id") and c_name.lower() != "id":
+        if is_num and not is_dim_like:
             safe_col = _safe_sql_ident(c_name)
             metrics.append(
                 {

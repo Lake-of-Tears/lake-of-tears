@@ -370,6 +370,13 @@ def test_e2e_lakeset_chart_builder_and_sql_editor_deep_link(lakeset_page, lakese
     sql_preview = page.locator("#lakeset-explore-sql-preview").inner_text()
     assert "gold.journal_trends" in sql_preview
 
+    # Verify ECharts canvas is rendered with non-zero dimensions and persists after re-run
+    page.wait_for_selector("#lakeset-explore-chart canvas", state="visible", timeout=5000)
+    page.locator("#btn-run-explore").click()
+    page.wait_for_selector("#lakeset-explore-chart canvas", state="visible", timeout=5000)
+    canvas_box = page.locator("#lakeset-explore-chart canvas").first.bounding_box()
+    assert canvas_box is not None and canvas_box["width"] > 100 and canvas_box["height"] > 100
+
     # Switch to Dashboards tab and verify seeded dashboard card + zero-login embedded iframe
     page.locator("#lakeset-tab-dashboards").click()
     page.locator("text=PubMed Executive Overview").first.wait_for(state="visible", timeout=5000)

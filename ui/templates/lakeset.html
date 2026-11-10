@@ -261,9 +261,16 @@
         <label class="block text-xs font-medium text-gray-400 mb-1">Dimension (X-Axis / Group By)</label>
         <input type="text"
                id="explore-dimension-input"
+               list="lakeset-dim-columns"
                x-model="chartConfig.dimension"
+               @change="runExploreQuery()"
                placeholder="e.g. journal, status, category"
                class="input-dark text-xs w-full" />
+        <datalist id="lakeset-dim-columns">
+          <template x-for="c in (selectedDataset && selectedDataset.columns ? selectedDataset.columns : [])" :key="c.column_name">
+            <option :value="c.column_name" x-text="`${c.column_name} (${c.type})`"></option>
+          </template>
+        </datalist>
       </div>
 
       <!-- Metric & Aggregation -->
@@ -272,13 +279,24 @@
           <label class="block text-xs font-medium text-gray-400 mb-1">Metric Column</label>
           <input type="text"
                  id="explore-metric-input"
+                 list="lakeset-metric-columns"
                  x-model="chartConfig.metric"
+                 @change="if ((chartConfig.metric || '').toLowerCase() === 'count') chartConfig.metricAgg = 'count'; runExploreQuery()"
                  placeholder="count or column"
                  class="input-dark text-xs w-full" />
+          <datalist id="lakeset-metric-columns">
+            <option value="count">count — Row Count (*)</option>
+            <template x-for="c in (selectedDataset && selectedDataset.columns ? selectedDataset.columns : [])" :key="c.column_name">
+              <option :value="c.column_name" x-text="`${c.column_name} (${c.type})`"></option>
+            </template>
+          </datalist>
         </div>
         <div>
           <label class="block text-xs font-medium text-gray-400 mb-1">Aggregation</label>
-          <select id="explore-agg-select" x-model="chartConfig.metricAgg" class="input-dark text-xs w-full">
+          <select id="explore-agg-select"
+                  x-model="chartConfig.metricAgg"
+                  @change="runExploreQuery()"
+                  class="input-dark text-xs w-full">
             <option value="count">COUNT(*)</option>
             <option value="sum">SUM</option>
             <option value="avg">AVG</option>
@@ -311,7 +329,9 @@
           <div class="text-xs font-semibold text-gray-300">Semantic Columns &amp; AI Descriptions</div>
           <div class="space-y-1.5 max-h-48 overflow-y-auto pr-1">
             <template x-for="c in selectedDataset.columns" :key="c.column_name">
-              <div class="p-2 rounded bg-gray-950/60 border border-gray-800/80 text-[11px]">
+              <div @click="chartConfig.dimension = c.column_name; runExploreQuery()"
+                   class="p-2 rounded bg-gray-950/60 border border-gray-800/80 hover:border-blue-500/40 cursor-pointer transition-colors text-[11px]"
+                   title="Click to group by this column">
                 <div class="flex items-center justify-between">
                   <span class="font-mono text-blue-400 font-medium" x-text="c.column_name"></span>
                   <span class="font-mono text-[10px] text-gray-500" x-text="c.type"></span>
@@ -326,7 +346,7 @@
 
     <!-- Right Column: Live Chart Canvas & Zero-Login Embedded Superset Frame -->
     <div class="lg:col-span-8 flex flex-col gap-4">
-      <div class="card p-5 flex-1 flex flex-col gap-4 min-h-[360px]">
+      <div class="card p-5 flex-1 flex flex-col gap-4 min-h-[420px]">
         <div class="flex items-center justify-between border-b border-gray-800 pb-3">
           <div>
             <h3 class="text-sm font-semibold text-gray-100" x-text="chartConfig.title">Chart Preview</h3>
@@ -340,7 +360,7 @@
         </div>
 
         <!-- ECharts Canvas -->
-        <div id="lakeset-explore-chart" class="flex-1 w-full min-h-[260px]"></div>
+        <div id="lakeset-explore-chart" class="flex-1 w-full min-h-[320px]" style="min-height: 320px; width: 100%;"></div>
 
         <!-- Synthesized DuckDB SQL -->
         <template x-if="exploreResult && exploreResult.sql">

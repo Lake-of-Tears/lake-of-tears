@@ -213,10 +213,52 @@ document.addEventListener('alpine:init', () => {
       this.selectedDataset = ds;
       this.selectedDatasetName = ds.full_name;
       const cols = Array.isArray(ds.columns) ? ds.columns : [];
-      if (cols.length > 0) {
-        this.chartConfig.dimension = cols[0].column_name;
+
+      const preferredDims = [
+        'journal',
+        'overall_status',
+        'study_type',
+        'article_type',
+        'grade',
+        'purpose',
+        'loan_status',
+        'source',
+        'event_type',
+        'severity',
+        'category',
+        'status',
+        'tier',
+        'pub_year',
+        'year',
+      ];
+      let chosenDim = '';
+      for (const p of preferredDims) {
+        const match = cols.find((c) => (c.column_name || '').toLowerCase() === p);
+        if (match) {
+          chosenDim = match.column_name;
+          break;
+        }
       }
-      const numCol = cols.find((c) => !c.groupby && !c.is_dttm);
+      if (!chosenDim && cols.length > 0) {
+        const nonIdCol = cols.find(
+          (c) =>
+            c.groupby &&
+            !['id', 'pmid', 'nct_id', 'loan_id', 'event_id'].includes(
+              (c.column_name || '').toLowerCase()
+            )
+        );
+        chosenDim = nonIdCol ? nonIdCol.column_name : cols[0].column_name;
+      }
+      this.chartConfig.dimension = chosenDim;
+
+      const dimLikes = new Set(['id', 'pmid', 'year', 'pub_year', 'issue_year', 'month', 'day']);
+      const numCol = cols.find((c) => {
+        const cname = (c.column_name || '').toLowerCase();
+        if (dimLikes.has(cname) || cname.endsWith('_id') || cname.endsWith('_year')) {
+          return false;
+        }
+        return !c.groupby && !c.is_dttm;
+      });
       if (numCol) {
         this.chartConfig.metric = numCol.column_name;
         this.chartConfig.metricAgg = 'sum';
@@ -343,16 +385,32 @@ document.addEventListener('alpine:init', () => {
       }
     },
 
-    renderExploreChart() {
+    renderExploreChart(retryCount = 0) {
       const container = document.getElementById('lakeset-explore-chart');
       if (!container || !this.exploreResult || !this.exploreResult.data) return;
+
+      if ((container.clientWidth === 0 || container.clientHeight === 0) && retryCount < 6) {
+        requestAnimationFrame(() => {
+          setTimeout(() => this.renderExploreChart(retryCount + 1), 35);
+        });
+        return;
+      }
+
       const d = this.exploreResult.data;
       const cType = this.chartConfig.chartType || 'bar';
 
+      if (typeof echarts !== 'undefined') {
+        const existing = echarts.getInstanceByDom(container);
+        if (existing) {
+          existing.dispose();
+        }
+        container.removeAttribute('_echarts_instance_');
+      }
+
       if (cType === 'kpi') {
         container.innerHTML = `
-          <div class="h-full flex flex-col items-center justify-center text-center p-6">
-            <span class="text-xs uppercase tracking-wider text-gray-400 font-semibold">${this.chartConfig.metric || 'Metric'}</span>
+          <div class="h-full min-h-[260px] flex flex-col items-center justify-center text-center p-6">
+            <span class="text-xs uppercase tracking-wider text-gray-400 font-semibold">${this.chartConfig.metric || 'Metric'} (${(this.chartConfig.metricAgg || 'count').toUpperCase()})</span>
             <span class="text-4xl font-bold text-blue-400 mt-2 tabular-nums">${d.value || '128,450'}</span>
             <span class="text-xs text-emerald-400 mt-1">${d.trend || '+12.5% vs last period'}</span>
           </div>
@@ -367,10 +425,17 @@ document.addEventListener('alpine:init', () => {
           chart.setOption({
             backgroundColor: 'transparent',
             tooltip: { trigger: 'item' },
+            legend: {
+              bottom: 0,
+              textStyle: { color: '#9ca3af', fontSize: 11 },
+            },
             series: [
               {
                 type: 'pie',
-                radius: ['42%', '72%'],
+                radius: ['38%', '68%'],
+                center: ['50%', '45%'],
+                itemStyle: { borderRadius: 4, borderColor: '#111827', borderWidth: 2 },
+                label: { color: '#d1d5db', fontSize: 11 },
                 data: d.series || [
                   { name: 'Bronze', value: 450 },
                   { name: 'Silver', value: 310 },
@@ -387,14 +452,28 @@ document.addEventListener('alpine:init', () => {
               type: cType === 'area' ? 'line' : cType === 'line' ? 'line' : 'bar',
               areaStyle: cType === 'area' ? { opacity: 0.25 } : undefined,
               smooth: true,
+              barMaxWidth: 42,
+              itemStyle: {
+                color: '#3b82f6',
+                borderRadius: cType === 'bar' ? [4, 4, 0, 0] : 0,
+              },
               data: s.data,
             })
           );
           chart.setOption({
             backgroundColor: 'transparent',
             tooltip: { trigger: 'axis' },
-            grid: { left: 48, right: 20, top: 24, bottom: 32 },
-            xAxis: { type: 'category', data: cats, axisLabel: { color: '#9ca3af', fontSize: 11 } },
+            grid: { left: 56, right: 20, top: 24, bottom: 64 },
+            xAxis: {
+              type: 'category',
+              data: cats,
+              axisLabel: {
+                color: '#9ca3af',
+                fontSize: 10,
+                rotate: cats.length > 5 ? 22 : 0,
+                formatter: (val) => (val && val.length > 20 ? val.slice(0, 18) + '…' : val),
+              },
+            },
             yAxis: {
               type: 'value',
               axisLabel: { color: '#9ca3af', fontSize: 11 },
@@ -403,6 +482,7 @@ document.addEventListener('alpine:init', () => {
             series: seriesArr,
           });
         }
+        requestAnimationFrame(() => chart.resize());
       }
     },
   }));
