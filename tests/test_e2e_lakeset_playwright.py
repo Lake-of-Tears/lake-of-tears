@@ -419,3 +419,26 @@ def test_e2e_lakeset_search_filter_and_sqllab_tab(lakeset_page, lakeset_server):
     iframe_src = page.locator("#lakeset-sqllab-iframe").get_attribute("src")
     assert "/lakeset/proxy/sqllab/" in iframe_src
     assert "gold.journal_trends" in iframe_src
+
+
+def test_e2e_dashboards_create_modal_and_redirect(lakeset_page, lakeset_server):
+    """Verify clicking 'Create Dashboard' on /dashboards creates the dashboard and redirects to /dashboards/{id}."""
+    page = lakeset_page
+    page.goto("/dashboards", wait_until="networkidle")
+
+    # Click 'New Dashboard' button to open create modal
+    page.locator("button:has-text('New Dashboard')").click()
+    page.locator("#create-modal").wait_for(state="visible", timeout=5000)
+
+    # Fill title, description, and choose Executive template
+    page.locator("#create-title").fill("TEst")
+    page.locator("#create-desc").fill("test")
+    page.locator("input[name='template-choice'][value='executive']").check(force=True)
+
+    # Submit via Create Dashboard button and verify redirect to /dashboards/{id}
+    page.locator("#btn-submit-create").click()
+    page.wait_for_url("**/dashboards/**", timeout=5000)
+    assert "/dashboards/" in page.url
+    page.locator("#dash-title", has_text="TEst").wait_for(state="visible", timeout=5000)
+    assert page.locator("#dash-title", has_text="TEst").is_visible()
+

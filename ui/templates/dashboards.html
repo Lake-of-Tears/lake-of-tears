@@ -416,8 +416,10 @@
     const selectedTemplate = document.querySelector('input[name="template-choice"]:checked')?.value || 'blank';
 
     try {
-      const resp = await fetch('/api/dashboards', {
+      const wsQuery = currentWorkspaceSlug ? `?workspace_slug=${encodeURIComponent(currentWorkspaceSlug)}` : '';
+      const resp = await fetch(`/api/dashboards${wsQuery}`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title,
@@ -433,8 +435,8 @@
         closeCreateModal();
         window.location.href = `/dashboards/${created.id}`;
       } else {
-        const err = await resp.json();
-        showToast(err.detail || 'Failed to create dashboard', 'error');
+        const err = await resp.json().catch(() => ({}));
+        showToast(err.detail || err.error || 'Failed to create dashboard', 'error');
       }
     } catch (err) {
       showToast('Connection error while creating dashboard', 'error');
@@ -461,16 +463,18 @@
     btn.disabled = true;
 
     try {
-      const resp = await fetch(`/api/dashboards/${pendingDeleteId}`, {
+      const wsQuery = currentWorkspaceSlug ? `?workspace_slug=${encodeURIComponent(currentWorkspaceSlug)}` : '';
+      const resp = await fetch(`/api/dashboards/${pendingDeleteId}${wsQuery}`, {
         method: 'DELETE',
+        credentials: 'include',
       });
       if (resp.ok) {
         showToast('Dashboard deleted', 'success');
         closeDeleteModal();
         loadDashboardGallery();
       } else {
-        const err = await resp.json();
-        showToast(err.detail || 'Failed to delete dashboard', 'error');
+        const err = await resp.json().catch(() => ({}));
+        showToast(err.detail || err.error || 'Failed to delete dashboard', 'error');
       }
     } catch (err) {
       showToast('Error deleting dashboard', 'error');
@@ -478,6 +482,10 @@
       btn.disabled = false;
     }
   }
+
+  window.showToast = showToast;
+  window.loadDashboardGallery = loadDashboardGallery;
+  window.renderDashboards = renderDashboards;
 
   // Initialize
   document.addEventListener('DOMContentLoaded', () => {

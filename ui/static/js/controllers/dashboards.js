@@ -32,6 +32,11 @@ document.addEventListener('alpine:init', () => {
     },
 
     init() {
+      const origSetFilterStatus = typeof window.setFilterStatus === 'function' ? window.setFilterStatus : null;
+      const origHandleFilter = typeof window.handleFilter === 'function' ? window.handleFilter : null;
+      this._origSetFilterStatus = origSetFilterStatus;
+      this._origHandleFilter = origHandleFilter;
+
       // Expose globally for legacy bridges, external inline handlers, and test assertions
       window.openCreateModal = () => this.openCreateModal();
       window.closeCreateModal = () => this.closeCreateModal();
@@ -62,9 +67,11 @@ document.addEventListener('alpine:init', () => {
         error: null
       };
       const modal = document.getElementById('create-modal');
-      const form = document.getElementById('create-dashboard-form');
-      if (form) form.reset();
+      const form = document.getElementById('form-create-dashboard') || document.getElementById('create-dashboard-form');
+      if (form && typeof form.reset === 'function') form.reset();
       if (modal) modal.classList.remove('hidden');
+      const titleInput = document.getElementById('create-title') || document.getElementById('dash-title');
+      if (titleInput && typeof titleInput.focus === 'function') titleInput.focus();
     },
 
     closeCreateModal() {
@@ -75,13 +82,18 @@ document.addEventListener('alpine:init', () => {
 
     async handleCreateDashboard(e) {
       if (e && e.preventDefault) e.preventDefault();
-      const form = document.getElementById('create-dashboard-form');
       const submitBtn = document.getElementById('btn-submit-create');
-      if (!form) return;
 
-      const title = (document.getElementById('dash-title') || {}).value || '';
-      const description = (document.getElementById('dash-desc') || {}).value || '';
-      const dataset = (document.getElementById('dash-dataset') || {}).value || '';
+      const titleEl = document.getElementById('create-title') || document.getElementById('dash-title');
+      const descEl = document.getElementById('create-desc') || document.getElementById('dash-desc');
+      const pubEl = document.getElementById('create-published');
+      const datasetEl = document.getElementById('dash-dataset');
+      const selectedTemplate = document.querySelector('input[name="template-choice"]:checked')?.value || 'blank';
+
+      const title = (titleEl ? titleEl.value : '') || '';
+      const description = (descEl ? descEl.value : '') || '';
+      const isPublished = pubEl ? Boolean(pubEl.checked) : true;
+      const dataset = (datasetEl ? datasetEl.value : '') || '';
 
       if (!title.trim()) {
         if (window.showToast) window.showToast('Dashboard title is required', 'error');
@@ -91,16 +103,20 @@ document.addEventListener('alpine:init', () => {
       this.newDashboard.isSubmitting = true;
       if (submitBtn) {
         submitBtn.disabled = true;
-        submitBtn.innerHTML = '<span class="animate-spin">⏳</span> Creating...';
+        submitBtn.innerHTML = '<span>Creating...</span>';
       }
 
       try {
+        const wsSlug = (typeof currentWorkspaceSlug !== 'undefined' && currentWorkspaceSlug) ? currentWorkspaceSlug : '';
+        const wsQuery = wsSlug ? `?workspace_slug=${encodeURIComponent(wsSlug)}` : '';
         const payload = {
           title: title.trim(),
-          description: description.trim(),
+          description: description.trim() || null,
+          is_published: isPublished,
+          template: selectedTemplate,
           dataset_id: dataset || null
         };
-        const resp = await fetch('/api/dashboards', {
+        const resp = await fetch(`/api/dashboards${wsQuery}`, {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
@@ -110,7 +126,7 @@ document.addEventListener('alpine:init', () => {
         if (!resp.ok) {
           throw new Error(res.error || res.detail || 'Failed to create dashboard');
         }
-        if (window.showToast) window.showToast('Dashboard created successfully', 'success');
+        if (window.showToast) window.showToast(`Dashboard "${title.trim()}" created successfully!`, 'success');
         this.closeCreateModal();
         if (res.id) {
           window.location.href = `/dashboards/${res.id}`;
@@ -118,34 +134,41 @@ document.addEventListener('alpine:init', () => {
           window.loadDashboardGallery();
         }
       } catch (err) {
-        if (window.showToast) window.showToast(err.message, 'error');
+        if (window.showToast) window.showToast(err.message || 'Connection error while creating dashboard', 'error');
       } finally {
         this.newDashboard.isSubmitting = false;
         if (submitBtn) {
           submitBtn.disabled = false;
-          submitBtn.innerHTML = 'Create Dashboard';
+          submitBtn.innerHTML = '<span>Create Dashboard</span>';
         }
       }
     },
 
     confirmDelete(id, title) {
       this.deleteTarget = { id: id, title: title, isSubmitting: false };
+      if (typeof pendingDeleteId !== 'undefined') {
+        pendingDeleteId = id;
+      }
       this.deleteModalOpen = true;
       const modal = document.getElementById('delete-modal');
       const titleEl = document.getElementById('delete-modal-title');
-      if (titleEl) titleEl.textContent = `Are you sure you want to delete "${title}"? This action cannot be undone.`;
+      if (titleEl) titleEl.textContent = title;
       if (modal) modal.classList.remove('hidden');
     },
 
     closeDeleteModal() {
       this.deleteModalOpen = false;
       this.deleteTarget = { id: null, title: '', isSubmitting: false };
+      if (typeof pendingDeleteId !== 'undefined') {
+        pendingDeleteId = null;
+      }
       const modal = document.getElementById('delete-modal');
       if (modal) modal.classList.add('hidden');
     },
 
     async executeDelete() {
-      if (!this.deleteTarget.id) return;
+      const targetId = this.deleteTarget.id || (typeof pendingDeleteId !== 'undefined' ? pendingDeleteId : null);
+      if (!targetId) return;
       this.deleteTarget.isSubmitting = true;
       const btn = document.getElementById('btn-confirm-delete');
       if (btn) {
@@ -154,7 +177,9 @@ document.addEventListener('alpine:init', () => {
       }
 
       try {
-        const resp = await fetch(`/api/dashboards/${this.deleteTarget.id}`, {
+        const wsSlug = (typeof currentWorkspaceSlug !== 'undefined' && currentWorkspaceSlug) ? currentWorkspaceSlug : '';
+        const wsQuery = wsSlug ? `?workspace_slug=${encodeURIComponent(wsSlug)}` : '';
+        const resp = await fetch(`/api/dashboards/${targetId}${wsQuery}`, {
           method: 'DELETE',
           credentials: 'include'
         });
@@ -173,21 +198,37 @@ document.addEventListener('alpine:init', () => {
         this.deleteTarget.isSubmitting = false;
         if (btn) {
           btn.disabled = false;
-          btn.innerHTML = 'Delete';
+          btn.innerHTML = 'Delete Dashboard';
         }
       }
     },
 
     setFilterStatus(status) {
       this.currentFilter = status;
-      if (typeof window.setFilterStatus === 'function' && window.setFilterStatus !== this.setFilterStatus) {
-        window.setFilterStatus(status);
+      if (typeof currentFilter !== 'undefined') {
+        currentFilter = status;
+      }
+      ['all', 'published', 'draft'].forEach(s => {
+        const btn = document.getElementById(`filter-${s}`);
+        if (!btn) return;
+        if (s === status) {
+          btn.className = 'px-2.5 py-1 rounded text-xs font-medium transition-colors bg-white/10 text-white';
+        } else {
+          btn.className = 'px-2.5 py-1 rounded text-xs font-medium transition-colors text-gray-400 hover:text-white';
+        }
+      });
+      if (typeof window.renderDashboards === 'function') {
+        window.renderDashboards();
+      } else if (typeof this._origSetFilterStatus === 'function') {
+        this._origSetFilterStatus(status);
       }
     },
 
     handleFilter() {
-      if (typeof window.handleFilter === 'function' && window.handleFilter !== this.handleFilter) {
-        window.handleFilter();
+      if (typeof window.renderDashboards === 'function') {
+        window.renderDashboards();
+      } else if (typeof this._origHandleFilter === 'function') {
+        this._origHandleFilter();
       }
     }
   }));
