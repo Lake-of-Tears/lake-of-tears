@@ -643,14 +643,150 @@ def revoke_personal_access_token(
     return True
 
 
+def _apply_proxy_impersonation(
+    db: Session,
+    caller: User,
+    x_on_behalf_of: str | None = None,
+    x_lot_user_email: str | None = None,
+) -> User:
+    """Resolve trusted proxy user impersonation (X-On-Behalf-Of / X-Lot-User-Email).
+
+    Only a superadmin caller is permitted to impersonate another active user.
+    """
+    target_ident: str | None = None
+    if isinstance(x_on_behalf_of, str) and x_on_behalf_of.strip():
+        target_ident = x_on_behalf_of.strip()
+    elif isinstance(x_lot_user_email, str) and x_lot_user_email.strip():
+        target_ident = x_lot_user_email.strip()
+
+    if not target_ident:
+        return caller
+
+    if getattr(caller, "role", None) != "superadmin":
+        raise HTTPException(
+            403,
+            "Forbidden: Superadmin privileges are required for trusted proxy user impersonation (X-On-Behalf-Of).",
+        )
+
+    from sqlalchemy import func
+
+    target_user = db.query(User).filter(func.lower(User.email) == target_ident.lower()).first()
+    if not target_user:
+        try:
+            target_uuid = uuid.UUID(target_ident)
+            target_user = db.query(User).filter(User.id == target_uuid).first()
+        except (ValueError, TypeError):
+            pass
+    if not target_user:
+        target_user = (
+            db.query(User).filter(func.lower(User.display_name) == target_ident.lower()).first()
+        )
+
+    if not target_user or not target_user.is_active:
+        raise HTTPException(
+            403,
+            f"Forbidden: Impersonated user '{target_ident}' not found or inactive.",
+        )
+
+    # Clear any transient PAT attributes so the impersonated user executes strictly under their own DB RBAC
+    target_user._is_pat = False
+    target_user._pat = None
+    target_user._pat_scopes = None
+    target_user._pat_workspace_ids = None
+    target_user._pat_workspace_id = None
+    target_user._pat_workspace_access = None
+    target_user._impersonated_by = getattr(caller, "email", "superadmin")
+    return target_user
+
+
+def is_effective_superadmin(user: Any) -> bool:
+    """Return True if user is a superadmin and not restricted by a non-admin workspace PAT."""
+    if getattr(user, "role", None) != "superadmin":
+        return False
+    if is_pat_user(user):
+        scopes = getattr(user, "_pat_scopes", None) or []
+        if "admin" not in scopes:
+            return False
+    return True
+
+
+def get_user_accessible_workspaces(db: Session, user: User) -> list[Workspace]:
+    """Return all active workspaces that the user (or PAT) is authorized to access."""
+    if is_effective_superadmin(user):
+        return (
+            db.query(Workspace)
+            .filter(Workspace.status == "active")
+            .order_by(Workspace.created_at)
+            .all()
+        )
+
+    pat_wids = (
+        {str(w) for w in (getattr(user, "_pat_workspace_ids", None) or [])}
+        if is_pat_user(user)
+        else None
+    )
+
+    if getattr(user, "role", None) == "superadmin" and pat_wids is not None:
+        valid_uuids = []
+        for wid_str in pat_wids:
+            try:
+                valid_uuids.append(uuid.UUID(wid_str))
+            except (ValueError, TypeError):
+                pass
+        if not valid_uuids:
+            return []
+        return (
+            db.query(Workspace)
+            .filter(Workspace.status == "active", Workspace.id.in_(valid_uuids))
+            .order_by(Workspace.created_at)
+            .all()
+        )
+
+    member_wids = {
+        m.workspace_id
+        for m in db.query(WorkspaceMember.workspace_id)
+        .filter(WorkspaceMember.user_id == user.id)
+        .all()
+    }
+    for m in getattr(user, "workspace_memberships", None) or []:
+        if getattr(m, "workspace_id", None):
+            member_wids.add(m.workspace_id)
+
+    shared_wids = {
+        s.workspace_id
+        for s in db.query(WorkspaceShare.workspace_id)
+        .filter(WorkspaceShare.user_id == user.id, WorkspaceShare.status == "approved")
+        .all()
+    }
+    allowed_wids = member_wids | shared_wids
+    if pat_wids is not None:
+        allowed_wids = {wid for wid in allowed_wids if str(wid) in pat_wids}
+
+    if not allowed_wids:
+        return []
+
+    return (
+        db.query(Workspace)
+        .filter(Workspace.status == "active", Workspace.id.in_(allowed_wids))
+        .order_by(Workspace.created_at)
+        .all()
+    )
+
+
 def get_current_user(
     lake_token: str | None = Cookie(default=None),
     authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    x_on_behalf_of: str | None = Header(default=None, alias="X-On-Behalf-Of"),
+    x_lot_user_email: str | None = Header(default=None, alias="X-Lot-User-Email"),
     db: Session = Depends(get_db),
 ) -> User:
     token = None
     if isinstance(authorization, str) and authorization.startswith("Bearer "):
         token = authorization[7:].strip()
+    if not token and isinstance(x_api_key, str) and x_api_key.strip():
+        raw_api_key = x_api_key.strip()
+        token = raw_api_key[7:].strip() if raw_api_key.startswith("Bearer ") else raw_api_key
     if not token and isinstance(lake_token, str):
         token = lake_token
     if not token:
@@ -704,7 +840,9 @@ def get_current_user(
         for wid in wids:
             if wid not in user._pat_workspace_access:
                 user._pat_workspace_access[wid] = "read"
-        return user
+        return _apply_proxy_impersonation(
+            db, user, x_on_behalf_of=x_on_behalf_of, x_lot_user_email=x_lot_user_email
+        )
 
     try:
         payload = decode_token(token)
@@ -767,7 +905,15 @@ def get_current_user(
             db.rollback()
 
     user._current_session_id = session_rec.id
-    return user
+    user._is_pat = False
+    user._pat = None
+    user._pat_scopes = None
+    user._pat_workspace_ids = None
+    user._pat_workspace_id = None
+    user._pat_workspace_access = None
+    return _apply_proxy_impersonation(
+        db, user, x_on_behalf_of=x_on_behalf_of, x_lot_user_email=x_lot_user_email
+    )
 
 
 def require_superadmin(current_user: User = Depends(get_current_user)) -> User:
