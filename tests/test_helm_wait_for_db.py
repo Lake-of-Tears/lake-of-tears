@@ -70,9 +70,7 @@ def test_helm_template_rendering_default_wait_for_db():
 
     for af_dep in ("lake-of-tears-airflow-webserver", "lake-of-tears-airflow-scheduler"):
         assert af_dep in deployments
-        airflow_inits = deployments[af_dep]["spec"]["template"]["spec"].get(
-            "initContainers", []
-        )
+        airflow_inits = deployments[af_dep]["spec"]["template"]["spec"].get("initContainers", [])
         assert any(c["name"] == "wait-for-postgres" for c in airflow_inits)
         airflow_wait = next(c for c in airflow_inits if c["name"] == "wait-for-postgres")
         assert "pg_isready" in airflow_wait["command"][2]
@@ -108,9 +106,7 @@ def test_helm_template_rendering_disabled_wait_for_db():
     assert not any(c["name"] == "wait-for-postgres" for c in backend_inits)
 
     for af_dep in ("lake-of-tears-airflow-webserver", "lake-of-tears-airflow-scheduler"):
-        airflow_inits = deployments[af_dep]["spec"]["template"]["spec"].get(
-            "initContainers", []
-        )
+        airflow_inits = deployments[af_dep]["spec"]["template"]["spec"].get("initContainers", [])
         assert not any(c["name"] == "wait-for-postgres" for c in airflow_inits)
 
 
@@ -143,7 +139,5 @@ def test_helm_template_rendering_disabled_postgres():
     assert not any(c["name"] == "wait-for-postgres" for c in backend_inits)
 
     for af_dep in ("lake-of-tears-airflow-webserver", "lake-of-tears-airflow-scheduler"):
-        airflow_inits = deployments[af_dep]["spec"]["template"]["spec"].get(
-            "initContainers", []
-        )
+        airflow_inits = deployments[af_dep]["spec"]["template"]["spec"].get("initContainers", [])
         assert not any(c["name"] == "wait-for-postgres" for c in airflow_inits)

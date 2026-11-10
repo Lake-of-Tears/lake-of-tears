@@ -223,7 +223,11 @@ def test_k8s_service_manager_supports_split_airflow_deployments():
         {"metadata": {"name": "lake-of-tears-airflow-scheduler"}, "spec": {"replicas": 1}},
     ]
     with patch.object(mgr, "_get_deployments", return_value=mock_deps):
-        assert mgr._resolve_deployment_name("airflow-webserver") == "lake-of-tears-airflow-webserver"
-        assert mgr._resolve_deployment_name("airflow-scheduler") == "lake-of-tears-airflow-scheduler"
+        assert (
+            mgr._resolve_deployment_name("airflow-webserver") == "lake-of-tears-airflow-webserver"
+        )
+        assert (
+            mgr._resolve_deployment_name("airflow-scheduler") == "lake-of-tears-airflow-scheduler"
+        )
         # Legacy 'airflow' alias resolves cleanly to webserver when split
         assert mgr._resolve_deployment_name("airflow") == "lake-of-tears-airflow-webserver"
