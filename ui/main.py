@@ -2106,13 +2106,342 @@ async def lakeset_studio(request: Request):
     )
 
 
+def _render_lakeset_embedded_studio_html(
+    path: str,
+    query_params: Any,
+    email: str,
+    role: str,
+    ws_slug: str,
+) -> str:
+    """Render an interactive zero-login Lakeset Studio canvas (Explore, SQL Lab, or Dashboards)."""
+    import html as html_lib
+    import json as json_lib
+
+    clean_path = (path or "").strip("/")
+    dataset = str(query_params.get("dataset") or "").strip()
+    initial_sql = str(query_params.get("sql") or "").strip()
+    mode = "explore"
+    if "sqllab" in clean_path.lower():
+        mode = "sqllab"
+    elif "welcome" in clean_path.lower() or "dashboard" in clean_path.lower():
+        mode = "dashboards"
+
+    cfg_json = json_lib.dumps(
+        {
+            "mode": mode,
+            "path": clean_path,
+            "dataset": dataset,
+            "initialSql": initial_sql,
+            "email": email,
+            "role": role,
+            "workspace": ws_slug,
+        }
+    )
+    safe_email = html_lib.escape(email)
+    safe_role = html_lib.escape(role)
+    safe_ws = html_lib.escape(ws_slug)
+    safe_path = html_lib.escape(clean_path or "studio")
+
+    return f"""<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8">
+  <title>Lakeset Embedded Studio · {safe_path}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+  <style>
+    body {{ margin: 0; background: #0b0f17; color: #e5e7eb; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }}
+  </style>
+</head>
+<body class="min-h-screen flex flex-col bg-[#0b0f17] text-gray-100">
+  <!-- Zero-Login Header Banner -->
+  <header class="px-5 py-3 border-b border-gray-800 bg-gray-900/80 flex flex-wrap items-center justify-between gap-3">
+    <div class="flex items-center gap-3">
+      <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+        Zero-Login SSO Authenticated
+      </span>
+      <span class="text-xs font-semibold text-gray-200">Lakeset Embedded BI Canvas ({safe_path})</span>
+      <span class="text-[11px] font-mono text-gray-400 hidden sm:inline">User: {safe_email} ({safe_role}) · Workspace: {safe_ws}</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <span class="text-[11px] font-mono text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2.5 py-0.5 rounded">
+        Engine: Lake of Tears DuckDB Lakehouse (httpfs + MinIO S3)
+      </span>
+      <a href="/lakeset" target="_top" class="text-xs px-3 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">
+        &larr; Back to Lakeset Studio
+      </a>
+    </div>
+  </header>
+
+  <!-- Interactive Workspace Body -->
+  <main class="flex-1 p-5 max-w-7xl w-full mx-auto flex flex-col gap-4">
+    <!-- Controls Bar -->
+    <div id="studio-controls" class="bg-gray-900/90 border border-gray-800 rounded-xl p-4 flex flex-wrap items-end gap-3">
+      <div class="flex-1 min-w-[220px]">
+        <label class="block text-[11px] font-medium text-gray-400 mb-1">Governed Dataset</label>
+        <select id="ds-select" class="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-1.5 text-xs text-gray-100 font-mono"></select>
+      </div>
+      <div id="viz-type-wrap">
+        <label class="block text-[11px] font-medium text-gray-400 mb-1">Chart Type</label>
+        <select id="viz-type" class="bg-gray-950 border border-gray-800 rounded-lg px-3 py-1.5 text-xs text-gray-100">
+          <option value="bar">Bar Chart</option>
+          <option value="line">Line Chart</option>
+          <option value="area">Area Chart</option>
+          <option value="pie">Donut / Pie</option>
+          <option value="table">Data Table Only</option>
+        </select>
+      </div>
+      <div id="dim-wrap">
+        <label class="block text-[11px] font-medium text-gray-400 mb-1">Dimension (X / Group)</label>
+        <input id="dim-input" type="text" class="bg-gray-950 border border-gray-800 rounded-lg px-3 py-1.5 text-xs text-gray-100 font-mono w-36" placeholder="category" />
+      </div>
+      <div id="metric-wrap">
+        <label class="block text-[11px] font-medium text-gray-400 mb-1">Metric Column</label>
+        <input id="metric-input" type="text" class="bg-gray-950 border border-gray-800 rounded-lg px-3 py-1.5 text-xs text-gray-100 font-mono w-36" placeholder="value" />
+      </div>
+      <div id="agg-wrap">
+        <label class="block text-[11px] font-medium text-gray-400 mb-1">Aggregation</label>
+        <select id="agg-select" class="bg-gray-950 border border-gray-800 rounded-lg px-2.5 py-1.5 text-xs text-gray-100 font-mono">
+          <option value="COUNT">COUNT</option>
+          <option value="SUM" selected>SUM</option>
+          <option value="AVG">AVG</option>
+          <option value="MAX">MAX</option>
+          <option value="MIN">MIN</option>
+        </select>
+      </div>
+      <button id="btn-run" onclick="runStudioQuery()" class="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition">
+        Run DuckDB Query
+      </button>
+    </div>
+
+    <!-- SQL Editor Box -->
+    <div class="bg-gray-900/90 border border-gray-800 rounded-xl p-3.5">
+      <div class="flex items-center justify-between mb-1.5">
+        <span class="text-[10px] uppercase tracking-wider font-semibold text-gray-400">DuckDB Lakehouse SQL Query</span>
+        <span id="status-pill" class="text-[11px] font-mono text-emerald-400">Ready</span>
+      </div>
+      <textarea id="sql-editor" rows="2" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-xs font-mono text-emerald-300 focus:outline-none focus:border-blue-500" placeholder="Optional custom DuckDB SQL (leave blank to auto-synthesize from Dimension & Metric)..."></textarea>
+      <div class="mt-1.5 text-[11px] font-mono text-gray-400 truncate" id="executed-sql-bar"></div>
+    </div>
+
+    <!-- Split Visualization & Data Table Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1">
+      <div id="chart-panel" class="lg:col-span-7 bg-gray-900/90 border border-gray-800 rounded-xl p-4 flex flex-col min-h-[360px]">
+        <div class="flex items-center justify-between mb-2">
+          <h4 class="text-xs font-semibold text-gray-200" id="chart-title">Interactive Visualization</h4>
+          <span class="text-[11px] font-mono text-gray-400" id="row-count-badge">0 rows</span>
+        </div>
+        <div id="echarts-canvas" class="w-full flex-1 min-h-[320px]"></div>
+      </div>
+
+      <div id="table-panel" class="lg:col-span-5 bg-gray-900/90 border border-gray-800 rounded-xl p-4 flex flex-col min-h-[360px]">
+        <h4 class="text-xs font-semibold text-gray-200 mb-2">Query Result Rows</h4>
+        <div class="overflow-auto flex-1 max-h-[340px] border border-gray-800 rounded-lg">
+          <table class="w-full text-xs text-left text-gray-300">
+            <thead id="result-thead" class="bg-gray-950 text-[11px] uppercase text-gray-400 sticky top-0"></thead>
+            <tbody id="result-tbody" class="divide-y divide-gray-800 font-mono text-[11px]"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const STUDIO_CFG = {cfg_json};
+    let datasetsList = [];
+    let chartInstance = null;
+
+    function pickDefaultColumns(ds) {{
+      const cols = (ds && ds.columns) || [];
+      if (!cols.length) return {{ dim: 'category', metric: 'value' }};
+      const numCol = cols.find(c => /INT|DOUBLE|FLOAT|DECIMAL|NUMERIC|BIGINT|REAL/i.test(c.type || ''));
+      const dimCol = cols.find(c => c !== numCol) || cols[0];
+      return {{
+        dim: dimCol ? dimCol.column_name : 'category',
+        metric: numCol ? numCol.column_name : (cols[0] ? cols[0].column_name : 'value')
+      }};
+    }}
+
+    async function initStudio() {{
+      if (STUDIO_CFG.initialSql) {{
+        document.getElementById('sql-editor').value = STUDIO_CFG.initialSql;
+      }}
+      if (STUDIO_CFG.mode === 'sqllab') {{
+        document.getElementById('sql-editor').rows = 4;
+      }}
+      try {{
+        const resp = await fetch(`/api/lakeset/datasets?workspace_slug=${{encodeURIComponent(STUDIO_CFG.workspace)}}`, {{ credentials: 'include' }});
+        if (resp.ok) {{
+          const data = await resp.json();
+          datasetsList = data.datasets || [];
+        }}
+      }} catch (e) {{}}
+
+      const sel = document.getElementById('ds-select');
+      if (datasetsList.length === 0 && STUDIO_CFG.dataset) {{
+        datasetsList = [{{ qualified_name: STUDIO_CFG.dataset, table_name: STUDIO_CFG.dataset, columns: [] }}];
+      }}
+      sel.innerHTML = datasetsList.map(d => {{
+        const qn = d.qualified_name || `${{d.catalog_name}}.${{d.schema_name}}.${{d.table_name}}`;
+        return `<option value="${{qn}}">${{qn}}</option>`;
+      }}).join('');
+
+      const targetDs = STUDIO_CFG.dataset || (datasetsList[0] && datasetsList[0].qualified_name) || '';
+      if (targetDs) sel.value = targetDs;
+
+      const matched = datasetsList.find(d => d.qualified_name === sel.value) || datasetsList[0];
+      if (matched) {{
+        const defs = pickDefaultColumns(matched);
+        document.getElementById('dim-input').value = defs.dim;
+        document.getElementById('metric-input').value = defs.metric;
+      }}
+
+      sel.addEventListener('change', () => {{
+        const m = datasetsList.find(d => d.qualified_name === sel.value);
+        if (m) {{
+          const defs = pickDefaultColumns(m);
+          document.getElementById('dim-input').value = defs.dim;
+          document.getElementById('metric-input').value = defs.metric;
+        }}
+        runStudioQuery();
+      }});
+      document.getElementById('viz-type').addEventListener('change', () => runStudioQuery());
+
+      await runStudioQuery();
+    }}
+
+    async function runStudioQuery() {{
+      const statusEl = document.getElementById('status-pill');
+      statusEl.textContent = 'Running DuckDB query...';
+      const dataset = document.getElementById('ds-select').value || STUDIO_CFG.dataset || 'default.telemetry.events';
+      const vizType = document.getElementById('viz-type').value || 'bar';
+      const dimension = document.getElementById('dim-input').value || 'category';
+      const metric = document.getElementById('metric-input').value || 'value';
+      const agg = document.getElementById('agg-select').value || 'SUM';
+      const customSql = document.getElementById('sql-editor').value.trim();
+
+      try {{
+        const resp = await fetch(`/api/lakeset/explore-data?workspace_slug=${{encodeURIComponent(STUDIO_CFG.workspace)}}`, {{
+          method: 'POST',
+          credentials: 'include',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{
+            dataset: dataset,
+            viz_type: vizType,
+            dimension: dimension,
+            metric: metric,
+            agg: agg,
+            sql: customSql
+          }})
+        }});
+        const data = await resp.json();
+        statusEl.textContent = 'Live · DuckDB S3';
+        document.getElementById('executed-sql-bar').textContent = 'Executed SQL: ' + (data.sql || '');
+        document.getElementById('chart-title').textContent = `${{dataset}} (${{vizType.toUpperCase()}})`;
+        const rows = data.rows || [];
+        document.getElementById('row-count-badge').textContent = `${{rows.length}} rows`;
+        renderTable(rows, data.dimension || dimension, data.metric || metric);
+        renderChart(vizType, rows);
+      }} catch (err) {{
+        statusEl.textContent = 'Query Error';
+      }}
+    }}
+
+    function renderTable(rows, dimHeader, metricHeader) {{
+      const thead = document.getElementById('result-thead');
+      const tbody = document.getElementById('result-tbody');
+      thead.innerHTML = `<tr><th class="px-3 py-2">${{dimHeader}}</th><th class="px-3 py-2 text-right">${{metricHeader}}</th></tr>`;
+      if (!rows.length) {{
+        tbody.innerHTML = '<tr><td colspan="2" class="px-3 py-6 text-center text-gray-500">No rows returned</td></tr>';
+        return;
+      }}
+      tbody.innerHTML = rows.map(r => `
+        <tr class="hover:bg-white/[0.02]">
+          <td class="px-3 py-1.5 text-gray-200">${{r.label}}</td>
+          <td class="px-3 py-1.5 text-right text-blue-400">${{Number(r.value || 0).toLocaleString()}}</td>
+        </tr>
+      `).join('');
+    }}
+
+    function renderChart(vizType, rows) {{
+      const el = document.getElementById('echarts-canvas');
+      if (!el || typeof echarts === 'undefined') return;
+      const existing = echarts.getInstanceByDom(el);
+      if (existing) existing.dispose();
+      chartInstance = echarts.init(el);
+
+      const labels = rows.map(r => r.label);
+      const values = rows.map(r => r.value);
+
+      if (vizType === 'pie') {{
+        chartInstance.setOption({{
+          backgroundColor: 'transparent',
+          tooltip: {{ trigger: 'item' }},
+          series: [{{
+            type: 'pie',
+            radius: ['42%', '72%'],
+            data: rows.map(r => ({{ name: r.label, value: r.value }}))
+          }}]
+        }});
+        return;
+      }}
+
+      chartInstance.setOption({{
+        backgroundColor: 'transparent',
+        tooltip: {{ trigger: 'axis' }},
+        grid: {{ left: '5%', right: '4%', top: '10%', bottom: '14%', containLabel: true }},
+        xAxis: {{ type: 'category', data: labels, axisLabel: {{ color: '#9ca3af', fontSize: 11, rotate: labels.length > 6 ? 20 : 0 }} }},
+        yAxis: {{ type: 'value', axisLabel: {{ color: '#9ca3af', fontSize: 11 }}, splitLine: {{ lineStyle: {{ color: 'rgba(255,255,255,0.06)' }} }} }},
+        series: [{{
+          type: vizType === 'area' ? 'line' : (vizType === 'table' ? 'bar' : vizType),
+          smooth: true,
+          areaStyle: vizType === 'area' ? {{ opacity: 0.25 }} : undefined,
+          itemStyle: {{ color: '#3b82f6', borderRadius: vizType === 'bar' ? [4, 4, 0, 0] : 0 }},
+          data: values
+        }}]
+      }});
+    }}
+
+    window.addEventListener('resize', () => {{ if (chartInstance) chartInstance.resize(); }});
+    document.addEventListener('DOMContentLoaded', initStudio);
+  </script>
+</body>
+</html>"""
+
+
 @app.api_route(
     "/lakeset/proxy/{path:path}",
     methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
 )
 async def lakeset_reverse_proxy(request: Request, path: str):
-    """Zero-login reverse auth proxy into Apache Superset with signed `X-Lakeset-User-*` headers."""
+    """Zero-login reverse auth proxy into Lakeset / Apache Superset with signed `X-Lakeset-User-*` headers."""
     proxy_headers = _build_lakeset_proxy_headers(request)
+    email = proxy_headers["X-Lakeset-User-Email"]
+    role = proxy_headers["X-Lakeset-User-Role"]
+    ws_slug = proxy_headers["X-Lakeset-Workspace"]
+
+    # Interactive embedded studio views (Explore, SQL Lab, Welcome/Dashboards) render self-contained
+    # DuckDB + ECharts BI studio when accessed via /lakeset/proxy/... unless raw API proxy is requested
+    clean_path = (path or "").strip("/").lower()
+    if request.method == "GET" and not os.getenv("SUPERSET_INTERNAL_URL") and (
+        clean_path.startswith("superset/explore")
+        or clean_path.startswith("sqllab")
+        or clean_path.startswith("superset/welcome")
+    ):
+        html = _render_lakeset_embedded_studio_html(
+            path=path,
+            query_params=request.query_params,
+            email=email,
+            role=role,
+            ws_slug=ws_slug,
+        )
+        return HTMLResponse(
+            content=html,
+            status_code=200,
+            headers={"X-Lakeset-Zero-Login": "active"},
+        )
+
     upstream_base = (
         os.getenv("SUPERSET_INTERNAL_URL") or SUPERSET_URL or "http://superset:8088"
     ).rstrip("/")
@@ -2124,6 +2453,7 @@ async def lakeset_reverse_proxy(request: Request, path: str):
     forward_headers = {
         k: v
         for k, v in request.headers.items()
+        for _ in [1]
         if k.lower() not in ("host", "content-length", "connection")
     }
     forward_headers.update(proxy_headers)
@@ -2153,31 +2483,13 @@ async def lakeset_reverse_proxy(request: Request, path: str):
                 media_type=resp.headers.get("content-type"),
             )
     except Exception:
-        # Clean zero-login embedded studio view when upstream Superset container is offline
-        email = proxy_headers["X-Lakeset-User-Email"]
-        role = proxy_headers["X-Lakeset-User-Role"]
-        ws_slug = proxy_headers["X-Lakeset-Workspace"]
-        html = f"""<!DOCTYPE html>
-<html lang="en" class="dark">
-<head><meta charset="utf-8"><title>Lakeset Embedded Runtime</title>
-<style>
-  body {{ margin: 0; font-family: ui-sans-serif, system-ui, sans-serif; background: #0b0f17; color: #e5e7eb; display: flex; align-items: center; justify-content: center; min-height: 100vh; }}
-  .box {{ border: 1px solid #1f2937; background: #111827; border-radius: 12px; padding: 24px 28px; max-width: 560px; width: 90%; }}
-  .badge {{ display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-family: monospace; background: rgba(16,185,129,0.15); color: #34d399; border: 1px solid rgba(16,185,129,0.3); }}
-  .meta {{ margin-top: 12px; font-size: 12px; color: #9ca3af; font-family: monospace; line-height: 1.7; }}
-</style></head>
-<body>
-  <div class="box">
-    <span class="badge">Zero-Login SSO Authenticated</span>
-    <h3 style="margin: 12px 0 6px 0; font-size: 15px;">Lakeset Embedded BI Canvas ({path})</h3>
-    <p style="margin: 0; font-size: 12px; color: #9ca3af;">Pre-authenticated via Lake of Tears proxy headers &mdash; zero login prompt required.</p>
-    <div class="meta">
-      <div>User: {email} ({role})</div>
-      <div>Workspace: {ws_slug}</div>
-      <div>Engine: Lake of Tears DuckDB Lakehouse (httpfs + MinIO S3)</div>
-    </div>
-  </div>
-</body></html>"""
+        html = _render_lakeset_embedded_studio_html(
+            path=path,
+            query_params=request.query_params,
+            email=email,
+            role=role,
+            ws_slug=ws_slug,
+        )
         return HTMLResponse(
             content=html,
             status_code=200,
