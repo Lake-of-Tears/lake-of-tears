@@ -1,6 +1,6 @@
 # AI Harnesses, RAG Gateways & MCP Integrations
 
-Lake of Tears provides a unified, permission-aware AI gateway and native Model Context Protocol (MCP) server so external conversational harnesses (**LibreChat**, **Open WebUI**, **AnythingLLM**, **Claude Desktop**, **Cursor**, **Windsurf**, **Antigravity**) and programmatic agent frameworks (**LangChain / LangGraph**, **LlamaIndex**, **CrewAI**, **OpenAI Agents SDK**) can query datalake vector embeddings and catalog tables while strictly enforcing per-user RBAC.
+Lake of Tears provides a unified, permission-aware AI gateway and native Model Context Protocol (MCP) server so external conversational harnesses (**Claude Desktop**, **Cursor**, **Windsurf**, **Antigravity**, **Open WebUI**, **AnythingLLM**) and programmatic agent frameworks (**LangChain / LangGraph**, **LlamaIndex**, **CrewAI**, **OpenAI Agents SDK**) can query datalake vector embeddings and catalog tables while strictly enforcing per-user RBAC.
 
 ---
 
@@ -40,21 +40,18 @@ Every request to `/api/v1/*` and `/api/mcp` resolves the caller's effective Lake
    - Add your Admin account with `superadmin` role (or workspace `admin` across all workspaces).
    - Add your Worker account (`worker@company.com`) **only** to the `training` workspace with `read` role (or grant an approved `CatalogAccess` share on the `training` catalog).
 3. **Authenticate from Your Harness:**
-   - **Option A (Per-User PAT):** Each user generates a Personal Access Token (`lot_pat_...`) under **Account Settings -> Personal Access Tokens** and enters it in LibreChat.
-   - **Option B (Automatic SSO Identity Pass-Through):** Configure LibreChat with a single `superadmin` Service PAT and pass `X-On-Behalf-Of: "{{LIBRECHAT_USER_EMAIL}}"` in `headers`.
+   - **Option A (Per-User PAT):** Each user generates a Personal Access Token (`lot_pat_...`) under **Account Settings -> Personal Access Tokens** and configures it in their AI client.
+   - **Option B (Automatic SSO Identity Pass-Through):** Configure your AI proxy or harness with a single `superadmin` Service PAT and pass `X-On-Behalf-Of: "<user_email>"` in `headers`.
 
 ---
 
-## 3. LibreChat Integration (`librechat.yaml`)
+## 3. Standard OpenAI & MCP Client Configuration
 
-### 3.1 Custom OpenAI Endpoint (SSO Identity Pass-Through or User PAT)
+### 3.1 Custom OpenAI-Compatible Endpoint (SSO Identity Pass-Through or User PAT)
 
-Add the following `endpoints.custom` block to your `librechat.yaml`:
+Any OpenAI-compatible client or multi-user AI gateway can connect to `/api/v1`:
 
 ```yaml
-version: 1.2.1
-cache: true
-
 endpoints:
   custom:
     # Option A: Automatic Per-User RBAC via Trusted Proxy Header (Recommended for SSO teams)
@@ -62,22 +59,17 @@ endpoints:
       apiKey: "${LOT_ADMIN_SERVICE_PAT}"
       baseURL: "http://lake-of-tears-backend:8000/api/v1"
       headers:
-        X-On-Behalf-Of: "{{LIBRECHAT_USER_EMAIL}}"
+        X-On-Behalf-Of: "${USER_EMAIL}"
       models:
         default:
           - "lot-rag"
           - "lot-genie"
           - "lot-hybrid"
         fetch: true
-      titleConvo: true
-      titleModel: "lot-rag"
-      summarize: false
-      forcePrompt: false
-      modelDisplayLabel: "Lake of Tears"
 
-    # Option B: Per-User Personal Access Token (User-provided key in LibreChat UI)
+    # Option B: Per-User Personal Access Token
     - name: "Lake of Tears (Personal Token)"
-      apiKey: "user_provided"
+      apiKey: "${LOT_USER_PAT}"
       baseURL: "http://lake-of-tears-backend:8000/api/v1"
       models:
         default:
@@ -85,12 +77,11 @@ endpoints:
           - "lot-genie"
           - "lot-hybrid"
         fetch: true
-      modelDisplayLabel: "Lake of Tears (PAT)"
 ```
 
-### 3.2 Native LibreChat MCP Server Configuration
+### 3.2 Native Remote MCP Server Configuration
 
-To let LibreChat Agents use external frontier models (e.g., Claude Sonnet, GPT-4o, Gemini 2.5 Pro) while invoking Lake of Tears tools (`semantic_search_datalake`, `query_datalake_sql`, `describe_table`, `list_workspaces_and_catalogs`, `ask_genie`) with per-user RBAC:
+To let MCP clients (e.g., Claude Desktop, Antigravity, Cursor, or custom agents) invoke Lake of Tears tools (`semantic_search_datalake`, `query_datalake_sql`, `describe_table`, `list_workspaces_and_catalogs`, `ask_genie`) with per-user RBAC:
 
 ```yaml
 mcpServers:
@@ -99,7 +90,7 @@ mcpServers:
     url: "http://lake-of-tears-backend:8000/api/mcp"
     headers:
       Authorization: "Bearer ${LOT_ADMIN_SERVICE_PAT}"
-      X-On-Behalf-Of: "{{LIBRECHAT_USER_EMAIL}}"
+      X-On-Behalf-Of: "${USER_EMAIL}"
     timeout: 60000
 ```
 

@@ -210,7 +210,7 @@ def gateway_env(tmp_path: Path):
     _, admin_pat = auth.create_personal_access_token(
         session,
         user_id=admin_user.id,
-        name="LibreChat Service Proxy PAT",
+        name="Trusted AI Gateway Service Proxy PAT",
         workspace_access={str(ws_exec.id): "admin", str(ws_training.id): "admin"},
         scopes=["read", "write", "admin"],
     )
