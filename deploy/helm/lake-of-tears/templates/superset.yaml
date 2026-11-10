@@ -40,7 +40,7 @@ spec:
             - |
               mkdir -p /app/superset_home/pythonpath &&
               python3 -c "import duckdb, duckdb_engine" 2>/dev/null || \
-                pip install --no-cache-dir --target /app/superset_home/pythonpath duckdb duckdb-engine &&
+                pip install --no-cache-dir --no-deps --target /app/superset_home/pythonpath duckdb duckdb-engine &&
               exec /usr/bin/run-server.sh
           env:
             - name: PYTHONPATH
