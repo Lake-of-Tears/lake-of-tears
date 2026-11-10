@@ -67,10 +67,10 @@ document.addEventListener('alpine:init', () => {
         error: null
       };
       const modal = document.getElementById('create-modal');
-      const form = document.getElementById('form-create-dashboard') || document.getElementById('create-dashboard-form');
+      const form = document.getElementById('form-create-dashboard');
       if (form && typeof form.reset === 'function') form.reset();
       if (modal) modal.classList.remove('hidden');
-      const titleInput = document.getElementById('create-title') || document.getElementById('dash-title');
+      const titleInput = document.getElementById('create-title');
       if (titleInput && typeof titleInput.focus === 'function') titleInput.focus();
     },
 
@@ -84,16 +84,15 @@ document.addEventListener('alpine:init', () => {
       if (e && e.preventDefault) e.preventDefault();
       const submitBtn = document.getElementById('btn-submit-create');
 
-      const titleEl = document.getElementById('create-title') || document.getElementById('dash-title');
-      const descEl = document.getElementById('create-desc') || document.getElementById('dash-desc');
+      const titleEl = document.getElementById('create-title');
+      const descEl = document.getElementById('create-desc');
       const pubEl = document.getElementById('create-published');
-      const datasetEl = document.getElementById('dash-dataset');
       const selectedTemplate = document.querySelector('input[name="template-choice"]:checked')?.value || 'blank';
 
       const title = (titleEl ? titleEl.value : '') || '';
       const description = (descEl ? descEl.value : '') || '';
       const isPublished = pubEl ? Boolean(pubEl.checked) : true;
-      const dataset = (datasetEl ? datasetEl.value : '') || '';
+      const dataset = this.newDashboard.dataset || '';
 
       if (!title.trim()) {
         if (window.showToast) window.showToast('Dashboard title is required', 'error');

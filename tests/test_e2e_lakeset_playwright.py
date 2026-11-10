@@ -302,7 +302,7 @@ def lakeset_server(tmp_path_factory):
 
 @pytest.fixture
 def lakeset_page(lakeset_server):
-    """Playwright headless Chromium browser page pre-authenticated with workspace cookies."""
+    """Playwright headless Chromium browser page pre-authenticated with workspace cookies and uncaught JS error guard."""
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
@@ -326,9 +326,14 @@ def lakeset_page(lakeset_server):
             ]
         )
         pg = context.new_page()
+        uncaught_page_errors: list[str] = []
+        pg.on("pageerror", lambda exc: uncaught_page_errors.append(str(exc)))
         yield pg
         context.close()
         browser.close()
+        assert not uncaught_page_errors, (
+            f"Uncaught JavaScript pageerror(s) detected during E2E test: {uncaught_page_errors}"
+        )
 
 
 def test_e2e_lakeset_sidebar_sync_and_semantic_inspector(lakeset_page, lakeset_server):
@@ -422,7 +427,7 @@ def test_e2e_lakeset_search_filter_and_sqllab_tab(lakeset_page, lakeset_server):
 
 
 def test_e2e_dashboards_create_modal_and_redirect(lakeset_page, lakeset_server):
-    """Verify clicking 'Refresh' and 'Create Dashboard' on /dashboards works without errors."""
+    """Verify clicking 'Refresh', filter tabs, search, and 'Create Dashboard' on /dashboards works without errors."""
     page = lakeset_page
     page.goto("/dashboards", wait_until="networkidle")
 
@@ -432,6 +437,14 @@ def test_e2e_dashboards_create_modal_and_redirect(lakeset_page, lakeset_server):
     page.locator("#btn-refresh").click()
     page.wait_for_timeout(300)
     assert page.locator("text=Error connecting to dashboards API").count() == 0
+
+    # Exercise filter tabs and search input (verifying no recursion / RangeError)
+    page.locator("#filter-published").click()
+    page.locator("#filter-draft").click()
+    page.locator("#filter-all").click()
+    page.locator("#search-input").fill("PubMed")
+    assert page.locator("text=PubMed Executive Overview").first.is_visible()
+    page.locator("#search-input").fill("")
 
     # Click 'New Dashboard' button to open create modal
     page.locator("button:has-text('New Dashboard')").click()
@@ -448,4 +461,5 @@ def test_e2e_dashboards_create_modal_and_redirect(lakeset_page, lakeset_server):
     assert "/dashboards/" in page.url
     page.locator("#dash-title", has_text="TEst").wait_for(state="visible", timeout=5000)
     assert page.locator("#dash-title", has_text="TEst").is_visible()
+
 

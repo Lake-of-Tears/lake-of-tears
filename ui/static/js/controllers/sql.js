@@ -8,9 +8,18 @@
 
 document.addEventListener('alpine:init', () => {
 
+  const _origToggleSqlSidebar = window.toggleSqlSidebar;
+  const _origSwitchSidebarTab = window.switchSidebarTab;
+  const _origExecuteRunQuery = window.executeRunQuery;
+  const _origExplainCurrentQuery = window.explainCurrentQuery;
+  const _origCloseExplainModal = window.closeExplainModal;
+  const _origGenerateSqlWithAi = window.generateSqlWithAi;
+  const _origFixQueryWithAi = window.fixQueryWithAi;
+  const _origApplyFixedSql = window.applyFixedSql;
+
   Alpine.data('sqlEditorManager', () => ({
     sidebarOpen: true,
-    activeSidebarTab: 'catalog',
+    activeSidebarTab: 'schema',
 
     // Query Execution State
     isRunning: false,
@@ -49,7 +58,10 @@ document.addEventListener('alpine:init', () => {
 
     toggleSidebar() {
       this.sidebarOpen = !this.sidebarOpen;
-      const sidebar = document.getElementById('sql-reference-sidebar');
+      if (typeof _origToggleSqlSidebar === 'function') {
+        return _origToggleSqlSidebar();
+      }
+      const sidebar = document.getElementById('sqlReferenceSidebar');
       if (sidebar) {
         sidebar.classList.toggle('hidden', !this.sidebarOpen);
       }
@@ -57,26 +69,29 @@ document.addEventListener('alpine:init', () => {
 
     switchSidebarTab(tab) {
       this.activeSidebarTab = tab;
-      const catalogBtn = document.getElementById('tab-btn-catalog');
-      const snippetsBtn = document.getElementById('tab-btn-snippets');
-      const catalogContent = document.getElementById('tab-content-catalog');
-      const snippetsContent = document.getElementById('tab-content-snippets');
+      if (typeof _origSwitchSidebarTab === 'function') {
+        return _origSwitchSidebarTab(tab);
+      }
+      const catalogBtn = document.getElementById('tabBtnSchema');
+      const snippetsBtn = document.getElementById('tabBtnFunctions');
+      const catalogContent = document.getElementById('sidebarTabSchema');
+      const snippetsContent = document.getElementById('sidebarTabFunctions');
 
-      if (tab === 'catalog') {
+      if (tab === 'schema' || tab === 'catalog') {
         if (catalogBtn) {
-          catalogBtn.className = 'px-3 py-2 text-xs font-semibold border-b-2 border-blue-500 text-blue-400';
+          catalogBtn.className = 'flex-1 py-2.5 text-xs font-semibold text-blue-400 border-b-2 border-blue-500 bg-gray-900/60';
         }
         if (snippetsBtn) {
-          snippetsBtn.className = 'px-3 py-2 text-xs font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200';
+          snippetsBtn.className = 'flex-1 py-2.5 text-xs font-semibold text-gray-500 hover:text-gray-300 border-b-2 border-transparent';
         }
         if (catalogContent) catalogContent.classList.remove('hidden');
         if (snippetsContent) snippetsContent.classList.add('hidden');
       } else {
         if (catalogBtn) {
-          catalogBtn.className = 'px-3 py-2 text-xs font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200';
+          catalogBtn.className = 'flex-1 py-2.5 text-xs font-semibold text-gray-500 hover:text-gray-300 border-b-2 border-transparent';
         }
         if (snippetsBtn) {
-          snippetsBtn.className = 'px-3 py-2 text-xs font-semibold border-b-2 border-blue-500 text-blue-400';
+          snippetsBtn.className = 'flex-1 py-2.5 text-xs font-semibold text-blue-400 border-b-2 border-blue-500 bg-gray-900/60';
         }
         if (catalogContent) catalogContent.classList.add('hidden');
         if (snippetsContent) snippetsContent.classList.remove('hidden');
@@ -84,10 +99,10 @@ document.addEventListener('alpine:init', () => {
     },
 
     executeRunQuery() {
-      if (typeof window.executeRunQuery === 'function' && window.executeRunQuery !== this.executeRunQuery) {
-        return window.executeRunQuery();
+      if (typeof _origExecuteRunQuery === 'function') {
+        return _origExecuteRunQuery();
       }
-      const form = document.getElementById('sql-form');
+      const form = document.getElementById('sqlEditorForm');
       if (form) form.submit();
     },
 
@@ -103,37 +118,45 @@ document.addEventListener('alpine:init', () => {
       this.explainModalOpen = true;
       this.isExplaining = true;
 
-      const modal = document.getElementById('explain-modal');
-      const content = document.getElementById('explain-content');
+      if (typeof _origExplainCurrentQuery === 'function') {
+        try {
+          return await _origExplainCurrentQuery();
+        } finally {
+          this.isExplaining = false;
+        }
+      }
+
+      const modal = document.getElementById('explainQueryModal');
+      const content = document.getElementById('explainModalBody');
       if (modal) modal.classList.remove('hidden');
       if (content) content.textContent = 'Generating EXPLAIN execution plan...';
-
-      if (typeof window.explainCurrentQuery === 'function' && window.explainCurrentQuery !== this.explainCurrentQuery) {
-        return window.explainCurrentQuery();
-      }
+      this.isExplaining = false;
     },
 
     closeExplainModal() {
       this.explainModalOpen = false;
-      const modal = document.getElementById('explain-modal');
+      if (typeof _origCloseExplainModal === 'function') {
+        return _origCloseExplainModal();
+      }
+      const modal = document.getElementById('explainQueryModal');
       if (modal) modal.classList.add('hidden');
     },
 
     async generateSqlWithAi() {
-      if (typeof window.generateSqlWithAi === 'function' && window.generateSqlWithAi !== this.generateSqlWithAi) {
-        return window.generateSqlWithAi();
+      if (typeof _origGenerateSqlWithAi === 'function') {
+        return _origGenerateSqlWithAi();
       }
     },
 
     async fixQueryWithAi() {
-      if (typeof window.fixQueryWithAi === 'function' && window.fixQueryWithAi !== this.fixQueryWithAi) {
-        return window.fixQueryWithAi();
+      if (typeof _origFixQueryWithAi === 'function') {
+        return _origFixQueryWithAi();
       }
     },
 
     applyFixedSql(andRun = false) {
-      if (typeof window.applyFixedSql === 'function' && window.applyFixedSql !== this.applyFixedSql) {
-        return window.applyFixedSql(andRun);
+      if (typeof _origApplyFixedSql === 'function') {
+        return _origApplyFixedSql(andRun);
       }
     },
 

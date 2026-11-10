@@ -155,3 +155,45 @@ def test_pipelines_controller_full_form_and_drawer_actions():
     assert "activeDrawerTab" in pipelines_js
     assert "drawer-tab-runs" in pipelines_js
     assert "drawer-tab-logs" in pipelines_js
+
+
+def test_all_alpine_controllers_dom_id_contract():
+    """Ensure every static getElementById('...') in ui/static/js/controllers/*.js exists in ui/templates/**/*.html."""
+    import re
+
+    templates_dir = repo_root / "ui" / "templates"
+    controllers_dir = repo_root / "ui" / "static" / "js" / "controllers"
+
+    templates_text = "\n".join(
+        p.read_text(encoding="utf-8") for p in templates_dir.rglob("*.html")
+    )
+    template_ids = set(re.findall(r'id=["\']([^"\'{]+)["\']', templates_text))
+
+    mismatches: dict[str, list[str]] = {}
+    for js_path in sorted(controllers_dir.glob("*.js")):
+        js_text = js_path.read_text(encoding="utf-8")
+        js_ids = set(re.findall(r'getElementById\(["\']([^"\'$]+)["\']\)', js_text))
+        missing = sorted(i for i in js_ids if i not in template_ids)
+        if missing:
+            mismatches[js_path.name] = missing
+
+    assert not mismatches, (
+        f"JS controllers reference DOM IDs missing from HTML templates: {mismatches}"
+    )
+
+
+def test_no_alpine_window_wrapper_self_recursion():
+    """Ensure no Alpine controller uses `window.fn !== this.fn` which causes infinite recursion with arrow wrappers."""
+    import re
+
+    controllers_dir = repo_root / "ui" / "static" / "js" / "controllers"
+    offenders: list[str] = []
+    for js_path in sorted(controllers_dir.glob("*.js")):
+        js_text = js_path.read_text(encoding="utf-8")
+        if re.search(r"window\.[A-Za-z0-9_]+\s*!==\s*this\.[A-Za-z0-9_]+", js_text):
+            offenders.append(js_path.name)
+
+    assert not offenders, (
+        f"Controllers contain self-recursive `window.fn !== this.fn` checks: {offenders}"
+    )
+

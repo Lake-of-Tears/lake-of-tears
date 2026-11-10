@@ -374,7 +374,7 @@ document.addEventListener('alpine:init', () => {
       this.currentSelectedRunId = runId;
       this.setDrawerTab('logs');
 
-      const tasksList = document.getElementById('drawer-tasks-list');
+      const tasksList = document.getElementById('drawer-runs-list');
       if (tasksList) {
         tasksList.innerHTML = '<div class="p-3 text-xs text-gray-500 text-center">Loading task instances...</div>';
       }
@@ -454,13 +454,11 @@ document.addEventListener('alpine:init', () => {
       this.triggerDagId = dagId;
       this.triggerModalOpen = true;
       const modal = document.getElementById('trigger-modal');
-      const dagNameEl = document.getElementById('trigger-dag-name');
-      const confInput = document.getElementById('trigger-conf-input');
-      const errEl = document.getElementById('trigger-error');
+      const dagNameEl = document.getElementById('trigger-dag-id');
+      const confInput = document.getElementById('trigger-params');
 
       if (dagNameEl) dagNameEl.textContent = dagId;
       if (confInput) confInput.value = '{}';
-      if (errEl) errEl.classList.add('hidden');
       if (modal) modal.classList.remove('hidden');
     },
 
@@ -485,18 +483,13 @@ document.addEventListener('alpine:init', () => {
       const targetDagId = this.triggerDagId || window.targetTriggerDagId;
       if (!targetDagId) return;
 
-      const confInput = document.getElementById('trigger-conf-input');
+      const confInput = document.getElementById('trigger-params');
       const submitBtn = document.getElementById('btn-submit-trigger');
-      const errEl = document.getElementById('trigger-error');
 
       let conf = {};
       try {
         conf = JSON.parse((confInput ? confInput.value : '{}') || '{}');
       } catch (e) {
-        if (errEl) {
-          errEl.textContent = 'Invalid JSON configuration: ' + e.message;
-          errEl.classList.remove('hidden');
-        }
         if (window.showToast) window.showToast('Invalid JSON in parameters field', 'error');
         return;
       }
@@ -523,10 +516,6 @@ document.addEventListener('alpine:init', () => {
         if (typeof window.fetchTimeline === 'function') window.fetchTimeline();
         this.openInspector(targetDagId, res.dag_run_id);
       } catch (err) {
-        if (errEl) {
-          errEl.textContent = err.message;
-          errEl.classList.remove('hidden');
-        }
         if (window.showToast) window.showToast(err.message, 'error');
       } finally {
         this.isTriggering = false;
@@ -704,10 +693,8 @@ document.addEventListener('alpine:init', () => {
         if (pre) {
           pre.textContent = data.content || 'No log output captured.';
         }
-        const activeTaskId = document.getElementById('active-log-task-id');
-        if (activeTaskId) activeTaskId.textContent = taskId;
-        const activeRunId = document.getElementById('active-log-run-id');
-        if (activeRunId) activeRunId.textContent = runId;
+        const activeTaskId = document.getElementById('log-target-task');
+        if (activeTaskId) activeTaskId.textContent = `${taskId} (${runId})`;
       } catch (err) {
         const pre = document.getElementById('log-pre');
         if (pre) pre.textContent = `Failed to load logs: ${err.message}`;
@@ -727,7 +714,7 @@ document.addEventListener('alpine:init', () => {
       if (typeof _origScrollLogsToBottom === 'function') {
         return _origScrollLogsToBottom();
       }
-      const container = document.getElementById('log-terminal') || document.getElementById('task-logs-container');
+      const container = document.getElementById('log-terminal');
       if (container) {
         container.scrollTop = container.scrollHeight;
       }
@@ -739,8 +726,8 @@ document.addEventListener('alpine:init', () => {
       if (typeof _origSetFilter === 'function') {
         return _origSetFilter(filter);
       }
-      if (typeof window.setFilter === 'function' && window.setFilter !== this.setFilter) {
-        window.setFilter(filter);
+      if (typeof window.applyFilters === 'function') {
+        window.applyFilters(true);
       }
     },
 
