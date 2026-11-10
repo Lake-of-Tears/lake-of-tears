@@ -1,66 +1,281 @@
+{{- define "lake-of-tears.airflow.commonEnv" -}}
+- name: CONNECTION_CHECK_MAX_COUNT
+  value: "0"
+- name: AIRFLOW__CORE__EXECUTOR
+  value: {{ .Values.airflow.executor | default "KubernetesExecutor" | quote }}
+- name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "lake-of-tears.fullname" . }}-credentials
+      key: AIRFLOW_DB_CONN
+- name: AIRFLOW__CORE__LOAD_EXAMPLES
+  value: "False"
+- name: AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION
+  value: "False"
+- name: AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL
+  value: "5"
+- name: AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL
+  value: "5"
+- name: AIRFLOW__CORE__DAGS_FOLDER
+  value: /opt/airflow/dags
+- name: AIRFLOW__LOGGING__BASE_LOG_FOLDER
+  value: /opt/airflow/logs
+- name: AIRFLOW__KUBERNETES_EXECUTOR__NAMESPACE
+  value: {{ .Release.Namespace | quote }}
+- name: AIRFLOW__KUBERNETES_EXECUTOR__POD_TEMPLATE_FILE
+  value: /opt/airflow/pod_templates/pod_template_file.yaml
+- name: AIRFLOW__KUBERNETES_EXECUTOR__DELETE_WORKER_PODS
+  value: {{ ternary "True" "False" (dig "worker" "deletePods" true .Values.airflow) | quote }}
+- name: AIRFLOW__KUBERNETES_EXECUTOR__DELETE_WORKER_PODS_ON_FAILURE
+  value: {{ ternary "True" "False" (dig "worker" "deletePodsOnFailure" false .Values.airflow) | quote }}
+- name: AIRFLOW__KUBERNETES_EXECUTOR__WORKER_CONTAINER_REPOSITORY
+  value: {{ .Values.airflow.image.repository | quote }}
+- name: AIRFLOW__KUBERNETES_EXECUTOR__WORKER_CONTAINER_TAG
+  value: {{ .Values.airflow.image.tag | quote }}
+- name: AIRFLOW__API__AUTH_BACKENDS
+  value: "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session"
+- name: AIRFLOW__WEBSERVER__SECRET_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "lake-of-tears.fullname" . }}-credentials
+      key: AIRFLOW_SECRET_KEY
+# BASE_URL tells Airflow to prefix all generated links with /airflow/.
+# The nginx Ingress strips this prefix before forwarding to the pod.
+- name: AIRFLOW__WEBSERVER__BASE_URL
+  value: "{{ if .Values.ingress.tls }}https{{ else }}http{{ end }}://{{ .Values.ingress.host }}/airflow"
+- name: AIRFLOW__WEBSERVER__ENABLE_PROXY_FIX
+  value: "True"
+- name: AIRFLOW__WEBSERVER__PROXY_FIX_X_FOR
+  value: "1"
+- name: AIRFLOW__WEBSERVER__PROXY_FIX_X_HOST
+  value: "1"
+- name: AIRFLOW__WEBSERVER__PROXY_FIX_X_PREFIX
+  value: "1"
+- name: AIRFLOW__WEBSERVER__WORKERS
+  value: "2"
+- name: _AIRFLOW_WWW_USER_USERNAME
+  value: admin
+- name: _AIRFLOW_WWW_USER_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "lake-of-tears.fullname" . }}-credentials
+      key: AIRFLOW_ADMIN_PASSWORD
+- name: _PIP_ADDITIONAL_REQUIREMENTS
+  value: {{ .Values.airflow.extraPipPackages | join " " | quote }}
+- name: JUPYTER_SERVER_URL
+  value: "http://{{ include "lake-of-tears.fullname" . }}-jupyter:{{ .Values.jupyter.service.port }}"
+- name: JUPYTER_BASE_URL
+  value: "/jupyter"
+- name: JUPYTER_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "lake-of-tears.fullname" . }}-credentials
+      key: JUPYTER_TOKEN
+- name: MINIO_ENDPOINT
+  value: "{{ include "lake-of-tears.fullname" . }}-minio:{{ .Values.minio.service.apiPort }}"
+- name: MINIO_ACCESS_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "lake-of-tears.fullname" . }}-credentials
+      key: MINIO_ROOT_USER
+- name: MINIO_SECRET_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "lake-of-tears.fullname" . }}-credentials
+      key: MINIO_ROOT_PASSWORD
+- name: MINIO_BUCKET
+  value: datalake
+{{- if dig "remoteLogging" "enabled" false .Values.airflow }}
+- name: AIRFLOW__LOGGING__REMOTE_LOGGING
+  value: "True"
+- name: AIRFLOW__LOGGING__REMOTE_BASE_LOG_FOLDER
+  value: {{ dig "remoteLogging" "s3LogFolder" "s3://datalake/_system/airflow-logs" .Values.airflow | quote }}
+- name: AIRFLOW__LOGGING__REMOTE_LOG_CONN_ID
+  value: {{ dig "remoteLogging" "connId" "minio_s3" .Values.airflow | quote }}
+- name: AIRFLOW_CONN_MINIO_S3
+  value: "aws://$(MINIO_ACCESS_KEY):$(MINIO_SECRET_KEY)@/?endpoint_url=http%3A%2F%2F{{ include "lake-of-tears.fullname" . }}-minio%3A{{ .Values.minio.service.apiPort }}"
+{{- end }}
+- name: BACKEND_URL
+  value: "http://{{ include "lake-of-tears.fullname" . }}-backend:8000"
+- name: POSTGRES_AUTH_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "lake-of-tears.fullname" . }}-credentials
+      key: postgresAuthPassword
+- name: DATABASE_URL
+  value: "postgresql://{{ .Values.postgres.auth.username }}:$(POSTGRES_AUTH_PASSWORD)@{{ include "lake-of-tears.fullname" . }}-postgres:5432/{{ .Values.postgres.auth.database }}"
+- name: AUTH_SECRET_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "lake-of-tears.fullname" . }}-credentials
+      key: authSecretKey
+- name: STRIPE_SECRET_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "lake-of-tears.fullname" . }}-credentials
+      key: STRIPE_SECRET_KEY
+- name: SHOPIFY_STORE_DOMAIN
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "lake-of-tears.fullname" . }}-credentials
+      key: SHOPIFY_STORE_DOMAIN
+- name: SHOPIFY_ACCESS_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "lake-of-tears.fullname" . }}-credentials
+      key: SHOPIFY_ACCESS_TOKEN
+- name: HUBSPOT_ACCESS_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "lake-of-tears.fullname" . }}-credentials
+      key: HUBSPOT_ACCESS_TOKEN
+- name: POSTGRES_DSN
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "lake-of-tears.fullname" . }}-credentials
+      key: POSTGRES_DSN
+{{- end -}}
+
+{{- define "lake-of-tears.airflow.waitForPostgresInitContainer" -}}
+{{- if and .Values.postgres.enabled (dig "waitForDb" "enabled" true .Values.airflow) }}
+- name: wait-for-postgres
+  image: {{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}
+  imagePullPolicy: {{ .Values.postgres.image.pullPolicy }}
+  {{- with .Values.airflow.securityContext }}
+  securityContext:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  command:
+    - sh
+    - -c
+    - |
+      start_time=$(date +%s)
+      timeout={{ dig "waitForDb" "timeoutSeconds" 60 .Values.airflow }}
+      echo "Waiting for PostgreSQL at {{ include "lake-of-tears.fullname" . }}-postgres:5432 (database: airflow)..."
+      until pg_isready -h {{ include "lake-of-tears.fullname" . }}-postgres -p 5432 -U {{ .Values.postgres.airflow.username }} -d airflow; do
+        current_time=$(date +%s)
+        elapsed=$((current_time - start_time))
+        if [ $elapsed -ge $timeout ]; then
+          echo "Error: Timed out after ${timeout}s waiting for PostgreSQL to become ready." >&2
+          exit 1
+        fi
+        echo "PostgreSQL not ready yet (${elapsed}s elapsed). Retrying in 2s..."
+        sleep 2
+      done
+      echo "PostgreSQL is ready."
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 50m
+      memory: 64Mi
+{{- end }}
+{{- end -}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "lake-of-tears.fullname" . }}-airflow-pod-template
+  labels:
+    {{- include "lake-of-tears.labels" . | nindent 4 }}
+    app.kubernetes.io/component: airflow-worker
+data:
+  pod_template_file.yaml: |
+    apiVersion: v1
+    kind: Pod
+    metadata:
+      name: placeholder-name
+      labels:
+        {{- include "lake-of-tears.labels" . | nindent 8 }}
+        app.kubernetes.io/component: airflow-worker
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      {{- with .Values.airflow.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: base
+          image: {{ .Values.airflow.image.repository }}:{{ .Values.airflow.image.tag }}
+          imagePullPolicy: {{ .Values.airflow.image.pullPolicy }}
+          {{- with .Values.airflow.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            {{- include "lake-of-tears.airflow.commonEnv" . | nindent 12 }}
+          volumeMounts:
+            - name: airflow-home
+              mountPath: /opt/airflow
+          resources:
+            {{- if and .Values.airflow.worker .Values.airflow.worker.resources }}
+            {{- toYaml .Values.airflow.worker.resources | nindent 12 }}
+            {{- else }}
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "2Gi"
+            {{- end }}
+      volumes:
+        - name: airflow-home
+          persistentVolumeClaim:
+            claimName: {{ include "lake-of-tears.fullname" . }}-airflow-home
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "lake-of-tears.fullname" . }}-airflow
+  name: {{ include "lake-of-tears.fullname" . }}-airflow-webserver
   labels:
     {{- include "lake-of-tears.labels" . | nindent 4 }}
-    app.kubernetes.io/component: airflow
+    app.kubernetes.io/component: airflow-webserver
 spec:
-  replicas: 1
+  replicas: {{ dig "webserver" "replicas" 1 .Values.airflow }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "lake-of-tears.name" . }}
-      app.kubernetes.io/component: airflow
+      app.kubernetes.io/component: airflow-webserver
   strategy:
     type: Recreate
   template:
     metadata:
       labels:
         app.kubernetes.io/name: {{ include "lake-of-tears.name" . }}
-        app.kubernetes.io/component: airflow
+        app.kubernetes.io/component: airflow-webserver
     spec:
+      automountServiceAccountToken: false
       {{- with .Values.airflow.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- if and .Values.postgres.enabled (dig "waitForDb" "enabled" true .Values.airflow) }}
       initContainers:
-        - name: wait-for-postgres
-          image: {{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}
-          imagePullPolicy: {{ .Values.postgres.image.pullPolicy }}
+        {{- include "lake-of-tears.airflow.waitForPostgresInitContainer" . | nindent 8 }}
+        - name: wait-for-airflow-migrations
+          image: {{ .Values.airflow.image.repository }}:{{ .Values.airflow.image.tag }}
+          imagePullPolicy: {{ .Values.airflow.image.pullPolicy }}
           {{- with .Values.airflow.securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          command:
-            - sh
-            - -c
+          command: ["/usr/bin/dumb-init", "--", "/bin/bash", "-c"]
+          args:
             - |
-              start_time=$(date +%s)
-              timeout={{ dig "waitForDb" "timeoutSeconds" 60 .Values.airflow }}
-              echo "Waiting for PostgreSQL at {{ include "lake-of-tears.fullname" . }}-postgres:5432 (database: airflow)..."
-              until pg_isready -h {{ include "lake-of-tears.fullname" . }}-postgres -p 5432 -U {{ .Values.postgres.airflow.username }} -d airflow; do
-                current_time=$(date +%s)
-                elapsed=$((current_time - start_time))
-                if [ $elapsed -ge $timeout ]; then
-                  echo "Error: Timed out after ${timeout}s waiting for PostgreSQL to become ready." >&2
-                  exit 1
-                fi
-                echo "PostgreSQL not ready yet (${elapsed}s elapsed). Retrying in 2s..."
-                sleep 2
-              done
-              echo "PostgreSQL is ready."
+              echo "Waiting for Airflow database migrations to complete..."
+              airflow db check-migrations --migration-wait-timeout=120
+          env:
+            {{- include "lake-of-tears.airflow.commonEnv" . | nindent 12 }}
           resources:
             requests:
-              cpu: 10m
-              memory: 32Mi
-            limits:
               cpu: 50m
-              memory: 64Mi
-      {{- end }}
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
       containers:
-        - name: airflow
+        - name: airflow-webserver
           {{- with .Values.airflow.securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
@@ -70,125 +285,11 @@ spec:
           command: ["/usr/bin/dumb-init", "--", "/bin/bash", "-c"]
           args:
             - |
+              mkdir -p /opt/airflow/dags /opt/airflow/logs /opt/airflow/notebooks
               rm -f /opt/airflow/airflow-webserver.pid
-              (
-                sleep 5
-                airflow users reset-password -u admin -p "$_AIRFLOW_WWW_USER_PASSWORD" 2>/dev/null || true
-                airflow dags unpause refresh_catalog_schemas 2>/dev/null || true
-              ) &
-              exec /entrypoint standalone
+              exec airflow webserver
           env:
-            - name: CONNECTION_CHECK_MAX_COUNT
-              value: "0"
-            - name: AIRFLOW__CORE__EXECUTOR
-              value: LocalExecutor
-            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "lake-of-tears.fullname" . }}-credentials
-                  key: AIRFLOW_DB_CONN
-            - name: AIRFLOW__CORE__LOAD_EXAMPLES
-              value: "False"
-            - name: AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION
-              value: "False"
-            - name: AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL
-              value: "5"
-            - name: AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL
-              value: "5"
-            - name: AIRFLOW__CORE__DAGS_FOLDER
-              value: /opt/airflow/dags
-            - name: AIRFLOW__API__AUTH_BACKENDS
-              value: "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session"
-            - name: AIRFLOW__WEBSERVER__SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "lake-of-tears.fullname" . }}-credentials
-                  key: AIRFLOW_SECRET_KEY
-            # BASE_URL tells Airflow to prefix all generated links with /airflow/.
-            # The nginx Ingress strips this prefix before forwarding to the pod.
-            - name: AIRFLOW__WEBSERVER__BASE_URL
-              value: "{{ if .Values.ingress.tls }}https{{ else }}http{{ end }}://{{ .Values.ingress.host }}/airflow"
-            - name: AIRFLOW__WEBSERVER__ENABLE_PROXY_FIX
-              value: "True"
-            - name: AIRFLOW__WEBSERVER__PROXY_FIX_X_FOR
-              value: "1"
-            - name: AIRFLOW__WEBSERVER__PROXY_FIX_X_HOST
-              value: "1"
-            - name: AIRFLOW__WEBSERVER__PROXY_FIX_X_PREFIX
-              value: "1"
-            - name: AIRFLOW__WEBSERVER__WORKERS
-              value: "2"
-            - name: _AIRFLOW_WWW_USER_USERNAME
-              value: admin
-            - name: _AIRFLOW_WWW_USER_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "lake-of-tears.fullname" . }}-credentials
-                  key: AIRFLOW_ADMIN_PASSWORD
-            - name: _PIP_ADDITIONAL_REQUIREMENTS
-              value: {{ .Values.airflow.extraPipPackages | join " " | quote }}
-            - name: JUPYTER_SERVER_URL
-              value: "http://{{ include "lake-of-tears.fullname" . }}-jupyter:{{ .Values.jupyter.service.port }}"
-            - name: JUPYTER_BASE_URL
-              value: "/jupyter"
-            - name: JUPYTER_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "lake-of-tears.fullname" . }}-credentials
-                  key: JUPYTER_TOKEN
-            - name: MINIO_ENDPOINT
-              value: "{{ include "lake-of-tears.fullname" . }}-minio:{{ .Values.minio.service.apiPort }}"
-            - name: MINIO_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "lake-of-tears.fullname" . }}-credentials
-                  key: MINIO_ROOT_USER
-            - name: MINIO_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "lake-of-tears.fullname" . }}-credentials
-                  key: MINIO_ROOT_PASSWORD
-            - name: MINIO_BUCKET
-              value: datalake
-            - name: BACKEND_URL
-              value: "http://{{ include "lake-of-tears.fullname" . }}-backend:8000"
-            - name: POSTGRES_AUTH_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "lake-of-tears.fullname" . }}-credentials
-                  key: postgresAuthPassword
-            - name: DATABASE_URL
-              value: "postgresql://{{ .Values.postgres.auth.username }}:$(POSTGRES_AUTH_PASSWORD)@{{ include "lake-of-tears.fullname" . }}-postgres:5432/{{ .Values.postgres.auth.database }}"
-            - name: AUTH_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "lake-of-tears.fullname" . }}-credentials
-                  key: authSecretKey
-            - name: STRIPE_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "lake-of-tears.fullname" . }}-credentials
-                  key: STRIPE_SECRET_KEY
-            - name: SHOPIFY_STORE_DOMAIN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "lake-of-tears.fullname" . }}-credentials
-                  key: SHOPIFY_STORE_DOMAIN
-            - name: SHOPIFY_ACCESS_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "lake-of-tears.fullname" . }}-credentials
-                  key: SHOPIFY_ACCESS_TOKEN
-            - name: HUBSPOT_ACCESS_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "lake-of-tears.fullname" . }}-credentials
-                  key: HUBSPOT_ACCESS_TOKEN
-            - name: POSTGRES_DSN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "lake-of-tears.fullname" . }}-credentials
-                  key: POSTGRES_DSN
+            {{- include "lake-of-tears.airflow.commonEnv" . | nindent 12 }}
           ports:
             - name: http
               containerPort: {{ .Values.airflow.service.port }}
@@ -196,19 +297,137 @@ spec:
             httpGet:
               path: /airflow/health
               port: http
-            initialDelaySeconds: 180
+            initialDelaySeconds: 120
             periodSeconds: 30
             failureThreshold: 10
+          readinessProbe:
+            httpGet:
+              path: /airflow/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 6
           volumeMounts:
             - name: airflow-home
               mountPath: /opt/airflow
+            - name: airflow-pod-template
+              mountPath: /opt/airflow/pod_templates
+              readOnly: true
           resources:
+            {{- if and .Values.airflow.webserver .Values.airflow.webserver.resources }}
+            {{- toYaml .Values.airflow.webserver.resources | nindent 12 }}
+            {{- else }}
             {{- toYaml .Values.airflow.resources | nindent 12 }}
+            {{- end }}
       volumes:
         - name: airflow-home
           persistentVolumeClaim:
             claimName: {{ include "lake-of-tears.fullname" . }}-airflow-home
-
+        - name: airflow-pod-template
+          configMap:
+            name: {{ include "lake-of-tears.fullname" . }}-airflow-pod-template
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lake-of-tears.fullname" . }}-airflow-scheduler
+  labels:
+    {{- include "lake-of-tears.labels" . | nindent 4 }}
+    app.kubernetes.io/component: airflow-scheduler
+spec:
+  replicas: {{ dig "scheduler" "replicas" 1 .Values.airflow }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "lake-of-tears.name" . }}
+      app.kubernetes.io/component: airflow-scheduler
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "lake-of-tears.name" . }}
+        app.kubernetes.io/component: airflow-scheduler
+    spec:
+      serviceAccountName: {{ dig "serviceAccount" "name" "" .Values.airflow | default (printf "%s-airflow-scheduler" (include "lake-of-tears.fullname" .)) }}
+      {{- with .Values.airflow.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        {{- include "lake-of-tears.airflow.waitForPostgresInitContainer" . | nindent 8 }}
+        - name: airflow-db-init
+          image: {{ .Values.airflow.image.repository }}:{{ .Values.airflow.image.tag }}
+          imagePullPolicy: {{ .Values.airflow.image.pullPolicy }}
+          {{- with .Values.airflow.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          command: ["/usr/bin/dumb-init", "--", "/bin/bash", "-c"]
+          args:
+            - |
+              set -e
+              mkdir -p /opt/airflow/dags /opt/airflow/logs /opt/airflow/notebooks
+              echo "Running Airflow database migrations..."
+              airflow db migrate
+              echo "Ensuring Airflow admin user exists..."
+              airflow users create \
+                --username "${_AIRFLOW_WWW_USER_USERNAME:-admin}" \
+                --password "${_AIRFLOW_WWW_USER_PASSWORD}" \
+                --firstname Admin \
+                --lastname User \
+                --role Admin \
+                --email admin@lakeoftears.local 2>/dev/null || \
+              airflow users reset-password -u "${_AIRFLOW_WWW_USER_USERNAME:-admin}" -p "${_AIRFLOW_WWW_USER_PASSWORD}" 2>/dev/null || true
+          env:
+            {{- include "lake-of-tears.airflow.commonEnv" . | nindent 12 }}
+          volumeMounts:
+            - name: airflow-home
+              mountPath: /opt/airflow
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+      containers:
+        - name: airflow-scheduler
+          {{- with .Values.airflow.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          image: {{ .Values.airflow.image.repository }}:{{ .Values.airflow.image.tag }}
+          imagePullPolicy: {{ .Values.airflow.image.pullPolicy }}
+          command: ["/usr/bin/dumb-init", "--", "/bin/bash", "-c"]
+          args:
+            - |
+              mkdir -p /opt/airflow/dags /opt/airflow/logs /opt/airflow/notebooks
+              (
+                sleep 10
+                airflow dags unpause refresh_catalog_schemas 2>/dev/null || true
+              ) &
+              exec airflow scheduler
+          env:
+            {{- include "lake-of-tears.airflow.commonEnv" . | nindent 12 }}
+          volumeMounts:
+            - name: airflow-home
+              mountPath: /opt/airflow
+            - name: airflow-pod-template
+              mountPath: /opt/airflow/pod_templates
+              readOnly: true
+          resources:
+            {{- if and .Values.airflow.scheduler .Values.airflow.scheduler.resources }}
+            {{- toYaml .Values.airflow.scheduler.resources | nindent 12 }}
+            {{- else }}
+            {{- toYaml .Values.airflow.resources | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: airflow-home
+          persistentVolumeClaim:
+            claimName: {{ include "lake-of-tears.fullname" . }}-airflow-home
+        - name: airflow-pod-template
+          configMap:
+            name: {{ include "lake-of-tears.fullname" . }}-airflow-pod-template
 ---
 apiVersion: v1
 kind: Service
@@ -216,11 +435,11 @@ metadata:
   name: {{ include "lake-of-tears.fullname" . }}-airflow
   labels:
     {{- include "lake-of-tears.labels" . | nindent 4 }}
-    app.kubernetes.io/component: airflow
+    app.kubernetes.io/component: airflow-webserver
 spec:
   selector:
     app.kubernetes.io/name: {{ include "lake-of-tears.name" . }}
-    app.kubernetes.io/component: airflow
+    app.kubernetes.io/component: airflow-webserver
   ports:
     - name: http
       port: {{ .Values.airflow.service.port }}

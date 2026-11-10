@@ -180,6 +180,10 @@ class PipelineTask(BaseModel):
     parameters: dict[str, Any] = Field(
         default_factory=dict, description="Runtime parameters passed to task"
     )
+    resources: dict[str, str] = Field(
+        default_factory=dict,
+        description="Optional KubernetesExecutor compute resource overrides (cpu, memory, cpu_limit, memory_limit)",
+    )
 
     @field_validator("upstream_tasks", mode="before")
     @classmethod

@@ -29,6 +29,18 @@ SERVICE_METADATA: dict[str, dict[str, Any]] = {
         "category": "Orchestration",
         "port": 8080,
     },
+    "airflow-webserver": {
+        "display_name": "Airflow Webserver",
+        "description": "Airflow UI, REST API & task log streaming endpoint.",
+        "category": "Orchestration",
+        "port": 8080,
+    },
+    "airflow-scheduler": {
+        "display_name": "Airflow Scheduler",
+        "description": "DAG parsing, schedule evaluation & KubernetesExecutor worker pod orchestration.",
+        "category": "Orchestration",
+        "port": None,
+    },
     "backend": {
         "display_name": "Lake Backend API",
         "description": "Core authentication, metadata catalog, SQL engine & REST endpoints.",
@@ -916,6 +928,12 @@ class KubernetesServiceManager:
         for name in dep_names:
             if name.endswith(f"-{srv}") or name == srv:
                 return name
+
+        # Support legacy 'airflow' alias resolving to 'airflow-webserver' when split
+        if srv in ("airflow", "lake-of-tears-airflow"):
+            for candidate in ("lake-of-tears-airflow-webserver", "airflow-webserver"):
+                if candidate in dep_names:
+                    return candidate
 
         return full_name
 

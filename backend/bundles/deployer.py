@@ -385,6 +385,14 @@ def generate_bundle_dag_code(
         params_json = json.dumps(task.parameters or {})
         entrypoint = (task.entrypoint or "").replace('"', '\\"')
         task_type = task.type or "duckdb_sql"
+        task_res = task.resources or {}
+        exec_cfg_arg = ""
+        if task_res:
+            cpu_req = task_res.get("cpu", task_res.get("cpu_request", "100m"))
+            mem_req = task_res.get("memory", task_res.get("memory_request", "256Mi"))
+            cpu_lim = task_res.get("cpu_limit", "1000m" if cpu_req == "100m" else cpu_req)
+            mem_lim = task_res.get("memory_limit", "2Gi" if mem_req == "256Mi" else mem_req)
+            exec_cfg_arg = f'\n        executor_config=_build_k8s_executor_config("{cpu_req}", "{mem_req}", "{cpu_lim}", "{mem_lim}"),'
 
         task_block = f"""    {task_var} = PythonOperator(
         task_id="{task_id}",
@@ -399,7 +407,7 @@ def generate_bundle_dag_code(
             "parameters": {params_json},
         }},
         execution_timeout=timedelta(seconds={timeout_sec}),
-        retries={retries},
+        retries={retries},{exec_cfg_arg}
     )"""
         task_blocks.append(task_block)
 
@@ -435,6 +443,29 @@ default_args = {{
 }}
 
 {_BUNDLE_TASK_RUNNER_CODE}
+
+
+def _build_k8s_executor_config(cpu_req: str, mem_req: str, cpu_limit: str, mem_limit: str):
+    try:
+        from kubernetes.client import models as k8s
+        return {{
+            "pod_override": k8s.V1Pod(
+                spec=k8s.V1PodSpec(
+                    containers=[
+                        k8s.V1Container(
+                            name="base",
+                            resources=k8s.V1ResourceRequirements(
+                                requests={{"cpu": cpu_req, "memory": mem_req}},
+                                limits={{"cpu": cpu_limit, "memory": mem_limit}},
+                            ),
+                        )
+                    ]
+                )
+            )
+        }}
+    except Exception:
+        return {{}}
+
 
 with DAG(
     dag_id="{dag_id}",

@@ -219,6 +219,9 @@ superset:
 # Apache Airflow — pipeline orchestration
 # ---------------------------------------------------------------------------
 airflow:
+  # Executor type: KubernetesExecutor (dynamic ephemeral task pods) or LocalExecutor
+  executor: KubernetesExecutor
+
   image:
     repository: lake-of-tears-airflow
     tag: latest
@@ -233,12 +236,25 @@ airflow:
   service:
     port: 8080
 
+  serviceAccount:
+    # Create a dedicated ServiceAccount + Role/RoleBinding for the Airflow Scheduler
+    create: true
+    name: ""
+
   persistence:
     size: 1Gi
+    accessMode: ReadWriteOnce
+
+  # Optional S3/MinIO remote task log persistence (in addition to shared PVC /opt/airflow/logs)
+  remoteLogging:
+    enabled: false
+    s3LogFolder: "s3://datalake/_system/airflow-logs"
+    connId: "minio_s3"
 
   # Additional pip packages installed at container startup via _PIP_ADDITIONAL_REQUIREMENTS
   extraPipPackages: []
 
+  # Default resources (used as fallback if webserver/scheduler resources are omitted)
   resources:
     requests:
       cpu: "500m"
@@ -246,6 +262,38 @@ airflow:
     limits:
       cpu: "2"
       memory: "4Gi"
+
+  webserver:
+    replicas: 1
+    resources:
+      requests:
+        cpu: "250m"
+        memory: "512Mi"
+      limits:
+        cpu: "1"
+        memory: "2Gi"
+
+  scheduler:
+    replicas: 1
+    resources:
+      requests:
+        cpu: "250m"
+        memory: "512Mi"
+      limits:
+        cpu: "1"
+        memory: "2Gi"
+
+  # Ephemeral worker pod lifecycle & default resource settings (pod_template_file.yaml)
+  worker:
+    deletePods: true
+    deletePodsOnFailure: false
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "256Mi"
+      limits:
+        cpu: "1000m"
+        memory: "2Gi"
 
   podSecurityContext:
     runAsNonRoot: true

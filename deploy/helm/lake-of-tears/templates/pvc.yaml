@@ -45,7 +45,7 @@ metadata:
     app.kubernetes.io/component: airflow
 spec:
   accessModes:
-    - ReadWriteOnce
+    - {{ .Values.airflow.persistence.accessMode | default "ReadWriteOnce" }}
   {{- if .Values.global.storageClass }}
   storageClassName: {{ .Values.global.storageClass }}
   {{- end }}

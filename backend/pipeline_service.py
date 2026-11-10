@@ -984,6 +984,29 @@ def _run_notebook_callable(**context):
     logger.info("Successfully archived notebook run to s3://%s/%s", bucket, s3_key)
     return {{"status": "success", "s3_key": s3_key}}
 
+
+def _build_k8s_executor_config():
+    try:
+        from kubernetes.client import models as k8s
+        return {{
+            "pod_override": k8s.V1Pod(
+                spec=k8s.V1PodSpec(
+                    containers=[
+                        k8s.V1Container(
+                            name="base",
+                            resources=k8s.V1ResourceRequirements(
+                                requests={{"cpu": "{cpu_req}", "memory": "{mem_req}"}},
+                                limits={{"cpu": "{cpu_limit}", "memory": "{mem_limit}"}},
+                            ),
+                        )
+                    ]
+                )
+            )
+        }}
+    except Exception:
+        return {{}}
+
+
 with DAG(
     dag_id="{dag_id}",
     schedule="{clean_sched}",
@@ -996,6 +1019,7 @@ with DAG(
     run_task = PythonOperator(
         task_id="execute_and_archive_notebook",
         python_callable=_run_notebook_callable,
+        executor_config=_build_k8s_executor_config(),
     )
 """
 
