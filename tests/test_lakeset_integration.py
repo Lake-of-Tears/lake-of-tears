@@ -72,6 +72,7 @@ def test_phase1_helm_superset_duckdb_engine_and_config():
     # Verify duckdb and duckdb-engine installation in Superset runtime
     assert "duckdb" in superset_yaml
     assert "duckdb-engine" in superset_yaml
+    assert superset_yaml.count("--no-deps") == 2
     assert "LAKESET_PROXY_SECRET" in superset_yaml
     assert "MINIO_ENDPOINT" in superset_yaml
 

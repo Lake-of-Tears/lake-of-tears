@@ -39,6 +39,7 @@ spec:
             - -c
             - |
               mkdir -p /app/superset_home/pythonpath &&
+              rm -rf /app/superset_home/pythonpath/sqlalchemy* /app/superset_home/pythonpath/greenlet* /app/superset_home/pythonpath/typing_extensions* /app/superset_home/pythonpath/packaging* &&
               python3 -c "import duckdb, duckdb_engine" 2>/dev/null || \
                 pip install --no-cache-dir --no-deps --target /app/superset_home/pythonpath duckdb duckdb-engine &&
               exec /usr/bin/run-server.sh
@@ -177,8 +178,9 @@ spec:
             - -c
             - |
               mkdir -p /app/superset_home/pythonpath &&
+              rm -rf /app/superset_home/pythonpath/sqlalchemy* /app/superset_home/pythonpath/greenlet* /app/superset_home/pythonpath/typing_extensions* /app/superset_home/pythonpath/packaging* &&
               python3 -c "import duckdb, duckdb_engine" 2>/dev/null || \
-                pip install --no-cache-dir --target /app/superset_home/pythonpath duckdb duckdb-engine &&
+                pip install --no-cache-dir --no-deps --target /app/superset_home/pythonpath duckdb duckdb-engine &&
               superset db upgrade &&
               superset fab create-admin \
                 --username admin \
