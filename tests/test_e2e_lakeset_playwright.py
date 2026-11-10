@@ -425,6 +425,17 @@ def test_e2e_lakeset_search_filter_and_sqllab_tab(lakeset_page, lakeset_server):
     assert "/lakeset/proxy/sqllab/" in iframe_src
     assert "gold.journal_trends" in iframe_src
 
+    # Navigate directly to /lakeset/proxy/superset/explore/ and verify chart + result rows render
+    page.goto(
+        "/lakeset/proxy/superset/explore/?datasource_type=table&datasource_id=1001&dataset=biomedical_lake.gold.journal_trends",
+        wait_until="networkidle",
+    )
+    page.wait_for_selector("#echarts-canvas canvas", state="visible", timeout=5000)
+    canvas_box = page.locator("#echarts-canvas canvas").first.bounding_box()
+    assert canvas_box is not None and canvas_box["width"] > 100 and canvas_box["height"] > 100
+    assert page.locator("text=No rows returned").count() == 0
+    assert page.locator("#result-tbody tr").count() > 1
+
 
 def test_e2e_dashboards_create_modal_and_redirect(lakeset_page, lakeset_server):
     """Verify clicking 'Refresh', filter tabs, search, and 'Create Dashboard' on /dashboards works without errors."""

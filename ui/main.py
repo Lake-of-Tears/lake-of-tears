@@ -2254,12 +2254,28 @@ def _render_lakeset_embedded_studio_html(
 
     function pickDefaultColumns(ds) {{
       const cols = (ds && ds.columns) || [];
-      if (!cols.length) return {{ dim: 'category', metric: 'value' }};
-      const numCol = cols.find(c => /INT|DOUBLE|FLOAT|DECIMAL|NUMERIC|BIGINT|REAL/i.test(c.type || ''));
-      const dimCol = cols.find(c => c !== numCol) || cols[0];
+      if (!cols.length) return {{ dim: 'category', metric: 'count' }};
+      const preferredDims = ['journal', 'category', 'overall_status', 'study_type', 'article_type', 'grade', 'purpose', 'loan_status', 'source', 'event_type', 'severity', 'status', 'tier', 'pub_year', 'year'];
+      const colMap = {{}};
+      cols.forEach(c => {{ colMap[(c.column_name || '').toLowerCase()] = c.column_name; }});
+      let chosenDim = null;
+      for (const p of preferredDims) {{
+        if (colMap[p]) {{ chosenDim = colMap[p]; break; }}
+      }}
+      const numCol = cols.find(c => {{
+        const t = (c.type || '').toUpperCase();
+        const n = (c.column_name || '').toLowerCase();
+        if (n.endsWith('_id') || n === 'id' || n === 'pmid' || n === 'nct_id' || n === 'year' || n === 'pub_year') return false;
+        return /INT|DOUBLE|FLOAT|DECIMAL|NUMERIC|BIGINT|REAL/.test(t);
+      }});
+      if (!chosenDim) {{
+        const nonNum = cols.find(c => c !== numCol) || cols[0];
+        chosenDim = nonNum ? nonNum.column_name : 'category';
+      }}
       return {{
-        dim: dimCol ? dimCol.column_name : 'category',
-        metric: numCol ? numCol.column_name : (cols[0] ? cols[0].column_name : 'value')
+        dim: chosenDim,
+        metric: numCol ? numCol.column_name : 'count',
+        agg: numCol ? 'SUM' : 'COUNT'
       }};
     }}
 
@@ -2280,29 +2296,41 @@ def _render_lakeset_embedded_studio_html(
 
       const sel = document.getElementById('ds-select');
       if (datasetsList.length === 0 && STUDIO_CFG.dataset) {{
-        datasetsList = [{{ qualified_name: STUDIO_CFG.dataset, table_name: STUDIO_CFG.dataset, columns: [] }}];
+        datasetsList = [{{ full_name: STUDIO_CFG.dataset, table_name: STUDIO_CFG.dataset, columns: [] }}];
       }}
       sel.innerHTML = datasetsList.map(d => {{
-        const qn = d.qualified_name || `${{d.catalog_name}}.${{d.schema_name}}.${{d.table_name}}`;
-        return `<option value="${{qn}}">${{qn}}</option>`;
+        const fn = d.full_name || d.qualified_name || `${{d.catalog_slug || d.catalog_name}}.${{d.schema_slug || d.schema_name}}.${{d.table_name}}`;
+        return `<option value="${{fn}}">${{fn}} (${{(d.columns || []).length}} cols)</option>`;
       }}).join('');
 
-      const targetDs = STUDIO_CFG.dataset || (datasetsList[0] && datasetsList[0].qualified_name) || '';
-      if (targetDs) sel.value = targetDs;
-
-      const matched = datasetsList.find(d => d.qualified_name === sel.value) || datasetsList[0];
+      let matched = null;
+      if (STUDIO_CFG.dataset) {{
+        const targetLower = STUDIO_CFG.dataset.toLowerCase();
+        matched = datasetsList.find(d =>
+          (d.full_name || '').toLowerCase() === targetLower ||
+          (d.table_name || '').toLowerCase() === targetLower ||
+          (d.sql_view || '').toLowerCase() === targetLower
+        );
+      }}
+      if (!matched && datasetsList.length > 0) {{
+        matched = datasetsList[0];
+      }}
       if (matched) {{
+        const fn = matched.full_name || matched.qualified_name;
+        sel.value = fn;
         const defs = pickDefaultColumns(matched);
         document.getElementById('dim-input').value = defs.dim;
         document.getElementById('metric-input').value = defs.metric;
+        document.getElementById('agg-select').value = defs.agg;
       }}
 
       sel.addEventListener('change', () => {{
-        const m = datasetsList.find(d => d.qualified_name === sel.value);
+        const m = datasetsList.find(d => (d.full_name || d.qualified_name) === sel.value);
         if (m) {{
           const defs = pickDefaultColumns(m);
           document.getElementById('dim-input').value = defs.dim;
           document.getElementById('metric-input').value = defs.metric;
+          document.getElementById('agg-select').value = defs.agg;
         }}
         runStudioQuery();
       }});
@@ -2316,9 +2344,9 @@ def _render_lakeset_embedded_studio_html(
       statusEl.textContent = 'Running DuckDB query...';
       const dataset = document.getElementById('ds-select').value || STUDIO_CFG.dataset || 'default.telemetry.events';
       const vizType = document.getElementById('viz-type').value || 'bar';
-      const dimension = document.getElementById('dim-input').value || 'category';
-      const metric = document.getElementById('metric-input').value || 'value';
-      const agg = document.getElementById('agg-select').value || 'SUM';
+      const dimension = document.getElementById('dim-input').value || '';
+      const metric = document.getElementById('metric-input').value || 'count';
+      const agg = document.getElementById('agg-select').value || 'COUNT';
       const customSql = document.getElementById('sql-editor').value.trim();
 
       try {{
@@ -2328,20 +2356,39 @@ def _render_lakeset_embedded_studio_html(
           headers: {{ 'Content-Type': 'application/json' }},
           body: JSON.stringify({{
             dataset: dataset,
-            viz_type: vizType,
-            dimension: dimension,
-            metric: metric,
-            agg: agg,
-            sql: customSql
+            chart_type: vizType === 'table' ? 'bar' : vizType,
+            dimension: dimension || null,
+            metric: metric || 'count',
+            metric_agg: agg.toLowerCase(),
+            sql: customSql || null
           }})
         }});
-        const data = await resp.json();
+        const res = await resp.json();
         statusEl.textContent = 'Live · DuckDB S3';
-        document.getElementById('executed-sql-bar').textContent = 'Executed SQL: ' + (data.sql || '');
-        document.getElementById('chart-title').textContent = `${{dataset}} (${{vizType.toUpperCase()}})`;
-        const rows = data.rows || [];
+        document.getElementById('executed-sql-bar').textContent = 'Executed SQL: ' + (res.sql || '');
+        document.getElementById('chart-title').textContent = `${{res.dataset || dataset}} (${{vizType.toUpperCase()}})`;
+        if (res.dimension) document.getElementById('dim-input').value = res.dimension;
+        if (res.metric) document.getElementById('metric-input').value = res.metric;
+
+        const chartData = res.data || {{}};
+        let rows = [];
+        if (Array.isArray(chartData.categories) && Array.isArray(chartData.series) && chartData.series.length > 0) {{
+          const vals = chartData.series[0].data || [];
+          rows = chartData.categories.map((cat, idx) => ({{
+            label: String(cat),
+            value: Number(vals[idx] ?? 0)
+          }}));
+        }} else if (Array.isArray(chartData.series)) {{
+          rows = chartData.series.map(item => ({{
+            label: String(item.name ?? 'Group'),
+            value: Number(item.value ?? 0)
+          }}));
+        }} else if (chartData.value !== undefined) {{
+          rows = [{{ label: res.metric || metric || 'KPI', value: Number(String(chartData.value).replace(/,/g, '')) || 0 }}];
+        }}
+
         document.getElementById('row-count-badge').textContent = `${{rows.length}} rows`;
-        renderTable(rows, data.dimension || dimension, data.metric || metric);
+        renderTable(rows, res.dimension || dimension || 'Category', `${{agg}}(${{res.metric || metric}})`);
         renderChart(vizType, rows);
       }} catch (err) {{
         statusEl.textContent = 'Query Error';
