@@ -263,7 +263,10 @@ function renderConversationThread() {
     }
     if (turn.sql) {
       const encodedSql = encodeURIComponent(turn.sql);
-      badgesHtml += `<a href="/sql?q=${encodedSql}" class="ml-auto text-[11px] text-blue-400 hover:text-blue-300 flex items-center gap-1">Open in SQL Editor →</a>`;
+      badgesHtml += `<div class="ml-auto flex items-center gap-3">
+        <a href="/lakeset?mode=explore&sql=${encodedSql}" class="text-[11px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1">Open in Lakeset →</a>
+        <a href="/sql?q=${encodedSql}" class="text-[11px] text-blue-400 hover:text-blue-300 flex items-center gap-1">Open in SQL Editor →</a>
+      </div>`;
     }
 
     let thinkingHtml = "";

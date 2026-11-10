@@ -411,6 +411,11 @@ document.addEventListener('alpine:init', () => {
       const queryBtn = document.getElementById('panel-query-btn');
       if (queryBtn) queryBtn.href = `/sql?q=${querySQL}`;
 
+      const lakesetBtn = document.getElementById('panel-lakeset-btn');
+      if (lakesetBtn) {
+        lakesetBtn.href = `/lakeset?mode=explore&dataset=${encodeURIComponent(fullNamespace)}`;
+      }
+
       const parquetBtn = document.getElementById('panel-parquet-btn');
       if (parquetBtn) {
         if (parquetSQL) {

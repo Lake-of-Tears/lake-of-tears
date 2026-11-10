@@ -73,6 +73,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
+from lakeset_router import router as lakeset_router
 
 try:
     from pipeline.shared.toon_catalog import schema_to_toon, table_to_toon
@@ -222,6 +223,8 @@ app.include_router(storage_router, prefix="/api/v1/storage", tags=["storage"])
 app.include_router(storage_router, prefix="/api/storage", tags=["storage"])
 app.include_router(dashboards_router, prefix="/api/v1/dashboards", tags=["dashboards"])
 app.include_router(dashboards_router, prefix="/api/dashboards", tags=["dashboards"])
+app.include_router(lakeset_router, prefix="/api/v1/lakeset", tags=["lakeset"])
+app.include_router(lakeset_router, prefix="/api/lakeset", tags=["lakeset"])
 app.include_router(ai_router, prefix="/api/v1/ai", tags=["ai"])
 app.include_router(ai_router, prefix="/api/ai", tags=["ai"])
 app.include_router(ai_router, prefix="/api/catalog/ai", tags=["ai"])

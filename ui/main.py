@@ -2060,6 +2060,131 @@ async def dashboard_view(request: Request, dashboard_id: str):
     )
 
 
+def _build_lakeset_proxy_headers(request: Request) -> dict[str, str]:
+    """Construct signed zero-login Lakeset proxy headers from the authenticated LakeUI session."""
+    import hashlib
+    import hmac
+
+    user = getattr(request.state, "user", None) or {}
+    ws = getattr(request.state, "workspace", None) or {}
+    email = str(user.get("email") or user.get("sub") or "admin@lake.local").strip()
+    display_name = str(user.get("display_name") or user.get("name") or email.split("@")[0]).strip()
+    global_role = str(user.get("role") or "user").strip().lower()
+    ws_role = str(ws.get("my_role") or global_role or "viewer").strip().lower()
+    effective_role = "superadmin" if global_role == "superadmin" else ws_role
+    ws_slug = str(ws.get("slug") or "default").strip()
+    secret = os.getenv("LAKESET_PROXY_SECRET") or AUTH_SECRET_KEY
+    msg = f"{email.lower()}|{effective_role.lower()}|{ws_slug.lower()}".encode()
+    sig = hmac.new(secret.encode("utf-8"), msg, hashlib.sha256).hexdigest()
+    return {
+        "X-Lakeset-User-Email": email,
+        "X-Lakeset-User-Name": display_name,
+        "X-Lakeset-User-Role": effective_role,
+        "X-Lakeset-Workspace": ws_slug,
+        "X-Lakeset-Proxy-Secret": secret,
+        "X-Lakeset-Signature": sig,
+    }
+
+
+@app.get("/lakeset", response_class=HTMLResponse)
+async def lakeset_studio(request: Request):
+    ws = getattr(request.state, "workspace", None)
+    user = getattr(request.state, "user", None)
+    user_role = user.get("role") if user else "user"
+    my_role = (ws.get("my_role") if ws else None) or user_role
+    return templates.TemplateResponse(
+        request=request,
+        name="lakeset.html",
+        context={
+            "request": request,
+            "page": "lakeset",
+            "workspace": ws,
+            "user": user,
+            "my_role": my_role,
+            "superset_url": SUPERSET_URL,
+        },
+    )
+
+
+@app.api_route(
+    "/lakeset/proxy/{path:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+)
+async def lakeset_reverse_proxy(request: Request, path: str):
+    """Zero-login reverse auth proxy into Apache Superset with signed `X-Lakeset-User-*` headers."""
+    proxy_headers = _build_lakeset_proxy_headers(request)
+    upstream_base = (
+        os.getenv("SUPERSET_INTERNAL_URL") or SUPERSET_URL or "http://superset:8088"
+    ).rstrip("/")
+    query_str = request.url.query
+    target_url = f"{upstream_base}/{path.lstrip('/')}"
+    if query_str:
+        target_url = f"{target_url}?{query_str}"
+
+    forward_headers = {
+        k: v
+        for k, v in request.headers.items()
+        if k.lower() not in ("host", "content-length", "connection")
+    }
+    forward_headers.update(proxy_headers)
+
+    try:
+        body = await request.body()
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+            resp = await client.request(
+                method=request.method,
+                url=target_url,
+                headers=forward_headers,
+                content=body if body else None,
+            )
+            excluded = {
+                "content-encoding",
+                "transfer-encoding",
+                "content-length",
+                "x-frame-options",
+                "content-security-policy",
+            }
+            resp_headers = {k: v for k, v in resp.headers.items() if k.lower() not in excluded}
+            resp_headers["X-Lakeset-Zero-Login"] = "active"
+            return Response(
+                content=resp.content,
+                status_code=resp.status_code,
+                headers=resp_headers,
+                media_type=resp.headers.get("content-type"),
+            )
+    except Exception:
+        # Clean zero-login embedded studio view when upstream Superset container is offline
+        email = proxy_headers["X-Lakeset-User-Email"]
+        role = proxy_headers["X-Lakeset-User-Role"]
+        ws_slug = proxy_headers["X-Lakeset-Workspace"]
+        html = f"""<!DOCTYPE html>
+<html lang="en" class="dark">
+<head><meta charset="utf-8"><title>Lakeset Embedded Runtime</title>
+<style>
+  body {{ margin: 0; font-family: ui-sans-serif, system-ui, sans-serif; background: #0b0f17; color: #e5e7eb; display: flex; align-items: center; justify-content: center; min-height: 100vh; }}
+  .box {{ border: 1px solid #1f2937; background: #111827; border-radius: 12px; padding: 24px 28px; max-width: 560px; width: 90%; }}
+  .badge {{ display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-family: monospace; background: rgba(16,185,129,0.15); color: #34d399; border: 1px solid rgba(16,185,129,0.3); }}
+  .meta {{ margin-top: 12px; font-size: 12px; color: #9ca3af; font-family: monospace; line-height: 1.7; }}
+</style></head>
+<body>
+  <div class="box">
+    <span class="badge">Zero-Login SSO Authenticated</span>
+    <h3 style="margin: 12px 0 6px 0; font-size: 15px;">Lakeset Embedded BI Canvas ({path})</h3>
+    <p style="margin: 0; font-size: 12px; color: #9ca3af;">Pre-authenticated via Lake of Tears proxy headers &mdash; zero login prompt required.</p>
+    <div class="meta">
+      <div>User: {email} ({role})</div>
+      <div>Workspace: {ws_slug}</div>
+      <div>Engine: Lake of Tears DuckDB Lakehouse (httpfs + MinIO S3)</div>
+    </div>
+  </div>
+</body></html>"""
+        return HTMLResponse(
+            content=html,
+            status_code=200,
+            headers={"X-Lakeset-Zero-Login": "active"},
+        )
+
+
 @app.get("/pipelines", response_class=HTMLResponse)
 async def pipelines(request: Request):
     ws = request.state.workspace
@@ -4994,6 +5119,11 @@ async def api_workspace_manifest(request: Request):
         {"title": "Storage", "subtitle": "Lake storage buckets & objects", "url": "/storage"},
         {"title": "SQL Editor", "subtitle": "DuckDB SQL queries", "url": "/sql"},
         {"title": "Visualizations", "subtitle": "Apache Superset dashboards", "url": "/dashboards"},
+        {
+            "title": "Lakeset",
+            "subtitle": "Zero-login Lakeset BI Studio & Chart Builder",
+            "url": "/lakeset",
+        },
         {"title": "Pipelines", "subtitle": "Apache Airflow DAGs", "url": "/pipelines"},
         {
             "title": "Add Data",
@@ -5371,6 +5501,11 @@ async def api_workspace_search(request: Request, q: str = ""):
         {"title": "Storage", "subtitle": "Lake storage buckets & objects", "url": "/storage"},
         {"title": "SQL Editor", "subtitle": "DuckDB SQL queries", "url": "/sql"},
         {"title": "Visualizations", "subtitle": "Apache Superset dashboards", "url": "/dashboards"},
+        {
+            "title": "Lakeset",
+            "subtitle": "Zero-login Lakeset BI Studio & Chart Builder",
+            "url": "/lakeset",
+        },
         {"title": "Pipelines", "subtitle": "Apache Airflow DAGs", "url": "/pipelines"},
         {
             "title": "Add Data",
@@ -6583,6 +6718,142 @@ async def ui_delete_dashboard(request: Request, dashboard_id: str):
                 f"{BACKEND_URL}/api/v1/dashboards/{dashboard_id}",
                 headers=headers,
                 params=params,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+# ── Lakeset BI Studio API Proxy Endpoints ─────────────────────────────────────
+
+
+@app.get("/api/lakeset/status")
+@app.get("/api/v1/lakeset/status")
+async def ui_lakeset_status(request: Request):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params = dict(request.query_params)
+    if ws and ws.get("slug") and "workspace_slug" not in params:
+        params["workspace_slug"] = ws["slug"]
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{BACKEND_URL}/api/v1/lakeset/status",
+                headers=headers,
+                params=params,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@app.get("/api/lakeset/datasets")
+@app.get("/api/v1/lakeset/datasets")
+async def ui_lakeset_datasets(request: Request):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params = dict(request.query_params)
+    if ws and ws.get("slug") and "workspace_slug" not in params:
+        params["workspace_slug"] = ws["slug"]
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{BACKEND_URL}/api/v1/lakeset/datasets",
+                headers=headers,
+                params=params,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@app.post("/api/lakeset/sync")
+@app.post("/api/v1/lakeset/sync")
+async def ui_lakeset_sync(request: Request):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params = dict(request.query_params)
+    if ws and ws.get("slug") and "workspace_slug" not in params:
+        params["workspace_slug"] = ws["slug"]
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.post(
+                f"{BACKEND_URL}/api/v1/lakeset/sync",
+                headers=headers,
+                params=params,
+                json=body,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@app.post("/api/lakeset/guest-token")
+@app.post("/api/v1/lakeset/guest-token")
+async def ui_lakeset_guest_token(request: Request):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params = dict(request.query_params)
+    if ws and ws.get("slug") and "workspace_slug" not in params:
+        params["workspace_slug"] = ws["slug"]
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{BACKEND_URL}/api/v1/lakeset/guest-token",
+                headers=headers,
+                params=params,
+                json=body,
+                cookies=request.cookies,
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@app.post("/api/lakeset/explore-data")
+@app.post("/api/v1/lakeset/explore-data")
+async def ui_lakeset_explore_data(request: Request):
+    token = _get_request_token(request)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    ws = getattr(request.state, "workspace", None)
+    params = dict(request.query_params)
+    if ws and ws.get("slug") and "workspace_slug" not in params:
+        params["workspace_slug"] = ws["slug"]
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{BACKEND_URL}/api/v1/lakeset/explore-data",
+                headers=headers,
+                params=params,
+                json=body,
                 cookies=request.cookies,
             )
             return JSONResponse(resp.json(), status_code=resp.status_code)

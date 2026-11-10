@@ -36,6 +36,7 @@ UI_ROUTES_TO_VERIFY = [
     "/catalog",
     "/bundles",
     "/dashboards",
+    "/lakeset",
     "/sql",
     "/notebooks",
     "/ingest",

@@ -1,0 +1,462 @@
+{% extends "base.html" %}
+{% block title %}Lakeset BI Studio — Lake of Tears{% endblock %}
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<script src="/static/js/controllers/lakeset.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="h-full flex flex-col gap-5" x-data="lakesetManager()">
+
+  <!-- Toast Notification -->
+  <div x-show="toast.show" x-cloak
+       class="fixed bottom-5 right-5 z-50 px-4 py-3 rounded-xl border shadow-2xl text-xs font-medium flex items-center gap-2.5 transition-all"
+       :class="toast.type === 'error' ? 'bg-rose-950/90 border-rose-700/60 text-rose-200' : 'bg-emerald-950/90 border-emerald-700/60 text-emerald-200'">
+    <span x-text="toast.message"></span>
+    <button type="button" @click="toast.show = false" class="text-gray-400 hover:text-white ml-2">&times;</button>
+  </div>
+
+  <!-- Top Header & Actions -->
+  <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0">
+    <div>
+      <div class="flex items-center gap-2.5 flex-wrap">
+        <h1 class="text-xl font-bold text-gray-100 tracking-tight">Lakeset BI Studio</h1>
+        <span class="px-2.5 py-0.5 text-[11px] font-mono font-medium rounded-full bg-indigo-950/60 text-indigo-300 border border-indigo-800/50 flex items-center gap-1.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+          Zero-Login SSO &middot; DuckDB + MinIO S3
+        </span>
+        <span class="px-2 py-0.5 text-[10px] font-mono rounded bg-gray-800/80 text-gray-400 border border-gray-700/60">
+          Workspace: {{ workspace.name if workspace else 'Default' }}
+        </span>
+      </div>
+      <p class="text-xs text-gray-400 mt-1">
+        Governed semantic datasets, interactive Chart Builder, and embedded Apache Superset powered directly by your workspace DuckDB Lakehouse views.
+      </p>
+    </div>
+
+    <div class="flex items-center gap-2.5 shrink-0">
+      <button type="button"
+              id="btn-sync-lakeset"
+              @click="syncCatalogs()"
+              :disabled="isSyncing"
+              class="btn-primary text-xs py-2 px-3.5 flex items-center gap-2 shadow-sm">
+        <svg class="w-3.5 h-3.5" :class="{ 'animate-spin': isSyncing }" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        <span x-text="isSyncing ? 'Syncing Catalogs…' : 'Sync Catalogs to Lakeset'">Sync Catalogs to Lakeset</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- KPI Summary Strip & Mode Navigation Tabs -->
+  <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-gray-800 pb-3 shrink-0">
+    <!-- Mode Tabs -->
+    <div class="flex items-center gap-1.5 bg-gray-900/90 p-1 rounded-xl border border-gray-800 w-fit">
+      <button type="button"
+              id="lakeset-tab-datasets"
+              @click="switchMode('datasets')"
+              :class="activeMode === 'datasets' ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200 hover:bg-white/[0.04]'"
+              class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg>
+        <span>Datasets &amp; Semantic Layer</span>
+        <span class="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-black/30" x-text="datasets.length">0</span>
+      </button>
+
+      <button type="button"
+              id="lakeset-tab-explore"
+              @click="switchMode('explore')"
+              :class="activeMode === 'explore' ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200 hover:bg-white/[0.04]'"
+              class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z"/><path stroke-linecap="round" stroke-linejoin="round" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z"/></svg>
+        <span>Chart Builder (Explore)</span>
+      </button>
+
+      <button type="button"
+              id="lakeset-tab-dashboards"
+              @click="switchMode('dashboards')"
+              :class="activeMode === 'dashboards' ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200 hover:bg-white/[0.04]'"
+              class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+        <span>Dashboards</span>
+        <span class="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-black/30" x-text="dashboards.length">0</span>
+      </button>
+
+      <button type="button"
+              id="lakeset-tab-sqllab"
+              @click="switchMode('sqllab')"
+              :class="activeMode === 'sqllab' ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200 hover:bg-white/[0.04]'"
+              class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+        <span>SQL Lab</span>
+      </button>
+    </div>
+
+    <!-- Engine Connection Badge -->
+    <div class="flex items-center gap-3 text-xs text-gray-400">
+      <div class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gray-900 border border-gray-800">
+        <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+        <span class="font-mono text-[11px] text-gray-300" x-text="studioStatus.database_name">Lake of Tears DuckDB Lakehouse</span>
+      </div>
+      <template x-if="studioStatus.last_synced_at">
+        <span class="text-[11px] text-gray-500 font-mono">
+          Last synced: <span x-text="new Date(studioStatus.last_synced_at).toLocaleTimeString()"></span>
+        </span>
+      </template>
+    </div>
+  </div>
+
+  <!-- ── MODE 1: DATASETS & SEMANTIC LAYER ─────────────────────────────────── -->
+  <div x-show="activeMode === 'datasets'" class="flex-1 flex flex-col gap-4 min-h-0">
+    <!-- Filter & Search Bar -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+      <div class="relative flex-1 max-w-md">
+        <input type="text"
+               id="lakeset-dataset-search"
+               x-model="searchQuery"
+               placeholder="Filter datasets, schemas, or AI column descriptions…"
+               class="input-dark text-xs pl-8 py-2 w-full" />
+        <svg class="w-3.5 h-3.5 text-gray-500 absolute left-2.5 top-2.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+        </svg>
+      </div>
+
+      <div class="flex items-center gap-1.5 flex-wrap">
+        <button type="button" @click="tierFilter = 'all'"
+                :class="tierFilter === 'all' ? 'bg-blue-600/20 text-blue-400 border-blue-500/40' : 'bg-gray-900 text-gray-400 border-gray-800'"
+                class="px-2.5 py-1 rounded-md text-xs border font-medium transition-colors">All Tiers</button>
+        <button type="button" @click="tierFilter = 'bronze'"
+                :class="tierFilter === 'bronze' ? 'bg-amber-600/20 text-amber-300 border-amber-500/40' : 'bg-gray-900 text-gray-400 border-gray-800'"
+                class="px-2.5 py-1 rounded-md text-xs border font-medium transition-colors">Bronze</button>
+        <button type="button" @click="tierFilter = 'silver'"
+                :class="tierFilter === 'silver' ? 'bg-slate-600/20 text-slate-300 border-slate-500/40' : 'bg-gray-900 text-gray-400 border-gray-800'"
+                class="px-2.5 py-1 rounded-md text-xs border font-medium transition-colors">Silver</button>
+        <button type="button" @click="tierFilter = 'gold'"
+                :class="tierFilter === 'gold' ? 'bg-yellow-500/20 text-yellow-300 border-yellow-500/40' : 'bg-gray-900 text-gray-400 border-gray-800'"
+                class="px-2.5 py-1 rounded-md text-xs border font-medium transition-colors">Gold</button>
+        <button type="button" @click="tierFilter = 'shared'"
+                :class="tierFilter === 'shared' ? 'bg-cyan-600/20 text-cyan-300 border-cyan-500/40' : 'bg-gray-900 text-gray-400 border-gray-800'"
+                class="px-2.5 py-1 rounded-md text-xs border font-medium transition-colors">Shared</button>
+      </div>
+    </div>
+
+    <!-- Datasets Grid / Table -->
+    <div class="flex-1 overflow-y-auto min-h-0">
+      <template x-if="filteredDatasets.length === 0">
+        <div class="card p-12 text-center space-y-3">
+          <div class="w-11 h-11 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 mx-auto">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg>
+          </div>
+          <h3 class="text-sm font-semibold text-gray-200">No Governed Datasets Found</h3>
+          <p class="text-xs text-gray-500 max-w-md mx-auto">
+            Click <strong>Sync Catalogs to Lakeset</strong> to register your workspace catalog tables and semantic column descriptions, or create tables in the <a href="/catalog" class="text-blue-400 hover:underline">Catalog Explorer</a>.
+          </p>
+        </div>
+      </template>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4" x-show="filteredDatasets.length > 0">
+        <template x-for="ds in filteredDatasets" :key="ds.id">
+          <div class="card p-4 flex flex-col justify-between gap-3 hover:border-blue-500/40 transition-all group">
+            <div class="space-y-2">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="px-1.5 py-0.5 rounded text-[10px] font-mono uppercase font-semibold border"
+                          :class="{
+                            'bg-amber-950/50 text-amber-300 border-amber-800/50': ds.tier === 'bronze',
+                            'bg-slate-800 text-slate-300 border-slate-700': ds.tier === 'silver',
+                            'bg-yellow-950/50 text-yellow-300 border-yellow-700/50': ds.tier === 'gold',
+                            'bg-blue-950/50 text-blue-300 border-blue-800/50': !['bronze','silver','gold'].includes(ds.tier)
+                          }"
+                          x-text="ds.tier || 'table'"></span>
+                    <span class="text-sm font-semibold text-gray-100 truncate" x-text="ds.display_name"></span>
+                    <template x-if="ds.is_shared">
+                      <span class="shared-object-badge px-1.5 py-0.5 rounded text-[10px] font-mono bg-cyan-950/50 text-cyan-300 border border-cyan-800/50">Shared</span>
+                    </template>
+                  </div>
+                  <div class="text-[11px] font-mono text-blue-400 mt-1 truncate" x-text="ds.full_name"></div>
+                </div>
+                <template x-if="ds.synced">
+                  <span class="badge-green text-[10px] shrink-0">Synced</span>
+                </template>
+              </div>
+
+              <p class="text-xs text-gray-400 line-clamp-2 min-h-[32px]"
+                 x-text="ds.description || 'Governed DuckDB Lakehouse dataset backed by MinIO S3 Parquet.'"></p>
+
+              <!-- Semantic Column Chips Preview -->
+              <div class="flex items-center gap-1.5 flex-wrap pt-1">
+                <span class="text-[10px] font-mono text-gray-500" x-text="`${ds.column_count || 0} cols:`"></span>
+                <template x-for="col in (ds.columns || []).slice(0, 4)" :key="col.column_name">
+                  <span class="px-1.5 py-0.5 rounded bg-gray-800/80 border border-gray-700/60 text-[10px] font-mono text-gray-300"
+                        :title="col.description || col.type"
+                        x-text="col.column_name"></span>
+                </template>
+              </div>
+            </div>
+
+            <div class="pt-3 border-t border-gray-800/80 flex items-center justify-between gap-2">
+              <button type="button"
+                      @click="openInspector(ds)"
+                      class="btn-ghost text-xs py-1 px-2.5 border border-gray-800">
+                Semantic Schema
+              </button>
+              <div class="flex items-center gap-1.5">
+                <button type="button"
+                        @click="openSqlLabWithQuery(ds)"
+                        class="btn-ghost text-xs py-1 px-2.5 text-gray-300 hover:text-white border border-gray-800">
+                  SQL Lab
+                </button>
+                <button type="button"
+                        @click="openInExplore(ds)"
+                        class="btn-primary text-xs py-1 px-3 flex items-center gap-1">
+                  <span>Create Chart</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── MODE 2: CHART BUILDER (EXPLORE) ───────────────────────────────────── -->
+  <div x-show="activeMode === 'explore'" x-cloak class="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-0 overflow-y-auto">
+    <!-- Left Column: Semantic Chart Controls -->
+    <div class="lg:col-span-4 card p-4 flex flex-col gap-4 overflow-y-auto">
+      <div class="flex items-center justify-between border-b border-gray-800 pb-2.5">
+        <h2 class="text-sm font-semibold text-gray-100">Chart Builder Controls</h2>
+        <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">DuckDB Engine</span>
+      </div>
+
+      <!-- Dataset Selector -->
+      <div>
+        <label class="block text-xs font-medium text-gray-400 mb-1">Governed Dataset</label>
+        <select id="explore-dataset-select"
+                x-model="selectedDatasetName"
+                @change="selectDatasetByName(selectedDatasetName); runExploreQuery()"
+                class="input-dark text-xs w-full">
+          <option value="">-- Select Workspace Dataset --</option>
+          <template x-for="ds in datasets" :key="ds.id">
+            <option :value="ds.full_name" x-text="`${ds.full_name} (${ds.column_count} cols)`"></option>
+          </template>
+        </select>
+      </div>
+
+      <!-- Visualization Type -->
+      <div>
+        <label class="block text-xs font-medium text-gray-400 mb-1">Visualization Type</label>
+        <div class="grid grid-cols-3 gap-1.5 text-xs">
+          <template x-for="vType in ['bar', 'line', 'area', 'pie', 'kpi']" :key="vType">
+            <button type="button"
+                    @click="chartConfig.chartType = vType; runExploreQuery()"
+                    :class="chartConfig.chartType === vType ? 'bg-blue-600 text-white border-blue-500' : 'bg-gray-800 text-gray-300 border-gray-700 hover:bg-gray-700'"
+                    class="py-1.5 px-2 rounded border font-medium uppercase text-[11px] transition-colors"
+                    x-text="vType"></button>
+          </template>
+        </div>
+      </div>
+
+      <!-- Dimension (Group By) -->
+      <div>
+        <label class="block text-xs font-medium text-gray-400 mb-1">Dimension (X-Axis / Group By)</label>
+        <input type="text"
+               id="explore-dimension-input"
+               x-model="chartConfig.dimension"
+               placeholder="e.g. journal, status, category"
+               class="input-dark text-xs w-full" />
+      </div>
+
+      <!-- Metric & Aggregation -->
+      <div class="grid grid-cols-2 gap-2.5">
+        <div>
+          <label class="block text-xs font-medium text-gray-400 mb-1">Metric Column</label>
+          <input type="text"
+                 id="explore-metric-input"
+                 x-model="chartConfig.metric"
+                 placeholder="count or column"
+                 class="input-dark text-xs w-full" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-400 mb-1">Aggregation</label>
+          <select id="explore-agg-select" x-model="chartConfig.metricAgg" class="input-dark text-xs w-full">
+            <option value="count">COUNT(*)</option>
+            <option value="sum">SUM</option>
+            <option value="avg">AVG</option>
+            <option value="min">MIN</option>
+            <option value="max">MAX</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Custom DuckDB SQL Override -->
+      <div>
+        <label class="block text-xs font-medium text-gray-400 mb-1">Custom DuckDB SQL (Optional)</label>
+        <textarea id="explore-sql-input"
+                  x-model="chartConfig.sql"
+                  rows="3"
+                  placeholder="SELECT category, COUNT(*) AS count FROM bronze.events GROUP BY 1"
+                  class="input-dark text-xs font-mono w-full"></textarea>
+      </div>
+
+      <button type="button"
+              id="btn-run-explore"
+              @click="runExploreQuery()"
+              class="btn-primary text-xs py-2 w-full justify-center">
+        Run &amp; Update Chart
+      </button>
+
+      <!-- Selected Dataset Semantic Column Dictionary -->
+      <template x-if="selectedDataset && selectedDataset.columns && selectedDataset.columns.length > 0">
+        <div class="pt-3 border-t border-gray-800 space-y-2">
+          <div class="text-xs font-semibold text-gray-300">Semantic Columns &amp; AI Descriptions</div>
+          <div class="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+            <template x-for="c in selectedDataset.columns" :key="c.column_name">
+              <div class="p-2 rounded bg-gray-950/60 border border-gray-800/80 text-[11px]">
+                <div class="flex items-center justify-between">
+                  <span class="font-mono text-blue-400 font-medium" x-text="c.column_name"></span>
+                  <span class="font-mono text-[10px] text-gray-500" x-text="c.type"></span>
+                </div>
+                <p class="text-gray-400 mt-0.5 text-[11px]" x-text="c.description || 'No column description'"></p>
+              </div>
+            </template>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- Right Column: Live Chart Canvas & Zero-Login Embedded Superset Frame -->
+    <div class="lg:col-span-8 flex flex-col gap-4">
+      <div class="card p-5 flex-1 flex flex-col gap-4 min-h-[360px]">
+        <div class="flex items-center justify-between border-b border-gray-800 pb-3">
+          <div>
+            <h3 class="text-sm font-semibold text-gray-100" x-text="chartConfig.title">Chart Preview</h3>
+            <p class="text-[11px] font-mono text-blue-400" x-text="selectedDatasetName || 'DuckDB Query Exploration'"></p>
+          </div>
+          <div class="flex items-center gap-2">
+            <a :href="iframeUrl" target="_blank" class="btn-ghost text-xs py-1 px-2.5 border border-gray-800">
+              Open Full Superset Explore &rarr;
+            </a>
+          </div>
+        </div>
+
+        <!-- ECharts Canvas -->
+        <div id="lakeset-explore-chart" class="flex-1 w-full min-h-[260px]"></div>
+
+        <!-- Synthesized DuckDB SQL -->
+        <template x-if="exploreResult && exploreResult.sql">
+          <div class="rounded-lg bg-gray-950 border border-gray-800 p-3">
+            <div class="flex items-center justify-between text-[11px] text-gray-500 mb-1">
+              <span class="font-mono uppercase">Executed DuckDB Lakehouse SQL</span>
+              <a :href="`/sql?q=${encodeURIComponent(exploreResult.sql)}`" class="text-blue-400 hover:underline">Open in SQL Editor &rarr;</a>
+            </div>
+            <pre id="lakeset-explore-sql-preview" class="text-xs font-mono text-emerald-300 overflow-x-auto whitespace-pre-wrap" x-text="exploreResult.sql"></pre>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── MODE 3: DASHBOARDS ────────────────────────────────────────────────── -->
+  <div x-show="activeMode === 'dashboards'" x-cloak class="flex-1 flex flex-col gap-4 min-h-0 overflow-y-auto">
+    <div class="flex items-center justify-between">
+      <h2 class="text-sm font-semibold text-gray-200">Workspace &amp; Embedded Lakeset Dashboards</h2>
+      <a href="/dashboards" class="btn-primary text-xs py-1.5 px-3">Open Native Dashboard Builder</a>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 shrink-0">
+      <template x-for="dash in dashboards" :key="dash.id">
+        <a :href="`/dashboards/${dash.id}`" class="card p-4 hover:border-blue-500/40 transition-all flex flex-col justify-between gap-3">
+          <div>
+            <div class="flex items-center justify-between">
+              <h3 class="text-sm font-semibold text-gray-100" x-text="dash.title"></h3>
+              <span class="badge-green text-[10px]" x-text="`${dash.charts_count || 0} widgets`"></span>
+            </div>
+            <p class="text-xs text-gray-400 mt-1" x-text="dash.description || 'Workspace analytical dashboard'"></p>
+          </div>
+          <div class="text-xs text-blue-400 font-medium">View Dashboard &rarr;</div>
+        </a>
+      </template>
+    </div>
+
+    <div class="card flex-1 min-h-[380px] overflow-hidden flex flex-col">
+      <div class="px-4 py-2.5 border-b border-gray-800 flex items-center justify-between bg-gray-900/60">
+        <span class="text-xs font-medium text-gray-300">Zero-Login Embedded Superset Dashboard Studio</span>
+        <span class="text-[11px] font-mono text-emerald-400">SSO Active ({{ user.email if user else 'admin@lake.local' }})</span>
+      </div>
+      <iframe id="lakeset-dashboards-iframe"
+              src="/lakeset/proxy/dashboard/list/"
+              class="w-full flex-1 border-0 bg-gray-950"
+              title="Lakeset Embedded Dashboards"></iframe>
+    </div>
+  </div>
+
+  <!-- ── MODE 4: SQL LAB ───────────────────────────────────────────────────── -->
+  <div x-show="activeMode === 'sqllab'" x-cloak class="flex-1 flex flex-col gap-3 min-h-0">
+    <div class="card flex-1 overflow-hidden flex flex-col min-h-[450px]">
+      <div class="px-4 py-2.5 border-b border-gray-800 flex items-center justify-between bg-gray-900/60">
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-semibold text-gray-200">Lakeset SQL Lab</span>
+          <span class="text-[11px] font-mono text-blue-400">Connected to: Lake of Tears DuckDB Lakehouse</span>
+        </div>
+        <a :href="`/sql?q=${encodeURIComponent(sqllabQuery)}`" class="text-xs text-blue-400 hover:underline">
+          Open in LakeUI DuckDB SQL Editor &rarr;
+        </a>
+      </div>
+      <iframe id="lakeset-sqllab-iframe"
+              :src="iframeUrl"
+              class="w-full flex-1 border-0 bg-gray-950"
+              title="Lakeset Embedded SQL Lab"></iframe>
+    </div>
+  </div>
+
+  <!-- ── SEMANTIC DATASET INSPECTOR DRAWER ─────────────────────────────────── -->
+  <div x-show="inspectorOpen" x-cloak class="fixed inset-0 z-50 flex justify-end bg-black/50" @click.self="closeInspector()">
+    <div class="w-[540px] max-w-[95vw] h-full bg-[#161616] border-l border-white/[0.08] shadow-2xl p-5 flex flex-col gap-4 overflow-y-auto">
+      <div class="flex items-start justify-between border-b border-gray-800 pb-3">
+        <div>
+          <h3 class="text-base font-semibold text-gray-100" x-text="inspectedDataset ? inspectedDataset.display_name : ''"></h3>
+          <code class="text-xs font-mono text-blue-400" x-text="inspectedDataset ? inspectedDataset.full_name : ''"></code>
+        </div>
+        <button type="button" @click="closeInspector()" class="text-gray-400 hover:text-white text-lg">&times;</button>
+      </div>
+
+      <template x-if="inspectedDataset">
+        <div class="space-y-4 text-xs">
+          <div>
+            <div class="text-gray-500 uppercase text-[10px] font-semibold mb-1">Description</div>
+            <p class="text-gray-300" x-text="inspectedDataset.description || 'No description provided.'"></p>
+          </div>
+
+          <div>
+            <div class="text-gray-500 uppercase text-[10px] font-semibold mb-1">MinIO S3 Parquet Location</div>
+            <code class="block p-2 rounded bg-black/40 border border-gray-800 font-mono text-[11px] text-amber-300 break-all"
+                  x-text="inspectedDataset.s3_path_pattern"></code>
+          </div>
+
+          <div>
+            <div class="text-gray-500 uppercase text-[10px] font-semibold mb-2">Governed Columns &amp; Semantic Descriptions</div>
+            <div class="space-y-2">
+              <template x-for="col in inspectedDataset.columns" :key="col.column_name">
+                <div class="p-2.5 rounded-lg bg-gray-900 border border-gray-800">
+                  <div class="flex items-center justify-between">
+                    <span class="font-mono font-semibold text-gray-200" x-text="col.column_name"></span>
+                    <span class="font-mono text-[10px] px-1.5 py-0.5 rounded bg-blue-950/50 text-blue-300 border border-blue-800/40" x-text="col.type"></span>
+                  </div>
+                  <p class="text-gray-400 mt-1" x-text="col.description || 'No AI semantic description yet.'"></p>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <div class="pt-3 border-t border-gray-800 flex justify-end gap-2">
+            <button type="button" @click="openInExplore(inspectedDataset)" class="btn-primary text-xs py-1.5 px-3">
+              Open in Chart Builder
+            </button>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
