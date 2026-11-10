@@ -34,12 +34,46 @@ spec:
           {{- end }}
           image: {{ .Values.superset.image.repository }}:{{ .Values.superset.image.tag }}
           imagePullPolicy: {{ .Values.superset.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /app/superset_home/pythonpath &&
+              python3 -c "import duckdb, duckdb_engine" 2>/dev/null || \
+                pip install --no-cache-dir --target /app/superset_home/pythonpath duckdb duckdb-engine &&
+              exec /usr/bin/run-server.sh
           env:
+            - name: PYTHONPATH
+              value: "/app/pythonpath:/app/superset_home/pythonpath"
             - name: SUPERSET_SECRET_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "lake-of-tears.fullname" . }}-credentials
                   key: SUPERSET_SECRET_KEY
+            - name: LAKESET_PROXY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "lake-of-tears.fullname" . }}-credentials
+                  key: authSecretKey
+            - name: GUEST_TOKEN_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "lake-of-tears.fullname" . }}-credentials
+                  key: SUPERSET_SECRET_KEY
+            - name: MINIO_ENDPOINT
+              value: "{{ include "lake-of-tears.fullname" . }}-minio:{{ .Values.minio.service.apiPort }}"
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "lake-of-tears.fullname" . }}-credentials
+                  key: MINIO_ROOT_USER
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "lake-of-tears.fullname" . }}-credentials
+                  key: MINIO_ROOT_PASSWORD
+            - name: MINIO_BUCKET
+              value: "datalake"
           ports:
             - name: http
               containerPort: {{ .Values.superset.service.port }}
@@ -126,6 +160,8 @@ spec:
           {{- end }}
           image: {{ .Values.superset.image.repository }}:{{ .Values.superset.image.tag }}
           env:
+            - name: PYTHONPATH
+              value: "/app/pythonpath:/app/superset_home/pythonpath"
             - name: SUPERSET_SECRET_KEY
               valueFrom:
                 secretKeyRef:
@@ -140,6 +176,9 @@ spec:
             - sh
             - -c
             - |
+              mkdir -p /app/superset_home/pythonpath &&
+              python3 -c "import duckdb, duckdb_engine" 2>/dev/null || \
+                pip install --no-cache-dir --target /app/superset_home/pythonpath duckdb duckdb-engine &&
               superset db upgrade &&
               superset fab create-admin \
                 --username admin \
@@ -147,7 +186,8 @@ spec:
                 --lastname User \
                 --email admin@localhost \
                 --password $SUPERSET_ADMIN_PASSWORD || true &&
-              echo "Superset initialized."
+              superset init &&
+              echo "Superset initialized with duckdb-engine and LakesetSecurityManager."
           volumeMounts:
             - name: superset-home
               mountPath: /app/superset_home

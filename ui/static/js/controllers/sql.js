@@ -37,6 +37,7 @@ document.addEventListener('alpine:init', () => {
       window.generateSqlWithAi = () => this.generateSqlWithAi();
       window.fixQueryWithAi = () => this.fixQueryWithAi();
       window.applyFixedSql = (andRun = false) => this.applyFixedSql(andRun);
+      window.openQueryInLakeset = () => this.openQueryInLakeset();
 
       // Keyboard shortcuts
       window.addEventListener('keydown', (e) => {
@@ -134,6 +135,18 @@ document.addEventListener('alpine:init', () => {
       if (typeof window.applyFixedSql === 'function' && window.applyFixedSql !== this.applyFixedSql) {
         return window.applyFixedSql(andRun);
       }
+    },
+
+    openQueryInLakeset() {
+      let currentSql = '';
+      if (typeof window.getEditorSql === 'function') {
+        currentSql = window.getEditorSql();
+      } else {
+        const ta = document.getElementById('sqlTextarea');
+        if (ta) currentSql = ta.value;
+      }
+      const encoded = encodeURIComponent((currentSql || '').trim());
+      window.location.href = `/lakeset?mode=explore&sql=${encoded}`;
     }
   }));
 

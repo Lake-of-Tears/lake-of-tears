@@ -1,8 +1,8 @@
 ---
-# ConfigMap holding the Superset Python config.
+# ConfigMap holding the Superset Python config for Lakeset BI Studio.
 # Mounted at /app/pythonpath/superset_config.py inside the container.
-# Superset is served at its own subdomain (ingress.supersetHost), so no path prefix
-# is needed. WTF_CSRF_ENABLED=False + TALISMAN_ENABLED=False allow iframe embedding.
+# Configures Zero-Login SSO via LakesetSecurityManager, DuckDB + MinIO S3 engine defaults,
+# and chromeless iframe / Embedded Superset Guest Token support.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -12,19 +12,109 @@ metadata:
     app.kubernetes.io/component: superset
 data:
   superset_config.py: |
-    # Allow Superset to be embedded in an iframe from any origin.
-    # Lake UI handles auth — users are already authenticated before reaching the iframe.
+    import hashlib
+    import hmac
+    import logging
+    import os
+    from flask import g, request
+    from flask_login import login_user
+    from superset.security import SupersetSecurityManager
+
+    logger = logging.getLogger("lakeset.security")
+
+    # ── Embedded & Chromeless Iframe Configuration ───────────────────────────
     SESSION_COOKIE_SAMESITE = "None"
     SESSION_COOKIE_SECURE = False
     WTF_CSRF_ENABLED = False
     TALISMAN_ENABLED = False
     TALISMAN_CONFIG = {"force_https": False, "frame_options": "ALLOWALL"}
-    # Enable native embedded dashboards and guest token authentication
+    HTTP_HEADERS = {"X-Frame-Options": "ALLOWALL"}
+
+    EMBEDDED_SUPERSET = True
+    ENABLE_TEMPLATE_PROCESSING = True
+    ENABLE_PROXY_FIX = True
+    PREVENT_UNSAFE_DB_CONNECTIONS = False
+
     FEATURE_FLAGS = {
         "EMBEDDED_SUPERSET": True,
+        "ENABLE_TEMPLATE_PROCESSING": True,
+        "DASHBOARD_RBAC": True,
+        "RLS_IN_SQLLAB": True,
+        "HORIZONTAL_FILTER_BAR": True,
     }
-    ENABLE_TEMPLATE_PROCESSING = True
-    GUEST_ROLE_NAME = "Gamma"
-    # Grant anonymous users Gamma-level read access so the iframe loads without login.
-    PUBLIC_ROLE_LIKE = "Gamma"
 
+    # ── Guest Token Configuration ────────────────────────────────────────────
+    GUEST_ROLE_NAME = "Gamma"
+    PUBLIC_ROLE_LIKE = "Gamma"
+    GUEST_TOKEN_JWT_SECRET = (
+        os.getenv("GUEST_TOKEN_JWT_SECRET")
+        or os.getenv("LAKESET_PROXY_SECRET")
+        or os.getenv("SUPERSET_SECRET_KEY")
+        or "lakeset-guest-jwt-secret-key"
+    )
+    GUEST_TOKEN_JWT_ALGO = "HS256"
+    GUEST_TOKEN_HEADER_NAME = "X-GuestToken"
+    GUEST_TOKEN_JWT_EXP_SECONDS = 3600
+
+    # ── Zero-Login LakesetSecurityManager ────────────────────────────────────
+    def _map_lot_role(lot_role: str) -> str:
+        role = (lot_role or "viewer").strip().lower()
+        if role == "superadmin":
+            return "Admin"
+        if role in ("owner", "admin", "editor", "member", "user", "alpha"):
+            return "Alpha"
+        return "Gamma"
+
+    class LakesetSecurityManager(SupersetSecurityManager):
+        """Zero-login security manager authenticating Lake of Tears proxy headers & JWTs."""
+
+        def init_app(self, app):
+            super().init_app(app)
+
+            @app.before_request
+            def _lakeset_zero_login():
+                try:
+                    email = (request.headers.get("X-Lakeset-User-Email") or "").strip()
+                    if not email:
+                        return
+                    proxy_secret = (request.headers.get("X-Lakeset-Proxy-Secret") or "").strip()
+                    expected_secret = (
+                        os.getenv("LAKESET_PROXY_SECRET")
+                        or os.getenv("AUTH_SECRET_KEY")
+                        or os.getenv("SUPERSET_SECRET_KEY")
+                        or ""
+                    )
+                    if expected_secret and proxy_secret and not hmac.compare_digest(proxy_secret, expected_secret):
+                        logger.warning("Rejected Lakeset proxy request with invalid X-Lakeset-Proxy-Secret")
+                        return
+
+                    display_name = (request.headers.get("X-Lakeset-User-Name") or email.split("@")[0]).strip()
+                    lot_role = (request.headers.get("X-Lakeset-User-Role") or "viewer").strip()
+                    target_role_name = _map_lot_role(lot_role)
+
+                    parts = display_name.split(None, 1)
+                    first_name = parts[0] if parts else "Lake"
+                    last_name = parts[1] if len(parts) > 1 else "User"
+
+                    role_obj = self.find_role(target_role_name) or self.find_role("Gamma")
+                    user = self.find_user(username=email) or self.find_user(email=email)
+                    if not user:
+                        user = self.add_user(
+                            username=email,
+                            first_name=first_name,
+                            last_name=last_name,
+                            email=email,
+                            role=[role_obj] if role_obj else [],
+                        )
+                    else:
+                        if role_obj and role_obj not in getattr(user, "roles", []):
+                            user.roles = [role_obj]
+                            self.update_user(user)
+
+                    if user:
+                        g.user = user
+                        login_user(user, remember=False)
+                except Exception as exc:
+                    logger.debug("Lakeset zero-login hook error: %s", exc)
+
+    CUSTOM_SECURITY_MANAGER = LakesetSecurityManager

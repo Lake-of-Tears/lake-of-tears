@@ -121,6 +121,16 @@
               <svg class="w-3.5 h-3.5 {% if has_ai %}text-blue-400{% else %}text-gray-500{% endif %}" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
               <span>Explain Query</span>
             </button>
+            <button
+              type="button"
+              id="btnOpenInLakeset"
+              onclick="openQueryInLakeset()"
+              class="btn-ghost text-xs py-2 px-3 border border-indigo-800/50 text-indigo-300 hover:border-indigo-500/50 rounded-md whitespace-nowrap flex items-center justify-center gap-1.5"
+              title="Open current SQL query in Lakeset BI Studio Chart Builder"
+            >
+              <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z"/><path stroke-linecap="round" stroke-linejoin="round" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z"/></svg>
+              <span>Open in Lakeset</span>
+            </button>
           </div>
         </div>
 

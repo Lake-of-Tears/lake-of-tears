@@ -1116,6 +1116,17 @@ class BundleDeployer:
             db.commit()
             db.refresh(bundle_record)
 
+            # 8. Non-blocking Lakeset BI Studio dataset synchronization
+            try:
+                try:
+                    import superset_service as _lakeset_svc
+                except ImportError:
+                    from backend import superset_service as _lakeset_svc
+
+                _lakeset_svc.sync_workspace_to_lakeset(db=db, workspace=workspace, user=user)
+            except Exception as sync_exc:
+                logger.debug("Non-blocking Lakeset bundle sync skipped/failed: %s", sync_exc)
+
             total_res = sum(len(v) for v in resources_map.values())
             msg = (
                 f"Successfully deployed bundle '{bundle_name}' to target '{target}' "
