@@ -443,3 +443,116 @@ def test_workspace_manifest_and_search_includes_asset_bundles():
         results3 = resp3.json()["results"]
         b_res3 = [r for r in results3 if r.get("type") == "bundle"]
         assert len(b_res3) == 1
+
+
+def test_workspace_manifest_and_search_includes_lakeset_datasets():
+    """Verify that /api/workspace/manifest and /api/workspace/search include Lakeset datasets with Create Chart (Explore) URLs."""
+    token, workspaces, cookies = _make_auth_cookie(role="member")
+    mock_catalogs = [
+        {
+            "id": "cat-default",
+            "name": "default",
+            "slug": "default",
+            "description": "Default Workspace Catalog",
+            "schemas": [
+                {
+                    "id": "sch-bronze",
+                    "name": "bronze",
+                    "slug": "bronze",
+                    "tier": "bronze",
+                    "tables": [
+                        {
+                            "id": "tbl-pubmed",
+                            "name": "PubMed Articles",
+                            "slug": "pubmed_articles",
+                            "description": "Indexed biomedical articles from PubMed",
+                            "columns": ["pmid", "title", "journal", "pub_year"],
+                            "column_defs": [
+                                {"name": "pmid", "type": "VARCHAR"},
+                                {"name": "title", "type": "VARCHAR"},
+                                {"name": "journal", "type": "VARCHAR"},
+                                {"name": "pub_year", "type": "INTEGER"},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+
+    # 1. Test /api/workspace/manifest
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_fetch_workspaces", return_value=workspaces),
+        patch.object(main, "_backend_get_async") as mock_backend_get_async,
+        patch.object(notebook_proxy, "scan_workspace_filesystem", return_value=[]),
+    ):
+
+        async def _mock_async_get(path, tok, workspace_id=None, workspace_slug=None):
+            if "catalog" in path:
+                return mock_catalogs
+            return []
+
+        mock_backend_get_async.side_effect = _mock_async_get
+
+        resp = client.get("/api/workspace/manifest", cookies=cookies)
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        lakeset_items = [i for i in items if i.get("type") == "lakeset"]
+        assert len(lakeset_items) == 1
+        ls_item = lakeset_items[0]
+        assert ls_item["category"] == "Lakeset"
+        assert ls_item["title"] == "PubMed Articles"
+        assert ls_item["dataset"] == "default.bronze.pubmed_articles"
+        assert ls_item["path"] == "default.bronze.pubmed_articles"
+        assert ls_item["url"] == "/lakeset?mode=explore&dataset=default.bronze.pubmed_articles"
+        assert "journal" in ls_item["columns"]
+
+    # 2. Test /api/workspace/search by full dataset name, table name, and $ prefix
+    with (
+        patch.object(main, "AUTH_ENABLED", True),
+        patch.object(main, "_fetch_workspaces", return_value=workspaces),
+        patch.object(
+            notebook_proxy, "search_workspace_items", new_callable=AsyncMock, return_value=[]
+        ),
+        patch.object(main, "_backend_get") as mock_backend_get_sync,
+    ):
+
+        def _mock_sync_get(path, tok, workspace_id=None, workspace_slug=None):
+            if "catalog" in path:
+                return mock_catalogs
+            return []
+
+        mock_backend_get_sync.side_effect = _mock_sync_get
+
+        # Search by full 3-part dataset identifier
+        resp_full = client.get(
+            "/api/workspace/search?q=default.bronze.pubmed_articles", cookies=cookies
+        )
+        assert resp_full.status_code == 200
+        ls_res_full = [r for r in resp_full.json()["results"] if r.get("type") == "lakeset"]
+        assert len(ls_res_full) == 1
+        assert (
+            ls_res_full[0]["url"] == "/lakeset?mode=explore&dataset=default.bronze.pubmed_articles"
+        )
+        assert ls_res_full[0]["dataset"] == "default.bronze.pubmed_articles"
+
+        # Search by $ lakeset prefix
+        resp_prefix = client.get("/api/workspace/search?q=$pubmed", cookies=cookies)
+        assert resp_prefix.status_code == 200
+        results_prefix = resp_prefix.json()["results"]
+        ls_res_prefix = [r for r in results_prefix if r.get("type") == "lakeset"]
+        assert len(ls_res_prefix) == 1
+        assert (
+            ls_res_prefix[0]["url"]
+            == "/lakeset?mode=explore&dataset=default.bronze.pubmed_articles"
+        )
+        # Ensure catalog/schema/table items are excluded when $ prefix is used
+        assert not any(r.get("type") in ("catalog", "schema", "table") for r in results_prefix)
+
+        # Search by column name
+        resp_col = client.get("/api/workspace/search?q=pub_year", cookies=cookies)
+        assert resp_col.status_code == 200
+        ls_res_col = [r for r in resp_col.json()["results"] if r.get("type") == "lakeset"]
+        assert len(ls_res_col) == 1
+        assert "Matched column: pub_year" in ls_res_col[0]["subtitle"]

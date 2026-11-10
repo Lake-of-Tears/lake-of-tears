@@ -5274,11 +5274,30 @@ async def api_workspace_manifest(request: Request):
             return data
         return []
 
-    catalogs_raw, pipelines_raw, nb_items, bundles_raw = await asyncio.gather(
+    async def _fetch_lakeset():
+        if not token:
+            return []
+        effective_ws_id = str(ws_id) if ws_id and ws_id != "default" else None
+        data = await _backend_get_async(
+            f"/api/v1/lakeset/datasets?workspace_slug={urllib.parse.quote(ws_slug)}"
+            if ws_slug
+            else "/api/v1/lakeset/datasets",
+            token,
+            workspace_id=effective_ws_id,
+            workspace_slug=ws_slug,
+        )
+        if data and isinstance(data, dict):
+            return data.get("datasets", [])
+        if isinstance(data, list):
+            return data
+        return []
+
+    catalogs_raw, pipelines_raw, nb_items, bundles_raw, lakeset_raw = await asyncio.gather(
         _fetch_catalogs(),
         _fetch_pipelines(),
         _fetch_notebooks(),
         _fetch_bundles(),
+        _fetch_lakeset(),
         return_exceptions=True,
     )
 
@@ -5294,8 +5313,12 @@ async def api_workspace_manifest(request: Request):
     if isinstance(bundles_raw, Exception):
         logger.warning("Error fetching bundles for manifest: %s", bundles_raw)
         bundles_raw = []
+    if isinstance(lakeset_raw, Exception):
+        logger.warning("Error fetching lakeset datasets for manifest: %s", lakeset_raw)
+        lakeset_raw = []
 
     items: list[dict[str, Any]] = []
+    seen_lakeset_datasets: set[str] = set()
 
     # 1. Process Notebooks and Folders
     for item in nb_items:
@@ -5325,11 +5348,12 @@ async def api_workspace_manifest(request: Request):
                 }
             )
 
-    # 2. Process Catalogs, Schemas, Tables
+    # 2. Process Catalogs, Schemas, Tables & Lakeset Datasets
     for cat in catalogs_raw:
         cat_id = cat.get("id", "")
         cat_name = cat.get("name", "")
         cat_slug = cat.get("slug", "")
+        cat_ident = duckdb_ai._safe_identifier(cat_slug or cat_name).lower()
         cat_desc = cat.get("description") or "Data Catalog"
         items.append(
             {
@@ -5369,8 +5393,8 @@ async def api_workspace_manifest(request: Request):
                 tbl_name = table.get("name", "")
                 tbl_slug = table.get("slug", "")
                 tbl_desc = table.get("description") or ""
-                sql_sch = duckdb_ai._safe_identifier(sch_slug)
-                sql_tbl = duckdb_ai._safe_identifier(tbl_slug)
+                sql_sch = duckdb_ai._safe_identifier(sch_slug or sch_name)
+                sql_tbl = duckdb_ai._safe_identifier(tbl_slug or tbl_name)
                 cols = table.get("columns") or []
                 if not cols and "column_defs" in table:
                     cols = [
@@ -5398,6 +5422,70 @@ async def api_workspace_manifest(request: Request):
                         "columns": cols,
                     }
                 )
+
+                full_ds = f"{cat_ident}.{sql_sch.lower()}.{sql_tbl.lower()}"
+                if full_ds not in seen_lakeset_datasets:
+                    seen_lakeset_datasets.add(full_ds)
+                    lakeset_sub = f"Lakeset Chart Builder • {full_ds} • {len(cols)} cols"
+                    if tbl_desc:
+                        lakeset_sub += f" • {tbl_desc}"
+                    items.append(
+                        {
+                            "category": "Lakeset",
+                            "title": tbl_name or sql_tbl,
+                            "subtitle": lakeset_sub,
+                            "url": f"/lakeset?mode=explore&dataset={urllib.parse.quote(full_ds, safe='.')}",
+                            "type": "lakeset",
+                            "dataset": full_ds,
+                            "catalog_id": str(cat_id),
+                            "schema_id": str(sch_id),
+                            "table_id": str(tbl_id),
+                            "table_ident": sql_tbl,
+                            "path": full_ds,
+                            "columns": cols,
+                        }
+                    )
+
+    # 2b. Process additional Lakeset datasets if returned directly by /api/v1/lakeset/datasets
+    if isinstance(lakeset_raw, list):
+        for ds in lakeset_raw:
+            if not isinstance(ds, dict):
+                continue
+            full_ds = str(ds.get("full_name") or "").strip()
+            if not full_ds or full_ds in seen_lakeset_datasets:
+                continue
+            seen_lakeset_datasets.add(full_ds)
+            ds_title = ds.get("display_name") or ds.get("table_name") or full_ds
+            ds_desc = ds.get("description") or ""
+            raw_cols = ds.get("columns") or []
+            col_names = [
+                c.get("column_name") or c.get("name") if isinstance(c, dict) else str(c)
+                for c in raw_cols
+                if c
+            ]
+            explore_url = (
+                ds.get("explore_url")
+                or f"/lakeset?mode=explore&dataset={urllib.parse.quote(full_ds, safe='.')}"
+            )
+            lakeset_sub = f"Lakeset Chart Builder • {full_ds} • {len(col_names)} cols"
+            if ds_desc:
+                lakeset_sub += f" • {ds_desc}"
+            items.append(
+                {
+                    "category": "Lakeset",
+                    "title": ds_title,
+                    "subtitle": lakeset_sub,
+                    "url": explore_url,
+                    "type": "lakeset",
+                    "dataset": full_ds,
+                    "catalog_id": str(ds.get("catalog_id", "")),
+                    "schema_id": str(ds.get("schema_id", "")),
+                    "table_id": str(ds.get("id", "")),
+                    "table_ident": ds.get("table_name") or full_ds.split(".")[-1],
+                    "path": full_ds,
+                    "columns": col_names,
+                }
+            )
 
     # 3. Pipelines
     if not pipelines_raw:
@@ -5599,12 +5687,26 @@ async def api_workspace_search(request: Request, q: str = ""):
                 )
                 or []
             )
+        seen_lakeset_datasets: set[str] = set()
+        lakeset_query = query
+        is_lakeset_prefix = False
+        if query.startswith("$"):
+            is_lakeset_prefix = True
+            lakeset_query = query[1:].strip()
+        elif query.startswith("l:"):
+            is_lakeset_prefix = True
+            lakeset_query = query[2:].strip()
+        elif query.startswith("lakeset:"):
+            is_lakeset_prefix = True
+            lakeset_query = query[8:].strip()
+
         for cat in catalogs:
             cat_id = cat.get("id", "")
             cat_name = cat.get("name", "")
             cat_slug = cat.get("slug", "")
+            cat_ident = duckdb_ai._safe_identifier(cat_slug or cat_name).lower()
             cat_desc = cat.get("description") or "Data Catalog"
-            if (
+            if not is_lakeset_prefix and (
                 not query
                 or query in cat_name.lower()
                 or query in cat_slug.lower()
@@ -5630,7 +5732,7 @@ async def api_workspace_search(request: Request, q: str = ""):
                 sch_tier = (schema.get("tier") or "").lower()
                 tables = schema.get("tables") or []
 
-                schema_matches = (
+                schema_matches = not is_lakeset_prefix and (
                     not query
                     or query in sch_name.lower()
                     or query in sch_slug.lower()
@@ -5662,26 +5764,36 @@ async def api_workspace_search(request: Request, q: str = ""):
                     tbl_slug = table.get("slug", "")
                     tbl_desc = table.get("description") or ""
                     tbl_s3 = table.get("s3_path_pattern") or ""
-                    cols = table.get("column_defs") or []
+                    cols = table.get("column_defs") or table.get("columns") or []
+                    sql_sch = duckdb_ai._safe_identifier(sch_slug or sch_name)
+                    sql_tbl = duckdb_ai._safe_identifier(tbl_slug or tbl_name)
+                    full_ds = f"{cat_ident}.{sql_sch.lower()}.{sql_tbl.lower()}"
+                    view_ident = f"{sql_sch.lower()}.{sql_tbl.lower()}"
 
+                    eff_q = lakeset_query if is_lakeset_prefix else query
                     direct_match = (
-                        not query
-                        or query in tbl_name.lower()
-                        or query in tbl_slug.lower()
-                        or query in tbl_desc.lower()
-                        or query in tbl_s3.lower()
+                        not eff_q
+                        or eff_q in tbl_name.lower()
+                        or eff_q in tbl_slug.lower()
+                        or eff_q in full_ds
+                        or eff_q in view_ident
+                        or eff_q in tbl_desc.lower()
+                        or eff_q in tbl_s3.lower()
                     )
 
                     col_match = None
-                    if not direct_match and query:
+                    if not direct_match and eff_q:
                         for col in cols:
-                            if isinstance(col, dict) and query in str(col.get("name", "")).lower():
-                                col_match = col.get("name")
+                            col_name_val = (
+                                col.get("name") or col.get("column_name")
+                                if isinstance(col, dict)
+                                else str(col)
+                            )
+                            if col_name_val and eff_q in str(col_name_val).lower():
+                                col_match = str(col_name_val)
                                 break
 
-                    if direct_match or col_match:
-                        sql_sch = duckdb_ai._safe_identifier(sch_slug)
-                        sql_tbl = duckdb_ai._safe_identifier(tbl_slug)
+                    if not is_lakeset_prefix and (direct_match or col_match):
                         if col_match:
                             sub = f"Table in {cat_name}.{sql_sch} • Matched column: {col_match} • {len(cols)} cols"
                         elif tbl_desc:
@@ -5703,6 +5815,116 @@ async def api_workspace_search(request: Request, q: str = ""):
                                 "path": f"{sql_sch}.{sql_tbl}",
                             }
                         )
+
+                    lakeset_keyword_match = bool(query and query in "lakeset chart builder explore")
+                    if direct_match or col_match or lakeset_keyword_match:
+                        if full_ds not in seen_lakeset_datasets:
+                            seen_lakeset_datasets.add(full_ds)
+                            if col_match:
+                                lakeset_sub = f"Lakeset Chart Builder • {full_ds} • Matched column: {col_match} • {len(cols)} cols"
+                            elif tbl_desc:
+                                lakeset_sub = f"Lakeset Chart Builder • {full_ds} • {len(cols)} cols • {tbl_desc}"
+                            else:
+                                lakeset_sub = (
+                                    f"Lakeset Chart Builder • {full_ds} • {len(cols)} cols"
+                                )
+
+                            results.append(
+                                {
+                                    "category": "Lakeset",
+                                    "title": tbl_name or sql_tbl,
+                                    "subtitle": lakeset_sub,
+                                    "url": f"/lakeset?mode=explore&dataset={urllib.parse.quote(full_ds, safe='.')}",
+                                    "type": "lakeset",
+                                    "dataset": full_ds,
+                                    "catalog_id": str(cat_id),
+                                    "schema_id": str(sch_id),
+                                    "table_id": str(tbl_id),
+                                    "table_ident": sql_tbl,
+                                    "path": full_ds,
+                                }
+                            )
+
+        # 2b. Direct Lakeset datasets from /api/v1/lakeset/datasets (if not already added from catalogs)
+        if token:
+            ws_id_val = ws.get("id") if ws else None
+            eff_ws_id = str(ws_id_val) if ws_id_val and ws_id_val != "default" else None
+            ws_slug_val = ws.get("slug") if ws else None
+            lakeset_data = _backend_get(
+                f"/api/v1/lakeset/datasets?workspace_slug={urllib.parse.quote(ws_slug_val)}"
+                if ws_slug_val
+                else "/api/v1/lakeset/datasets",
+                token,
+                workspace_id=eff_ws_id,
+                workspace_slug=ws_slug_val,
+            )
+            lakeset_list = []
+            if lakeset_data and isinstance(lakeset_data, dict):
+                lakeset_list = lakeset_data.get("datasets", [])
+            elif isinstance(lakeset_data, list):
+                lakeset_list = lakeset_data
+
+            eff_q = lakeset_query if is_lakeset_prefix else query
+            for ds in lakeset_list:
+                if not isinstance(ds, dict) or not ds.get("full_name"):
+                    continue
+                full_ds = str(ds.get("full_name")).strip()
+                if full_ds in seen_lakeset_datasets:
+                    continue
+                ds_title = str(ds.get("display_name") or ds.get("table_name") or full_ds)
+                ds_tbl = str(ds.get("table_name") or full_ds.split(".")[-1])
+                ds_view = str(ds.get("sql_view") or "")
+                ds_desc = str(ds.get("description") or "")
+                raw_cols = ds.get("columns") or []
+                direct_ds_match = (
+                    not eff_q
+                    or eff_q in ds_title.lower()
+                    or eff_q in ds_tbl.lower()
+                    or eff_q in full_ds.lower()
+                    or eff_q in ds_view.lower()
+                    or eff_q in ds_desc.lower()
+                    or eff_q in "lakeset chart builder explore"
+                )
+                ds_col_match = None
+                if not direct_ds_match and eff_q:
+                    for col in raw_cols:
+                        c_name = (
+                            col.get("column_name") or col.get("name")
+                            if isinstance(col, dict)
+                            else str(col)
+                        )
+                        if c_name and eff_q in str(c_name).lower():
+                            ds_col_match = str(c_name)
+                            break
+                if direct_ds_match or ds_col_match:
+                    seen_lakeset_datasets.add(full_ds)
+                    if ds_col_match:
+                        lakeset_sub = f"Lakeset Chart Builder • {full_ds} • Matched column: {ds_col_match} • {len(raw_cols)} cols"
+                    elif ds_desc:
+                        lakeset_sub = (
+                            f"Lakeset Chart Builder • {full_ds} • {len(raw_cols)} cols • {ds_desc}"
+                        )
+                    else:
+                        lakeset_sub = f"Lakeset Chart Builder • {full_ds} • {len(raw_cols)} cols"
+                    explore_url = (
+                        ds.get("explore_url")
+                        or f"/lakeset?mode=explore&dataset={urllib.parse.quote(full_ds, safe='.')}"
+                    )
+                    results.append(
+                        {
+                            "category": "Lakeset",
+                            "title": ds_title,
+                            "subtitle": lakeset_sub,
+                            "url": explore_url,
+                            "type": "lakeset",
+                            "dataset": full_ds,
+                            "catalog_id": str(ds.get("catalog_id", "")),
+                            "schema_id": str(ds.get("schema_id", "")),
+                            "table_id": str(ds.get("id", "")),
+                            "table_ident": ds_tbl,
+                            "path": full_ds,
+                        }
+                    )
     except Exception as exc:
         logger.warning("Error searching catalog in workspace search: %s", exc)
 

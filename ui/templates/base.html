@@ -3,7 +3,29 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="light dark" />
   <title>{% block title %}Lake of Tears{% endblock %}</title>
+  <script>
+    (function() {
+      try {
+        var pref = localStorage.getItem('lake-theme') || 'auto';
+        var effective = pref;
+        if (pref === 'auto') {
+          if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+            effective = 'light';
+          } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            effective = 'dark';
+          } else {
+            var h = new Date().getHours();
+            effective = (h >= 19 || h < 7) ? 'dark' : 'light';
+          }
+        }
+        document.documentElement.setAttribute('data-theme', effective);
+        document.documentElement.classList.toggle('dark', effective !== 'light');
+        document.documentElement.classList.toggle('light', effective === 'light');
+      } catch (_) {}
+    })();
+  </script>
   <link rel="icon" type="image/png" sizes="64x64" href="/static/img/favicon.png"/>
   <link rel="icon" type="image/png" sizes="32x32" href="/static/img/favicon-32.png"/>
   <script src="https://cdn.tailwindcss.com"></script>
@@ -666,6 +688,7 @@
               <span class="flex items-center gap-1"><kbd class="font-mono text-gray-400 bg-white/[0.06] px-1 rounded text-[10px]">esc</kbd> close</span>
               <span class="hidden md:inline-flex items-center gap-2 pl-2 border-l border-white/[0.08] text-[10px]">
                 <span><code class="text-blue-400 font-mono">#</code> catalog</span>
+                <span><code class="text-indigo-400 font-mono">$</code> lakeset</span>
                 <span><code class="text-amber-400 font-mono">/</code> files</span>
                 <span><code class="text-purple-400 font-mono">%</code> pipelines</span>
                 <span><code class="text-teal-400 font-mono">&gt;</code> pages</span>
@@ -1089,6 +1112,7 @@
     let workspaceSearchSeq = 0;
     let workspaceManifest = null;
     let workspaceManifestLoading = false;
+    let workspaceManifestPromise = null;
     let workspaceManifestLoadedAt = 0;
     let workspaceActivePrefixFilter = null;
     const MANIFEST_TTL_MS = 60000;
@@ -1109,23 +1133,27 @@
       if (!forceRefresh && workspaceManifest && (now - workspaceManifestLoadedAt < MANIFEST_TTL_MS)) {
         return workspaceManifest;
       }
-      if (workspaceManifestLoading) {
-        return;
+      if (workspaceManifestLoading && workspaceManifestPromise) {
+        return workspaceManifestPromise;
       }
       workspaceManifestLoading = true;
-      try {
-        const res = await fetch('/api/workspace/manifest', { credentials: 'include' });
-        if (res.ok) {
-          const data = await res.json();
-          workspaceManifest = data.items || [];
-          workspaceManifestLoadedAt = Date.now();
+      workspaceManifestPromise = (async () => {
+        try {
+          const res = await fetch('/api/workspace/manifest', { credentials: 'include' });
+          if (res.ok) {
+            const data = await res.json();
+            workspaceManifest = data.items || [];
+            workspaceManifestLoadedAt = Date.now();
+          }
+        } catch (err) {
+          console.warn('Failed to load workspace manifest, using live search fallback:', err);
+        } finally {
+          workspaceManifestLoading = false;
+          workspaceManifestPromise = null;
         }
-      } catch (err) {
-        console.warn('Failed to load workspace manifest, using live search fallback:', err);
-      } finally {
-        workspaceManifestLoading = false;
-      }
-      return workspaceManifest;
+        return workspaceManifest;
+      })();
+      return workspaceManifestPromise;
     }
 
     function handleWorkspaceSearchFocus() {
@@ -1154,6 +1182,7 @@
       // Ultra-fast path: if manifest is loaded, search client-side with 0 network calls (< 1ms)
       if (workspaceManifest && workspaceManifest.length > 0) {
         clearTimeout(workspaceSearchDebounceTimer);
+        workspaceSearchSeq++;
         executeClientFuzzySearch(query);
         return;
       }
@@ -1164,6 +1193,8 @@
           const curInput = document.getElementById('workspace-search-input');
           const curVal = (curInput ? curInput.value : '').trim();
           if (curVal.length > 0) {
+            clearTimeout(workspaceSearchDebounceTimer);
+            workspaceSearchSeq++;
             executeClientFuzzySearch(curVal);
           }
         }
@@ -1230,12 +1261,17 @@
       let prefixLabel = null;
       let allowedTypes = null;
 
-      // Check prefix triggers: # (catalog), / (notebooks), > (navigation), % (pipelines), @ or ! or b: (asset bundles)
+      // Check prefix triggers: # (catalog), $ or l: (lakeset), / (notebooks), > (navigation), % (pipelines), @ or ! or b: (asset bundles)
       if (q.startsWith('#')) {
         prefixMode = '#';
         prefixLabel = 'Catalogs & Tables';
         allowedTypes = new Set(['catalog', 'schema', 'table']);
         q = q.slice(1).trim();
+      } else if (q.startsWith('$') || q.startsWith('l:') || q.toLowerCase().startsWith('lakeset:')) {
+        prefixMode = q.toLowerCase().startsWith('lakeset:') ? 'lakeset:' : (q.startsWith('l:') ? 'l:' : '$');
+        prefixLabel = 'Lakeset BI Studio';
+        allowedTypes = new Set(['lakeset']);
+        q = q.slice(prefixMode.length).trim();
       } else if (q.startsWith('/')) {
         prefixMode = '/';
         prefixLabel = 'Notebooks & Files';
@@ -1289,6 +1325,7 @@
 
         const titleLower = (item.title || '').toLowerCase();
         const pathLower = (item.path || '').toLowerCase();
+        const identLower = (item.table_ident || '').toLowerCase();
         const subLower = (item.subtitle || '').toLowerCase();
 
         // 1. Title match
@@ -1298,18 +1335,27 @@
           bestTitleMatches = titleRes.matches;
         }
 
-        // 2. Path match
+        // 2. Path or table identifier match
         if (pathLower) {
           const pathRes = scoreSubsequence(qLower, pathLower);
           if (pathRes) {
-            const pathScore = pathRes.score + 30;
+            const pathScore = pathRes.score + (pathLower === qLower ? 120 : 30);
             if (pathScore > bestScore) {
               bestScore = pathScore;
             }
           }
         }
+        if (identLower) {
+          const identRes = scoreSubsequence(qLower, identLower);
+          if (identRes) {
+            const identScore = identRes.score + 45;
+            if (identScore > bestScore) {
+              bestScore = identScore;
+            }
+          }
+        }
 
-        // 3. Columns match (for tables)
+        // 3. Columns match (for tables & lakeset datasets)
         if (Array.isArray(item.columns) && item.columns.length > 0) {
           for (let c = 0; c < item.columns.length; c++) {
             const col = String(item.columns[c]);
@@ -1333,6 +1379,9 @@
         }
 
         if (bestScore > -Infinity) {
+          if (window.location.pathname.startsWith('/lakeset') && item.type === 'lakeset') {
+            bestScore += 80;
+          }
           scored.push({
             item: {
               ...item,
@@ -1487,6 +1536,16 @@
         }
       }
 
+      // If already on the lakeset page, seamlessly open dataset in Chart Builder (Explore) as if clicking Create Chart
+      if (window.location.pathname.startsWith('/lakeset') && (item.type === 'lakeset' || item.dataset)) {
+        const dsName = item.dataset || item.path;
+        if (dsName && typeof window.openDatasetInLakeset === 'function') {
+          window.openDatasetInLakeset(dsName);
+          window.history.pushState({}, '', item.url);
+          return;
+        }
+      }
+
       window.location.href = item.url;
     }
 
@@ -1578,6 +1637,9 @@
         } else if (item.type === 'table') {
           badgeColor = 'bg-teal-900/40 text-teal-300 border border-teal-800/40';
           iconSvg = `<svg class="w-4 h-4 text-teal-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M3 14h18m-9-10v18m-6-18h12a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2z"/></svg>`;
+        } else if (item.type === 'lakeset') {
+          badgeColor = 'bg-indigo-900/40 text-indigo-300 border border-indigo-800/40';
+          iconSvg = `<svg class="w-4 h-4 text-indigo-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z"/><path stroke-linecap="round" stroke-linejoin="round" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z"/></svg>`;
         } else if (item.type === 'pipeline') {
           badgeColor = 'bg-purple-900/40 text-purple-300 border border-purple-800/40';
           iconSvg = `<svg class="w-4 h-4 text-purple-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>`;

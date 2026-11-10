@@ -75,7 +75,16 @@ class IngressTestApp:
     async def __call__(self, scope, receive, send):
         if scope["type"] in ("http", "websocket"):
             path = scope.get("path", "")
-            if path.startswith("/api/") or path == "/api":
+            ui_api_prefixes = (
+                "/api/workspace/manifest",
+                "/api/workspace/search",
+                "/api/notebooks",
+                "/api/ingest",
+                "/api/catalog/",
+            )
+            if (path.startswith("/api/") or path == "/api") and not path.startswith(
+                ui_api_prefixes
+            ):
                 await self.backend_app(scope, receive, send)
                 return
         await self.ui_app(scope, receive, send)
@@ -250,6 +259,10 @@ def lakeset_server(tmp_path_factory):
     ]
     patch_ui_ws = patch.object(ui_main, "_fetch_workspaces", return_value=mock_ws_list)
     patch_ui_ws.start()
+    patch_nb_scan = patch.object(
+        ui_main.notebook_proxy, "scan_workspace_filesystem", return_value=[]
+    )
+    patch_nb_scan.start()
 
     ui_main.BACKEND_URL = server_url
     ingress_app = IngressTestApp(backend_main.app, ui_main.app)
@@ -293,6 +306,7 @@ def lakeset_server(tmp_path_factory):
 
     uv_server.should_exit = True
     server_thread.join(timeout=2.0)
+    patch_nb_scan.stop()
     patch_ui_ws.stop()
     database.engine = orig_engine
     database.SessionLocal = orig_session_local
@@ -472,3 +486,43 @@ def test_e2e_dashboards_create_modal_and_redirect(lakeset_page, lakeset_server):
     assert "/dashboards/" in page.url
     page.locator("#dash-title", has_text="TEst").wait_for(state="visible", timeout=5000)
     assert page.locator("#dash-title", has_text="TEst").is_visible()
+
+
+def test_e2e_workspace_search_input_lakeset_explore_navigation(lakeset_page, lakeset_server):
+    """Verify searching Lakeset objects in #workspace-search-input and selecting the item opens Chart Builder (Explore)."""
+    page = lakeset_page
+    page.goto("/lakeset", wait_until="networkidle")
+
+    # Focus #workspace-search-input and wait for manifest to load
+    ws_search = page.locator("#workspace-search-input")
+    assert ws_search.is_visible()
+    with page.expect_response("**/api/workspace/manifest") as manifest_resp:
+        ws_search.click()
+    assert manifest_resp.value.status == 200
+
+    # Type the Lakeset dataset identifier into #workspace-search-input
+    ws_search.fill("biomedical_lake.gold.journal_trends")
+    ws_search.dispatch_event("input")
+
+    # Wait for dropdown and Lakeset item to appear
+    dropdown = page.locator("#workspace-search-dropdown")
+    dropdown.wait_for(state="visible", timeout=5000)
+    lakeset_result = page.locator(
+        "#workspace-search-results .search-result-item", has_text="Lakeset"
+    ).first
+    lakeset_result.wait_for(state="visible", timeout=5000)
+
+    # Select the Lakeset item (triggers mousedown handler selectWorkspaceSearchResult)
+    lakeset_result.dispatch_event("mousedown")
+
+    # Verify URL updates to /lakeset?mode=explore&dataset=biomedical_lake.gold.journal_trends
+    page.wait_for_url(
+        "**/lakeset?mode=explore&dataset=biomedical_lake.gold.journal_trends", timeout=5000
+    )
+    assert "mode=explore" in page.url
+    assert "dataset=biomedical_lake.gold.journal_trends" in page.url
+
+    # Verify Chart Builder (Explore) is active with SQL preview & ECharts canvas rendered
+    page.wait_for_selector("#lakeset-explore-sql-preview", state="visible", timeout=5000)
+    assert "gold.journal_trends" in page.locator("#lakeset-explore-sql-preview").inner_text()
+    page.wait_for_selector("#lakeset-explore-chart canvas", state="visible", timeout=5000)

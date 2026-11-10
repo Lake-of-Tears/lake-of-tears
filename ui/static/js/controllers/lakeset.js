@@ -125,6 +125,9 @@ document.addEventListener('alpine:init', () => {
         }
         if (this.activeMode === 'explore') {
           await this.runExploreQuery();
+          if (this.selectedDatasetName) {
+            await this.mintGuestToken(this.selectedDatasetName);
+          }
         }
       } finally {
         this.isLoading = false;
@@ -201,7 +204,9 @@ document.addEventListener('alpine:init', () => {
           (d.full_name || '').toLowerCase() === target ||
           (d.table_name || '').toLowerCase() === target ||
           (d.sql_view || '').toLowerCase() === target ||
-          String(d.id).toLowerCase() === target
+          (d.display_name || '').toLowerCase() === target ||
+          String(d.id).toLowerCase() === target ||
+          Boolean(d.sql_view && target.endsWith('.' + d.sql_view.toLowerCase()))
       );
       if (found) {
         this.selectDataset(found);
