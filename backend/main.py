@@ -78,6 +78,7 @@ try:
     from pipeline.shared.toon_catalog import schema_to_toon, table_to_toon
 except ImportError:
     from toon_catalog import schema_to_toon, table_to_toon
+from mcp_router import router as mcp_router
 from models import (
     Catalog,
     CatalogAccess,
@@ -247,6 +248,8 @@ app.include_router(bundles_router, prefix="/api/bundles", tags=["bundles"])
 app.include_router(openai_compat_router, prefix="/api/v1", tags=["openai-compat"])
 app.include_router(openai_compat_router, prefix="/api/ai/v1", tags=["openai-compat"])
 app.include_router(openai_compat_router, prefix="/v1", tags=["openai-compat"])
+app.include_router(mcp_router, prefix="/api/mcp", tags=["mcp"])
+app.include_router(mcp_router, prefix="/api/v1/mcp", tags=["mcp"])
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

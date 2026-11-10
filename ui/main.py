@@ -7712,3 +7712,75 @@ async def ui_openai_search_vector_store(vector_store_id: str, request: Request):
             )
     except Exception as exc:
         return JSONResponse({"detail": str(exc)}, status_code=502)
+
+
+@app.post("/api/mcp")
+@app.post("/api/mcp/messages")
+@app.post("/api/v1/mcp")
+@app.post("/api/v1/mcp/messages")
+async def ui_mcp_post_proxy(request: Request):
+    headers = _build_proxy_auth_headers(request)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(
+                f"{BACKEND_URL}/api/mcp",
+                json=body,
+                headers=headers,
+                cookies=request.cookies,
+            )
+            if resp.status_code == 202:
+                return Response(status_code=202)
+            return JSONResponse(
+                resp.json() if resp.content else {},
+                status_code=resp.status_code,
+            )
+    except Exception as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=502)
+
+
+@app.get("/api/mcp")
+@app.get("/api/mcp/sse")
+@app.get("/api/v1/mcp")
+@app.get("/api/v1/mcp/sse")
+async def ui_mcp_get_proxy(request: Request):
+    headers = _build_proxy_auth_headers(request)
+    accept = (request.headers.get("accept") or "").lower()
+    if request.url.path.endswith("/sse") or "text/event-stream" in accept:
+
+        async def _sse_proxy():
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                async with client.stream(
+                    "GET",
+                    f"{BACKEND_URL}{request.url.path}",
+                    headers=headers,
+                    cookies=request.cookies,
+                ) as resp:
+                    async for chunk in resp.aiter_bytes():
+                        yield chunk
+
+        return StreamingResponse(
+            _sse_proxy(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"{BACKEND_URL}/api/mcp",
+                headers=headers,
+                cookies=request.cookies,
+            )
+            return JSONResponse(
+                resp.json() if resp.content else {},
+                status_code=resp.status_code,
+            )
+    except Exception as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=502)
