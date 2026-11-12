@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   lint:
@@ -230,6 +230,9 @@ jobs:
       - docker-build-ui
       - docker-build-airflow
     if: always()
+    # Only this job pushes the release tag (main pushes only); every other job is read-only.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
 
@@ -251,9 +254,22 @@ jobs:
           if [ -z "$APP_VERSION" ]; then
             APP_VERSION=$(grep '^version:' deploy/helm/lake-of-tears/Chart.yaml | awk '{print $2}' | tr -d '"' | tr -d "'")
           fi
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          BUILD_TAG="v${APP_VERSION}-build.${{ github.run_number }}-${SHORT_SHA}"
-          echo "Generated Build Tag: $BUILD_TAG"
+          # Only a push to main produces a deployable, git-tagged build. Pull requests are
+          # labelled as previews from the PR head commit: github.sha on a PR is GitHub's
+          # temporary merge commit, which never lands on main and is never tagged.
+          if [ "${{ github.ref }}" = "refs/heads/main" ] && [ "${{ github.event_name }}" = "push" ]; then
+            IS_RELEASE_BUILD=true
+            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+            BUILD_TAG="v${APP_VERSION}-build.${{ github.run_number }}-${SHORT_SHA}"
+            COMMIT_SHA="${{ github.sha }}"
+          else
+            IS_RELEASE_BUILD=false
+            COMMIT_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+            SHORT_SHA=$(echo "$COMMIT_SHA" | cut -c1-7)
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+            BUILD_TAG="pr-${PR_NUMBER:-${{ github.run_number }}}-${SHORT_SHA}"
+          fi
+          echo "Generated Build Tag: $BUILD_TAG (release build: $IS_RELEASE_BUILD)"
 
           # 2. Status formatting helper
           format_status() {
@@ -287,8 +303,8 @@ jobs:
           done
 
           # 3. Create and push Git tag when running on main branch push with all checks passing
-          TAG_RELEASED="ℹ️ PR / Branch Preview (Not Tagged in Git)"
-          if [ "${{ github.ref }}" = "refs/heads/main" ] && [ "${{ github.event_name }}" = "push" ] && [ "$ALL_SUCCESS" = "true" ]; then
+          TAG_RELEASED="ℹ️ PR preview — not deployable (no git tag is created for pull requests)"
+          if [ "$IS_RELEASE_BUILD" = "true" ] && [ "$ALL_SUCCESS" = "true" ]; then
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             if git ls-remote --tags origin "$BUILD_TAG" | grep -q "$BUILD_TAG"; then
@@ -315,7 +331,7 @@ jobs:
           | Parameter | Value |
           |---|---|
           | **Build Tag** | \`$BUILD_TAG\` |
-          | **Commit** | [\`${SHORT_SHA}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}) |
+          | **Commit** | [\`${SHORT_SHA}\`](${{ github.server_url }}/${{ github.repository }}/commit/${COMMIT_SHA}) |
           | **Branch / Ref** | \`${{ github.ref_name }}\` |
           | **Workflow Run** | [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
           | **Triggered By** | \`${{ github.actor }}\` via \`${{ github.event_name }}\` |
@@ -335,6 +351,10 @@ jobs:
           | **4. Packaging** | **Docker: UI** | $BUILD_UI_STATUS | Built image \`lake-of-tears-ui:ci\` |
           | **4. Packaging** | **Docker: Airflow** | $BUILD_AIRFLOW_STATUS | Built image \`lake-of-tears-airflow:ci\` |
 
+          EOF
+
+          if [ "$IS_RELEASE_BUILD" = "true" ] && [ "$ALL_SUCCESS" = "true" ]; then
+            cat << EOF >> "$GITHUB_STEP_SUMMARY"
           ### 🚀 Deploy with this Build Tag
           To deploy or upgrade a Kubernetes deployment using this build tag:
           \`\`\`bash
@@ -345,6 +365,18 @@ jobs:
             --set airflow.image.tag=$BUILD_TAG
           \`\`\`
           EOF
+          elif [ "$IS_RELEASE_BUILD" = "true" ]; then
+            cat << EOF >> "$GITHUB_STEP_SUMMARY"
+          ### ⛔ Not Deployable
+          One or more stages failed, so no git tag was created for this \`main\` build.
+          EOF
+          else
+            cat << EOF >> "$GITHUB_STEP_SUMMARY"
+          ### ⛔ Not Deployable
+          \`$BUILD_TAG\` is a preview label, not a git tag. After this pull request merges, deploy the
+          \`v${APP_VERSION}-build.<run>-<sha>\` tag created by the CI run on \`main\`.
+          EOF
+          fi
 
           # 5. Fail the summary step if any upstream job failed
           if [ "$ALL_SUCCESS" != "true" ]; then
