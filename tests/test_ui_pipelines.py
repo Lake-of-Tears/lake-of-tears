@@ -611,3 +611,54 @@ def test_pipelines_template_lab_badge_and_banner_rendering():
     assert "Lake Asset Bundle (LAB)" in html_content
     assert "Open Asset Bundle" in html_content
     assert "/bundles?open=" in html_content
+
+
+# ── Drawer Refresh & Run Dates (#479) ─────────────────────────────────────────
+
+
+def test_inspector_drawer_refresh_lives_in_header_and_uses_wall_clock_dates():
+    token, mock_workspaces = _create_auth_cookie(role="member")
+
+    with patch.object(main, "_fetch_workspaces", return_value=mock_workspaces):
+        response = client.get(
+            "/pipelines",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
+        )
+    assert response.status_code == 200
+    html = response.text
+
+    header = html.split('id="inspector-drawer-header"', 1)[1].split("drawer-metadata-section", 1)[0]
+    assert 'id="btn-drawer-refresh"' in header
+    assert 'onclick="refreshInspector()"' in header
+    assert 'id="drawer-last-refreshed"' in header
+
+    runs_pane = html.split('id="drawer-pane-runs"', 1)[1].split('id="drawer-pane-logs"', 1)[0]
+    assert "Refresh" not in runs_pane
+    assert "loadDrawerRuns(currentDrawerDagId)" not in runs_pane
+
+    # Next Run uses the fire time; run cards show the actual start time, not the logical date
+    assert "p.next_run_at || p.next_dagrun" in html
+    assert "formatRunStarted(r)" in html
+    assert "Date: ${r.execution_date" not in html
+
+
+@pytest.mark.anyio
+async def test_ui_pipeline_detail_proxy_forwards_workspace_slug_query():
+    token, mock_workspaces = _create_auth_cookie(role="member")
+
+    mock_resp = httpx.Response(
+        200,
+        json={"dag_id": "ws_shared_etl"},
+        request=httpx.Request("GET", "http://backend:8000/api/v1/pipelines/ws_shared_etl"),
+    )
+
+    with (
+        patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
+        patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp) as mock_get,
+    ):
+        res = client.get(
+            "/api/pipelines/ws_shared_etl?workspace_slug=shared",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
+        )
+    assert res.status_code == 200
+    assert mock_get.call_args.kwargs["params"]["workspace_slug"] == "shared"

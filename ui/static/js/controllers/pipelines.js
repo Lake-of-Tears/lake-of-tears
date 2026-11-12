@@ -338,7 +338,7 @@ document.addEventListener('alpine:init', () => {
                   }">${r.state}</span>
                 </div>
                 <div class="flex items-center justify-between text-[11px] text-gray-500 font-mono">
-                  <span>Date: ${r.execution_date ? new Date(r.execution_date).toLocaleString() : '—'}</span>
+                  <span>Started: ${r.start_date ? new Date(r.start_date).toLocaleString() : (r.state === 'queued' ? 'queued' : '—')}</span>
                   <span>Duration: ${r.duration_seconds !== null ? `${Math.round(r.duration_seconds)}s` : '—'}</span>
                 </div>
                 <div class="pt-2 border-t border-white/[0.04] flex items-center justify-between">

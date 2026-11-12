@@ -6566,6 +6566,8 @@ async def ui_get_pipeline(request: Request, dag_id: str):
     params = {}
     if ws and ws.get("slug"):
         params["workspace_slug"] = ws["slug"]
+    if request.query_params.get("workspace_slug"):
+        params["workspace_slug"] = request.query_params["workspace_slug"]
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:

@@ -1384,3 +1384,121 @@ async def test_pipeline_bundle_vs_notebook_detection():
         gen_dag = next(r for r in results if r["dag_id"] == "ws_default_generic_pipeline")
         assert gen_dag["is_bundle_pipeline"] is False
         assert gen_dag["is_notebook_job"] is False
+
+
+# ── Logical Date vs Wall-Clock Run Times (#479) ───────────────────────────────
+
+
+def test_next_run_at_prefers_create_after_over_logical_date():
+    dag = {
+        "next_dagrun": "2026-11-12T01:00:00+00:00",
+        "next_dagrun_data_interval_end": "2026-11-12T07:00:00+00:00",
+        "next_dagrun_create_after": "2026-11-12T07:00:00+00:00",
+    }
+    assert pipeline_service._next_run_at(dag) == "2026-11-12T07:00:00+00:00"
+
+    # Older payloads without create_after fall back to the interval end, then the logical date
+    dag.pop("next_dagrun_create_after")
+    assert pipeline_service._next_run_at(dag) == "2026-11-12T07:00:00+00:00"
+    dag.pop("next_dagrun_data_interval_end")
+    assert pipeline_service._next_run_at(dag) == "2026-11-12T01:00:00+00:00"
+    assert pipeline_service._next_run_at({}) is None
+
+
+def _airflow_run(run_id, logical, start, end, run_type, interval=None):
+    return {
+        "dag_run_id": run_id,
+        "state": "success",
+        "run_type": run_type,
+        "execution_date": logical,
+        "data_interval_start": interval[0] if interval else logical,
+        "data_interval_end": interval[1] if interval else logical,
+        "start_date": start,
+        "end_date": end,
+        "conf": {},
+    }
+
+
+# Prod sequence from #479: a scheduled run created at 01:00 UTC whose logical date
+# (19:00) is older than a manual run triggered at 23:56.
+SCHEDULED_RUN = _airflow_run(
+    "scheduled__2026-11-11T19:00:00+00:00",
+    "2026-11-11T19:00:00+00:00",
+    "2026-11-12T01:00:00.532654+00:00",
+    "2026-11-12T01:01:32.449156+00:00",
+    "scheduled",
+    ("2026-11-11T19:00:00+00:00", "2026-11-12T01:00:00+00:00"),
+)
+MANUAL_RUN = _airflow_run(
+    "manual__20261111T235625Z__member",
+    "2026-11-11T23:56:25.570877+00:00",
+    "2026-11-11T23:56:26.243608+00:00",
+    "2026-11-11T23:58:00.670605+00:00",
+    "manual",
+)
+
+
+def _mock_airflow_client(mock_client, dag_payload, runs):
+    def _get(url, params=None, **kwargs):
+        if url.endswith("/dagRuns"):
+            return MagicMock(status_code=200, json=lambda: {"dag_runs": runs})
+        return MagicMock(status_code=200, json=lambda: dag_payload)
+
+    mock_instance = AsyncMock()
+    mock_instance.get.side_effect = _get
+    mock_client.return_value.__aenter__.return_value = mock_instance
+    return mock_instance
+
+
+def test_get_dag_details_reports_last_created_run_and_wall_clock_next_run():
+    dag_payload = {
+        "dag_id": "ws_analytics_email",
+        "is_paused": False,
+        "schedule_interval": {"__type": "CronExpression", "value": "0 1,7,13,19 * * *"},
+        "tags": [{"name": "workspace:analytics"}],
+        "next_dagrun": "2026-11-12T01:00:00+00:00",
+        "next_dagrun_create_after": "2026-11-12T07:00:00+00:00",
+    }
+    with (
+        patch("pipeline_service.get_airflow_server_url", return_value="http://mock:8080"),
+        patch("pipeline_service.get_airflow_auth", return_value=("admin", "pass")),
+        patch("pipeline_service.httpx.AsyncClient") as mock_client,
+    ):
+        mock_instance = _mock_airflow_client(mock_client, dag_payload, [SCHEDULED_RUN])
+        details = asyncio.run(
+            pipeline_service.get_dag_details("analytics", "ws_analytics_email", is_superadmin=True)
+        )
+
+    runs_calls = [c for c in mock_instance.get.call_args_list if c.args[0].endswith("/dagRuns")]
+    assert runs_calls[0].kwargs["params"]["order_by"] == "-id"
+    assert details["next_dagrun"] == "2026-11-12T01:00:00+00:00"
+    assert details["next_run_at"] == "2026-11-12T07:00:00+00:00"
+    assert details["last_run"]["dag_run_id"] == SCHEDULED_RUN["dag_run_id"]
+    assert details["last_run"]["start_date"] == SCHEDULED_RUN["start_date"]
+    assert details["last_run"]["data_interval_end"] == "2026-11-12T01:00:00+00:00"
+
+
+def test_list_dag_runs_orders_by_creation_and_returns_intervals():
+    with (
+        patch.object(pipeline_service, "get_dag_details", new_callable=AsyncMock),
+        patch("pipeline_service.get_airflow_server_url", return_value="http://mock:8080"),
+        patch("pipeline_service.get_airflow_auth", return_value=("admin", "pass")),
+        patch("pipeline_service.httpx.AsyncClient") as mock_client,
+    ):
+        mock_instance = _mock_airflow_client(mock_client, {}, [SCHEDULED_RUN, MANUAL_RUN])
+        runs = asyncio.run(
+            pipeline_service.list_dag_runs("analytics", "ws_analytics_email", is_superadmin=True)
+        )
+
+    assert mock_instance.get.call_args.kwargs["params"]["order_by"] == "-id"
+    assert [r["dag_run_id"] for r in runs] == [
+        SCHEDULED_RUN["dag_run_id"],
+        MANUAL_RUN["dag_run_id"],
+    ]
+    scheduled = runs[0]
+    assert scheduled["run_type"] == "scheduled"
+    assert scheduled["execution_date"] == "2026-11-11T19:00:00+00:00"
+    assert scheduled["start_date"] == "2026-11-12T01:00:00.532654+00:00"
+    assert scheduled["data_interval_start"] == "2026-11-11T19:00:00+00:00"
+    assert scheduled["data_interval_end"] == "2026-11-12T01:00:00+00:00"
+    assert scheduled["conf"] == {}

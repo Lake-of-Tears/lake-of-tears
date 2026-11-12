@@ -191,15 +191,55 @@ def _calculate_duration(
     return None
 
 
+# Airflow labels a scheduled run with its logical date (the START of its data
+# interval) but creates it at the END of that interval, so ordering by
+# execution_date puts a run that just fired behind older manual runs. The
+# auto-increment id follows creation order for every run type, including
+# queued runs that have no start_date yet.
+DAG_RUNS_ORDER_BY = "-id"
+
+
+def _serialize_dag_run(r: dict[str, Any]) -> dict[str, Any]:
+    """Normalize an Airflow DAG run payload, keeping both wall-clock and logical dates."""
+    start = r.get("start_date")
+    end = r.get("end_date")
+    state = r.get("state")
+    return {
+        "dag_run_id": r.get("dag_run_id"),
+        "state": state,
+        "run_type": r.get("run_type"),
+        "execution_date": r.get("execution_date"),
+        "data_interval_start": r.get("data_interval_start"),
+        "data_interval_end": r.get("data_interval_end"),
+        "start_date": start,
+        "end_date": end,
+        "duration_seconds": _calculate_duration(start, end, state),
+    }
+
+
+def _next_run_at(dag: dict[str, Any]) -> str | None:
+    """Wall-clock time the next scheduled run fires.
+
+    ``next_dagrun`` is the next run's logical date (start of its data interval),
+    which is already in the past for interval-based cron schedules. The run is
+    actually created at ``next_dagrun_create_after``.
+    """
+    return (
+        dag.get("next_dagrun_create_after")
+        or dag.get("next_dagrun_data_interval_end")
+        or dag.get("next_dagrun")
+    )
+
+
 async def _fetch_latest_dag_run(
     client: httpx.AsyncClient, api_base: str, auth: tuple[str, str] | None, dag_id: str
 ) -> dict[str, Any] | None:
-    """Fetch the most recent DAG run for a given pipeline."""
+    """Fetch the most recently created DAG run for a given pipeline."""
     try:
         url = f"{api_base}/dags/{dag_id}/dagRuns"
         resp = await client.get(
             url,
-            params={"order_by": "-execution_date", "limit": 1},
+            params={"order_by": DAG_RUNS_ORDER_BY, "limit": 1},
             auth=auth,
             timeout=5.0,
         )
@@ -207,19 +247,7 @@ async def _fetch_latest_dag_run(
             data = resp.json()
             runs = data.get("dag_runs", [])
             if runs:
-                r = runs[0]
-                start = r.get("start_date")
-                end = r.get("end_date")
-                state = r.get("state")
-                duration = _calculate_duration(start, end, state)
-                return {
-                    "dag_run_id": r.get("dag_run_id"),
-                    "state": state,
-                    "execution_date": r.get("execution_date"),
-                    "start_date": start,
-                    "end_date": end,
-                    "duration_seconds": duration,
-                }
+                return _serialize_dag_run(runs[0])
     except Exception as exc:
         logger.debug("Failed to fetch latest run for %s: %s", dag_id, exc)
     return None
@@ -264,6 +292,7 @@ def _extract_pending_dag_metadata_from_file(
             "tags": [{"name": t} for t in tags],
             "fileloc": str(py_file),
             "next_dagrun": None,
+            "next_dagrun_create_after": None,
         }
     except Exception as exc:
         logger.warning("Failed to parse pending DAG metadata from %s: %s", py_file, exc)
@@ -394,6 +423,7 @@ async def list_workspace_dags(
                         "is_paused": dag.get("is_paused", False),
                         "schedule_interval": schedule,
                         "next_dagrun": dag.get("next_dagrun"),
+                        "next_run_at": _next_run_at(dag),
                         "tags": tags,
                         "is_notebook_job": is_nb,
                         "notebook_path": nb_path,
@@ -523,6 +553,7 @@ async def get_dag_details(
                 "is_paused": dag.get("is_paused", False),
                 "schedule_interval": schedule,
                 "next_dagrun": dag.get("next_dagrun"),
+                "next_run_at": _next_run_at(dag),
                 "tags": tags,
                 "is_notebook_job": is_nb,
                 "notebook_path": nb_path,
@@ -642,7 +673,7 @@ async def list_dag_runs(
             fetch_limit = limit * 5 if dag_id == "run_notebook" else limit
             resp = await client.get(
                 url,
-                params={"order_by": "-execution_date", "limit": fetch_limit},
+                params={"order_by": DAG_RUNS_ORDER_BY, "limit": fetch_limit},
                 auth=auth,
             )
             if resp.status_code != 200:
@@ -657,20 +688,7 @@ async def list_dag_runs(
                     if run_ws != workspace_slug:
                         continue
 
-                start = r.get("start_date")
-                end = r.get("end_date")
-                state = r.get("state")
-                results.append(
-                    {
-                        "dag_run_id": r.get("dag_run_id"),
-                        "state": state,
-                        "execution_date": r.get("execution_date"),
-                        "start_date": start,
-                        "end_date": end,
-                        "duration_seconds": _calculate_duration(start, end, state),
-                        "conf": conf,
-                    }
-                )
+                results.append({**_serialize_dag_run(r), "conf": conf})
                 if len(results) >= limit:
                     break
             return results
@@ -708,18 +726,7 @@ async def get_dag_run(
                         404, f"Run {run_id} not found in workspace {workspace_slug}"
                     )
 
-            start = r.get("start_date")
-            end = r.get("end_date")
-            state = r.get("state")
-            return {
-                "dag_run_id": r.get("dag_run_id"),
-                "state": state,
-                "execution_date": r.get("execution_date"),
-                "start_date": start,
-                "end_date": end,
-                "duration_seconds": _calculate_duration(start, end, state),
-                "conf": conf,
-            }
+            return {**_serialize_dag_run(r), "conf": conf}
     except HTTPException:
         raise
     except httpx.HTTPError as exc:
@@ -1556,7 +1563,7 @@ async def get_workspace_timeline(
                 resp = await client.get(
                     url,
                     params={
-                        "order_by": "-execution_date",
+                        "order_by": DAG_RUNS_ORDER_BY,
                         "limit": 50,
                     },
                     auth=auth,
@@ -1640,10 +1647,11 @@ async def get_workspace_timeline(
                     if not already_ran:
                         projected_runs.append(proj)
 
-            # 3. Include next_dagrun from Airflow if available and falls within this day
-            if not p.get("is_paused") and p.get("next_dagrun"):
+            # 3. Include the next scheduled fire time from Airflow if it falls within this day
+            next_run_at = p.get("next_run_at") or p.get("next_dagrun")
+            if not p.get("is_paused") and next_run_at:
                 try:
-                    next_dt_utc = datetime.fromisoformat(p["next_dagrun"].replace("Z", "+00:00"))
+                    next_dt_utc = datetime.fromisoformat(next_run_at.replace("Z", "+00:00"))
                     if day_start_utc <= next_dt_utc <= day_end_utc:
                         next_dt_local = next_dt_utc.astimezone(user_tz)
                         already_included = any(
@@ -1669,7 +1677,7 @@ async def get_workspace_timeline(
                                 }
                             )
                 except Exception as exc:
-                    logger.debug("Failed parsing next_dagrun: %s", exc)
+                    logger.debug("Failed parsing next run time: %s", exc)
 
             combined_runs = sorted(
                 actual_runs + projected_runs,
