@@ -334,46 +334,64 @@ def test_backend_services_lifecycle_api(backend_client, superadmin_user, db_sess
 # =============================================================================
 
 
+def _mock_backend_httpx(method: str, payload: dict) -> MagicMock:
+    """Stand-in for ui/main's ``httpx`` module whose Client returns ``payload`` for ``method``.
+
+    Patching ``httpx.Client`` itself would also patch Starlette's TestClient (a subclass under
+    httpx, and a different class under httpx2), so the proxy is never exercised reliably.
+    """
+    fake_httpx = MagicMock()
+    client = fake_httpx.Client.return_value.__enter__.return_value
+    getattr(client, method).return_value = MagicMock(status_code=200, json=lambda: payload)
+    return fake_httpx
+
+
 def test_ui_proxy_services_endpoints(superadmin_user, regular_user, db_session):
     ui_client = TestClient(ui_main.app)
     admin_token = make_token(superadmin_user, db_session)
     user_token = make_token(regular_user, db_session)
 
-    # Regular user forbidden
-    ui_client.cookies.set("lake_token", user_token)
-    resp = ui_client.get("/settings/admin/services")
-    assert resp.status_code == 403
-
-    # Superadmin proxy listing
-    ui_client.cookies.set("lake_token", admin_token)
-    mock_resp_data = {
-        "cluster_connected": True,
-        "services": [{"id": "airflow", "display_name": "Apache Airflow", "status": "running"}],
-        "healthy_count": 1,
-        "total_services": 1,
-    }
-
-    with patch("httpx.Client.get") as mock_get:
-        mock_get.return_value = MagicMock(status_code=200, json=lambda: mock_resp_data)
+    # The auth middleware's own backend lookups are not under test here
+    with (
+        patch.object(ui_main, "_fetch_workspaces", return_value=[{"id": "ws-1", "name": "Main"}]),
+        patch.object(ui_main, "_get_session_config", return_value={}),
+    ):
+        # Regular user forbidden
+        ui_client.cookies.set("lake_token", user_token)
         resp = ui_client.get("/settings/admin/services")
-        assert resp.status_code == 200
-        assert resp.json()["cluster_connected"] is True
+        assert resp.status_code == 403
 
-    # Superadmin proxy actions
-    with patch("httpx.Client.post") as mock_post:
-        mock_post.return_value = MagicMock(
-            status_code=200,
-            json=lambda: {"success": True, "message": "Service restart initiated."},
-        )
-        resp = ui_client.post("/settings/admin/services/airflow/restart")
+        # Superadmin proxy listing
+        ui_client.cookies.set("lake_token", admin_token)
+        mock_resp_data = {
+            "cluster_connected": True,
+            "services": [{"id": "airflow", "display_name": "Apache Airflow", "status": "running"}],
+            "healthy_count": 1,
+            "total_services": 1,
+        }
+        fake_httpx = _mock_backend_httpx("get", mock_resp_data)
+        with patch.object(ui_main, "httpx", fake_httpx):
+            resp = ui_client.get("/settings/admin/services")
         assert resp.status_code == 200
-        assert resp.json()["success"] is True
+        assert resp.json() == mock_resp_data
+        proxied = fake_httpx.Client.return_value.__enter__.return_value.get
+        proxied.assert_called_once()
+        assert proxied.call_args.args[0] == f"{ui_main.BACKEND_URL}/api/admin/services"
+        assert proxied.call_args.kwargs["headers"] == {"Authorization": f"Bearer {admin_token}"}
 
-        resp = ui_client.post("/settings/admin/services/airflow/stop")
-        assert resp.status_code == 200
-
-        resp = ui_client.post("/settings/admin/services/airflow/start")
-        assert resp.status_code == 200
+        # Superadmin proxy actions
+        for action in ("restart", "stop", "start"):
+            fake_httpx = _mock_backend_httpx(
+                "post", {"success": True, "message": f"Service {action} initiated."}
+            )
+            with patch.object(ui_main, "httpx", fake_httpx):
+                resp = ui_client.post(f"/settings/admin/services/airflow/{action}")
+            assert resp.status_code == 200
+            assert resp.json()["success"] is True
+            proxied = fake_httpx.Client.return_value.__enter__.return_value.post
+            assert proxied.call_args.args[0] == (
+                f"{ui_main.BACKEND_URL}/api/admin/services/airflow/{action}"
+            )
 
 
 # =============================================================================
