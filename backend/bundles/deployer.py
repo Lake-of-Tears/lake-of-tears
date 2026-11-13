@@ -8,6 +8,7 @@ import logging
 import re
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
@@ -836,6 +837,8 @@ class BundleDeployer:
             git_commit_sha=commit_hash,
             status="deploying",
         )
+        # Snapshot what the previous deploy provisioned so removed resources can be pruned
+        previous_resources_map = dict(bundle_record.resources_map or {})
         BundleStateService.update_bundle_status(db, bundle_record.id, "deploying")
 
         resources_map: dict[str, list[str]] = {
@@ -1141,13 +1144,28 @@ class BundleDeployer:
                     db.flush()
                 resources_map["dashboards"].append(str(dash.id))
 
+            # 8. Prune pipelines and dashboards removed from the manifest since the last deploy
+            previous_map = previous_resources_map or {}
+            for old_dag in previous_map.get("pipelines", []):
+                if old_dag not in resources_map["pipelines"]:
+                    cls._teardown_pipeline(db, workspace, ws_dags_dir, old_dag)
+            for old_dash_id in previous_map.get("dashboards", []):
+                if old_dash_id not in resources_map["dashboards"]:
+                    try:
+                        db.query(WorkspaceDashboard).filter(
+                            WorkspaceDashboard.id == uuid.UUID(old_dash_id),
+                            WorkspaceDashboard.workspace_id == workspace.id,
+                        ).delete()
+                    except ValueError:
+                        logger.warning("Skipping malformed dashboard id %s", old_dash_id)
+
             # Finalize State
             BundleStateService.update_resources_map(db, bundle_record.id, resources_map)
             BundleStateService.update_bundle_status(db, bundle_record.id, "active")
             db.commit()
             db.refresh(bundle_record)
 
-            # 8. Non-blocking Lakeset BI Studio dataset synchronization
+            # 9. Non-blocking Lakeset BI Studio dataset synchronization
             try:
                 try:
                     import superset_service as _lakeset_svc
@@ -1186,6 +1204,22 @@ class BundleDeployer:
                 pass
             raise HTTPException(500, f"Bundle deployment failed: {exc}") from exc
 
+    @staticmethod
+    def _teardown_pipeline(
+        db: Session, workspace: Workspace, ws_dags_dir: Path, dag_id: str
+    ) -> None:
+        """Remove a bundle pipeline's DAG file and its PipelineMetadata row."""
+        dag_file = ws_dags_dir / f"{dag_id}.py"
+        if dag_file.exists():
+            try:
+                dag_file.unlink()
+            except Exception as exc:
+                logger.warning("Failed to remove DAG file %s: %s", dag_file, exc)
+        db.query(PipelineMetadata).filter(
+            PipelineMetadata.workspace_id == workspace.id,
+            PipelineMetadata.dag_id == dag_id,
+        ).delete()
+
     @classmethod
     def destroy(
         cls,
@@ -1214,17 +1248,7 @@ class BundleDeployer:
         dags_dir = pipeline_service.get_airflow_dags_dir()
         ws_dags_dir = dags_dir / "workspaces" / workspace.slug
         for dag_id in res_map.get("pipelines", []):
-            dag_file = ws_dags_dir / f"{dag_id}.py"
-            if dag_file.exists():
-                try:
-                    dag_file.unlink()
-                except Exception as exc:
-                    logger.warning("Failed to remove DAG file %s: %s", dag_file, exc)
-            # Delete PipelineMetadata
-            db.query(PipelineMetadata).filter(
-                PipelineMetadata.workspace_id == workspace.id,
-                PipelineMetadata.dag_id == dag_id,
-            ).delete()
+            cls._teardown_pipeline(db, workspace, ws_dags_dir, dag_id)
             purged["pipelines"].append(dag_id)
 
         # 2. Teardown Dashboards

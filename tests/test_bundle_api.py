@@ -119,6 +119,22 @@ resources:
 """
 
 
+# Customer 360 plus a second pipeline, and the original with its dashboard removed,
+# used to exercise redeploys that drop resources from the manifest (#511).
+TWO_PIPELINE_TOON = SAMPLE_CUSTOMER360_TOON.replace(
+    "  dashboards:\n",
+    """    backfill_pipeline:
+      description: One-off historical backfill
+      schedule: "@once"
+      tasks[1]{name,type,entrypoint,upstream_tasks}:
+        backfill_events,duckdb_sql,sql/backfill.sql,[]
+
+  dashboards:
+""",
+)
+NO_DASHBOARDS_TOON = SAMPLE_CUSTOMER360_TOON.split("  dashboards:")[0]
+
+
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 
@@ -536,6 +552,87 @@ def test_deploy_bundle_idempotency_and_update(client_admin: TestClient, test_set
     data2 = resp2.json()
     assert data2["id"] == bundle_id
     assert data2["status"] == "active"
+
+
+def test_redeploy_prunes_pipelines_and_dashboards_removed_from_manifest(
+    client_admin: TestClient,
+    test_setup: dict,
+    db_session: Session,
+    mock_dags_dir: Path,
+):
+    """Redeploying without a pipeline/dashboard removes its DAG file, metadata and dashboard (#511)."""
+    ws = test_setup["workspace"]
+    resp1 = client_admin.post(
+        f"/api/bundles/deploy?workspace_slug={ws.slug}",
+        json={"manifest_content": TWO_PIPELINE_TOON, "manifest_format": "toon", "target": "dev"},
+    )
+    assert resp1.status_code == 201
+    first_map = resp1.json()["resources_map"]
+    assert len(first_map["pipelines"]) == 2
+    backfill_dag = next(d for d in first_map["pipelines"] if d.endswith("_backfill_pipeline"))
+    daily_dag = next(d for d in first_map["pipelines"] if d != backfill_dag)
+    removed_dash_id = first_map["dashboards"][0]
+
+    ws_dag_folder = mock_dags_dir / "workspaces" / ws.slug
+    assert (ws_dag_folder / f"{backfill_dag}.py").exists()
+
+    # Drop the backfill pipeline and every dashboard from the manifest, then redeploy
+    resp2 = client_admin.post(
+        f"/api/bundles/deploy?workspace_slug={ws.slug}",
+        json={"manifest_content": NO_DASHBOARDS_TOON, "manifest_format": "toon", "target": "dev"},
+    )
+    assert resp2.status_code == 201
+    second_map = resp2.json()["resources_map"]
+    assert second_map["pipelines"] == [daily_dag]
+    assert second_map["dashboards"] == []
+
+    db_session.expire_all()
+    assert not (ws_dag_folder / f"{backfill_dag}.py").exists()
+    assert (ws_dag_folder / f"{daily_dag}.py").exists()
+    assert (
+        db_session.query(PipelineMetadata)
+        .filter_by(workspace_id=ws.id, dag_id=backfill_dag)
+        .first()
+        is None
+    )
+    assert (
+        db_session.query(PipelineMetadata).filter_by(workspace_id=ws.id, dag_id=daily_dag).first()
+        is not None
+    )
+    assert (
+        db_session.query(WorkspaceDashboard).filter_by(id=uuid.UUID(removed_dash_id)).first()
+        is None
+    )
+
+
+def test_validate_plan_lists_pipelines_and_dashboards_removed_from_manifest(
+    client_admin: TestClient, test_setup: dict
+):
+    """The validate/dry-run plan reports removed pipelines and dashboards under to_delete (#511)."""
+    ws = test_setup["workspace"]
+
+    resp1 = client_admin.post(
+        f"/api/bundles/deploy?workspace_slug={ws.slug}",
+        json={"manifest_content": TWO_PIPELINE_TOON, "manifest_format": "toon", "target": "dev"},
+    )
+    assert resp1.status_code == 201
+    first_map = resp1.json()["resources_map"]
+    backfill_dag = next(d for d in first_map["pipelines"] if d.endswith("_backfill_pipeline"))
+    removed_dash_id = first_map["dashboards"][0]
+
+    resp2 = client_admin.post(
+        f"/api/bundles/validate?workspace_slug={ws.slug}",
+        json={"manifest_content": NO_DASHBOARDS_TOON, "manifest_format": "toon", "target": "dev"},
+    )
+    assert resp2.status_code == 200
+    diff = resp2.json()["diff"]
+    assert {"type": "pipeline", "dag_id": backfill_dag} in diff["to_delete"]
+    assert {
+        "type": "dashboard",
+        "id": removed_dash_id,
+        "title": "executive_overview",
+    } in diff["to_delete"]
+    assert diff["summary"]["delete"] == 2
 
 
 # ── REST API Integration Tests: List & Get ───────────────────────────────────
