@@ -1,148 +1,503 @@
 {% extends "base.html" %}
 {% block title %}AI Query &amp; Genie Analyst — Lake of Tears{% endblock %}
 {% block head %}
+<!-- Marked for Rich Markdown Rendering -->
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<!-- Apache ECharts for Genie Auto-Visualizations -->
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+
 <style>
-  html[data-theme="light"] #genieChatThread {
+  /* ── Theme Overrides for Light & Dark Mode ───────────────────────────── */
+  html[data-theme="light"] #genieChatThread,
+  html[data-theme="light"] #genieHistorySidebar,
+  html[data-theme="light"] #aiForm {
     background-color: var(--surface-card) !important;
+    border-color: var(--border-default) !important;
+  }
+  html[data-theme="light"] .genie-assistant-card {
+    background-color: var(--surface-elevated) !important;
+    border-color: var(--border-default) !important;
+    color: var(--text-primary) !important;
+  }
+  html[data-theme="light"] .genie-user-bubble {
+    background-color: rgba(37, 99, 235, 0.10) !important;
+    border-color: rgba(37, 99, 235, 0.25) !important;
+    color: var(--text-primary) !important;
+  }
+  html[data-theme="light"] .genie-chart-card {
+    background-color: var(--surface-muted) !important;
     border-color: var(--border-default) !important;
   }
   html[data-theme="light"] .prose-invert {
     color: var(--text-primary) !important;
   }
+
+  /* ── Rich Markdown Typography (.genie-markdown) ──────────────────────── */
+  .genie-markdown {
+    color: var(--text-primary, #e5e7eb);
+    font-size: 0.875rem;
+    line-height: 1.65;
+    word-break: break-word;
+  }
+  .genie-markdown > *:first-child {
+    margin-top: 0 !important;
+  }
+  .genie-markdown > *:last-child {
+    margin-bottom: 0 !important;
+  }
+  .genie-markdown p {
+    margin-top: 0.5rem;
+    margin-bottom: 0.65rem;
+  }
+  .genie-markdown h1,
+  .genie-markdown h2,
+  .genie-markdown h3,
+  .genie-markdown h4 {
+    color: #f9fafb;
+    font-weight: 600;
+    line-height: 1.35;
+    margin-top: 1rem;
+    margin-bottom: 0.45rem;
+  }
+  html[data-theme="light"] .genie-markdown h1,
+  html[data-theme="light"] .genie-markdown h2,
+  html[data-theme="light"] .genie-markdown h3,
+  html[data-theme="light"] .genie-markdown h4 {
+    color: #111827;
+  }
+  .genie-markdown h1 { font-size: 1.125rem; border-bottom: 1px solid var(--border-default, #1f2937); padding-bottom: 0.25rem; }
+  .genie-markdown h2 { font-size: 1rem; border-bottom: 1px solid var(--border-subtle, rgba(255,255,255,0.06)); padding-bottom: 0.2rem; }
+  .genie-markdown h3 { font-size: 0.925rem; }
+  .genie-markdown h4 { font-size: 0.875rem; color: #93c5fd; }
+  html[data-theme="light"] .genie-markdown h4 { color: #2563eb; }
+
+  .genie-markdown strong {
+    font-weight: 600;
+    color: #ffffff;
+  }
+  html[data-theme="light"] .genie-markdown strong {
+    color: #111827;
+  }
+  .genie-markdown ul,
+  .genie-markdown ol {
+    margin: 0.5rem 0 0.75rem 1.25rem;
+    padding-left: 0.25rem;
+  }
+  .genie-markdown ul { list-style-type: disc; }
+  .genie-markdown ol { list-style-type: decimal; }
+  .genie-markdown li {
+    margin-bottom: 0.25rem;
+  }
+  .genie-markdown li > ul,
+  .genie-markdown li > ol {
+    margin-top: 0.25rem;
+    margin-bottom: 0.25rem;
+  }
+  .genie-markdown blockquote {
+    border-left: 3px solid #3b82f6;
+    background: rgba(59, 130, 246, 0.08);
+    padding: 0.5rem 0.75rem;
+    margin: 0.65rem 0;
+    border-radius: 0 0.375rem 0.375rem 0;
+    color: #d1d5db;
+    font-size: 0.8125rem;
+  }
+  html[data-theme="light"] .genie-markdown blockquote {
+    color: #374151;
+    background: rgba(37, 99, 235, 0.06);
+  }
+  .genie-markdown code:not(pre code) {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.775rem;
+    background: rgba(59, 130, 246, 0.12);
+    color: #93c5fd;
+    border: 1px solid rgba(59, 130, 246, 0.25);
+    padding: 0.1rem 0.35rem;
+    border-radius: 0.25rem;
+  }
+  html[data-theme="light"] .genie-markdown code:not(pre code) {
+    background: rgba(37, 99, 235, 0.08);
+    color: #1d4ed8;
+    border-color: rgba(37, 99, 235, 0.2);
+  }
+  .genie-markdown pre {
+    background: #0d1117;
+    border: 1px solid #1f2937;
+    border-radius: 0.5rem;
+    padding: 0.75rem;
+    overflow-x: auto;
+    margin: 0.65rem 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.75rem;
+    color: #e5e7eb;
+  }
+  html[data-theme="light"] .genie-markdown pre {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+    color: #0f172a;
+  }
+  .genie-markdown table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.75rem 0;
+    font-size: 0.775rem;
+    border: 1px solid var(--border-default, #1f2937);
+    border-radius: 0.5rem;
+    overflow: hidden;
+  }
+  .genie-markdown th {
+    background: rgba(17, 24, 39, 0.8);
+    color: #9ca3af;
+    font-weight: 600;
+    text-align: left;
+    padding: 0.45rem 0.75rem;
+    border-bottom: 1px solid var(--border-default, #1f2937);
+  }
+  html[data-theme="light"] .genie-markdown th {
+    background: #f3f4f6;
+    color: #4b5563;
+  }
+  .genie-markdown td {
+    padding: 0.45rem 0.75rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  }
+  html[data-theme="light"] .genie-markdown td {
+    border-bottom-color: #e5e7eb;
+  }
+  .genie-markdown hr {
+    border: 0;
+    border-top: 1px solid var(--border-default, #1f2937);
+    margin: 0.85rem 0;
+  }
+  .genie-markdown a {
+    color: #60a5fa;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
 </style>
 {% endblock %}
 {% block content %}
 
-<!-- Apache ECharts for Genie Auto-Visualizations -->
-<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<div class="h-full max-w-7xl mx-auto flex gap-4 min-h-0 overflow-hidden">
 
-<div class="h-full max-w-5xl mx-auto flex flex-col gap-4">
-
-  <!-- Header & Mode Selector -->
-  <div class="flex items-center justify-between flex-wrap gap-3 shrink-0">
-    <div>
-      <div class="flex items-center gap-2.5">
-        <h1 class="text-xl font-semibold text-gray-100">AI Query &amp; Genie Data Analyst</h1>
-        <span class="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 font-medium">
-          Multi-Turn Text-to-SQL + RAG
-        </span>
-      </div>
-      <p class="text-xs text-gray-500 mt-1">
-        Ask questions in plain English — Genie discovers your workspace catalog schema, synthesizes &amp; executes DuckDB SQL, and visualizes insights.
-      </p>
-    </div>
-
-    <div class="flex items-center gap-2">
-      <div class="inline-flex rounded-lg bg-gray-900 border border-gray-800 p-0.5 text-xs">
-        <button type="button" id="modeBtn-genie" onclick="setAiMode('genie')" class="px-2.5 py-1 rounded-md font-medium bg-blue-600 text-white">
-          Genie SQL
-        </button>
-        <button type="button" id="modeBtn-hybrid" onclick="setAiMode('hybrid')" class="px-2.5 py-1 rounded-md font-medium text-gray-400 hover:text-gray-200">
-          Hybrid
-        </button>
-        <button type="button" id="modeBtn-rag" onclick="setAiMode('rag')" class="px-2.5 py-1 rounded-md font-medium text-gray-400 hover:text-gray-200">
-          RAG Embeddings
-        </button>
-      </div>
-      <button type="button" onclick="clearGenieConversation()" class="btn-ghost text-xs py-1.5 px-2.5 border border-gray-800 rounded-md text-gray-400 hover:text-gray-200">
-        New Chat
+  <!-- Left Collapsible Chat History Sidebar (ChatGPT / Claude style) -->
+  <aside id="genieHistorySidebar" class="w-64 shrink-0 card flex flex-col overflow-hidden border border-gray-800/90 transition-all duration-200">
+    <!-- New Chat Primary CTA -->
+    <div class="p-3 border-b border-gray-800/80 flex items-center gap-2">
+      <button
+        type="button"
+        id="newChatSidebarBtn"
+        onclick="startNewGenieChat()"
+        class="flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium shadow-sm transition-colors"
+        title="Start a new Genie conversation"
+      >
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+        </svg>
+        <span>New Chat</span>
+      </button>
+      <button
+        type="button"
+        onclick="toggleGenieSidebar()"
+        class="p-2 rounded-lg border border-gray-800 text-gray-400 hover:text-gray-200 hover:bg-gray-800/50 transition-colors"
+        title="Collapse chat history sidebar"
+      >
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"/>
+        </svg>
       </button>
     </div>
-  </div>
 
-  <!-- Server-rendered Fallback Result (when submitted via standard POST /ai) -->
-  {% if result %}
-    {% if result.ok %}
-    <div class="card p-5 space-y-4 shrink-0">
-      <div class="prose prose-invert prose-sm max-w-none text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">{{ result.answer }}</div>
-      {% if result.snippets %}
-      <details class="group">
-        <summary class="text-xs text-gray-600 cursor-pointer hover:text-gray-400 transition-colors select-none list-none flex items-center gap-1">
-          <svg class="w-3 h-3 transition-transform group-open:rotate-90" fill="currentColor" viewBox="0 0 6 10"><path d="M0 0l6 5-6 5V0z"/></svg>
-          {{ result.snippets | length }} source snippet{% if result.snippets | length != 1 %}s{% endif %} used
-        </summary>
-        <div class="mt-3 space-y-2">
-          {% for s in result.snippets %}
-          <div class="bg-gray-800/60 rounded-md px-4 py-3 text-xs">
-            <div class="flex items-center justify-between mb-1">
-              <span class="text-blue-400 font-medium">{{ s.source }}</span>
-              <span class="text-gray-600 tabular-nums">score {{ s.score }}</span>
-            </div>
-            <p class="text-gray-400">{{ s.summary[:200] }}{% if s.summary | length > 200 %}…{% endif %}</p>
+    <!-- Filter / Search Conversations -->
+    <div class="px-3 pt-2.5 pb-1.5">
+      <div class="relative">
+        <svg class="w-3.5 h-3.5 text-gray-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z"/>
+        </svg>
+        <input
+          type="text"
+          id="genieThreadSearch"
+          oninput="renderThreadSidebar()"
+          placeholder="Filter chats…"
+          class="input-dark w-full pl-8 pr-2.5 py-1.5 text-[11px] rounded-md"
+          autocomplete="off"
+        />
+      </div>
+    </div>
+
+    <!-- Saved Conversation Threads List -->
+    <div id="genieThreadList" class="flex-1 overflow-y-auto px-2 py-2 space-y-3 text-xs">
+      <!-- Populated dynamically by renderThreadSidebar() -->
+    </div>
+
+    <!-- Sidebar Footer Info -->
+    <div class="p-2.5 border-t border-gray-800/80 flex items-center justify-between text-[11px] text-gray-500">
+      <span class="truncate">Workspace History</span>
+      <button
+        type="button"
+        onclick="clearAllGenieThreads()"
+        class="text-gray-500 hover:text-red-400 transition-colors"
+        title="Clear all saved chats in this workspace"
+      >
+        Clear All
+      </button>
+    </div>
+  </aside>
+
+  <!-- Main Chat Column -->
+  <div class="flex-1 flex flex-col gap-3 min-w-0 min-h-0">
+
+    <!-- Header & Mode Selector -->
+    <div class="flex items-center justify-between flex-wrap gap-3 shrink-0">
+      <div class="flex items-center gap-2.5">
+        <button
+          type="button"
+          id="openGenieSidebarBtn"
+          onclick="toggleGenieSidebar()"
+          class="hidden p-2 rounded-lg border border-gray-800 text-gray-400 hover:text-gray-200 hover:bg-gray-800/50 transition-colors"
+          title="Expand chat history sidebar"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h7"/>
+          </svg>
+        </button>
+        <div>
+          <div class="flex items-center gap-2.5">
+            <h1 class="text-xl font-semibold text-gray-100">AI Query &amp; Genie Data Analyst</h1>
+            <span class="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 font-medium">
+              Multi-Turn Text-to-SQL + RAG
+            </span>
           </div>
+          <p class="text-xs text-gray-500 mt-0.5">
+            Ask questions in plain English — Genie discovers your workspace catalog schema, synthesizes &amp; executes DuckDB SQL, and visualizes insights.
+          </p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <div class="inline-flex rounded-lg bg-gray-900 border border-gray-800 p-0.5 text-xs">
+          <button type="button" id="modeBtn-genie" onclick="setAiMode('genie')" class="px-2.5 py-1 rounded-md font-medium bg-blue-600 text-white">
+            Genie SQL
+          </button>
+          <button type="button" id="modeBtn-hybrid" onclick="setAiMode('hybrid')" class="px-2.5 py-1 rounded-md font-medium text-gray-400 hover:text-gray-200">
+            Hybrid
+          </button>
+          <button type="button" id="modeBtn-rag" onclick="setAiMode('rag')" class="px-2.5 py-1 rounded-md font-medium text-gray-400 hover:text-gray-200">
+            RAG Embeddings
+          </button>
+        </div>
+        <button
+          type="button"
+          id="headerNewChatBtn"
+          onclick="clearGenieConversation()"
+          class="btn-ghost text-xs py-1.5 px-2.5 border border-gray-800 rounded-md text-gray-400 hover:text-gray-200 flex items-center gap-1.5"
+          title="Start a fresh conversation thread"
+        >
+          <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+          </svg>
+          <span>New Chat</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Server-rendered Fallback Result (when submitted via standard POST /ai) -->
+    {% if result %}
+      {% if result.ok %}
+      <div class="card p-5 space-y-4 shrink-0">
+        <div id="serverFallbackAnswer" class="prose prose-invert prose-sm max-w-none genie-markdown" data-raw-markdown="{{ result.answer | e }}">{{ result.answer }}</div>
+        {% if result.snippets %}
+        <details class="group">
+          <summary class="text-xs text-gray-600 cursor-pointer hover:text-gray-400 transition-colors select-none list-none flex items-center gap-1">
+            <svg class="w-3 h-3 transition-transform group-open:rotate-90" fill="currentColor" viewBox="0 0 6 10"><path d="M0 0l6 5-6 5V0z"/></svg>
+            {{ result.snippets | length }} source snippet{% if result.snippets | length != 1 %}s{% endif %} used
+          </summary>
+          <div class="mt-3 space-y-2">
+            {% for s in result.snippets %}
+            <div class="bg-gray-800/60 rounded-md px-4 py-3 text-xs">
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-blue-400 font-medium">{{ s.source }}</span>
+                <span class="text-gray-600 tabular-nums">score {{ s.score }}</span>
+              </div>
+              <p class="text-gray-400">{{ s.summary[:200] }}{% if s.summary | length > 200 %}…{% endif %}</p>
+            </div>
+            {% endfor %}
+          </div>
+        </details>
+        {% endif %}
+      </div>
+      {% else %}
+      <div class="card p-5 border-red-900/50 shrink-0">
+        <p class="text-red-400 text-sm font-semibold mb-1">Error</p>
+        <p class="text-gray-500 text-xs font-mono">{{ result.error }}</p>
+      </div>
+      {% endif %}
+    {% endif %}
+
+    <!-- Multi-Turn Conversation Feed -->
+    <div id="genieChatThread" class="flex-1 card p-4 overflow-y-auto space-y-4 min-h-[320px]">
+      <div id="genieEmptyState" class="h-full flex flex-col items-center justify-center text-center py-8 space-y-4">
+        <div class="w-12 h-12 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 shadow-inner">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        </div>
+        <div class="max-w-md space-y-1">
+          <p class="text-sm font-semibold text-gray-200">Ask anything about your Lakehouse data</p>
+          <p class="text-xs text-gray-500">
+            Genie inspects your workspace Catalog schemas, generates &amp; self-corrects DuckDB SQL, runs live queries against S3 Parquet, and plots interactive charts automatically.
+          </p>
+        </div>
+        <div class="flex flex-wrap justify-center gap-2 max-w-2xl pt-2">
+          {% for q in example_questions %}
+          <button type="button"
+                  onclick="askExampleQuestion({{ q | tojson }})"
+                  class="btn-ghost text-xs py-1.5 px-3 border border-gray-800 rounded-full hover:border-blue-500/40">
+            {{ q }}
+          </button>
           {% endfor %}
         </div>
-      </details>
-      {% endif %}
+      </div>
     </div>
-    {% else %}
-    <div class="card p-5 border-red-900/50 shrink-0">
-      <p class="text-red-400 text-sm font-semibold mb-1">Error</p>
-      <p class="text-gray-500 text-xs font-mono">{{ result.error }}</p>
-    </div>
-    {% endif %}
-  {% endif %}
 
-  <!-- Multi-Turn Conversation Feed -->
-  <div id="genieChatThread" class="flex-1 card p-4 overflow-y-auto space-y-4 min-h-[320px]">
-    <div id="genieEmptyState" class="h-full flex flex-col items-center justify-center text-center py-8 space-y-4">
-      <div class="w-11 h-11 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-      </div>
-      <div class="max-w-md space-y-1">
-        <p class="text-sm font-semibold text-gray-200">Ask anything about your Lakehouse data</p>
-        <p class="text-xs text-gray-500">
-          Genie inspects your workspace Catalog schemas, generates &amp; self-corrects DuckDB SQL, runs live queries against S3 Parquet, and plots charts automatically.
-        </p>
-      </div>
-      <div class="flex flex-wrap justify-center gap-2 max-w-2xl pt-2">
-        {% for q in example_questions %}
-        <button type="button"
-                onclick="askExampleQuestion({{ q | tojson }})"
-                class="btn-ghost text-xs py-1.5 px-3 border border-gray-800 rounded-full hover:border-blue-500/40">
-          {{ q }}
+    <!-- Auto-Expanding Chatbot Composer Dock -->
+    <form method="post" action="/ai" id="aiForm" class="card p-3 space-y-2 shrink-0 border border-gray-800/90 focus-within:border-blue-500/50 transition-colors">
+      <div class="flex items-end gap-2.5">
+        <div class="flex-1 relative">
+          <textarea
+            name="question"
+            id="question"
+            rows="1"
+            placeholder="Ask Genie a question or follow-up… (Press ↑ for previous prompt, Enter to send, Shift+Enter for new line)"
+            class="input-dark w-full text-xs leading-relaxed resize-none py-2 px-3 max-h-36 overflow-y-auto"
+            autocomplete="off"
+          >{{ question }}</textarea>
+        </div>
+        <button type="submit" id="askBtn" class="btn-primary shrink-0 text-xs px-4 py-2 flex items-center gap-1.5 h-[36px]">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          <span>Ask Genie</span>
         </button>
-        {% endfor %}
       </div>
-    </div>
+      <div class="flex items-center justify-between text-[11px] text-gray-500 flex-wrap gap-2">
+        <span id="loadingHint" class="hidden text-blue-400 animate-pulse">
+          Discovering schema → generating SQL → executing in DuckDB…
+        </span>
+        <div class="flex items-center gap-3 text-[10px] text-gray-500">
+          <span class="inline-flex items-center gap-1"><kbd class="px-1 py-0.5 rounded bg-gray-800/80 border border-gray-700 text-gray-400 font-mono">↑</kbd>/<kbd class="px-1 py-0.5 rounded bg-gray-800/80 border border-gray-700 text-gray-400 font-mono">↓</kbd> Prompt history</span>
+          <span class="inline-flex items-center gap-1"><kbd class="px-1 py-0.5 rounded bg-gray-800/80 border border-gray-700 text-gray-400 font-mono">Enter</kbd> Send</span>
+          <span class="inline-flex items-center gap-1"><kbd class="px-1 py-0.5 rounded bg-gray-800/80 border border-gray-700 text-gray-400 font-mono">Shift+Enter</kbd> New line</span>
+          <span class="hidden md:inline text-gray-600">· Click any past message to edit &amp; rerun</span>
+        </div>
+        <span class="ml-auto hidden lg:inline text-[10px] text-gray-500">
+          Schema Discovery → SQL Synthesis &amp; Self-Correction → Live DuckDB → Interactive Chart
+        </span>
+      </div>
+    </form>
+
   </div>
-
-  <!-- Input Form -->
-  <form method="post" action="/ai" id="aiForm" class="card p-3 space-y-2.5 shrink-0">
-    <div class="flex gap-3">
-      <input
-        type="text"
-        name="question"
-        id="question"
-        value="{{ question }}"
-        placeholder="Ask a question or follow-up (e.g. 'What was our revenue trend over the last 30 days?' or 'Now break that down by stage')…"
-        class="input-dark flex-1 text-xs"
-        autocomplete="off"
-      />
-      <button type="submit" id="askBtn" class="btn-primary shrink-0 text-xs px-4">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-        Ask Genie
-      </button>
-    </div>
-    <div class="flex items-center justify-between text-[11px] text-gray-500">
-      <span id="loadingHint" class="hidden text-blue-400 animate-pulse">
-        Discovering schema → generating SQL → executing in DuckDB…
-      </span>
-      <span class="ml-auto">
-        Agent loop: Schema Discovery → SQL Generation &amp; Self-Correction → Live DuckDB Execution → Chart + Insight
-      </span>
-    </div>
-  </form>
-
 </div>
 
 <script>
 const ACTIVE_WORKSPACE_SLUG = "{{ (workspace.slug if workspace and workspace.slug is defined else (workspace['slug'] if workspace and workspace['slug'] is defined else 'default')) }}";
 const ACTIVE_WORKSPACE_ID = "{{ (workspace.id if workspace and workspace.id is defined else (workspace['id'] if workspace and workspace['id'] is defined else '')) }}";
-const WORKSPACE_STORAGE_KEY = "lake_genie_chat_" + (ACTIVE_WORKSPACE_ID || ACTIVE_WORKSPACE_SLUG || "default");
+const WORKSPACE_KEY_SUFFIX = ACTIVE_WORKSPACE_ID || ACTIVE_WORKSPACE_SLUG || "default";
+const WORKSPACE_STORAGE_KEY = "lake_genie_chat_" + WORKSPACE_KEY_SUFFIX;
+const WORKSPACE_THREADS_STORAGE_KEY = "lake_genie_threads_" + WORKSPACE_KEY_SUFFIX;
+const WORKSPACE_PROMPT_HISTORY_KEY = "lake_genie_prompts_" + WORKSPACE_KEY_SUFFIX;
+const EXAMPLE_QUESTIONS_LIST = {{ (example_questions or []) | tojson }};
+
 let currentAiMode = "genie";
 let chatHistory = [];
+let chatThreads = [];
+let activeThreadId = null;
+let editingTurnIndex = null;
 let chartCounter = 0;
+let genieSidebarOpen = true;
+
+// Up/Down Arrow Prompt History State
+let promptHistoryIndex = -1;
+let promptHistoryDraft = "";
+
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str == null ? "" : String(str);
+  return div.innerHTML;
+}
+
+/**
+ * Sanitize and render Markdown into readable HTML without loose markdown tokens.
+ * Uses marked.js when loaded, with a built-in fallback parser for offline/test environments.
+ */
+function renderGenieMarkdown(rawText) {
+  const text = String(rawText == null ? "" : rawText).trim();
+  if (!text) return "";
+
+  let html = "";
+  if (typeof marked !== "undefined" && typeof marked.parse === "function") {
+    try {
+      html = marked.parse(text, { gfm: true, breaks: true });
+    } catch (e) {
+      html = fallbackMarkdownParse(text);
+    }
+  } else {
+    html = fallbackMarkdownParse(text);
+  }
+  return sanitizeRenderedHtml(html);
+}
+
+function fallbackMarkdownParse(text) {
+  let out = escapeHtml(text);
+  // Fenced code blocks
+  out = out.replace(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g, function(_, lang, code) {
+    return `<pre><code class="language-${lang || 'text'}">${code.trim()}</code></pre>`;
+  });
+  // Headings
+  out = out.replace(/^####\s+(.+)$/gm, "<h4>$1</h4>");
+  out = out.replace(/^###\s+(.+)$/gm, "<h3>$1</h3>");
+  out = out.replace(/^##\s+(.+)$/gm, "<h2>$1</h2>");
+  out = out.replace(/^#\s+(.+)$/gm, "<h1>$1</h1>");
+  // Bold & italic
+  out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  out = out.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
+  // Inline code
+  out = out.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+  // Unordered list items
+  out = out.replace(/^(?:[-*])\s+(.+)$/gm, "<li>$1</li>");
+  out = out.replace(/(<li>[\s\S]*?<\/li>)/g, "<ul>$1</ul>");
+  out = out.replace(/<\/ul>\s*<ul>/g, "");
+  // Paragraphs
+  out = out
+    .split(/\n{2,}/)
+    .map(block => {
+      const trimmed = block.trim();
+      if (!trimmed) return "";
+      if (/^<(h[1-4]|ul|ol|pre|blockquote|table)/i.test(trimmed)) return trimmed;
+      return `<p>${trimmed.replace(/\n/g, "<br/>")}</p>`;
+    })
+    .join("\n");
+  return out;
+}
+
+function sanitizeRenderedHtml(dirtyHtml) {
+  const tpl = document.createElement("template");
+  tpl.innerHTML = dirtyHtml;
+  const forbiddenTags = ["script", "iframe", "object", "embed", "form", "style", "link", "meta"];
+  forbiddenTags.forEach(tag => {
+    tpl.content.querySelectorAll(tag).forEach(el => el.remove());
+  });
+  tpl.content.querySelectorAll("*").forEach(el => {
+    Array.from(el.attributes).forEach(attr => {
+      const name = attr.name.toLowerCase();
+      const val = (attr.value || "").trim().toLowerCase();
+      if (name.startsWith("on") || (name === "href" && val.startsWith("javascript:")) || (name === "src" && val.startsWith("javascript:"))) {
+        el.removeAttribute(attr.name);
+      }
+    });
+    if (el.tagName === "A") {
+      el.setAttribute("target", "_blank");
+      el.setAttribute("rel", "noopener noreferrer");
+    }
+  });
+  return tpl.innerHTML;
+}
 
 function setAiMode(mode) {
   currentAiMode = mode;
@@ -157,58 +512,533 @@ function setAiMode(mode) {
   });
 }
 
+function toggleGenieSidebar() {
+  genieSidebarOpen = !genieSidebarOpen;
+  const sidebar = document.getElementById("genieHistorySidebar");
+  const openBtn = document.getElementById("openGenieSidebarBtn");
+  if (sidebar) {
+    sidebar.classList.toggle("hidden", !genieSidebarOpen);
+  }
+  if (openBtn) {
+    openBtn.classList.toggle("hidden", genieSidebarOpen);
+  }
+}
+
 function askExampleQuestion(q) {
   const input = document.getElementById("question");
-  input.value = q;
+  if (input) {
+    input.value = q;
+    autoResizeComposer(input);
+  }
   submitGenieQuestion(q);
 }
 
-function clearGenieConversation() {
+/* ── Multi-Session Chat Thread Management ──────────────────────────────── */
+
+function generateThreadId() {
+  return "thread_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+}
+
+function deriveThreadTitle(messages) {
+  const firstUser = (messages || []).find(m => m && m.role === "user" && m.content);
+  if (!firstUser) return "New Chat";
+  const clean = String(firstUser.content).replace(/\s+/g, " ").trim();
+  return clean.length > 42 ? clean.slice(0, 42) + "…" : clean;
+}
+
+function startNewGenieChat() {
+  if (activeGenieRequest) {
+    cancelGenieRequest();
+  }
+  editingTurnIndex = null;
+  promptHistoryIndex = -1;
+  promptHistoryDraft = "";
+
+  // If current active thread is already empty, just focus the composer
+  const existingActive = chatThreads.find(t => t.id === activeThreadId);
+  if (existingActive && (!existingActive.messages || existingActive.messages.length === 0)) {
+    chatHistory = [];
+    renderConversationThread();
+    renderThreadSidebar();
+    const input = document.getElementById("question");
+    if (input) input.focus();
+    return;
+  }
+
+  const newThread = {
+    id: generateThreadId(),
+    title: "New Chat",
+    mode: currentAiMode,
+    updatedAt: Date.now(),
+    messages: []
+  };
+  chatThreads.unshift(newThread);
+  activeThreadId = newThread.id;
   chatHistory = [];
+  saveConversation();
+  renderThreadSidebar();
+  renderConversationThread();
+
+  const input = document.getElementById("question");
+  if (input) {
+    input.value = "";
+    autoResizeComposer(input);
+    input.focus();
+  }
+}
+
+function clearGenieConversation() {
+  startNewGenieChat();
+}
+
+function switchGenieThread(threadId) {
+  const target = chatThreads.find(t => t.id === threadId);
+  if (!target) return;
+  if (activeGenieRequest) {
+    cancelGenieRequest();
+  }
+  activeThreadId = target.id;
+  editingTurnIndex = null;
+  promptHistoryIndex = -1;
+  chatHistory = Array.isArray(target.messages) ? [...target.messages] : [];
+  if (target.mode) {
+    setAiMode(target.mode);
+  }
+  try {
+    localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(chatHistory.slice(-20)));
+  } catch (e) {}
+  renderThreadSidebar();
+  renderConversationThread();
+}
+
+function deleteGenieThread(threadId, ev) {
+  if (ev) ev.stopPropagation();
+  chatThreads = chatThreads.filter(t => t.id !== threadId);
+  if (activeThreadId === threadId) {
+    if (chatThreads.length > 0) {
+      activeThreadId = chatThreads[0].id;
+      chatHistory = Array.isArray(chatThreads[0].messages) ? [...chatThreads[0].messages] : [];
+    } else {
+      activeThreadId = null;
+      chatHistory = [];
+    }
+  }
+  saveConversation();
+  renderThreadSidebar();
+  renderConversationThread();
+}
+
+function clearAllGenieThreads() {
+  chatThreads = [];
+  chatHistory = [];
+  activeThreadId = null;
+  editingTurnIndex = null;
   try {
     localStorage.removeItem(WORKSPACE_STORAGE_KEY);
+    localStorage.removeItem(WORKSPACE_THREADS_STORAGE_KEY);
   } catch (e) {}
+  renderThreadSidebar();
   renderConversationThread();
 }
 
 function saveConversation() {
   try {
-    localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(chatHistory.slice(-12)));
+    const trimmedHistory = chatHistory.slice(-24);
+    localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(trimmedHistory));
+
+    if (trimmedHistory.length > 0) {
+      let thread = chatThreads.find(t => t.id === activeThreadId);
+      if (!thread) {
+        thread = {
+          id: activeThreadId || generateThreadId(),
+          title: deriveThreadTitle(trimmedHistory),
+          mode: currentAiMode,
+          updatedAt: Date.now(),
+          messages: trimmedHistory
+        };
+        activeThreadId = thread.id;
+        chatThreads.unshift(thread);
+      } else {
+        thread.messages = trimmedHistory;
+        thread.title = deriveThreadTitle(trimmedHistory);
+        thread.mode = currentAiMode;
+        thread.updatedAt = Date.now();
+      }
+    }
+
+    // Keep most recent 30 threads sorted by updatedAt desc
+    chatThreads.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    chatThreads = chatThreads.slice(0, 30);
+    localStorage.setItem(WORKSPACE_THREADS_STORAGE_KEY, JSON.stringify(chatThreads));
   } catch (e) {}
+  renderThreadSidebar();
 }
 
 function loadConversation() {
   try {
-    const raw = localStorage.getItem(WORKSPACE_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        chatHistory = parsed;
-        renderConversationThread();
+    const rawThreads = localStorage.getItem(WORKSPACE_THREADS_STORAGE_KEY);
+    if (rawThreads) {
+      const parsedThreads = JSON.parse(rawThreads);
+      if (Array.isArray(parsedThreads)) {
+        chatThreads = parsedThreads;
       }
     }
+
+    const rawLegacy = localStorage.getItem(WORKSPACE_STORAGE_KEY);
+    if (rawLegacy) {
+      const parsedLegacy = JSON.parse(rawLegacy);
+      if (Array.isArray(parsedLegacy) && parsedLegacy.length > 0) {
+        if (chatThreads.length === 0) {
+          const migratedThread = {
+            id: generateThreadId(),
+            title: deriveThreadTitle(parsedLegacy),
+            mode: currentAiMode,
+            updatedAt: Date.now(),
+            messages: parsedLegacy
+          };
+          chatThreads = [migratedThread];
+          activeThreadId = migratedThread.id;
+          chatHistory = parsedLegacy;
+          localStorage.setItem(WORKSPACE_THREADS_STORAGE_KEY, JSON.stringify(chatThreads));
+        } else if (!activeThreadId) {
+          activeThreadId = chatThreads[0].id;
+          chatHistory = Array.isArray(chatThreads[0].messages) ? [...chatThreads[0].messages] : parsedLegacy;
+        }
+      }
+    }
+
+    if (!activeThreadId && chatThreads.length > 0) {
+      activeThreadId = chatThreads[0].id;
+      chatHistory = Array.isArray(chatThreads[0].messages) ? [...chatThreads[0].messages] : [];
+    }
   } catch (e) {}
+
+  renderThreadSidebar();
+  renderConversationThread();
 }
 
-function escapeHtml(str) {
-  const div = document.createElement("div");
-  div.textContent = str == null ? "" : String(str);
-  return div.innerHTML;
+function renderThreadSidebar() {
+  const listEl = document.getElementById("genieThreadList");
+  if (!listEl) return;
+
+  const searchInput = document.getElementById("genieThreadSearch");
+  const filterText = (searchInput ? searchInput.value : "").trim().toLowerCase();
+
+  const visibleThreads = chatThreads.filter(t => {
+    if (!filterText) return true;
+    const titleMatch = (t.title || "").toLowerCase().includes(filterText);
+    const contentMatch = (t.messages || []).some(m => String(m.content || "").toLowerCase().includes(filterText));
+    return titleMatch || contentMatch;
+  });
+
+  if (visibleThreads.length === 0) {
+    listEl.innerHTML = `
+      <div class="px-3 py-8 text-center text-gray-500 space-y-1">
+        <p class="text-[11px] font-medium text-gray-400">${filterText ? "No matching chats" : "No saved chats yet"}</p>
+        <p class="text-[10px] text-gray-600">Ask Genie a question to start a conversation thread.</p>
+      </div>
+    `;
+    return;
+  }
+
+  const now = Date.now();
+  const oneDayMs = 86400000;
+  const groups = [
+    { label: "Today", items: [] },
+    { label: "Previous 7 Days", items: [] },
+    { label: "Earlier", items: [] }
+  ];
+
+  visibleThreads.forEach(t => {
+    const age = now - (t.updatedAt || now);
+    if (age < oneDayMs) {
+      groups[0].items.push(t);
+    } else if (age < oneDayMs * 7) {
+      groups[1].items.push(t);
+    } else {
+      groups[2].items.push(t);
+    }
+  });
+
+  listEl.innerHTML = groups
+    .filter(g => g.items.length > 0)
+    .map(g => {
+      const itemsHtml = g.items.map(t => {
+        const isActive = t.id === activeThreadId;
+        const turnCount = (t.messages || []).filter(m => m.role === "user").length;
+        return `
+          <div
+            onclick="switchGenieThread('${escapeHtml(t.id)}')"
+            class="group flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg cursor-pointer transition-colors ${
+              isActive
+                ? "bg-blue-600/15 border border-blue-500/30 text-gray-100"
+                : "text-gray-400 hover:text-gray-200 hover:bg-gray-800/50 border border-transparent"
+            }"
+          >
+            <div class="flex items-center gap-2 min-w-0 flex-1">
+              <svg class="w-3.5 h-3.5 shrink-0 ${isActive ? "text-blue-400" : "text-gray-500"}" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/>
+              </svg>
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-xs font-medium">${escapeHtml(t.title || "New Chat")}</p>
+                <p class="text-[10px] text-gray-500">${turnCount} prompt${turnCount === 1 ? "" : "s"} · ${escapeHtml((t.mode || "genie").toUpperCase())}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onclick="deleteGenieThread('${escapeHtml(t.id)}', event)"
+              class="opacity-0 group-hover:opacity-100 p-1 rounded text-gray-500 hover:text-red-400 hover:bg-gray-800 transition-opacity"
+              title="Delete chat thread"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+              </svg>
+            </button>
+          </div>
+        `;
+      }).join("");
+
+      return `
+        <div class="space-y-1">
+          <div class="px-2 text-[10px] font-semibold uppercase tracking-wider text-gray-500">${escapeHtml(g.label)}</div>
+          ${itemsHtml}
+        </div>
+      `;
+    })
+    .join("");
 }
+
+/* ── Prompt History Stack (ArrowUp / ArrowDown in Ask Genie Composer) ──── */
+
+function getPromptHistoryList() {
+  const prompts = [];
+  try {
+    const saved = JSON.parse(localStorage.getItem(WORKSPACE_PROMPT_HISTORY_KEY) || "[]");
+    if (Array.isArray(saved)) {
+      saved.forEach(p => {
+        if (typeof p === "string" && p.trim()) prompts.push(p.trim());
+      });
+    }
+  } catch (e) {}
+
+  // Also include prompts from current chatHistory so history is always up-to-date
+  (chatHistory || []).forEach(turn => {
+    if (turn && turn.role === "user" && turn.content && String(turn.content).trim()) {
+      const clean = String(turn.content).trim();
+      if (prompts[prompts.length - 1] !== clean) {
+        prompts.push(clean);
+      }
+    }
+  });
+
+  // Deduplicate consecutive entries
+  return prompts.filter((item, idx, arr) => idx === 0 || item !== arr[idx - 1]);
+}
+
+function recordPromptInHistory(promptText) {
+  const clean = String(promptText || "").trim();
+  if (!clean) return;
+  try {
+    const existing = getPromptHistoryList();
+    if (existing[existing.length - 1] !== clean) {
+      existing.push(clean);
+    }
+    localStorage.setItem(WORKSPACE_PROMPT_HISTORY_KEY, JSON.stringify(existing.slice(-50)));
+  } catch (e) {}
+  promptHistoryIndex = -1;
+  promptHistoryDraft = "";
+}
+
+function autoResizeComposer(el) {
+  if (!el) return;
+  el.style.height = "auto";
+  const nextHeight = Math.min(Math.max(el.scrollHeight, 36), 144);
+  el.style.height = nextHeight + "px";
+}
+
+function recallPreviousPrompt(direction) {
+  const input = document.getElementById("question");
+  if (!input) return false;
+  const historyList = getPromptHistoryList();
+  if (historyList.length === 0) return false;
+
+  if (direction === "up") {
+    if (promptHistoryIndex === -1) {
+      promptHistoryDraft = input.value;
+      promptHistoryIndex = historyList.length - 1;
+    } else if (promptHistoryIndex > 0) {
+      promptHistoryIndex--;
+    }
+    input.value = historyList[promptHistoryIndex] || "";
+    autoResizeComposer(input);
+    input.setSelectionRange(input.value.length, input.value.length);
+    return true;
+  } else if (direction === "down") {
+    if (promptHistoryIndex === -1) return false;
+    if (promptHistoryIndex < historyList.length - 1) {
+      promptHistoryIndex++;
+      input.value = historyList[promptHistoryIndex] || "";
+    } else {
+      promptHistoryIndex = -1;
+      input.value = promptHistoryDraft || "";
+    }
+    autoResizeComposer(input);
+    input.setSelectionRange(input.value.length, input.value.length);
+    return true;
+  }
+  return false;
+}
+
+/* ── Inline Edit & Re-Run on Past User Messages + Turn Actions ─────────── */
+
+function startEditGenieTurn(idx) {
+  if (!chatHistory[idx] || chatHistory[idx].role !== "user") return;
+  editingTurnIndex = idx;
+  renderConversationThread();
+  const editArea = document.getElementById("genieInlineEditInput-" + idx);
+  if (editArea) {
+    editArea.focus();
+    editArea.setSelectionRange(editArea.value.length, editArea.value.length);
+  }
+}
+
+function cancelEditGenieTurn() {
+  editingTurnIndex = null;
+  renderConversationThread();
+}
+
+function submitEditedGenieTurn(idx) {
+  const editArea = document.getElementById("genieInlineEditInput-" + idx);
+  const updatedPrompt = editArea ? editArea.value.trim() : "";
+  if (!updatedPrompt) return;
+
+  if (activeGenieRequest) {
+    cancelGenieRequest();
+  }
+
+  // Truncate conversation history to before this edited user turn and re-run
+  chatHistory = chatHistory.slice(0, idx);
+  editingTurnIndex = null;
+  saveConversation();
+  submitGenieQuestion(updatedPrompt);
+}
+
+function handleInlineEditKeydown(event, idx) {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    cancelEditGenieTurn();
+  } else if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    submitEditedGenieTurn(idx);
+  }
+}
+
+function regenerateGenieTurn(assistantIdx) {
+  if (activeGenieRequest) return;
+  // Find the preceding user message
+  let userIdx = -1;
+  for (let i = assistantIdx - 1; i >= 0; i--) {
+    if (chatHistory[i] && chatHistory[i].role === "user") {
+      userIdx = i;
+      break;
+    }
+  }
+  if (userIdx < 0) return;
+  const promptToRerun = chatHistory[userIdx].content;
+  chatHistory = chatHistory.slice(0, userIdx);
+  saveConversation();
+  submitGenieQuestion(promptToRerun);
+}
+
+function copyTurnText(idx, btnEl) {
+  const turn = chatHistory[idx];
+  if (!turn || !turn.content) return;
+  navigator.clipboard.writeText(String(turn.content)).then(() => {
+    if (btnEl) {
+      const orig = btnEl.innerHTML;
+      btnEl.innerHTML = `<span class="text-emerald-400">Copied!</span>`;
+      setTimeout(() => { btnEl.innerHTML = orig; }, 1400);
+    }
+  }).catch(() => {});
+}
+
+function copyTurnSql(idx, btnEl) {
+  const turn = chatHistory[idx];
+  if (!turn || !turn.sql) return;
+  navigator.clipboard.writeText(String(turn.sql)).then(() => {
+    if (btnEl) {
+      const orig = btnEl.innerHTML;
+      btnEl.innerHTML = `<span class="text-emerald-400">SQL Copied!</span>`;
+      setTimeout(() => { btnEl.innerHTML = orig; }, 1400);
+    }
+  }).catch(() => {});
+}
+
+function copyTurnTableCsv(idx, btnEl) {
+  const turn = chatHistory[idx];
+  if (!turn || !Array.isArray(turn.columns) || !Array.isArray(turn.rows)) return;
+  const escapeCsvCell = (val) => {
+    const s = val == null ? "" : String(val);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lines = [
+    turn.columns.map(escapeCsvCell).join(","),
+    ...turn.rows.map(r => r.map(escapeCsvCell).join(","))
+  ];
+  navigator.clipboard.writeText(lines.join("\n")).then(() => {
+    if (btnEl) {
+      const orig = btnEl.innerHTML;
+      btnEl.innerHTML = `<span class="text-emerald-400">CSV Copied!</span>`;
+      setTimeout(() => { btnEl.innerHTML = orig; }, 1400);
+    }
+  }).catch(() => {});
+}
+
+function switchTurnChartType(turnIdx, chartType) {
+  const turn = chatHistory[turnIdx];
+  if (!turn) return;
+  if (!turn.chart_config) {
+    turn.chart_config = {
+      type: chartType,
+      title: "Query Visualization",
+      x_column: (turn.columns && turn.columns[0]) || null,
+      y_columns: (turn.columns && turn.columns.slice(1, 3)) || []
+    };
+  } else {
+    turn.chart_config.type = chartType;
+  }
+  saveConversation();
+  renderConversationThread();
+}
+
+/* ── Conversation Thread & Interactive Chart Rendering ─────────────────── */
 
 function renderConversationThread() {
   const container = document.getElementById("genieChatThread");
+  if (!container) return;
+
   if (!chatHistory || chatHistory.length === 0) {
+    const examplesHtml = (EXAMPLE_QUESTIONS_LIST || []).map(q => `
+      <button type="button"
+              onclick='askExampleQuestion(${JSON.stringify(q)})'
+              class="btn-ghost text-xs py-1.5 px-3 border border-gray-800 rounded-full hover:border-blue-500/40">
+        ${escapeHtml(q)}
+      </button>
+    `).join("");
+
     container.innerHTML = `
       <div id="genieEmptyState" class="h-full flex flex-col items-center justify-center text-center py-8 space-y-4">
-        <div class="w-11 h-11 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        <div class="w-12 h-12 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 shadow-inner">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
         </div>
         <div class="max-w-md space-y-1">
           <p class="text-sm font-semibold text-gray-200">Ask anything about your Lakehouse data</p>
           <p class="text-xs text-gray-500">
-            Genie inspects your workspace Catalog schemas, generates &amp; self-corrects DuckDB SQL, runs live queries against S3 Parquet, and plots charts automatically.
+            Genie inspects your workspace Catalog schemas, generates &amp; self-corrects DuckDB SQL, runs live queries against S3 Parquet, and plots interactive charts automatically.
           </p>
+        </div>
+        <div class="flex flex-wrap justify-center gap-2 max-w-2xl pt-2">
+          ${examplesHtml}
         </div>
       </div>`;
     return;
@@ -220,11 +1050,72 @@ function renderConversationThread() {
   chatHistory.forEach((turn, idx) => {
     if (turn.role === "user") {
       const userDiv = document.createElement("div");
-      userDiv.className = "flex justify-end";
-      userDiv.innerHTML = `
-        <div class="max-w-2xl rounded-xl bg-blue-600/20 border border-blue-500/30 px-4 py-2.5 text-xs text-gray-100">
-          ${escapeHtml(turn.content)}
-        </div>`;
+      userDiv.className = "flex justify-end group";
+
+      if (editingTurnIndex === idx) {
+        userDiv.innerHTML = `
+          <div class="w-full max-w-2xl rounded-xl bg-gray-900 border border-blue-500/50 p-3 space-y-2.5 shadow-lg">
+            <div class="flex items-center justify-between text-[11px] text-blue-400 font-medium">
+              <span>Edit prompt &amp; re-run from here</span>
+              <span class="text-gray-500 font-mono text-[10px]">Enter to submit · Esc to cancel</span>
+            </div>
+            <textarea
+              id="genieInlineEditInput-${idx}"
+              rows="2"
+              onkeydown="handleInlineEditKeydown(event, ${idx})"
+              class="input-dark w-full text-xs leading-relaxed p-2.5 rounded-lg resize-y"
+            >${escapeHtml(turn.content)}</textarea>
+            <div class="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onclick="cancelEditGenieTurn()"
+                class="btn-ghost text-xs py-1 px-3 border border-gray-800 rounded-md text-gray-400 hover:text-gray-200"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onclick="submitEditedGenieTurn(${idx})"
+                class="btn-primary text-xs py-1 px-3 rounded-md flex items-center gap-1"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                <span>Save &amp; Submit</span>
+              </button>
+            </div>
+          </div>`;
+      } else {
+        userDiv.innerHTML = `
+          <div class="flex flex-col items-end gap-1 max-w-2xl">
+            <div
+              onclick="startEditGenieTurn(${idx})"
+              title="Click to edit and re-run this prompt"
+              class="genie-user-bubble cursor-pointer rounded-2xl rounded-br-sm bg-blue-600/20 hover:bg-blue-600/25 border border-blue-500/30 hover:border-blue-500/50 px-4 py-2.5 text-xs text-gray-100 leading-relaxed transition-all"
+            >
+              ${escapeHtml(turn.content)}
+            </div>
+            <div class="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity px-1 text-[11px] text-gray-500">
+              <button
+                type="button"
+                onclick="startEditGenieTurn(${idx})"
+                class="hover:text-blue-400 flex items-center gap-1"
+                title="Edit prompt and re-run"
+              >
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+                <span>Edit</span>
+              </button>
+              <span>·</span>
+              <button
+                type="button"
+                onclick="copyTurnText(${idx}, this)"
+                class="hover:text-gray-300 flex items-center gap-1"
+                title="Copy prompt"
+              >
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                <span>Copy</span>
+              </button>
+            </div>
+          </div>`;
+      }
       container.appendChild(userDiv);
       return;
     }
@@ -246,12 +1137,15 @@ function renderConversationThread() {
         `;
       }
       cancelDiv.innerHTML = `
-        <div class="flex items-center gap-2 text-gray-400 text-[11px]">
-          <svg class="w-3.5 h-3.5 text-gray-500 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-            <path stroke-linecap="round" stroke-linejoin="round" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/>
-          </svg>
-          <span class="italic font-medium">Request stopped after ${escapeHtml(turn.thinking_seconds || '0.0')}s</span>
+        <div class="flex items-center justify-between gap-2 text-gray-400 text-[11px]">
+          <div class="flex items-center gap-2">
+            <svg class="w-3.5 h-3.5 text-gray-500 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/>
+            </svg>
+            <span class="italic font-medium">Request stopped after ${escapeHtml(turn.thinking_seconds || '0.0')}s</span>
+          </div>
+          <button type="button" onclick="regenerateGenieTurn(${idx})" class="text-blue-400 hover:text-blue-300 font-medium">Retry →</button>
         </div>
         ${stepsHtml}
       `;
@@ -260,14 +1154,14 @@ function renderConversationThread() {
     }
 
     const msgDiv = document.createElement("div");
-    msgDiv.className = "rounded-xl bg-gray-900/90 border border-gray-800 p-4 space-y-3 text-xs";
+    msgDiv.className = "genie-assistant-card rounded-xl bg-gray-900/90 border border-gray-800 p-4 space-y-3.5 text-xs";
 
     let badgesHtml = `<span class="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">${escapeHtml(turn.mode || "genie")}</span>`;
     if (turn.row_count != null && turn.sql) {
       badgesHtml += `<span class="text-[11px] text-gray-400">${turn.row_count} row${turn.row_count === 1 ? "" : "s"}</span>`;
     }
     if (turn.execution_ms) {
-      badgesHtml += `<span class="text-[11px] text-gray-600 tabular-nums">${turn.execution_ms} ms</span>`;
+      badgesHtml += `<span class="text-[11px] text-gray-500 tabular-nums">${turn.execution_ms} ms</span>`;
     }
     if (turn.self_corrected) {
       badgesHtml += `<span class="text-[10px] px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">Auto-Fixed SQL</span>`;
@@ -299,7 +1193,7 @@ function renderConversationThread() {
       }).join("");
 
       thinkingHtml = `
-        <details class="group bg-gray-950/40 rounded-lg border border-gray-800/70 p-2.5 text-xs mb-3">
+        <details class="group bg-gray-950/40 rounded-lg border border-gray-800/70 p-2.5 text-xs">
           <summary class="flex items-center gap-2 cursor-pointer text-gray-400 hover:text-gray-200 select-none list-none text-[11px]">
             <svg class="w-3.5 h-3.5 text-blue-400 shrink-0" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 2L14.4 9.6L22 12L14.4 14.4L12 22L9.6 14.4L2 12L9.6 9.6L12 2Z"/>
@@ -315,29 +1209,72 @@ function renderConversationThread() {
       `;
     }
 
+    // Rich Markdown rendered content instead of raw loose markdown
+    const formattedMarkdownHtml = renderGenieMarkdown(turn.content);
+
     let bodyHtml = `
       <div class="flex items-center flex-wrap gap-2 pb-2 border-b border-gray-800/80">
         ${badgesHtml}
       </div>
       ${thinkingHtml}
-      <div class="text-gray-200 text-sm leading-relaxed whitespace-pre-wrap">${escapeHtml(turn.content)}</div>
+      <div class="genie-markdown">${formattedMarkdownHtml}</div>
     `;
 
     const hasRows = Array.isArray(turn.rows) && turn.rows.length > 0 && Array.isArray(turn.columns) && turn.columns.length > 0;
-    const hasChart = hasRows && turn.chart_config && turn.chart_config.type && turn.chart_config.type !== "table";
+    const activeChartType = (turn.chart_config && turn.chart_config.type) ? turn.chart_config.type : "bar";
+    const showChartCanvas = hasRows && activeChartType !== "table";
     const chartDomId = `genie-chart-${idx}-${++chartCounter}`;
 
-    if (hasChart) {
+    if (hasRows) {
+      const chartTypes = [
+        { id: "bar", label: "Bar" },
+        { id: "line", label: "Line" },
+        { id: "pie", label: "Pie" },
+        { id: "kpi", label: "KPI" },
+        { id: "table", label: "Table Only" }
+      ];
+      const switcherBtns = chartTypes.map(ct => `
+        <button
+          type="button"
+          onclick="switchTurnChartType(${idx}, '${ct.id}')"
+          class="px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
+            activeChartType === ct.id
+              ? "bg-blue-600 text-white"
+              : "text-gray-400 hover:text-gray-200 hover:bg-gray-800"
+          }"
+        >${ct.label}</button>
+      `).join("");
+
       bodyHtml += `
-        <div class="rounded-lg bg-gray-950/60 border border-gray-800/80 p-3">
-          <div id="${chartDomId}" class="w-full h-56"></div>
+        <div class="genie-chart-card rounded-xl bg-gray-950/60 border border-gray-800/80 p-3 space-y-3">
+          <div class="flex items-center justify-between flex-wrap gap-2 border-b border-gray-800/60 pb-2">
+            <div class="flex items-center gap-2">
+              <span class="text-[11px] font-semibold text-gray-300">${escapeHtml((turn.chart_config && turn.chart_config.title) || "Interactive Visualization")}</span>
+              <span class="text-[10px] text-gray-500">(${turn.rows.length} row${turn.rows.length === 1 ? "" : "s"})</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <div class="inline-flex rounded-md bg-gray-900 border border-gray-800 p-0.5">
+                ${switcherBtns}
+              </div>
+              <button
+                type="button"
+                onclick="copyTurnTableCsv(${idx}, this)"
+                class="px-2 py-1 rounded border border-gray-800 text-[10px] text-gray-400 hover:text-gray-200 hover:border-gray-700"
+                title="Copy result rows as CSV"
+              >
+                Copy CSV
+              </button>
+            </div>
+          </div>
+          ${showChartCanvas ? `<div id="${chartDomId}" class="w-full h-60"></div>` : ""}
         </div>
       `;
-      pendingCharts.push({ domId: chartDomId, turn: turn });
-    }
 
-    if (hasRows) {
-      let thead = turn.columns.map(c => `<th class="px-3 py-1.5 text-left font-semibold text-gray-500 whitespace-nowrap">${escapeHtml(c)}</th>`).join("");
+      if (showChartCanvas) {
+        pendingCharts.push({ domId: chartDomId, turn: turn });
+      }
+
+      let thead = turn.columns.map(c => `<th class="px-3 py-1.5 text-left font-semibold text-gray-400 whitespace-nowrap">${escapeHtml(c)}</th>`).join("");
       let tbody = turn.rows.slice(0, 25).map(r => {
         const cells = r.map(cell => `<td class="px-3 py-1.5 text-gray-300 font-mono whitespace-nowrap max-w-xs truncate">${escapeHtml(cell)}</td>`).join("");
         return `<tr class="hover:bg-white/[0.02]">${cells}</tr>`;
@@ -355,10 +1292,12 @@ function renderConversationThread() {
     if (turn.sql) {
       bodyHtml += `
         <details class="group">
-          <summary class="text-[11px] text-gray-500 cursor-pointer hover:text-gray-300 select-none">
-            View Generated DuckDB SQL
+          <summary class="text-[11px] text-gray-500 cursor-pointer hover:text-gray-300 select-none flex items-center gap-2">
+            <span>View Generated DuckDB SQL</span>
           </summary>
-          <pre class="mt-2 bg-gray-950 border border-gray-800 rounded p-3 font-mono text-[11px] text-blue-300 overflow-x-auto whitespace-pre-wrap">${escapeHtml(turn.sql)}</pre>
+          <div class="mt-2 relative">
+            <pre class="bg-gray-950 border border-gray-800 rounded-lg p-3 font-mono text-[11px] text-blue-300 overflow-x-auto whitespace-pre-wrap">${escapeHtml(turn.sql)}</pre>
+          </div>
         </details>
       `;
     }
@@ -382,6 +1321,41 @@ function renderConversationThread() {
         </details>
       `;
     }
+
+    // Modern Chatbot Message Footer Actions (Copy Response, Regenerate, Copy SQL)
+    bodyHtml += `
+      <div class="pt-2 border-t border-gray-800/60 flex items-center gap-3 text-[11px] text-gray-500">
+        <button
+          type="button"
+          onclick="copyTurnText(${idx}, this)"
+          class="hover:text-gray-300 flex items-center gap-1 transition-colors"
+          title="Copy response"
+        >
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+          <span>Copy</span>
+        </button>
+        <button
+          type="button"
+          onclick="regenerateGenieTurn(${idx})"
+          class="hover:text-blue-400 flex items-center gap-1 transition-colors"
+          title="Regenerate response"
+        >
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          <span>Regenerate</span>
+        </button>
+        ${turn.sql ? `
+        <button
+          type="button"
+          onclick="copyTurnSql(${idx}, this)"
+          class="hover:text-blue-400 flex items-center gap-1 transition-colors"
+          title="Copy generated SQL"
+        >
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+          <span>Copy SQL</span>
+        </button>
+        ` : ""}
+      </div>
+    `;
 
     msgDiv.innerHTML = bodyHtml;
     container.appendChild(msgDiv);
@@ -416,6 +1390,10 @@ function renderGenieEChart(el, turn) {
     return;
   }
 
+  const existingInstance = echarts.getInstanceByDom(el);
+  if (existingInstance) {
+    existingInstance.dispose();
+  }
   const chart = echarts.init(el);
   const xLabels = rows.map(r => String(r[xIdx] ?? ""));
   const themeCfg = (typeof getLakeEChartsThemeConfig === "function")
@@ -656,8 +1634,10 @@ async function submitGenieQuestion(questionText) {
   const input = document.getElementById("question");
   const btn = document.getElementById("askBtn");
   const hint = document.getElementById("loadingHint");
-  const q = (questionText || input.value || "").trim();
+  const q = (questionText || (input ? input.value : "") || "").trim();
   if (!q) return;
+
+  recordPromptInHistory(q);
 
   const priorHistory = chatHistory.filter(t => !t.cancelled).map(t => ({
     role: t.role,
@@ -666,8 +1646,12 @@ async function submitGenieQuestion(questionText) {
   }));
 
   chatHistory.push({ role: "user", content: q });
+  saveConversation();
   renderConversationThread();
-  input.value = "";
+  if (input) {
+    input.value = "";
+    autoResizeComposer(input);
+  }
 
   const container = document.getElementById("genieChatThread");
   const startTime = Date.now();
@@ -830,15 +1814,61 @@ async function submitGenieQuestion(questionText) {
   } finally {
     activeGenieRequest = null;
     setAskButtonRunning(false);
-    btn.disabled = false;
-    hint.classList.add("hidden");
+    if (btn) btn.disabled = false;
+    if (hint) hint.classList.add("hidden");
   }
+}
+
+// Composer keyboard navigation: Enter to submit, Shift+Enter for newline, Up/Down arrows for prompt history
+const questionComposer = document.getElementById("question");
+if (questionComposer) {
+  questionComposer.addEventListener("input", function() {
+    autoResizeComposer(this);
+  });
+
+  questionComposer.addEventListener("keydown", function(e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (activeGenieRequest) {
+        cancelGenieRequest();
+        return;
+      }
+      submitGenieQuestion();
+      return;
+    }
+
+    if (e.key === "ArrowUp") {
+      const cursorAtFirstLine = !this.value.slice(0, this.selectionStart).includes("\n");
+      if (cursorAtFirstLine) {
+        const handled = recallPreviousPrompt("up");
+        if (handled) e.preventDefault();
+      }
+    } else if (e.key === "ArrowDown") {
+      const cursorAtLastLine = !this.value.slice(this.selectionEnd).includes("\n");
+      if (cursorAtLastLine && promptHistoryIndex !== -1) {
+        const handled = recallPreviousPrompt("down");
+        if (handled) e.preventDefault();
+      }
+    }
+  });
 }
 
 document.getElementById("aiForm").addEventListener("submit", function(e) {
   e.preventDefault();
   if (activeGenieRequest) { cancelGenieRequest(); return; }
   submitGenieQuestion();
+});
+
+// Format server-rendered fallback markdown if present
+const serverFallbackEl = document.getElementById("serverFallbackAnswer");
+if (serverFallbackEl) {
+  const rawMd = serverFallbackEl.getAttribute("data-raw-markdown") || serverFallbackEl.textContent || "";
+  serverFallbackEl.innerHTML = renderGenieMarkdown(rawMd);
+}
+
+// Re-sync ECharts theme dynamically on light/dark theme toggle
+window.addEventListener("lake:theme-change", function() {
+  renderConversationThread();
 });
 
 loadConversation();
