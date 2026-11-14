@@ -33,11 +33,13 @@ def test_ai_template_includes_collapsible_chat_history_sidebar_and_multi_thread_
 
 
 def test_ai_template_includes_auto_expanding_composer_and_up_down_arrow_prompt_history():
-    """Issue #529: Verify auto-expanding textarea composer and ArrowUp/ArrowDown prompt history recall."""
+    """Issue #529: Verify aligned single-line text input composer and ArrowUp/ArrowDown prompt history recall."""
     html = AI_TEMPLATE.read_text(encoding="utf-8")
 
-    assert '<textarea' in html
+    assert 'type="text"' in html
     assert 'id="question"' in html
+    assert "max-w-7xl" not in html
+    assert html.index('id="genieChatThread"') < html.index('id="genieHistorySidebar"')
     assert "function recallPreviousPrompt(" in html
     assert "function getPromptHistoryList()" in html
     assert "function recordPromptInHistory(" in html
