@@ -584,6 +584,39 @@ class SecretAcl(Base):
     creator: Mapped["User | None"] = relationship(foreign_keys=[created_by])
 
 
+class SecretAuditLog(Base):
+    __tablename__ = "secret_audit_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    scope_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("secret_scopes.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    scope_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    key: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)  # PUT_SECRET, DELETE_SECRET
+    version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    actor_type: Mapped[str] = mapped_column(String(32), nullable=False)  # user, pipeline
+    actor_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    bundle_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    pipeline_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    task_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True
+    )
+
+
 class DeletedCatalogAsset(Base):
     __tablename__ = "deleted_catalog_assets"
 

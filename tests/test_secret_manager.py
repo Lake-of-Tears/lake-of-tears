@@ -563,3 +563,153 @@ def test_secrets_validation_and_cascade(client, db_session):
     assert (
         db_session.query(SecretAcl).filter(SecretAcl.scope_id == uuid.UUID(scope_id)).count() == 0
     )
+
+
+def test_pipeline_task_token_read_rotate_and_audit(client, db_session):
+    admin_user, admin_token = create_user_and_token(db_session, "admin-task@example.com")
+    create_workspace(db_session, "TMD 291", "default", admin_user)
+    other_ws = create_workspace(db_session, "Other WS", "other-ws", admin_user)
+    admin_headers = {"Authorization": f"Bearer {admin_token}", "X-Workspace-Slug": "default"}
+
+    # 1. Create scope tmd-291 and seed a key
+    res = client.post(
+        "/api/v1/secrets/scopes",
+        headers=admin_headers,
+        json={"name": "tmd-291", "backend_type": "internal"},
+    )
+    assert res.status_code == 201
+
+    res = client.put(
+        "/api/v1/secrets/scopes/tmd-291/keys/GUSTO_SESSION_STORAGE_STATE_B64",
+        headers=admin_headers,
+        json={"value": "initial-session-v1"},
+    )
+    assert res.status_code == 200
+    assert res.json()["version"] == 1
+
+    # 2. Mint a task token for a read-only bundle (e.g. tmd-291-sales-and-product-mix-pipeline)
+    sales_token = auth.create_task_token(
+        workspace_slug="default",
+        bundle_name="tmd_291_sales_and_product_mix_pipeline",
+        pipeline_name="tmd_291_sales_pipeline",
+        task_name="fetch_revel_sales",
+    )
+    sales_headers = {"Authorization": f"Bearer {sales_token}"}
+
+    # Before granting bundle ACL, even reading is 403
+    res = client.get(
+        "/api/v1/secrets/scopes/tmd-291/keys/GUSTO_SESSION_STORAGE_STATE_B64",
+        headers=sales_headers,
+    )
+    assert res.status_code == 403
+
+    # 3. Grant READ to bundle:* and WRITE to bundle:tmd-291-payroll-pipeline
+    res = client.post(
+        "/api/v1/secrets/scopes/tmd-291/acls",
+        headers=admin_headers,
+        json={"principal_type": "bundle", "principal_id": "*", "permission": "READ"},
+    )
+    assert res.status_code == 200
+
+    res = client.post(
+        "/api/v1/secrets/scopes/tmd-291/acls",
+        headers=admin_headers,
+        json={
+            "principal_type": "bundle",
+            "principal_id": "tmd-291-payroll-pipeline",
+            "permission": "WRITE",
+        },
+    )
+    assert res.status_code == 200
+
+    # 4. Read-only bundle can now read keys and values, but gets 403 on PUT/POST/DELETE
+    res = client.get(
+        "/api/v1/secrets/scopes/tmd-291/keys/GUSTO_SESSION_STORAGE_STATE_B64",
+        headers=sales_headers,
+    )
+    assert res.status_code == 200
+    assert res.json()["value"] == "initial-session-v1"
+    assert res.json()["version"] == 1
+
+    res = client.put(
+        "/api/v1/secrets/scopes/tmd-291/keys/GUSTO_SESSION_STORAGE_STATE_B64",
+        headers=sales_headers,
+        json={"value": "unauthorized-overwrite"},
+    )
+    assert res.status_code == 403
+
+    # Cross-workspace access with task token is rejected with 403
+    res = client.get(
+        "/api/v1/secrets/scopes/tmd-291/keys",
+        headers={**sales_headers, "X-Workspace-Slug": other_ws.slug},
+    )
+    assert res.status_code == 403
+
+    # 5. Payroll bundle (with WRITE permission, hyphen/underscore normalized) can rotate the secret
+    payroll_token = auth.create_task_token(
+        workspace_slug="default",
+        bundle_name="tmd_291_payroll_pipeline",
+        pipeline_name="tmd_291_payroll_pipeline",
+        task_name="fetch_payroll_runs",
+    )
+    payroll_headers = {"Authorization": f"Bearer {payroll_token}"}
+
+    res = client.put(
+        "/api/v1/secrets/scopes/tmd-291/keys/GUSTO_SESSION_STORAGE_STATE_B64",
+        headers=payroll_headers,
+        json={"value": "rotated-session-v2"},
+    )
+    assert res.status_code == 200
+    assert res.json()["version"] == 2
+
+    # Subsequent GET returns v2 immediately
+    res = client.get(
+        "/api/v1/secrets/scopes/tmd-291/keys/GUSTO_SESSION_STORAGE_STATE_B64",
+        headers=payroll_headers,
+    )
+    assert res.status_code == 200
+    assert res.json()["value"] == "rotated-session-v2"
+    assert res.json()["version"] == 2
+
+    # 6. Verify audit log records both writes (user v1 + pipeline v2)
+    res = client.get("/api/v1/secrets/scopes/tmd-291/audit", headers=admin_headers)
+    assert res.status_code == 200
+    audit_entries = res.json()
+    assert len(audit_entries) >= 2
+    latest = audit_entries[0]
+    assert latest["key"] == "GUSTO_SESSION_STORAGE_STATE_B64"
+    assert latest["action"] == "PUT_SECRET"
+    assert latest["version"] == 2
+    assert latest["actor_type"] == "pipeline"
+    assert (
+        latest["actor_id"] == "tmd_291_payroll_pipeline/tmd_291_payroll_pipeline/fetch_payroll_runs"
+    )
+    assert latest["bundle_name"] == "tmd_291_payroll_pipeline"
+    assert latest["task_name"] == "fetch_payroll_runs"
+
+    # 7. Verify generate_bundle_dag_code embeds _mint_task_token and LOT_TASK_TOKEN
+    from bundles.deployer import generate_bundle_dag_code
+    from bundles.schemas import PipelineResource, PipelineTask
+
+    pipe = PipelineResource(
+        name="tmd_291_payroll_pipeline",
+        schedule=None,
+        tasks=[
+            PipelineTask(
+                name="fetch_payroll_runs",
+                type="python_script",
+                entrypoint="tasks/fetch_payroll_runs.py",
+                timeout_seconds=1800,
+            )
+        ],
+    )
+    dag_id, dag_code = generate_bundle_dag_code(
+        workspace_slug="default",
+        bundle_name="tmd-291-payroll-pipeline",
+        target_name="dev",
+        pipeline=pipe,
+    )
+    assert dag_id == "ws_default_tmd_291_payroll_pipeline_tmd_291_payroll_pipeline"
+    assert "LOT_TASK_TOKEN" in dag_code
+    assert "_mint_task_token" in dag_code
+    assert '"pipeline_name": "tmd_291_payroll_pipeline"' in dag_code

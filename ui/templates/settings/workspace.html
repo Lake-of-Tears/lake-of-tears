@@ -1135,6 +1135,7 @@
                         class="w-full bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-md px-2 py-1.5 focus:outline-none focus:border-blue-500">
                   <option value="user">Workspace Member</option>
                   <option value="role">Workspace Role</option>
+                  <option value="bundle">Pipeline Bundle</option>
                 </select>
               </div>
               <div>
@@ -1150,6 +1151,8 @@
                   <option value="write">Write Members</option>
                   <option value="read">Read Members</option>
                 </select>
+                <input id="acl-principal-id-bundle" type="text" placeholder="bundle name or * (all bundles)"
+                       class="hidden w-full bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-md px-2 py-1.5 font-mono focus:outline-none focus:border-blue-500" />
               </div>
               <div>
                 <label class="block text-xs text-gray-400 font-medium mb-1">Permission</label>
@@ -1391,9 +1394,11 @@
   }
 
   function aclPrincipalTypeChanged() {
-    const isUser = document.getElementById('acl-principal-type').value === 'user';
-    document.getElementById('acl-principal-id-user').classList.toggle('hidden', !isUser);
-    document.getElementById('acl-principal-id-role').classList.toggle('hidden', isUser);
+    const pType = document.getElementById('acl-principal-type').value;
+    document.getElementById('acl-principal-id-user').classList.toggle('hidden', pType !== 'user');
+    document.getElementById('acl-principal-id-role').classList.toggle('hidden', pType !== 'role');
+    const bundleEl = document.getElementById('acl-principal-id-bundle');
+    if (bundleEl) bundleEl.classList.toggle('hidden', pType !== 'bundle');
   }
 
   async function openAclModal(scopeId, scopeName) {
@@ -1460,7 +1465,9 @@
     const pType = document.getElementById('acl-principal-type').value;
     const pId = pType === 'user'
       ? document.getElementById('acl-principal-id-user').value
-      : document.getElementById('acl-principal-id-role').value;
+      : (pType === 'bundle'
+          ? (document.getElementById('acl-principal-id-bundle')?.value || '').trim()
+          : document.getElementById('acl-principal-id-role').value);
     const perm = document.getElementById('acl-permission').value;
     const btn = document.getElementById('new-acl-btn');
     const errBox = document.getElementById('new-acl-error');

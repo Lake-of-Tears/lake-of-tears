@@ -1171,6 +1171,10 @@ class SecretKeyCreate(BaseModel):
     value: str
 
 
+class SecretValueUpdate(BaseModel):
+    value: str
+
+
 class SecretKeySummaryResponse(BaseModel):
     key: str
     version: int
@@ -1191,7 +1195,7 @@ class SecretValueResponse(BaseModel):
 
 
 class SecretAclCreate(BaseModel):
-    principal_type: str = Field(..., pattern=r"^(user|role)$")
+    principal_type: str = Field(..., pattern=r"^(user|role|bundle)$")
     principal_id: str = Field(..., min_length=1, max_length=255)
     permission: str = Field(..., pattern=r"^(READ|WRITE|MANAGE)$")
 
@@ -1204,6 +1208,25 @@ class SecretAclResponse(BaseModel):
     permission: str
     created_at: datetime
     created_by: uuid.UUID | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class SecretAuditLogResponse(BaseModel):
+    id: uuid.UUID
+    workspace_id: uuid.UUID | None = None
+    scope_id: uuid.UUID | None = None
+    scope_name: str
+    key: str
+    action: str
+    version: int | None = None
+    actor_type: str
+    actor_id: str
+    user_id: uuid.UUID | None = None
+    bundle_name: str | None = None
+    pipeline_name: str | None = None
+    task_name: str | None = None
+    created_at: datetime
 
     model_config = {"from_attributes": True}
 

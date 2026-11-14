@@ -85,10 +85,43 @@ _BUNDLE_TASK_RUNNER_CODE = '''def _run_bundle_task(**kwargs):
 
     workspace_slug = kwargs.get("workspace_slug")
     bundle_name = kwargs.get("bundle_name")
+    pipeline_name = kwargs.get("pipeline_name") or ""
     task_name = kwargs.get("task_name")
     task_type = kwargs.get("task_type", "duckdb_sql")
     entrypoint = kwargs.get("entrypoint", "")
     params = kwargs.get("parameters", {})
+    timeout_seconds = int(kwargs.get("timeout_seconds") or 3600)
+
+    def _mint_task_token() -> str:
+        import base64
+        import hashlib
+        import hmac
+        import time
+
+        secret = os.getenv("AUTH_SECRET_KEY", "dev-secret-please-change-in-production")
+        now_ts = int(time.time())
+        header_b64 = base64.urlsafe_b64encode(
+            json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode("utf-8")
+        ).rstrip(b"=")
+        payload_b64 = base64.urlsafe_b64encode(
+            json.dumps(
+                {
+                    "typ": "lot_task",
+                    "sub": f"pipeline:{bundle_name}/{pipeline_name}/{task_name}",
+                    "workspace_slug": str(workspace_slug),
+                    "bundle_name": str(bundle_name),
+                    "pipeline_name": str(pipeline_name),
+                    "task_name": str(task_name),
+                    "iat": now_ts,
+                    "exp": now_ts + max(timeout_seconds, 3600) + 600,
+                },
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).rstrip(b"=")
+        signing_input = header_b64 + b"." + payload_b64
+        sig = hmac.new(secret.encode("utf-8"), signing_input, hashlib.sha256).digest()
+        sig_b64 = base64.urlsafe_b64encode(sig).rstrip(b"=")
+        return (signing_input + b"." + sig_b64).decode("ascii")
 
     logger.info("Executing bundle task: %s (%s) for bundle %s in workspace %s", task_name, task_type, bundle_name, workspace_slug)
 
@@ -151,11 +184,21 @@ _BUNDLE_TASK_RUNNER_CODE = '''def _run_bundle_task(**kwargs):
             tf.write(script_content)
             tf_path = tf.name
         try:
+            backend_url = (
+                os.getenv("LOT_BACKEND_URL")
+                or os.getenv("BACKEND_URL")
+                or "http://lake-of-tears-backend:8000"
+            )
+            task_token = _mint_task_token()
             env = os.environ.copy()
             env.update({
                 "WORKSPACE_SLUG": str(workspace_slug),
                 "BUNDLE_NAME": str(bundle_name),
+                "PIPELINE_NAME": str(pipeline_name),
                 "TASK_NAME": str(task_name),
+                "LOT_BACKEND_URL": str(backend_url),
+                "BACKEND_URL": str(backend_url),
+                "LOT_TASK_TOKEN": str(task_token),
                 "MINIO_ENDPOINT": str(minio_endpoint),
                 "MINIO_ACCESS_KEY": str(minio_access),
                 "MINIO_SECRET_KEY": str(minio_secret),
@@ -401,11 +444,13 @@ def generate_bundle_dag_code(
         op_kwargs={{
             "workspace_slug": "{clean_ws}",
             "bundle_name": "{clean_bundle}",
+            "pipeline_name": "{clean_pipe}",
             "task_name": "{task.name}",
             "task_type": "{task_type}",
             "entrypoint": "{entrypoint}",
             "requirements": "{task.requirements or ''}",
             "parameters": {params_json},
+            "timeout_seconds": {timeout_sec},
         }},
         execution_timeout=timedelta(seconds={timeout_sec}),
         retries={retries},{exec_cfg_arg}

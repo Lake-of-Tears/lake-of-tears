@@ -359,7 +359,9 @@ document.addEventListener('alpine:init', () => {
         const pType = pTypeEl ? pTypeEl.value : this.principalType;
         const pId = pType === 'user'
           ? (document.getElementById('acl-principal-id-user')?.value || this.principalIdUser)
-          : (document.getElementById('acl-principal-id-role')?.value || this.principalIdRole);
+          : (pType === 'bundle'
+              ? (document.getElementById('acl-principal-id-bundle')?.value || '').trim()
+              : (document.getElementById('acl-principal-id-role')?.value || this.principalIdRole));
         const permEl = document.getElementById('acl-permission');
         const perm = permEl ? permEl.value : this.permission;
 
@@ -460,11 +462,13 @@ document.addEventListener('alpine:init', () => {
       window.deleteAcl = (aclId) => this.aclModal.revokeAcl(aclId);
       window.aclPrincipalTypeChanged = () => {
         const pTypeEl = document.getElementById('acl-principal-type');
-        const isUser = pTypeEl ? pTypeEl.value === 'user' : true;
+        const pType = pTypeEl ? pTypeEl.value : 'user';
         const userGroup = document.getElementById('acl-principal-id-user');
         const roleGroup = document.getElementById('acl-principal-id-role');
-        if (userGroup) userGroup.classList.toggle('hidden', !isUser);
-        if (roleGroup) roleGroup.classList.toggle('hidden', isUser);
+        const bundleGroup = document.getElementById('acl-principal-id-bundle');
+        if (userGroup) userGroup.classList.toggle('hidden', pType !== 'user');
+        if (roleGroup) roleGroup.classList.toggle('hidden', pType !== 'role');
+        if (bundleGroup) bundleGroup.classList.toggle('hidden', pType !== 'bundle');
       };
 
       // Escape key closes modals
