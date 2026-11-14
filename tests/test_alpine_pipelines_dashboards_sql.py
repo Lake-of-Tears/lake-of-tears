@@ -122,8 +122,10 @@ def test_pipelines_drawer_header_alignment_and_controls():
     assert 'id="drawer-dag-id"' in pipelines_html
     assert "truncate max-w-[240px]" in pipelines_html or "truncate" in pipelines_html
 
-    # Drawer width responsiveness
+    # Drawer width responsiveness (Issue #530)
     assert "lg:max-w-3xl" in pipelines_html or "max-w-2xl" in pipelines_html
+    assert "xl:max-w-4xl" in pipelines_html
+    assert "2xl:max-w-5xl" in pipelines_html
 
     # Color swatch and action buttons
     assert 'id="drawer-color-swatch"' in pipelines_html

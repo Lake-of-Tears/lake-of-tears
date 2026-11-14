@@ -5,13 +5,13 @@
 {% endblock %}
 
 {% block content %}
-<div class="max-w-7xl mx-auto space-y-6" id="pipelines-container" x-data="pipelinesManager()">
+<div class="w-full min-h-full flex flex-col gap-5" id="pipelines-container" x-data="pipelinesManager()">
 
   <!-- Toast Notification Container -->
   <div id="toast-container" class="fixed top-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
 
   <!-- Page Header -->
-  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-white/[0.07]">
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-white/[0.07] shrink-0">
     <div>
       <div class="flex items-center gap-3">
         <h1 class="text-xl font-bold tracking-tight text-gray-100">Pipelines</h1>
@@ -296,7 +296,7 @@
   </style>
 
   <!-- ── 24-Hour Visual Schedule Timeline ─────────────────────────────────── -->
-  <div id="timeline-banner" class="card overflow-hidden border border-white/[0.08] bg-[#141414] transition-all duration-200">
+  <div id="timeline-banner" class="card overflow-hidden border border-white/[0.08] bg-[#141414] transition-all duration-200 shrink-0">
     <!-- Banner Header Toolbar -->
     <div class="timeline-toolbar px-4 py-2.5 bg-white/[0.02] border-b border-white/[0.06] flex flex-wrap items-center justify-between gap-3 select-none">
       <!-- Left Title & Date Navigator -->
@@ -395,7 +395,7 @@
           <!-- Time Axis Header -->
           <div class="flex items-center border-b border-white/[0.06] bg-black/30 sticky top-0 z-20" id="timeline-ruler-header">
             <!-- Fixed Left Column Header -->
-            <div class="timeline-sticky-corner-header w-48 sm:w-60 shrink-0 px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wider border-r border-white/[0.06] bg-[#141414] sticky left-0 z-30">
+            <div class="timeline-sticky-corner-header w-48 sm:w-60 lg:w-72 shrink-0 px-3 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wider border-r border-white/[0.06] bg-[#141414] sticky left-0 z-30">
               Pipeline
             </div>
             <!-- Time Ticks Ruler -->
@@ -407,7 +407,7 @@
           <!-- Swimlanes Wrapper with Grid Overlay -->
           <div id="timeline-swimlanes-wrapper" class="relative">
             <!-- Grid overlay across the swimlane track area -->
-            <div id="timeline-grid-overlay" class="absolute top-0 bottom-0 right-0 left-48 sm:left-60 pointer-events-none z-0">
+            <div id="timeline-grid-overlay" class="absolute top-0 bottom-0 right-0 left-48 sm:left-60 lg:left-72 pointer-events-none z-0">
               <!-- Vertical hour grid lines & NOW indicator line -->
             </div>
             <!-- Swimlanes Container -->
@@ -421,7 +421,7 @@
   </div>
 
   <!-- Filter & Search Toolbar -->
-  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
     <!-- Filter Pills -->
     <div class="filter-pill-container flex items-center gap-1 bg-white/[0.04] p-1 rounded-lg border border-white/[0.06] text-xs">
       <button onclick="setFilter('all')" id="filter-all" class="filter-pill active px-3 py-1 rounded-md font-medium transition-colors">
@@ -452,8 +452,8 @@
   </div>
 
   <!-- Pipelines Table Card -->
-  <div class="card pipelines-table-card overflow-hidden">
-    <div class="overflow-x-auto">
+  <div class="card pipelines-table-card overflow-hidden flex-1 flex flex-col justify-between min-h-[360px]">
+    <div class="overflow-x-auto flex-1">
       <table class="pipelines-table w-full text-left text-xs text-gray-300">
         <thead class="bg-white/[0.02] border-b border-white/[0.07] text-[11px] font-medium text-gray-500 uppercase tracking-wider">
           <tr>
@@ -484,7 +484,7 @@
     </div>
 
     <!-- Pipelines Pagination Toolbar -->
-    <div id="pipelines-pagination-toolbar" class="px-5 py-3 border-t border-white/[0.06] bg-black/20 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-gray-400">
+    <div id="pipelines-pagination-toolbar" class="px-5 py-3 border-t border-white/[0.06] bg-black/20 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-gray-400 mt-auto shrink-0">
       <div id="pipelines-pagination-info" class="font-medium">
         Showing 0-0 of 0 pipelines
       </div>
@@ -498,6 +498,7 @@
             <option value="10">10</option>
             <option value="25">25</option>
             <option value="50">50</option>
+            <option value="100">100</option>
           </select>
         </div>
 
@@ -590,7 +591,7 @@
   <div class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onclick="closeInspector()"></div>
 
   <div class="fixed inset-y-0 right-0 max-w-full flex pl-10">
-    <div id="inspector-drawer-panel" class="w-screen max-w-2xl lg:max-w-3xl bg-[#161616] border-l border-white/[0.08] shadow-2xl flex flex-col h-full">
+    <div id="inspector-drawer-panel" class="w-screen max-w-2xl lg:max-w-3xl xl:max-w-4xl 2xl:max-w-5xl bg-[#161616] border-l border-white/[0.08] shadow-2xl flex flex-col h-full">
 
       <!-- Drawer Header -->
       <div id="inspector-drawer-header" class="px-5 py-4 border-b border-white/[0.08] flex items-center justify-between gap-4 shrink-0 bg-[#1a1a1a]">
@@ -603,12 +604,12 @@
             <div class="flex items-center gap-2 min-w-0">
               <input id="drawer-name-input" type="text"
                      placeholder="Pipeline Display Name"
-                     class="text-sm font-semibold text-gray-100 bg-transparent border-b border-dashed border-gray-600 focus:border-blue-400 focus:outline-none min-w-0 max-w-xs px-0.5 py-0.5 transition-colors truncate"
+                     class="text-sm font-semibold text-gray-100 bg-transparent border-b border-dashed border-gray-600 focus:border-blue-400 focus:outline-none min-w-0 max-w-xs sm:max-w-md lg:max-w-lg px-0.5 py-0.5 transition-colors truncate"
                      title="Click to edit pipeline display name"/>
               <span id="drawer-status-badge" class="shrink-0"></span>
             </div>
             <div class="flex items-center gap-2 mt-0.5 min-w-0">
-              <span id="drawer-dag-id" class="text-xs text-gray-400 font-mono truncate max-w-[240px] sm:max-w-[320px]" title="Airflow DAG ID">pipeline_id</span>
+              <span id="drawer-dag-id" class="text-xs text-gray-400 font-mono truncate max-w-[240px] sm:max-w-[360px] lg:max-w-[500px]" title="Airflow DAG ID">pipeline_id</span>
             </div>
           </div>
         </div>
@@ -984,9 +985,13 @@
   let currentSelectedTaskId = null;
   const userRole = "{{ my_role }}";
   let currentPage = 1;
-  let pageSize = parseInt(localStorage.getItem('pipelines_page_size') || '10', 10);
-  if (![10, 25, 50].includes(pageSize)) {
-    pageSize = 10;
+  let pageSize = parseInt(localStorage.getItem('pipelines_page_size') || '25', 10);
+  if (![10, 25, 50, 100].includes(pageSize)) {
+    pageSize = 25;
+  }
+  const initialPageSizeSelect = document.getElementById('pipelines-page-size');
+  if (initialPageSizeSelect) {
+    initialPageSizeSelect.value = String(pageSize);
   }
   let lastFilteredPipelines = [];
 
@@ -1824,7 +1829,7 @@
       return `
         <div class="timeline-swimlane-row flex items-center hover:bg-white/[0.02] transition-colors group relative" id="swimlane-${dagId}">
           <!-- Sticky Left Pipeline Lane Info -->
-          <div class="timeline-sticky-pipeline-col w-48 sm:w-60 shrink-0 px-3 py-2 flex items-center justify-between border-r border-white/[0.06] bg-[#141414] sticky left-0 z-10">
+          <div class="timeline-sticky-pipeline-col w-48 sm:w-60 lg:w-72 shrink-0 px-3 py-2 flex items-center justify-between border-r border-white/[0.06] bg-[#141414] sticky left-0 z-10">
             <div class="flex items-center gap-2 min-w-0">
               <button onclick="openColorPicker('${dagId}', event)"
                       ${isViewer ? 'disabled title="Viewer cannot edit pipeline color"' : 'title="Change Pipeline Color"'}
@@ -1990,7 +1995,7 @@
 
   function changePipelinesPageSize(newSize) {
     const parsed = parseInt(newSize, 10);
-    if (![10, 25, 50].includes(parsed)) return;
+    if (![10, 25, 50, 100].includes(parsed)) return;
     pageSize = parsed;
     try {
       localStorage.setItem('pipelines_page_size', String(pageSize));
@@ -2151,7 +2156,7 @@
               ${p.is_bundle_pipeline ? `<span class="px-1.5 py-0.2 bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-[10px] rounded font-medium">LAB</span>` : ''}
               ${(!p.is_bundle_pipeline && p.is_notebook_job) ? `<span class="px-1.5 py-0.2 bg-purple-500/10 text-purple-400 border border-purple-500/20 text-[10px] rounded">Notebook</span>` : ''}
             </div>
-            <p class="text-[11px] text-gray-500 truncate max-w-xs mt-0.5">${p.description || 'No description provided'}</p>
+            <p class="text-[11px] text-gray-500 truncate max-w-2xl xl:max-w-4xl mt-0.5">${p.description || 'No description provided'}</p>
           </td>
 
           <!-- Schedule & Triggers -->

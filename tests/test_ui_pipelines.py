@@ -68,6 +68,52 @@ def test_get_pipelines_page_renders_native_template():
         assert '<option value="10">10</option>' in response.text
         assert '<option value="25">25</option>' in response.text
         assert '<option value="50">50</option>' in response.text
+        assert '<option value="100">100</option>' in response.text
+
+
+def test_get_pipelines_page_full_viewport_layout_and_page_size():
+    """Issue #530: Verify Pipelines page expands to 100% full-viewport real estate with 25-row default pagination."""
+    token, mock_workspaces = _create_auth_cookie(role="member")
+
+    with patch.object(main, "_fetch_workspaces", return_value=mock_workspaces):
+        response = client.get(
+            "/pipelines",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
+        )
+        assert response.status_code == 200
+
+        # 1. Full-width & full-height container layout (Issue #530)
+        assert (
+            'class="w-full min-h-full flex flex-col gap-5" id="pipelines-container"'
+            in response.text
+        )
+        assert 'class="max-w-7xl mx-auto space-y-6" id="pipelines-container"' not in response.text
+
+        # 2. Table card flex vertical stretch and pagination anchoring
+        assert (
+            "pipelines-table-card overflow-hidden flex-1 flex flex-col justify-between min-h-[360px]"
+            in response.text
+        )
+        assert "mt-auto shrink-0" in response.text
+
+        # 3. Fluid column descriptions
+        assert "max-w-2xl xl:max-w-4xl" in response.text
+        assert "max-w-xs mt-0.5" not in response.text
+
+        # 4. Default 25-row pagination in JS
+        assert (
+            "pageSize = parseInt(localStorage.getItem('pipelines_page_size') || '25', 10)"
+            in response.text
+        )
+        assert "[10, 25, 50, 100].includes(pageSize)" in response.text
+
+        # 5. Widen 24-hour visual timeline sticky column and grid overlay on desktop
+        assert "timeline-sticky-corner-header w-48 sm:w-60 lg:w-72" in response.text
+        assert "left-48 sm:left-60 lg:left-72" in response.text
+        assert "timeline-sticky-pipeline-col w-48 sm:w-60 lg:w-72" in response.text
+
+        # 6. Widen slide-over Run Inspector Drawer on large/ultrawide displays
+        assert "max-w-2xl lg:max-w-3xl xl:max-w-4xl 2xl:max-w-5xl" in response.text
 
 
 def test_get_pipelines_page_viewer_mode_restrictions():
