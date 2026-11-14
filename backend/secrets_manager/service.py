@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException, status
-from models import SecretAcl, SecretKey, SecretScope, User
+from models import SecretAcl, SecretAuditLog, SecretKey, SecretScope, User
 from sqlalchemy.orm import Session
 
 from secrets_manager.registry import get_secret_provider
@@ -23,9 +23,78 @@ PERMISSION_LEVELS: dict[str, int] = {
 SCOPE_NAME_REGEX = re.compile(r"^[a-zA-Z0-9_\-\.]+$")
 
 
+def _normalize_bundle_id(val: str | None) -> str:
+    return re.sub(r"[-\s]+", "_", (val or "").strip().lower())
+
+
 class SecretManagerService:
     def __init__(self, db: Session) -> None:
         self.db = db
+
+    def _record_audit_log(
+        self,
+        scope: SecretScope,
+        key: str,
+        action: str,
+        version: int | None,
+        user: User | None,
+    ) -> None:
+        is_task = getattr(user, "_is_task_token", False) is True
+        if is_task:
+            actor_type = "pipeline"
+            b_name = getattr(user, "_task_bundle_name", None)
+            p_name = getattr(user, "_task_pipeline_name", None)
+            t_name = getattr(user, "_task_name", None)
+            actor_id = (
+                getattr(user, "_task_actor_id", None)
+                or "/".join([x for x in (b_name, p_name, t_name) if x])
+                or "pipeline"
+            )
+            user_id = None
+        else:
+            actor_type = "user"
+            b_name = None
+            p_name = None
+            t_name = None
+            user_id = getattr(user, "id", None)
+            actor_id = str(getattr(user, "email", None) or user_id or "unknown")
+
+        entry = SecretAuditLog(
+            workspace_id=scope.workspace_id,
+            scope_id=scope.id,
+            scope_name=scope.name,
+            key=key,
+            action=action,
+            version=version,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            user_id=user_id,
+            bundle_name=b_name,
+            pipeline_name=p_name,
+            task_name=t_name,
+            created_at=datetime.now(UTC),
+        )
+        self.db.add(entry)
+        self.db.commit()
+        logger.info(
+            "SECRET_AUDIT action=%s workspace_id=%s scope=%s key=%s version=%s actor_type=%s actor_id=%s",
+            action,
+            scope.workspace_id,
+            scope.name,
+            key,
+            version,
+            actor_type,
+            actor_id,
+        )
+
+    def list_audit_logs(self, scope: SecretScope, limit: int = 100) -> list[SecretAuditLog]:
+        return (
+            self.db.query(SecretAuditLog)
+            .filter(SecretAuditLog.scope_id == scope.id)
+            .order_by(SecretAuditLog.created_at.desc())
+            .limit(max(1, min(limit, 500)))
+            .all()
+        )
 
     def resolve_user_permission(
         self,
@@ -33,7 +102,28 @@ class SecretManagerService:
         user: User,
         workspace_role: str | None = None,
     ) -> str | None:
-        """Calculate the highest permission level for a user on a given scope."""
+        """Calculate the highest permission level for a user or pipeline task on a given scope."""
+        if getattr(user, "_is_task_token", False) is True:
+            task_bundle_norm = _normalize_bundle_id(getattr(user, "_task_bundle_name", None))
+            if not task_bundle_norm:
+                return None
+            highest_level = 0
+            acls = (
+                self.db.query(SecretAcl)
+                .filter(SecretAcl.scope_id == scope.id, SecretAcl.principal_type == "bundle")
+                .all()
+            )
+            for acl in acls:
+                pid = (acl.principal_id or "").strip()
+                if pid == "*" or _normalize_bundle_id(pid) == task_bundle_norm:
+                    level = PERMISSION_LEVELS.get(acl.permission.upper(), 0)
+                    if level > highest_level:
+                        highest_level = level
+            for perm, lvl in PERMISSION_LEVELS.items():
+                if lvl == highest_level:
+                    return perm
+            return None
+
         if getattr(user, "role", None) == "superadmin":
             return "MANAGE"
 
@@ -279,8 +369,11 @@ class SecretManagerService:
                 detail="Secret key name must contain only letters, numbers, underscores, periods, and hyphens.",
             )
 
+        is_task = getattr(user, "_is_task_token", False) is True
+        actor_user_id = None if is_task else getattr(user, "id", None)
+
         provider = get_secret_provider(scope.backend_type, self.db, scope.provider_config)
-        provider.put_secret(scope, clean_key, value, user_id=user.id)
+        provider.put_secret(scope, clean_key, value, user_id=actor_user_id)
 
         secret_record = (
             self.db.query(SecretKey)
@@ -294,8 +387,8 @@ class SecretManagerService:
                 key=clean_key,
                 encrypted_value="[EXTERNAL_MANAGED]" if scope.backend_type != "internal" else "",
                 version=1,
-                created_by=user.id,
-                updated_by=user.id,
+                created_by=actor_user_id,
+                updated_by=actor_user_id,
                 created_at=now,
                 updated_at=now,
             )
@@ -305,28 +398,48 @@ class SecretManagerService:
         elif scope.backend_type != "internal":
             secret_record.version += 1
             secret_record.updated_at = now
-            secret_record.updated_by = user.id
+            secret_record.updated_by = actor_user_id
             self.db.commit()
             self.db.refresh(secret_record)
 
+        self._record_audit_log(
+            scope=scope,
+            key=clean_key,
+            action="PUT_SECRET",
+            version=secret_record.version,
+            user=user,
+        )
         return secret_record
 
-    def delete_secret_value(self, scope: SecretScope, key: str) -> bool:
+    def delete_secret_value(self, scope: SecretScope, key: str, user: User | None = None) -> bool:
         provider = get_secret_provider(scope.backend_type, self.db, scope.provider_config)
+        rec = (
+            self.db.query(SecretKey)
+            .filter(SecretKey.scope_id == scope.id, SecretKey.key == key)
+            .first()
+        )
+        prev_version = rec.version if rec else None
         deleted = provider.delete_secret(scope, key)
         if not deleted:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Secret key '{key}' not found in scope '{scope.name}'",
             )
-        rec = (
+        rec_after = (
             self.db.query(SecretKey)
             .filter(SecretKey.scope_id == scope.id, SecretKey.key == key)
             .first()
         )
-        if rec:
-            self.db.delete(rec)
+        if rec_after:
+            self.db.delete(rec_after)
             self.db.commit()
+        self._record_audit_log(
+            scope=scope,
+            key=key,
+            action="DELETE_SECRET",
+            version=prev_version,
+            user=user,
+        )
         return True
 
     def list_acls(self, scope: SecretScope) -> list[SecretAcl]:
@@ -353,10 +466,10 @@ class SecretManagerService:
             )
 
         ptype_clean = principal_type.lower().strip()
-        if ptype_clean not in ("user", "role"):
+        if ptype_clean not in ("user", "role", "bundle"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid principal_type. Must be 'user' or 'role'.",
+                detail="Invalid principal_type. Must be 'user', 'role', or 'bundle'.",
             )
 
         now = datetime.now(UTC)

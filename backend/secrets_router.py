@@ -11,11 +11,13 @@ from models import User, Workspace
 from schemas import (
     SecretAclCreate,
     SecretAclResponse,
+    SecretAuditLogResponse,
     SecretKeyCreate,
     SecretKeySummaryResponse,
     SecretScopeCreate,
     SecretScopeResponse,
     SecretValueResponse,
+    SecretValueUpdate,
 )
 from secrets_manager.service import SecretManagerService
 from sqlalchemy.orm import Session
@@ -327,6 +329,47 @@ def get_secret_key_value(
     )
 
 
+@router.put(
+    "/scopes/{scope_identifier}/keys/{key}",
+    response_model=SecretKeySummaryResponse,
+    status_code=status.HTTP_200_OK,
+)
+def put_secret_key_by_name(
+    scope_identifier: str,
+    key: str,
+    payload: SecretValueUpdate,
+    workspace_id: str | None = None,
+    workspace_slug: str | None = Query(None),
+    x_workspace_id: str | None = Header(None, alias="X-Workspace-Id"),
+    x_workspace_slug: str | None = Header(None, alias="X-Workspace-Slug"),
+    lake_workspace_id: str | None = Cookie(None),
+    lake_active_workspace: str | None = Cookie(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> SecretKeySummaryResponse:
+    ws, role = _resolve_context(
+        workspace_id=workspace_id,
+        workspace_slug=workspace_slug,
+        x_workspace_id=x_workspace_id,
+        x_workspace_slug=x_workspace_slug,
+        lake_workspace_id=lake_workspace_id,
+        lake_active_workspace=lake_active_workspace,
+        current_user=current_user,
+        db=db,
+    )
+    svc = SecretManagerService(db)
+    scope = svc.get_scope(ws.id, scope_identifier)
+    svc.require_permission(scope, current_user, role, "WRITE")
+    record = svc.put_secret_value(scope, key, payload.value, current_user)
+    return SecretKeySummaryResponse(
+        key=record.key,
+        version=record.version,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+        updated_by=record.updated_by,
+    )
+
+
 @router.delete("/scopes/{scope_identifier}/keys/{key}")
 def delete_secret_key(
     scope_identifier: str,
@@ -353,8 +396,56 @@ def delete_secret_key(
     svc = SecretManagerService(db)
     scope = svc.get_scope(ws.id, scope_identifier)
     svc.require_permission(scope, current_user, role, "WRITE")
-    svc.delete_secret_value(scope, key)
+    svc.delete_secret_value(scope, key, user=current_user)
     return {"status": "deleted", "scope": scope.name, "key": key}
+
+
+@router.get("/scopes/{scope_identifier}/audit", response_model=list[SecretAuditLogResponse])
+def list_scope_audit_logs(
+    scope_identifier: str,
+    limit: int = Query(100, ge=1, le=500),
+    workspace_id: str | None = None,
+    workspace_slug: str | None = Query(None),
+    x_workspace_id: str | None = Header(None, alias="X-Workspace-Id"),
+    x_workspace_slug: str | None = Header(None, alias="X-Workspace-Slug"),
+    lake_workspace_id: str | None = Cookie(None),
+    lake_active_workspace: str | None = Cookie(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[SecretAuditLogResponse]:
+    ws, role = _resolve_context(
+        workspace_id=workspace_id,
+        workspace_slug=workspace_slug,
+        x_workspace_id=x_workspace_id,
+        x_workspace_slug=x_workspace_slug,
+        lake_workspace_id=lake_workspace_id,
+        lake_active_workspace=lake_active_workspace,
+        current_user=current_user,
+        db=db,
+    )
+    svc = SecretManagerService(db)
+    scope = svc.get_scope(ws.id, scope_identifier)
+    svc.require_permission(scope, current_user, role, "READ")
+    logs = svc.list_audit_logs(scope, limit=limit)
+    return [
+        SecretAuditLogResponse(
+            id=row.id,
+            workspace_id=row.workspace_id,
+            scope_id=row.scope_id,
+            scope_name=row.scope_name,
+            key=row.key,
+            action=row.action,
+            version=row.version,
+            actor_type=row.actor_type,
+            actor_id=row.actor_id,
+            user_id=row.user_id,
+            bundle_name=row.bundle_name,
+            pipeline_name=row.pipeline_name,
+            task_name=row.task_name,
+            created_at=row.created_at,
+        )
+        for row in logs
+    ]
 
 
 # ── Scope ACL Management ──────────────────────────────────────────────────────

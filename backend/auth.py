@@ -57,6 +57,11 @@ def is_pat_user(user: Any) -> bool:
     )
 
 
+def is_task_token_user(user: Any) -> bool:
+    """Return True if caller authenticated with a bundle pipeline task token (LOT_TASK_TOKEN)."""
+    return getattr(user, "_is_task_token", False) is True
+
+
 def _keystream(enc_key: bytes, nonce: bytes, length: int) -> bytes:
     out = bytearray()
     counter = 0
@@ -254,6 +259,28 @@ def create_token(
         **data,
         "jti": str(jti),
         "ss": session_start_ts if session_start_ts is not None else now.timestamp(),
+        "exp": now + expires_delta,
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def create_task_token(
+    workspace_slug: str,
+    bundle_name: str,
+    pipeline_name: str | None = None,
+    task_name: str | None = None,
+    expires_delta: timedelta = timedelta(hours=2),
+) -> str:
+    """Create a short-lived task-scoped JWT for an executing bundle pipeline task."""
+    now = datetime.now(UTC)
+    payload = {
+        "typ": "lot_task",
+        "sub": f"pipeline:{bundle_name}/{pipeline_name or ''}/{task_name or ''}",
+        "workspace_slug": str(workspace_slug),
+        "bundle_name": str(bundle_name),
+        "pipeline_name": str(pipeline_name or ""),
+        "task_name": str(task_name or ""),
+        "iat": now,
         "exp": now + expires_delta,
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
@@ -851,6 +878,33 @@ def get_current_user(
     except jwt.InvalidTokenError:
         raise HTTPException(401, "Invalid token")
 
+    if payload.get("typ") == "lot_task":
+        ws_slug = str(payload.get("workspace_slug") or "").strip()
+        b_name = str(payload.get("bundle_name") or "").strip()
+        p_name = str(payload.get("pipeline_name") or "").strip()
+        t_name = str(payload.get("task_name") or "").strip()
+        if not ws_slug or not b_name:
+            raise HTTPException(401, "Invalid task token claims")
+        actor_parts = [p for p in (b_name, p_name, t_name) if p]
+        actor_label = "/".join(actor_parts)
+        task_user = User(
+            id=None,
+            email=f"pipeline:{actor_label}",
+            display_name=actor_label,
+            hashed_password="",
+            role="task",
+            is_active=True,
+        )
+        task_user._is_task_token = True
+        task_user._task_workspace_slug = ws_slug
+        task_user._task_bundle_name = b_name
+        task_user._task_pipeline_name = p_name or None
+        task_user._task_name = t_name or None
+        task_user._task_actor_id = actor_label
+        task_user._current_session_id = None
+        task_user._is_pat = False
+        return task_user
+
     sub_val = payload.get("sub")
     user = None
     try:
@@ -1029,6 +1083,29 @@ def get_workspace_context(
         or _clean(lake_workspace_id)
         or _clean(lake_active_workspace)
     )
+
+    if is_task_token_user(current_user):
+        task_ws_slug = getattr(current_user, "_task_workspace_slug", None)
+        task_ws = (
+            db.query(Workspace)
+            .filter(Workspace.slug == task_ws_slug, Workspace.status == "active")
+            .first()
+        )
+        if not task_ws:
+            raise HTTPException(404, f"Workspace '{task_ws_slug}' not found")
+        if slug and slug != task_ws.slug:
+            raise HTTPException(
+                403,
+                f"Task token is scoped to workspace '{task_ws.slug}' and cannot access '{slug}'",
+            )
+        if raw_id and str(raw_id) not in (str(task_ws.id), task_ws.slug):
+            raise HTTPException(
+                403,
+                f"Task token is scoped to workspace '{task_ws.slug}' and cannot access '{raw_id}'",
+            )
+        if require_write:
+            raise HTTPException(403, write_error_msg)
+        return task_ws, "task"
 
     if not slug and not raw_id:
         raise HTTPException(
