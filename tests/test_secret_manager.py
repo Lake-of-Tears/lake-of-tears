@@ -713,3 +713,12 @@ def test_pipeline_task_token_read_rotate_and_audit(client, db_session):
     assert "LOT_TASK_TOKEN" in dag_code
     assert "_mint_task_token" in dag_code
     assert '"pipeline_name": "tmd_291_payroll_pipeline"' in dag_code
+
+    # 8. Verify Alembic migration chain has a single head (0026)
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    alembic_cfg = Config(str(repo_root / "backend" / "alembic.ini"))
+    alembic_cfg.set_main_option("script_location", str(repo_root / "backend" / "alembic"))
+    script_dir = ScriptDirectory.from_config(alembic_cfg)
+    assert script_dir.get_heads() == ["0026"]
