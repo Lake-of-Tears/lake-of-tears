@@ -44,7 +44,7 @@ document.addEventListener('alpine:init', () => {
     currentFilter: 'all',
     searchQuery: '',
     currentPage: 1,
-    pageSize: parseInt(localStorage.getItem('pipelines_page_size') || '10', 10) || 10,
+    pageSize: parseInt(localStorage.getItem('pipelines_page_size') || '25', 10) || 25,
     totalPipelines: 0,
 
     // Inspector Drawer State
