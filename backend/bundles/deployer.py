@@ -23,6 +23,7 @@ try:
         PipelineMetadata,
         User,
         Workspace,
+        WorkspaceBundle,
         WorkspaceDashboard,
     )
 except ImportError:
@@ -33,6 +34,7 @@ except ImportError:
         PipelineMetadata,
         User,
         Workspace,
+        WorkspaceBundle,
         WorkspaceDashboard,
     )
 
@@ -1044,6 +1046,69 @@ class BundleDeployer:
                 return s
 
             # 4. Provision Tables
+            def _infer_column_defs_from_s3(s3_pattern: str | None) -> list[dict[str, Any]]:
+                if not s3_pattern:
+                    return []
+                try:
+                    import pyarrow.parquet as pq
+
+                    stripped = s3_pattern
+                    if stripped.startswith("s3://"):
+                        stripped = stripped[5:]
+                        parts = stripped.split("/", 1)
+                        bucket_name = parts[0]
+                        key_pattern = parts[1] if len(parts) > 1 else ""
+                    else:
+                        bucket_name = storage_service.MINIO_BUCKET
+                        key_pattern = stripped.lstrip("/")
+
+                    prefix = key_pattern.split("*", 1)[0]
+                    s3_client = storage_service.get_s3_client()
+                    resp = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=prefix, MaxKeys=10)
+                    parquet_item = next(
+                        (
+                            item
+                            for item in resp.get("Contents", [])
+                            if str(item.get("Key", "")).lower().endswith(".parquet")
+                            and int(item.get("Size", 0)) > 0
+                        ),
+                        None,
+                    )
+                    if not parquet_item:
+                        return []
+                    reader = storage_service.S3RangeReader(
+                        s3_client,
+                        bucket_name,
+                        parquet_item["Key"],
+                        int(parquet_item["Size"]),
+                    )
+                    pf = pq.ParquetFile(reader)
+                    inferred: list[dict[str, Any]] = []
+                    for i in range(pf.metadata.num_columns):
+                        col_schema = pf.schema.column(i)
+                        arrow_field = None
+                        try:
+                            arrow_field = pf.schema_arrow.field(i)
+                        except Exception:
+                            pass
+                        col_type = (
+                            str(arrow_field.type)
+                            if arrow_field
+                            else str(col_schema.logical_type or col_schema.physical_type)
+                        )
+                        inferred.append(
+                            {
+                                "name": col_schema.name,
+                                "type": col_type,
+                                "nullable": arrow_field.nullable if arrow_field else True,
+                                "description": None,
+                            }
+                        )
+                    return inferred
+                except Exception as exc:
+                    logger.debug("Could not infer Parquet schema for %s: %s", s3_pattern, exc)
+                    return []
+
             for tbl_res in bundle_spec.resources.tables:
                 clean_tbl_name = tbl_res.name.strip()
                 parent_sch = _get_schema(tbl_res.catalog, tbl_res.schema_name)
@@ -1065,6 +1130,8 @@ class BundleDeployer:
                     for c in tbl_res.columns
                 ]
                 if not tbl:
+                    if not col_defs and tbl_res.s3_path_pattern:
+                        col_defs = _infer_column_defs_from_s3(tbl_res.s3_path_pattern)
                     tbl = CatalogTable(
                         schema_id=parent_sch.id,
                         name=clean_tbl_name,
@@ -1082,6 +1149,10 @@ class BundleDeployer:
                         tbl.s3_path_pattern = tbl_res.s3_path_pattern
                     if col_defs:
                         tbl.column_defs = col_defs
+                    elif not tbl.column_defs and tbl.s3_path_pattern:
+                        inferred_cols = _infer_column_defs_from_s3(tbl.s3_path_pattern)
+                        if inferred_cols:
+                            tbl.column_defs = inferred_cols
                     db.flush()
                 resources_map["tables"].append(str(tbl.id))
 
@@ -1104,14 +1175,19 @@ class BundleDeployer:
                         if isinstance(vec_res.column, str)
                         else (vec_res.column or [])
                     )
-                    target_tbl.vector_index = {
-                        "columns": cols,
-                        "embedding_model": vec_res.model or "gemini-2.5-flash",
-                        "dimensions": vec_res.dimensions or 768,
-                        "distance_metric": vec_res.metric or "cosine",
-                        "status": "ready",
-                        "index_name": vec_res.name,
-                    }
+                    existing_vec = dict(target_tbl.vector_index or {})
+                    existing_vec.update(
+                        {
+                            "columns": cols,
+                            "embedding_model": vec_res.model or "gemini-2.5-flash",
+                            "dimensions": vec_res.dimensions or 768,
+                            "distance_metric": vec_res.metric or "cosine",
+                            "index_name": vec_res.name,
+                        }
+                    )
+                    if existing_vec.get("status") not in ("synced", "syncing"):
+                        existing_vec["status"] = "ready"
+                    target_tbl.vector_index = existing_vec
                     db.flush()
                     resources_map["vector_indexes"].append(vec_res.name)
 
@@ -1308,8 +1384,26 @@ class BundleDeployer:
             except Exception:
                 pass
 
-        # 3. Teardown Vector Indexes & Tables
+        # Collect table IDs still claimed by any other active bundle in this workspace
+        other_active_bundles = (
+            db.query(WorkspaceBundle)
+            .filter(
+                WorkspaceBundle.workspace_id == workspace.id,
+                WorkspaceBundle.id != bundle.id,
+                WorkspaceBundle.status == "active",
+            )
+            .all()
+        )
+        shared_table_ids: set[str] = set()
+        for ob in other_active_bundles:
+            ob_map = ob.resources_map or {}
+            for tid in ob_map.get("tables", []):
+                shared_table_ids.add(str(tid))
+
+        # 3. Teardown Vector Indexes & Tables (only tables not shared with another active bundle)
         for tbl_id_str in res_map.get("tables", []):
+            if str(tbl_id_str) in shared_table_ids:
+                continue
             try:
                 t_uuid = uuid.UUID(tbl_id_str)
                 tbl = db.query(CatalogTable).filter(CatalogTable.id == t_uuid).first()
@@ -1319,27 +1413,10 @@ class BundleDeployer:
             except Exception:
                 pass
 
-        # 4. Teardown Schemas (protecting medallion tiers)
-        for sch_id_str in res_map.get("schemas", []):
-            try:
-                s_uuid = uuid.UUID(sch_id_str)
-                sch = db.query(CatalogSchema).filter(CatalogSchema.id == s_uuid).first()
-                if sch and sch.tier not in _MEDALLION_TIERS and sch.slug not in _MEDALLION_TIERS:
-                    db.delete(sch)
-                    purged["schemas"].append(sch_id_str)
-            except Exception:
-                pass
-
-        # 5. Teardown Catalogs (only if empty)
-        for cat_id_str in res_map.get("catalogs", []):
-            try:
-                c_uuid = uuid.UUID(cat_id_str)
-                cat = db.query(Catalog).filter(Catalog.id == c_uuid).first()
-                if cat and len(cat.schemas) <= 3:  # Only bronze/silver/gold remaining
-                    db.delete(cat)
-                    purged["catalogs"].append(cat_id_str)
-            except Exception:
-                pass
+        # 4 & 5. Shared Unity-Catalog style containers (Catalogs and CatalogSchemas) are
+        # never deleted by `bundle destroy`. Multiple bundles deploy into the same catalog
+        # (e.g., TMD-291-dev) and schemas (Bronze, Silver, Gold), so destroying a bundle
+        # must never cascade-delete shared schemas or catalogs (#527).
 
         # 6. Teardown Artifacts
         if purge_storage:

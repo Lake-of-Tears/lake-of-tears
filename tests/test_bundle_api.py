@@ -798,6 +798,81 @@ def test_destroy_bundle_endpoint(
     assert len(dashboards) == 0
 
 
+def test_destroy_bundle_preserves_shared_catalog_schemas_and_other_bundle_tables(
+    client_admin: TestClient,
+    test_setup: dict,
+    db_session: Session,
+):
+    """Destroying one bundle must never delete a shared catalog, its schemas, or another bundle's tables (#527)."""
+    ws = test_setup["workspace"]
+
+    # Bundle A deploys into main_lake (raw_customers, dim_customers)
+    resp_a = client_admin.post(
+        f"/api/bundles/deploy?workspace_slug={ws.slug}",
+        json={
+            "manifest_content": SAMPLE_CUSTOMER360_TOON,
+            "manifest_format": "toon",
+            "target": "dev",
+        },
+    )
+    assert resp_a.status_code == 201
+    bundle_a_id = resp_a.json()["id"]
+    bundle_a_tables = resp_a.json()["resources_map"]["tables"]
+    assert len(bundle_a_tables) == 2
+
+    # Bundle B deploys into the SAME main_lake catalog with its own tables
+    bundle_b_toon = (
+        SAMPLE_CUSTOMER360_TOON.replace(
+            "name: customer360-medallion", "name: store-orders-medallion"
+        )
+        .replace("raw_customers,", "raw_orders,")
+        .replace("dim_customers,", "fact_orders,")
+        .replace("dim_customers", "fact_orders")
+        .replace("customer_medallion_pipeline:", "orders_medallion_pipeline:")
+        .replace("executive_overview:", "orders_overview:")
+    )
+
+    resp_b = client_admin.post(
+        f"/api/bundles/deploy?workspace_slug={ws.slug}",
+        json={
+            "manifest_content": bundle_b_toon,
+            "manifest_format": "toon",
+            "target": "dev",
+        },
+    )
+    assert resp_b.status_code == 201
+    bundle_b_id = resp_b.json()["id"]
+
+    # Destroy Bundle B
+    del_b = client_admin.delete(f"/api/bundles/{bundle_b_id}?workspace_slug={ws.slug}")
+    assert del_b.status_code == 200
+    purged_b = del_b.json()["purged_resources"]
+    assert purged_b["catalogs"] == []
+    assert purged_b["schemas"] == []
+    assert len(purged_b["tables"]) == 2
+
+    db_session.expire_all()
+
+    # Verify main_lake catalog and all 3 medallion schemas still exist
+    cat = db_session.query(Catalog).filter_by(owner_workspace_id=ws.id, name="main_lake").first()
+    assert cat is not None
+    assert len(cat.schemas) == 3
+
+    # Verify Bundle A's tables still exist intact
+    remaining_tables = [
+        t.name
+        for s in cat.schemas
+        for t in db_session.query(CatalogTable).filter_by(schema_id=s.id).all()
+    ]
+    assert sorted(remaining_tables) == ["dim_customers", "raw_customers"]
+
+    # Verify Bundle A has zero drift
+    drift_a = client_admin.get(
+        f"/api/bundles/{bundle_a_id}?workspace_slug={ws.slug}&include_drift=true"
+    ).json()["drift"]
+    assert drift_a["in_sync"] is True
+
+
 # ── RBAC & Isolation Tests ───────────────────────────────────────────────────
 
 
