@@ -778,8 +778,9 @@ function renderThreadSidebar() {
         const turnCount = (t.messages || []).filter(m => m.role === "user").length;
         return `
           <div
+            data-thread-id="${escapeHtml(t.id)}"
             onclick="switchGenieThread('${escapeHtml(t.id)}')"
-            class="group flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg cursor-pointer transition-colors ${
+            class="genie-thread-item group flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg cursor-pointer transition-colors ${
               isActive
                 ? "bg-blue-600/15 border border-blue-500/30 text-gray-100"
                 : "text-gray-400 hover:text-gray-200 hover:bg-gray-800/50 border border-transparent"
