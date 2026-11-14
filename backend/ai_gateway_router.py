@@ -11,7 +11,7 @@ import logging
 from typing import Any
 
 from ai_providers import AIProvider, ProviderError, ProviderNotConfigured, get_active_provider
-from auth import SECRET_KEY
+from auth import SECRET_KEY, decode_token
 from database import get_db
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -24,11 +24,23 @@ router = APIRouter()
 MAX_EMBED_BATCH = 256
 
 
-def require_internal_secret(x_internal_secret: str | None = Header(default=None)) -> None:
-    if not x_internal_secret or not hmac.compare_digest(
+def require_internal_secret(
+    x_internal_secret: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+) -> None:
+    if x_internal_secret and hmac.compare_digest(
         x_internal_secret.encode("utf-8"), SECRET_KEY.encode("utf-8")
     ):
-        raise HTTPException(401, "Not authorized")
+        return
+    if isinstance(authorization, str) and authorization.startswith("Bearer "):
+        token = authorization[7:].strip()
+        try:
+            payload = decode_token(token)
+            if payload.get("typ") == "lot_task":
+                return
+        except Exception:
+            pass
+    raise HTTPException(401, "Not authorized")
 
 
 class EmbedRequest(BaseModel):
