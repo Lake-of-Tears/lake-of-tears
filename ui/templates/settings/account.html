@@ -408,11 +408,11 @@
         </select>
       </div>
 
-      <!-- Workspaces List Controller (Default: No Access) -->
+      <!-- Workspaces List Controller (Permitted Workspaces) -->
       <div>
         <div class="flex items-center justify-between mb-1">
           <label class="block text-xs font-medium text-gray-400">Permitted Workspaces</label>
-          <span class="text-[10px] text-amber-400/90 font-medium">Default: No Access</span>
+          <span id="pat-policy-badge" class="text-[10px] text-amber-400/90 font-medium">No Workspaces Granted</span>
         </div>
         <p class="text-[11px] text-gray-500 mb-2">Explicitly add the workspaces this token is authorized to access.</p>
 
@@ -477,16 +477,27 @@ function updatePatWorkspaceRole(wsId, newRole) {
 
 function renderSelectedWorkspaces() {
   const container = document.getElementById('pat-selected-workspaces-container');
+  const badge = document.getElementById('pat-policy-badge');
   if (!container) return;
   container.innerHTML = '';
 
   if (selectedWorkspaces.size === 0) {
+    if (badge) {
+      badge.textContent = 'No Workspaces Granted';
+      badge.className = 'text-[10px] text-amber-400/90 font-medium';
+    }
     container.innerHTML = `
       <div id="pat-no-ws-notice" class="p-2 text-center text-[11px] text-amber-300/80 bg-amber-950/20 border border-amber-800/30 rounded">
         No workspaces added. The token will have zero access. You must add at least one workspace.
       </div>
     `;
     return;
+  }
+
+  if (badge) {
+    const count = selectedWorkspaces.size;
+    badge.textContent = `${count} Workspace${count === 1 ? '' : 's'} Configured`;
+    badge.className = 'text-[10px] text-emerald-400 font-medium';
   }
 
   selectedWorkspaces.forEach((info, wsId) => {

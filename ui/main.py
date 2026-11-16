@@ -4749,17 +4749,21 @@ async def settings_admin_create_invitation(
         return RedirectResponse(url="/", status_code=302)
     token = request.cookies.get("lake_token")
 
+    assigned_role = role.strip()
+    if assigned_role == "superadmin":
+        default_role = "admin"
+
     workspace_access = {"default": default_role}
     form_data = await request.form()
     for key, val in form_data.items():
         if key.startswith("ws_role_"):
             ws_slug = key[len("ws_role_") :]
             if val and str(val) != "none":
-                workspace_access[ws_slug] = str(val)
+                workspace_access[ws_slug] = "admin" if assigned_role == "superadmin" else str(val)
 
     payload = {
         "email": email.strip(),
-        "role": role.strip(),
+        "role": assigned_role,
         "workspace_access": workspace_access,
     }
     data, err = _backend_post_with_error("/api/admin/invitations", token or "", payload)

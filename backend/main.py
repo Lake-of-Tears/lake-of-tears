@@ -417,12 +417,11 @@ def _set_auth_cookie(
 def _workspace_response(ws: Workspace, user: User, is_shared: bool = False) -> WorkspaceResponse:
     from sqlalchemy.orm import object_session
 
-    member = next((m for m in ws.members if m.user_id == user.id), None)
-    role = (
-        member.role
-        if member
-        else ("superadmin" if user.role == "superadmin" else ("read" if is_shared else None))
-    )
+    if user.role == "superadmin":
+        role = "admin"
+    else:
+        member = next((m for m in ws.members if m.user_id == user.id), None)
+        role = member.role if member else ("read" if is_shared else None)
     sess = object_session(ws)
     has_shared_catalogs = False
     if sess is not None:
@@ -555,8 +554,8 @@ def register(
         ws_access = invite.workspace_access if (invite and invite.workspace_access) else {}
         default_ws = db.query(Workspace).filter(Workspace.slug == "default").first()
         if default_ws:
-            default_role = ws_access.get("default") or (
-                "write" if assigned_role == "superadmin" else "read"
+            default_role = (
+                "admin" if assigned_role == "superadmin" else (ws_access.get("default") or "read")
             )
             db.add(WorkspaceMember(workspace_id=default_ws.id, user_id=user.id, role=default_role))
 
@@ -572,7 +571,8 @@ def register(
                 .first()
             )
             if other_ws and other_ws.id != (default_ws.id if default_ws else None):
-                db.add(WorkspaceMember(workspace_id=other_ws.id, user_id=user.id, role=ws_role))
+                target_role = "admin" if assigned_role == "superadmin" else ws_role
+                db.add(WorkspaceMember(workspace_id=other_ws.id, user_id=user.id, role=target_role))
 
     if invite:
         invite.status = "accepted"
@@ -1161,11 +1161,18 @@ def create_invitation(
     if pending_invite:
         raise HTTPException(400, "An invitation is already pending for this email")
 
+    inv_ws_access = req.workspace_access
+    if req.role == "superadmin":
+        if inv_ws_access:
+            inv_ws_access = {k: "admin" for k in inv_ws_access}
+        else:
+            inv_ws_access = {"default": "admin"}
+
     invitation = UserInvitation(
         id=uuid.uuid4(),
         email=email_clean,
         role=req.role,
-        workspace_access=req.workspace_access,
+        workspace_access=inv_ws_access,
         status="pending",
         invited_by_id=current_admin.id,
         created_at=datetime.now(UTC),
