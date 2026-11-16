@@ -18,9 +18,11 @@ from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
-import pytest
 from models import Catalog, CatalogSchema, CatalogTable
-from tests.e2e_angler_common import angler_binary, run_angler, server  # noqa: F401
+
+from tests.e2e_angler_common import run_angler
+
+pytest_plugins = ["tests.e2e_angler_common"]
 
 
 def _write_parquet(path: Path, table: pa.Table) -> None:
@@ -45,7 +47,16 @@ def test_angler_cli_catalog_schemas_and_tables_lifecycle(server, angler_binary):
     res_sch_create = run_angler(
         angler_binary,
         server,
-        ["catalog", "schemas", "create", cat_id, "finance", "--description", "Financial ledgers", "--json"],
+        [
+            "catalog",
+            "schemas",
+            "create",
+            cat_id,
+            "finance",
+            "--description",
+            "Financial ledgers",
+            "--json",
+        ],
     )
     assert res_sch_create.returncode == 0, f"schema create failed: {res_sch_create.stderr}"
 
@@ -57,8 +68,15 @@ def test_angler_cli_catalog_schemas_and_tables_lifecycle(server, angler_binary):
     )
     assert res_sch_list.returncode == 0
     sch_items = json.loads(res_sch_list.stdout)
-    assert any("finance" in s.get("name", "").lower() or "finance" in s.get("slug", "").lower() for s in sch_items)
-    target_sch = next(s for s in sch_items if "finance" in s.get("name", "").lower() or "finance" in s.get("slug", "").lower())
+    assert any(
+        "finance" in s.get("name", "").lower() or "finance" in s.get("slug", "").lower()
+        for s in sch_items
+    )
+    target_sch = next(
+        s
+        for s in sch_items
+        if "finance" in s.get("name", "").lower() or "finance" in s.get("slug", "").lower()
+    )
     sch_id = str(target_sch["id"])
 
     # 3. Get schema
@@ -69,13 +87,25 @@ def test_angler_cli_catalog_schemas_and_tables_lifecycle(server, angler_binary):
     )
     assert res_sch_get.returncode == 0
     sch_data = json.loads(res_sch_get.stdout)
-    assert "finance" in sch_data.get("name", "").lower() or "finance" in sch_data.get("slug", "").lower()
+    assert (
+        "finance" in sch_data.get("name", "").lower()
+        or "finance" in sch_data.get("slug", "").lower()
+    )
 
     # 4. Update schema
     res_sch_up = run_angler(
         angler_binary,
         server,
-        ["catalog", "schemas", "update", cat_id, sch_id, "--description", "Updated description", "--json"],
+        [
+            "catalog",
+            "schemas",
+            "update",
+            cat_id,
+            sch_id,
+            "--description",
+            "Updated description",
+            "--json",
+        ],
     )
     assert res_sch_up.returncode == 0
 
@@ -135,7 +165,11 @@ def test_angler_cli_catalog_toon_and_trash_lifecycle(server, angler_binary, tmp_
         ["catalog", "toon", cat_id, sch_id, tbl_id],
     )
     assert res_toon.returncode == 0, f"catalog toon failed: {res_toon.stderr}"
-    assert "table" in res_toon.stdout.lower() or "columns" in res_toon.stdout.lower() or "schema" in res_toon.stdout.lower()
+    assert (
+        "table" in res_toon.stdout.lower()
+        or "columns" in res_toon.stdout.lower()
+        or "schema" in res_toon.stdout.lower()
+    )
 
     # 2. Soft-delete table
     res_del = run_angler(
@@ -154,7 +188,14 @@ def test_angler_cli_catalog_toon_and_trash_lifecycle(server, angler_binary, tmp_
     assert res_trash.returncode == 0
     trash_items = json.loads(res_trash.stdout)
     assert len(trash_items) > 0
-    trashed_asset = next((a for a in trash_items if a.get("slug") == tbl_slug or a.get("name") == "Recoverable Table"), None)
+    trashed_asset = next(
+        (
+            a
+            for a in trash_items
+            if a.get("slug") == tbl_slug or a.get("name") == "Recoverable Table"
+        ),
+        None,
+    )
     assert trashed_asset is not None
     asset_id = trashed_asset.get("id")
 
@@ -314,7 +355,11 @@ def test_angler_cli_webhooks_inspection(server, angler_binary):
     sec_data = json.loads(res_sec.stdout)
     assert "webhook_secret" in sec_data
     # Masked by default
-    assert "•" in sec_data.get("webhook_secret", "") or "*" in sec_data.get("webhook_secret", "") or len(sec_data.get("webhook_secret", "")) > 0
+    assert (
+        "•" in sec_data.get("webhook_secret", "")
+        or "*" in sec_data.get("webhook_secret", "")
+        or len(sec_data.get("webhook_secret", "")) > 0
+    )
 
 
 def test_angler_cli_jobs_and_pipelines(server, angler_binary):

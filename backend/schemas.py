@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal, Self
 
 import email_validator
@@ -20,8 +20,9 @@ def _format_utc_datetime(dt: datetime | None) -> str | None:
     if dt is None:
         return None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     return dt.isoformat()
+
 
 # Allow internal/private self-hosted domains (e.g. .local, .localhost) for Lake of Tears deployments
 for _domain in ("local", "localhost"):

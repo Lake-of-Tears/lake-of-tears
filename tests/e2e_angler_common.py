@@ -319,7 +319,9 @@ def server(tmp_path_factory):
     patch_stream = patch.object(storage_service, "stream_object", side_effect=mock_stream_object)
     patch_stream.start()
 
-    def mock_upload_object(key="", data=b"", content_type="text/plain", workspace_slug="default", **kwargs):
+    def mock_upload_object(
+        key="", data=b"", content_type="text/plain", workspace_slug="default", **kwargs
+    ):
         return {
             "key": f"workspaces/{workspace_slug}/{key.lstrip('/')}",
             "size": len(data) if data else 33,

@@ -14,9 +14,11 @@ from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
-import pytest
 from models import Catalog, CatalogSchema, CatalogTable
-from tests.e2e_angler_common import angler_binary, run_angler, server  # noqa: F401
+
+from tests.e2e_angler_common import run_angler
+
+pytest_plugins = ["tests.e2e_angler_common"]
 
 
 def _write_parquet(path: Path, table: pa.Table) -> None:
@@ -51,12 +53,7 @@ def test_angler_cli_table_migration_and_rollback_zero_copy(server, angler_binary
 
     # 2. Seed Parquet table files on disk inside workspace warehouse jail
     table_dir = (
-        server.warehouse_dir
-        / "workspaces"
-        / server.workspace_slug
-        / cat.slug
-        / sch.slug
-        / "orders"
+        server.warehouse_dir / "workspaces" / server.workspace_slug / cat.slug / sch.slug / "orders"
     )
     data1 = pa.table({"id": pa.array([1, 2], pa.int64()), "amount": [19.99, 45.50]})
     data2 = pa.table({"id": pa.array([3], pa.int64()), "amount": [99.00]})
@@ -111,7 +108,11 @@ def test_angler_cli_table_migration_and_rollback_zero_copy(server, angler_binary
     res_query = run_angler(
         angler_binary,
         server,
-        ["query", f"SELECT COUNT(*) AS total_rows, SUM(amount) AS total_amount FROM {cat_slug}.{sch_slug}.{tbl_slug}", "--json"],
+        [
+            "query",
+            f"SELECT COUNT(*) AS total_rows, SUM(amount) AS total_amount FROM {cat_slug}.{sch_slug}.{tbl_slug}",
+            "--json",
+        ],
     )
     assert res_query.returncode == 0, f"query failed: {res_query.stderr}"
     assert "3" in res_query.stdout
@@ -249,7 +250,17 @@ def test_angler_cli_table_rollback_materialized(server, angler_binary, tmp_path)
     res_mat = run_angler(
         angler_binary,
         server,
-        ["catalog", "tables", "rollback", cat_slug, sch_slug, tbl_slug, "--materialize", "-y", "--json"],
+        [
+            "catalog",
+            "tables",
+            "rollback",
+            cat_slug,
+            sch_slug,
+            tbl_slug,
+            "--materialize",
+            "-y",
+            "--json",
+        ],
     )
     assert res_mat.returncode == 0, f"materialized rollback failed: {res_mat.stderr}"
     mat_data = json.loads(res_mat.stdout)
@@ -285,12 +296,7 @@ def test_angler_cli_catalog_wide_migration_and_rollback(server, angler_binary, t
     # Create 2 Parquet tables
     for name in ["batch_t1", "batch_t2"]:
         tdir = (
-            server.warehouse_dir
-            / "workspaces"
-            / server.workspace_slug
-            / cat.slug
-            / sch.slug
-            / name
+            server.warehouse_dir / "workspaces" / server.workspace_slug / cat.slug / sch.slug / name
         )
         _write_parquet(tdir / "data.parquet", pa.table({"id": pa.array([1, 2], pa.int64())}))
         tbl = CatalogTable(

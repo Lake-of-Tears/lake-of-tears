@@ -3406,7 +3406,6 @@ def delete_table(
     return {"ok": True, "deleted_id": str(deleted.id)}
 
 
-
 # ── Access management ─────────────────────────────────────────────────────────
 
 
