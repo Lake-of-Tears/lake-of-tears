@@ -347,3 +347,113 @@ async def test_ui_proxy_storage_upload_url():
         assert res.status_code == 200
         assert "upload_url" in res.json()
         assert mock_post.called
+
+
+# ── Dynamic Storage Format Tests ───────────────────────────────────────────────
+
+
+def test_compute_storage_format_all_iceberg():
+    catalogs = [
+        {
+            "slug": "main",
+            "schemas": [
+                {
+                    "slug": "bronze",
+                    "tables": [
+                        {"slug": "t1", "format": "iceberg"},
+                        {"slug": "t2", "format": "iceberg"},
+                    ],
+                }
+            ],
+        }
+    ]
+    name, desc, css_class, ice_cnt, parq_cnt = main._compute_storage_format(catalogs=catalogs)
+    assert name == "Apache Iceberg"
+    assert desc == "2 Tables · v2 REST"
+    assert "cyan" in css_class
+    assert ice_cnt == 2
+    assert parq_cnt == 0
+
+
+def test_compute_storage_format_hybrid():
+    catalogs = [
+        {
+            "slug": "main",
+            "schemas": [
+                {
+                    "slug": "bronze",
+                    "tables": [
+                        {"slug": "t1", "format": "iceberg"},
+                        {"slug": "t2", "format": "parquet"},
+                    ],
+                }
+            ],
+        }
+    ]
+    name, desc, css_class, ice_cnt, parq_cnt = main._compute_storage_format(catalogs=catalogs)
+    assert name == "Hybrid Lakehouse"
+    assert desc == "1 Iceberg · 1 Parquet"
+    assert "cyan" in css_class
+    assert ice_cnt == 1
+    assert parq_cnt == 1
+
+
+def test_compute_storage_format_all_parquet():
+    catalogs = [
+        {
+            "slug": "main",
+            "schemas": [
+                {
+                    "slug": "bronze",
+                    "tables": [
+                        {"slug": "t1", "format": "parquet"},
+                        {"slug": "t2", "format": None},
+                    ],
+                }
+            ],
+        }
+    ]
+    name, desc, css_class, ice_cnt, parq_cnt = main._compute_storage_format(catalogs=catalogs)
+    assert name == "Apache Parquet"
+    assert desc == "2 Tables · Hive Partitioned"
+    assert "emerald" in css_class
+    assert ice_cnt == 0
+    assert parq_cnt == 2
+
+
+def test_compute_storage_format_s3_metadata_detected():
+    name, desc, css_class, ice_cnt, parq_cnt = main._compute_storage_format(
+        catalogs=[], has_iceberg_metadata=True
+    )
+    assert name == "Apache Iceberg"
+    assert desc == "v2 Table Metadata Detected"
+    assert "cyan" in css_class
+
+
+def test_storage_page_renders_dynamic_iceberg_format():
+    token, mock_workspaces = _create_auth_cookie(role="member")
+    mock_stats = {
+        "ok": True,
+        "total_objects": 15,
+        "total_size": "25.0 MB",
+        "raw_objects": 10,
+        "raw_size": "20.0 MB",
+        "embeddings_objects": 5,
+        "embeddings_size": "5.0 MB",
+        "format_name": "Apache Iceberg",
+        "format_desc": "3 Tables · v2 REST",
+        "format_class": "text-cyan-400",
+    }
+
+    with (
+        patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
+        patch.object(main, "_get_bucket_stats", return_value=mock_stats),
+    ):
+        response = client.get(
+            "/storage",
+            cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
+        )
+        assert response.status_code == 200
+        assert "Apache Iceberg" in response.text
+        assert "3 Tables · v2 REST" in response.text
+        assert "text-cyan-400" in response.text

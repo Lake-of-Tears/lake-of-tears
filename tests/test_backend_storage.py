@@ -762,3 +762,69 @@ def test_get_upload_url_endpoint_jailed():
             content_type="application/octet-stream",
             workspace_slug="analytics",
         )
+
+
+def test_compute_storage_format_scenarios():
+    # Iceberg only
+    title, desc, css = storage_service.compute_storage_format(iceberg_count=3, parquet_count=0)
+    assert title == "Apache Iceberg"
+    assert "3 Tables" in desc
+    assert "cyan" in css
+
+    # Hybrid
+    title, desc, css = storage_service.compute_storage_format(iceberg_count=2, parquet_count=4)
+    assert title == "Hybrid Lakehouse"
+    assert "2 Iceberg · 4 Parquet" in desc
+    assert "cyan" in css
+
+    # Parquet only
+    title, desc, css = storage_service.compute_storage_format(iceberg_count=0, parquet_count=5)
+    assert title == "Apache Parquet"
+    assert "5 Tables" in desc
+    assert "emerald" in css
+
+    # S3 Iceberg metadata detection
+    title, desc, css = storage_service.compute_storage_format(
+        iceberg_count=0, parquet_count=0, has_iceberg_metadata=True
+    )
+    assert title == "Apache Iceberg"
+    assert "Metadata Detected" in desc
+    assert "cyan" in css
+
+
+def test_get_bucket_summary_computes_dynamic_format_with_db():
+    mock_s3 = MagicMock()
+    mock_paginator = MagicMock()
+    mock_s3.get_paginator.return_value = mock_paginator
+    mock_paginator.paginate.return_value = [
+        {
+            "Contents": [
+                {
+                    "Key": "workspaces/analytics/raw/orders/file.parquet",
+                    "Size": 1024,
+                    "LastModified": datetime.now(UTC),
+                }
+            ]
+        }
+    ]
+
+    mock_db = MagicMock()
+    # Mock query returning 2 iceberg tables and 1 parquet table
+    mock_query = MagicMock()
+    mock_db.query.return_value = mock_query
+    mock_query.join.return_value = mock_query
+    mock_query.filter.return_value = mock_query
+    mock_query.all.return_value = [("iceberg",), ("iceberg",), ("parquet",)]
+
+    summary = storage_service.get_bucket_summary(
+        s3_client=mock_s3,
+        workspace_slug="analytics",
+        db=mock_db,
+        workspace_id=uuid.uuid4(),
+    )
+
+    assert summary["format_name"] == "Hybrid Lakehouse"
+    assert "2 Iceberg · 1 Parquet" in summary["format_desc"]
+    assert "text-cyan-400" in summary["format_class"]
+    assert summary["iceberg_tables_count"] == 2
+    assert summary["parquet_tables_count"] == 1

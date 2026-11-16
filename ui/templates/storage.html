@@ -76,8 +76,8 @@
     </div>
     <div class="stat-card">
       <span class="text-xs text-gray-400 uppercase tracking-wide">Primary Format</span>
-      <span class="text-2xl font-bold text-emerald-400">Apache Parquet</span>
-      <span class="text-xs text-gray-500">Hive Partitioned</span>
+      <span class="text-2xl font-bold {{ stats.format_class or 'text-emerald-400' }}" id="storage-primary-format">{{ stats.format_name or 'Apache Parquet' }}</span>
+      <span class="text-xs text-gray-500" id="storage-primary-format-desc">{{ stats.format_desc or 'Hive Partitioned' }}</span>
     </div>
   </div>
   {% endif %}
