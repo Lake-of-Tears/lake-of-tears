@@ -491,6 +491,10 @@ class CreateTableRequest(BaseModel):
     description: str | None = None
     s3_path_pattern: str | None = None
     column_defs: list[ColumnDef] | None = None
+    # None auto-detects (Iceberg when the path already holds Iceberg metadata, else Parquet)
+    format: str | None = None
+    # Identity partition columns for a new Iceberg table
+    partition_by: list[str] | None = None
 
     @field_validator("name")
     @classmethod
@@ -498,6 +502,16 @@ class CreateTableRequest(BaseModel):
         v = v.strip()
         if not v:
             raise ValueError("Table name cannot be empty")
+        return v
+
+    @field_validator("format")
+    @classmethod
+    def format_supported(cls, v: str | None) -> str | None:
+        if v is None or not str(v).strip():
+            return None
+        v = str(v).strip().lower()
+        if v not in ("parquet", "iceberg"):
+            raise ValueError("format must be 'parquet' or 'iceberg'")
         return v
 
 
@@ -518,9 +532,18 @@ class CatalogTableResponse(BaseModel):
     column_defs: list | None
     schema_drift: bool
     vector_index: dict | None = None
+    # 'parquet' | 'iceberg'; Iceberg tables are read with iceberg_scan(iceberg_metadata_location)
+    format: str = "parquet"
+    iceberg_metadata_location: str | None = None
+    iceberg_snapshot_id: int | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @field_validator("format", mode="before")
+    @classmethod
+    def default_format(cls, v: Any) -> str:
+        return v if isinstance(v, str) and v else "parquet"
 
 
 class DeletedCatalogAssetResponse(BaseModel):

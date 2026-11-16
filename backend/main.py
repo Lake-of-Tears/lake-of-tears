@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import ai_service
+import iceberg_catalog
 import jwt as _jwt
 import sqlalchemy as sa
 from ai_admin_router import router as ai_admin_router
@@ -46,6 +47,7 @@ from auth import (
     verify_password,
     verify_password_reset_token,
 )
+from catalog_acl import caller_access
 from catalog_storage import delete_prefix, prefixes_to_delete
 from cluster_router import router as cluster_router
 from dashboards_router import router as dashboards_router
@@ -73,6 +75,9 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
+from iceberg_rest_router import router as iceberg_rest_router
+from iceberg_tables_router import internal_router as iceberg_internal_router
+from iceberg_tables_router import router as iceberg_tables_router
 from lakeset_router import router as lakeset_router
 
 try:
@@ -255,6 +260,13 @@ app.include_router(openai_compat_router, prefix="/api/v1", tags=["openai-compat"
 app.include_router(openai_compat_router, prefix="/api/ai/v1", tags=["openai-compat"])
 app.include_router(openai_compat_router, prefix="/v1", tags=["openai-compat"])
 app.include_router(mcp_router, prefix="/api/mcp", tags=["mcp"])
+app.include_router(iceberg_rest_router, prefix="/api/v1/iceberg", tags=["iceberg-rest"])
+app.include_router(iceberg_rest_router, prefix="/api/iceberg", tags=["iceberg-rest"])
+app.include_router(iceberg_tables_router, prefix="/api", tags=["iceberg-tables"])
+app.include_router(iceberg_tables_router, prefix="/api/v1", tags=["iceberg-tables"])
+app.include_router(
+    iceberg_internal_router, prefix="/api/internal/iceberg", tags=["iceberg-internal"]
+)
 app.include_router(mcp_router, prefix="/api/v1/mcp", tags=["mcp"])
 
 
@@ -2034,79 +2046,8 @@ def _caller_access(
     user: User,
     ws: Workspace | None = None,
 ) -> str | None:
-    """Determine caller's access level ('owner', 'write', 'read', or None) to a catalog.
-
-    When `ws` is provided (active workspace context), access is strictly jailed to that workspace:
-    - If active workspace owns the catalog:
-      - superadmin -> 'owner'
-      - workspace admin/owner -> 'owner'
-      - workspace member/write/user -> 'write'
-      - workspace viewer/read -> 'read'
-    - If active workspace does NOT own the catalog:
-      - Checks approved, non-suspended CatalogAccess grant specifically for `ws.id`
-      - If no approved grant exists -> returns None (catalog is invisible in this workspace)
-      - If grant exists -> grant.mode (e.g. 'read')
-    """
-    if ws is not None:
-        if str(catalog.owner_workspace_id) == str(ws.id):
-            if user.role == "superadmin":
-                return "owner"
-            member = next(
-                (m for m in user.workspace_memberships if str(m.workspace_id) == str(ws.id)),
-                None,
-            )
-            if not member:
-                share = (
-                    db.query(WorkspaceShare)
-                    .filter(
-                        WorkspaceShare.workspace_id == ws.id,
-                        WorkspaceShare.user_id == user.id,
-                        WorkspaceShare.status == "approved",
-                    )
-                    .first()
-                )
-                if share:
-                    return "read"
-                return None
-            role = member.role.lower() if member.role else "read"
-            if role in ("admin", "owner"):
-                return "owner"
-            if role in ("write", "user", "member"):
-                return "write"
-            return "read"
-
-        # Cross-workspace: strictly verify approved sharing grant for active workspace and user
-        grant = (
-            db.query(CatalogAccess)
-            .filter(
-                CatalogAccess.catalog_id == catalog.id,
-                CatalogAccess.workspace_id == ws.id,
-                CatalogAccess.requested_by == user.id,
-                CatalogAccess.status == "approved",
-                CatalogAccess.suspended.is_(False),
-            )
-            .first()
-        )
-        return grant.mode if grant else None
-
-    # Fallback when ws is not provided
-    if user.role == "superadmin":
-        return "owner"
-    ws_ids = [str(m.workspace_id) for m in user.workspace_memberships]
-    if str(catalog.owner_workspace_id) in ws_ids:
-        return "owner"
-    grant = (
-        db.query(CatalogAccess)
-        .filter(
-            CatalogAccess.catalog_id == catalog.id,
-            CatalogAccess.workspace_id.in_(ws_ids),
-            CatalogAccess.requested_by == user.id,
-            CatalogAccess.status == "approved",
-            CatalogAccess.suspended.is_(False),
-        )
-        .first()
-    )
-    return grant.mode if grant else None
+    """Determine caller's access level ('owner', 'write', 'read', or None) to a catalog."""
+    return caller_access(db, catalog, user, ws=ws)
 
 
 def _assert_catalog_access(
@@ -2939,6 +2880,16 @@ def create_table(
     if db.query(CatalogTable).filter_by(schema_id=sch_uuid, slug=slug).first():
         raise HTTPException(400, f"Table slug '{slug}' already exists in this schema")
     col_defs = [c.model_dump() for c in req.column_defs] if req.column_defs is not None else []
+
+    # Auto-detection: a path that already holds Iceberg metadata registers as an Iceberg table
+    detected_metadata = None
+    if req.s3_path_pattern and req.format != "parquet":
+        detected_metadata = iceberg_catalog.detect_iceberg_metadata(req.s3_path_pattern)
+
+    if req.format == "iceberg" and not detected_metadata:
+        table = _create_new_iceberg_table(db, catalog, schema, slug, req, col_defs)
+        return CatalogTableResponse.model_validate(table)
+
     table = CatalogTable(
         schema_id=schema.id,
         name=req.name.strip(),
@@ -2950,7 +2901,69 @@ def create_table(
     db.add(table)
     db.commit()
     db.refresh(table)
+    if detected_metadata:
+        try:
+            iceberg_catalog.system_catalog(db, catalog.owner_workspace).adopt_table(
+                table, detected_metadata
+            )
+            db.refresh(table)
+        except Exception as exc:
+            db.rollback()
+            if req.format == "iceberg":
+                db.delete(table)
+                db.commit()
+                raise HTTPException(400, f"Could not register Iceberg table: {exc}") from exc
+            logger.info("Iceberg metadata at %s not adopted: %s", detected_metadata, exc)
     return CatalogTableResponse.model_validate(table)
+
+
+def _create_new_iceberg_table(
+    db: Session,
+    catalog: Catalog,
+    schema: CatalogSchema,
+    slug: str,
+    req: CreateTableRequest,
+    col_defs: list[dict[str, Any]],
+) -> CatalogTable:
+    """Create an empty managed Iceberg table (v1 metadata + pointer row) from column definitions."""
+    from pyiceberg.partitioning import PartitionField, PartitionSpec
+    from pyiceberg.transforms import IdentityTransform
+
+    if not col_defs:
+        raise HTTPException(400, "An Iceberg table needs at least one column definition")
+    try:
+        iceberg_schema = iceberg_catalog.schema_from_column_defs(col_defs)
+        fields = []
+        for idx, col_name in enumerate(req.partition_by or []):
+            source = iceberg_schema.find_field(col_name)
+            fields.append(
+                PartitionField(
+                    source_id=source.field_id,
+                    field_id=1000 + idx,
+                    transform=IdentityTransform(),
+                    name=col_name,
+                )
+            )
+        location = None
+        if req.s3_path_pattern:
+            location = re.split(r"[*?\[]", req.s3_path_pattern.strip(), maxsplit=1)[0].rstrip("/")
+        iceberg_catalog.system_catalog(db, catalog.owner_workspace).create_table(
+            (catalog.slug, schema.slug, slug),
+            schema=iceberg_schema,
+            location=location or None,
+            partition_spec=PartitionSpec(*fields),
+            description=req.description,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(400, f"Could not create Iceberg table: {exc}") from exc
+    table = db.query(CatalogTable).filter_by(schema_id=schema.id, slug=slug).first()
+    table.name = req.name.strip()
+    db.commit()
+    db.refresh(table)
+    return table
 
 
 @app.get(
@@ -2990,11 +3003,17 @@ def export_table_toon(
     schema_id: str,
     table_id: str,
     format: str | None = Query(None),
+    tier: int | None = Query(None, ge=1, le=2),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     ws_ctx: tuple[Workspace, str] | None = Depends(get_catalog_workspace_and_role),
 ):
-    """Export table definition, columns, and metadata in standard compact TOON notation."""
+    """Export table definition, columns, and metadata in standard compact TOON notation.
+
+    For Iceberg tables `tier=1` returns the `table.toon` metadata summary and `tier=2` the
+    `table_files.toon` file manifest; without `tier` the editable table specification is
+    exported (the format `toon_to_table_spec` round-trips).
+    """
     ws = _extract_ws(ws_ctx)
     cat_uuid = _as_uuid(catalog_id)
     sch_uuid = _as_uuid(schema_id)
@@ -3015,10 +3034,20 @@ def export_table_toon(
         db.query(CatalogSchema).filter_by(id=sch_uuid).first() if sch_uuid else None
     )
     sch_name = schema.slug if schema else ""
-    toon_text = table_to_toon(
-        table, catalog_name=catalog.name or catalog.slug, schema_name=sch_name
-    )
-    if (format or "").strip().lower() in ("raw", "toon", "text"):
+    tier_val: int | None = tier if isinstance(tier, int) else None
+    if tier_val is not None and (table.format != "iceberg" or not table.iceberg):
+        raise HTTPException(400, "TOON metadata tiers are only available for Iceberg tables")
+    if tier_val is not None:
+        # Iceberg metadata views: Tier 1 table summary / Tier 2 file manifest (cached on commit)
+        import iceberg_toon
+
+        toon_text = iceberg_toon.get_table_toon(db, table, tier_val)
+    else:
+        toon_text = table_to_toon(
+            table, catalog_name=catalog.name or catalog.slug, schema_name=sch_name
+        )
+    fmt_str = format if isinstance(format, str) else ""
+    if fmt_str.strip().lower() in ("raw", "toon", "text"):
         return PlainTextResponse(toon_text, media_type="text/plain")
 
     return {
