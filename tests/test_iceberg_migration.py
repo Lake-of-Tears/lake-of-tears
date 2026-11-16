@@ -106,7 +106,9 @@ def test_zero_copy_migration_with_hive_partitions(env):
     schema_row = cat.schemas[0]
 
     # Create Hive partitioned directory structure
-    table_dir = env["root"] / "workspaces" / ws.slug / cat.slug / schema_row.slug / "events_partitioned"
+    table_dir = (
+        env["root"] / "workspaces" / ws.slug / cat.slug / schema_row.slug / "events_partitioned"
+    )
     data_west = pa.table({"id": pa.array([1], pa.int64()), "event": ["login"]})
     data_east = pa.table({"id": pa.array([2], pa.int64()), "event": ["logout"]})
     _write_parquet(table_dir / "region=west" / "data.parquet", data_west)

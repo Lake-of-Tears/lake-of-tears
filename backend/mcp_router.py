@@ -340,8 +340,11 @@ def _handle_resources_read(
             table_filter=tbl_slug,
         )
         if not scope["catalogs"]:
-            raise HTTPException(status_code=404, detail=f"Table '{tbl_slug}' not found in '{ws_slug}'")
+            raise HTTPException(
+                status_code=404, detail=f"Table '{tbl_slug}' not found in '{ws_slug}'"
+            )
         from models import Catalog, CatalogSchema, CatalogTable
+
         table_row = (
             db.query(CatalogTable)
             .join(CatalogSchema, CatalogTable.schema_id == CatalogSchema.id)
@@ -357,9 +360,11 @@ def _handle_resources_read(
             raise HTTPException(status_code=404, detail=f"Table '{tbl_slug}' not found")
         if table_row.format == "iceberg" and table_row.iceberg:
             import iceberg_toon
+
             toon_text = iceberg_toon.get_table_toon(db, table_row, tier=1)
         else:
             from catalog_toon_service import table_to_toon
+
             toon_text = table_to_toon(table_row, catalog_name=cat_slug, schema_name=sch_slug)
         return {
             "contents": [
@@ -514,11 +519,7 @@ def _execute_mcp_tool(
             t_slug = matched_tbl.get("slug") or matched_tbl.get("name")
             if t_slug:
                 try:
-                    tbl_row = (
-                        db.query(CatalogTable)
-                        .filter(CatalogTable.slug == t_slug)
-                        .first()
-                    )
+                    tbl_row = db.query(CatalogTable).filter(CatalogTable.slug == t_slug).first()
                     if tbl_row and tbl_row.format == "iceberg" and tbl_row.iceberg:
                         import iceberg_toon
 

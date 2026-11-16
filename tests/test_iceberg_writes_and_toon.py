@@ -159,9 +159,7 @@ def test_lab_bundle_iceberg_table_materialization(env):
 
     db = env["Session"]()
     ws = db.merge(env["ws"])
-    schema_row = (
-        db.query(CatalogSchema).filter_by(catalog_id=env["cat"].id, slug="bronze").one()
-    )
+    schema_row = db.query(CatalogSchema).filter_by(catalog_id=env["cat"].id, slug="bronze").one()
 
     tbl_resource = TableResource(
         name="telemetry",

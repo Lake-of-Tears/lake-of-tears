@@ -173,10 +173,13 @@ def test_sql_restore_table_statement_interception(env):
 
     table.append(ARROW_2)
 
-    assert rest.load_table(("main_lake", "bronze", "sql_restore_tbl")).scan().to_arrow().num_rows == 3
+    assert (
+        rest.load_table(("main_lake", "bronze", "sql_restore_tbl")).scan().to_arrow().num_rows == 3
+    )
 
     # Intercept via sql_router
     import iceberg_service
+
     db = env["Session"]()
     ws = db.merge(env["ws"])
     writer_user = db.merge(env["writer"])
