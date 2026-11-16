@@ -129,3 +129,18 @@ def test_page_by_page_light_theme_coverage():
         assert (
             'html[data-theme="light"]' in content
         ), f"Missing html[data-theme='light'] coverage in {rel_path}"
+
+
+def test_lakeset_confirm_modal_theming_and_semantic_tokens():
+    """Verify #lakeset-confirm-modal uses semantic tokens and handles light/dark transitions."""
+    base_html = (TEMPLATES_DIR / "base.html").read_text(encoding="utf-8")
+    lakeset_html = (TEMPLATES_DIR / "lakeset.html").read_text(encoding="utf-8")
+
+    assert "#lakeset-confirm-modal > div" in base_html
+    assert 'html[data-theme="light"] #lakeset-confirm-modal > div' in lakeset_html
+    assert "var(--surface-elevated" in lakeset_html
+    assert "var(--border-default" in lakeset_html
+    assert "var(--surface-muted" in lakeset_html
+    assert 'id="lakeset-confirm-modal"' in lakeset_html
+    assert 'id="btn-cancel-custom-sql-switch"' in lakeset_html
+    assert 'id="btn-confirm-custom-sql-switch"' in lakeset_html

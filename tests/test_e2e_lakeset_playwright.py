@@ -526,3 +526,80 @@ def test_e2e_workspace_search_input_lakeset_explore_navigation(lakeset_page, lak
     page.wait_for_selector("#lakeset-explore-sql-preview", state="visible", timeout=5000)
     assert "gold.journal_trends" in page.locator("#lakeset-explore-sql-preview").inner_text()
     page.wait_for_selector("#lakeset-explore-chart canvas", state="visible", timeout=5000)
+
+
+def test_e2e_lakeset_custom_sql_mode_and_theme_modal(lakeset_page, lakeset_server):
+    """Verify Custom SQL mode, Run & Update Chart interactivity, and LoT Confirmation Dialog theme transition."""
+    page = lakeset_page
+    custom_sql = "SELECT 'Tier 1' AS seg, 320 AS rev UNION ALL SELECT 'Tier 2', 180"
+
+    # 1. Navigate to Lakeset with custom SQL in URL
+    page.goto(f"/lakeset?mode=explore&sql={custom_sql}", wait_until="networkidle")
+
+    # Verify dedicated Custom SQL mode
+    page.locator("#lakeset-explore-chart canvas").wait_for(state="visible", timeout=7000)
+    assert page.locator("text=Custom Query Exploration").first.is_visible()
+    assert page.locator("text=Custom SQL").first.is_visible()
+    assert page.locator("button:has-text('Clear')").first.is_visible()
+
+    # 2. Edit SQL in textarea and click 'Run & Update Chart'
+    updated_sql = "SELECT 'North' AS seg, 540 AS rev UNION ALL SELECT 'South', 290"
+    page.locator("#explore-sql-input").fill(updated_sql)
+
+    with page.expect_response("**/api/lakeset/explore-data") as resp_info:
+        page.locator("#btn-run-explore").click()
+    assert resp_info.value.status == 200
+
+    # Wait for JS to process response and sync URL
+    page.wait_for_function("() => window.location.href.includes('North')", timeout=5000)
+    assert "mode=explore" in page.url
+    assert "North" in page.url or "%27North%27" in page.url
+
+    # 3. Select a governed dataset from dropdown while custom SQL is active -> triggers LoT confirmation dialog
+    page.locator("#explore-dataset-select").select_option(
+        value="biomedical_lake.gold.journal_trends"
+    )
+
+    # Modal appears
+    modal = page.locator("#lakeset-confirm-modal")
+    modal.wait_for(state="visible", timeout=5000)
+    assert modal.is_visible()
+    assert page.locator("#lakeset-confirm-title").inner_text() == "Clear Custom SQL Query?"
+    assert "biomedical_lake.gold.journal_trends" in modal.inner_text()
+    assert "North" in modal.locator(".sql-preview-box").inner_text()
+
+    # 4. Test Theme Transition while modal is open
+    # Switch to light mode
+    page.evaluate("() => (window.setTheme ? window.setTheme('light') : window.applyTheme('light'))")
+    page.wait_for_timeout(300)
+    theme_val = page.evaluate("() => document.documentElement.getAttribute('data-theme')")
+    assert theme_val == "light"
+    assert modal.is_visible()
+
+    # Test 'Keep Custom SQL' (Cancel)
+    page.locator("#btn-cancel-custom-sql-switch").click()
+    page.wait_for_timeout(300)
+    assert not modal.is_visible()
+
+    # Custom SQL textarea remains unchanged
+    assert "North" in page.locator("#explore-sql-input").input_value()
+
+    # 5. Open modal again and confirm switch
+    page.locator("#explore-dataset-select").select_option(
+        value="biomedical_lake.gold.journal_trends"
+    )
+    modal.wait_for(state="visible", timeout=5000)
+
+    # Switch back to dark mode
+    page.evaluate("() => (window.setTheme ? window.setTheme('dark') : window.applyTheme('dark'))")
+    page.wait_for_timeout(300)
+    assert page.evaluate("() => document.documentElement.getAttribute('data-theme')") == "dark"
+
+    # Click 'Clear & Switch Dataset' (Confirm)
+    page.locator("#btn-confirm-custom-sql-switch").click()
+    page.wait_for_timeout(800)
+    assert not modal.is_visible()
+
+    # Custom SQL is cleared, governed dataset is charted
+    assert page.locator("#explore-sql-input").input_value() == ""
+    page.locator("#lakeset-explore-chart canvas").wait_for(state="visible", timeout=7000)
