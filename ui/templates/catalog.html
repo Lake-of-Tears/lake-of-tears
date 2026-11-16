@@ -690,6 +690,12 @@
                     {% endif %}
                   </div>
 
+                  {% if table.format == 'iceberg' %}
+                  <span class="text-[9px] px-1.5 py-0.5 rounded font-mono font-semibold tracking-wider bg-cyan-950/60 text-cyan-300 border border-cyan-800/60 shrink-0">ICEBERG</span>
+                  {% else %}
+                  <span class="text-[9px] px-1.5 py-0.5 rounded font-mono text-gray-500 bg-gray-900/40 border border-gray-800 shrink-0">PARQUET</span>
+                  {% endif %}
+
                   {% if table.vector_index and table.vector_index.status == 'synced' %}
                   <span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950/40 text-emerald-400 border border-emerald-800/40 shrink-0 font-mono">vector</span>
                   {% endif %}
@@ -930,6 +936,9 @@
                           {% endif %}
                         </div>
                         <span class="text-[9px] px-1.5 py-0.5 rounded font-mono uppercase bg-cyan-950/40 text-cyan-400 border border-cyan-800/40 shrink-0">shared</span>
+                        {% if table.format == 'iceberg' %}
+                        <span class="text-[9px] px-1.5 py-0.5 rounded font-mono font-semibold tracking-wider bg-cyan-950/60 text-cyan-300 border border-cyan-800/60 shrink-0">ICEBERG</span>
+                        {% endif %}
                         {% if table.column_defs and table.column_defs | length > 0 %}
                         <span class="text-[11px] text-gray-600 shrink-0">{{ table.column_defs | length }} cols</span>
                         {% endif %}
@@ -967,6 +976,7 @@
       <div class="min-w-0 flex-1 pr-3">
         <div class="flex items-center gap-2">
           <h2 class="font-semibold text-gray-100 text-sm truncate" id="panel-title">Table detail</h2>
+          <span id="panel-format-badge" class="text-[10px] px-1.5 py-0.5 rounded font-mono font-semibold tracking-wider bg-cyan-950/60 text-cyan-300 border border-cyan-800/60 shrink-0">ICEBERG</span>
           <span id="panel-drift-badge" class="hidden text-[10px] px-1.5 py-0.5 rounded bg-yellow-900/30 text-yellow-500 border border-yellow-800/40 shrink-0">drift</span>
         </div>
         <div class="flex items-center gap-1.5 mt-1.5" id="panel-namespace-row">
@@ -1044,6 +1054,11 @@
               class="px-3.5 py-2 text-xs font-semibold border-b-2 border-transparent text-gray-400 hover:text-gray-200 transition-colors">
         Vector Index
       </button>
+      <button type="button" onclick="switchDrawerTab('snapshots')" id="tab-btn-snapshots"
+              class="hidden px-3.5 py-2 text-xs font-semibold border-b-2 border-transparent text-gray-400 hover:text-gray-200 transition-colors flex items-center gap-1.5">
+        <span>Snapshots</span>
+        <span class="text-[9px] px-1 py-0.2 rounded bg-cyan-950/60 text-cyan-400 border border-cyan-800/40 font-mono">ICE</span>
+      </button>
     </div>
   </div>
 
@@ -1057,6 +1072,8 @@
     <div id="drawer-tab-details" class="hidden space-y-4"></div>
     <!-- Tab 4: Vector Index -->
     <div id="drawer-tab-vector" class="hidden space-y-4"></div>
+    <!-- Tab 5: Snapshots History -->
+    <div id="drawer-tab-snapshots" class="hidden space-y-4"></div>
   </div>
 </div>
 <div id="panel-overlay" class="hidden fixed inset-0 z-40 bg-black/40" onclick="closePanel()"></div>
@@ -1181,7 +1198,7 @@
     <!-- Scrollable Body -->
     <div class="flex-1 overflow-y-auto p-5 space-y-4">
       <!-- Target Placement -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
         <div>
           <label class="block text-xs font-medium text-gray-400 mb-1">Catalog</label>
           <select id="upload-table-cat-select" class="input-dark w-full text-xs" onchange="onUploadCatChanged()">
@@ -1197,6 +1214,13 @@
         <div>
           <label class="block text-xs font-medium text-gray-400 mb-1">Table Name</label>
           <input id="upload-table-name-input" type="text" placeholder="e.g. orders_raw" class="input-dark w-full text-xs" required/>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-400 mb-1">Table Format</label>
+          <select id="upload-table-format-select" class="input-dark w-full text-xs">
+            <option value="parquet">Apache Parquet</option>
+            <option value="iceberg">Apache Iceberg</option>
+          </select>
         </div>
       </div>
 
@@ -2952,6 +2976,10 @@ async function submitCreateTableUpload() {
   formData.append('catalog_id', catId);
   formData.append('schema_id', schId);
   formData.append('table_name', tableName);
+  const formatSelect = document.getElementById('upload-table-format-select');
+  if (formatSelect) {
+    formData.append('format', formatSelect.value);
+  }
   formData.append('mode', 'create_new');
   formData.append('description', `Managed table ingested from ${uploadCurrentFile.name}`);
   formData.append('columns_json', JSON.stringify(columnOverrides));

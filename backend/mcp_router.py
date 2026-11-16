@@ -14,6 +14,7 @@ from models import CatalogTable, User
 from openai_compat_router import execute_vector_retrieve_request
 from schemas import VectorRetrieveRequest
 from sqlalchemy.orm import Session
+from table_scan import table_scan_for
 
 logger = logging.getLogger("lake.backend.mcp")
 
@@ -68,6 +69,11 @@ MCP_TOOLS_SPEC: list[dict[str, Any]] = [
                 "include_sample": {
                     "type": "boolean",
                     "description": "Whether to fetch up to 5 sample rows from the table (default: false).",
+                    "default": False,
+                },
+                "include_files_manifest": {
+                    "type": "boolean",
+                    "description": "Whether to include Tier 2 table_files.toon manifest for Iceberg tables (default: false).",
                     "default": False,
                 },
             },
@@ -316,6 +322,55 @@ def _handle_resources_read(
     params: dict[str, Any],
 ) -> dict[str, Any]:
     uri = str(params.get("uri") or "").strip()
+    if uri.startswith("lot://tables/"):
+        rest = uri[len("lot://tables/") :]
+        parts = [p.strip() for p in rest.split("/") if p.strip()]
+        if len(parts) < 4:
+            raise HTTPException(
+                status_code=400,
+                detail="Resource URI must match lot://tables/{workspace_slug}/{catalog_slug}/{schema_slug}/{table_slug}/toon",
+            )
+        ws_slug, cat_slug, sch_slug, tbl_slug = parts[0], parts[1], parts[2], parts[3]
+        scope = ai_service.resolve_user_ai_scope(
+            db=db,
+            user=current_user,
+            workspace_slug=ws_slug,
+            catalog_filter=cat_slug,
+            schema_filter=sch_slug,
+            table_filter=tbl_slug,
+        )
+        if not scope["catalogs"]:
+            raise HTTPException(status_code=404, detail=f"Table '{tbl_slug}' not found in '{ws_slug}'")
+        from models import Catalog, CatalogSchema, CatalogTable
+        table_row = (
+            db.query(CatalogTable)
+            .join(CatalogSchema, CatalogTable.schema_id == CatalogSchema.id)
+            .join(Catalog, CatalogSchema.catalog_id == Catalog.id)
+            .filter(
+                Catalog.slug == cat_slug,
+                CatalogSchema.slug == sch_slug,
+                CatalogTable.slug == tbl_slug,
+            )
+            .first()
+        )
+        if not table_row:
+            raise HTTPException(status_code=404, detail=f"Table '{tbl_slug}' not found")
+        if table_row.format == "iceberg" and table_row.iceberg:
+            import iceberg_toon
+            toon_text = iceberg_toon.get_table_toon(db, table_row, tier=1)
+        else:
+            from catalog_toon_service import table_to_toon
+            toon_text = table_to_toon(table_row, catalog_name=cat_slug, schema_name=sch_slug)
+        return {
+            "contents": [
+                {
+                    "uri": uri,
+                    "mimeType": "text/plain; format=toon",
+                    "text": toon_text,
+                }
+            ]
+        }
+
     if not uri.startswith("lot://catalogs/"):
         raise HTTPException(status_code=400, detail=f"Unsupported resource URI: {uri}")
     rest = uri[len("lot://catalogs/") :]
@@ -436,9 +491,8 @@ def _execute_mcp_tool(
             sample_rows: list[list[Any]] = []
             sample_columns: list[str] = []
             if include_sample and matched_tbl.get("s3_path_pattern"):
-                s3_pat = str(matched_tbl["s3_path_pattern"]).replace("'", "''")
                 sample_res = ai_service.execute_sql_query(
-                    sql=f"SELECT * FROM read_parquet('{s3_pat}') LIMIT 5",
+                    sql=f"SELECT * FROM {table_scan_for(matched_tbl)} LIMIT 5",
                     catalogs=scope["catalogs"],
                     read_only=True,
                     workspace_slug=scope["primary_workspace"].slug,
@@ -454,6 +508,26 @@ def _execute_mcp_tool(
                 or vec_cfg.get("enabled")
                 or vec_cfg.get("status") in ("ready", "synced")
             )
+            tbl_format = matched_tbl.get("format") or "parquet"
+            toon_summary = None
+            toon_files = None
+            t_slug = matched_tbl.get("slug") or matched_tbl.get("name")
+            if t_slug:
+                try:
+                    tbl_row = (
+                        db.query(CatalogTable)
+                        .filter(CatalogTable.slug == t_slug)
+                        .first()
+                    )
+                    if tbl_row and tbl_row.format == "iceberg" and tbl_row.iceberg:
+                        import iceberg_toon
+
+                        toon_summary = iceberg_toon.get_table_toon(db, tbl_row, tier=1)
+                        if arguments.get("include_files_manifest"):
+                            toon_files = iceberg_toon.get_table_toon(db, tbl_row, tier=2)
+                except Exception as exc:
+                    logger.warning("Error fetching TOON for describe_table: %s", exc)
+
             return _tool_success(
                 {
                     "ok": True,
@@ -462,11 +536,14 @@ def _execute_mcp_tool(
                     "catalog": (matched_cat or {}).get("slug") or cat_name,
                     "schema": (matched_sch or {}).get("slug") or sch_name,
                     "table": matched_tbl.get("slug") or tbl_name,
+                    "format": tbl_format,
                     "description": matched_tbl.get("description"),
                     "columns": matched_tbl.get("column_defs") or [],
                     "has_vector_index": has_vec,
                     "sample_columns": sample_columns,
                     "sample_rows": sample_rows,
+                    "toon_summary": toon_summary,
+                    "toon_files": toon_files,
                 }
             )
 

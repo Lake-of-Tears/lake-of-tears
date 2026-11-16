@@ -17,6 +17,11 @@ import sqlglot
 from sqlglot import exp
 
 try:
+    from table_scan import ensure_iceberg_loaded, is_iceberg, table_scan_for
+except ImportError:
+    from ui.table_scan import ensure_iceberg_loaded, is_iceberg, table_scan_for
+
+try:
     from ui.ai_gateway_client import GatewayClient
 except ImportError:
     from ai_gateway_client import GatewayClient
@@ -680,17 +685,19 @@ def register_catalog_views(
                 s3_path = (table.get("s3_path_pattern") or "").strip()
                 if not table_slug or not s3_path:
                     continue
-                escaped_path = s3_path.replace("'", "''")
                 try:
+                    # Iceberg tables route to iceberg_scan, legacy tables to read_parquet
+                    if is_iceberg(table):
+                        ensure_iceberg_loaded(con)
+                    scan = table_scan_for(table)
                     con.execute(
                         f'CREATE OR REPLACE VIEW "{schema_slug}"."{table_slug}" AS '
-                        f"SELECT * FROM read_parquet('{escaped_path}')"
+                        f"SELECT * FROM {scan}"
                     )
                     registered.append(f"{schema_slug}.{table_slug}")
                     try:
                         con.execute(
-                            f'CREATE OR REPLACE VIEW "{table_slug}" AS '
-                            f"SELECT * FROM read_parquet('{escaped_path}')"
+                            f'CREATE OR REPLACE VIEW "{table_slug}" AS SELECT * FROM {scan}'
                         )
                     except Exception:
                         pass
@@ -731,6 +738,13 @@ def build_schema_prompt_context(
                     # The views are created with _safe_identifier names (a slug like
                     # "tmdb-trending" becomes tmdb_trending), so that is what queries must use.
                     view = f"{_safe_identifier(schema_slug)}.{_safe_identifier(t_slug or '')}"
+                    if is_iceberg(table):
+                        lines.append(
+                            f"- `{cat_slug}.{schema_slug}.{t_slug}` (Iceberg table; View: `{view}`, "
+                            f"time travel: `{view} FOR SYSTEM_VERSION AS OF <snapshot_id>`){desc}\n"
+                            f"  Columns: {col_str}"
+                        )
+                        continue
                     lines.append(
                         f"- `{cat_slug}.{schema_slug}.{t_slug}` (View: `{view}` or `read_parquet('{s3_path}')`){desc}\n"
                         f"  Columns: {col_str}"

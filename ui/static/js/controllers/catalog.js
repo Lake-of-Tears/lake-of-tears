@@ -402,6 +402,24 @@ document.addEventListener('alpine:init', () => {
         driftBadge.classList.toggle('hidden', !table.schema_drift);
       }
 
+      // Format badge
+      const formatBadge = document.getElementById('panel-format-badge');
+      if (formatBadge) {
+        if (table.format === 'iceberg') {
+          formatBadge.textContent = 'ICEBERG';
+          formatBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-mono font-semibold tracking-wider bg-cyan-950/60 text-cyan-300 border border-cyan-800/60 shrink-0';
+        } else {
+          formatBadge.textContent = 'PARQUET';
+          formatBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-mono text-gray-400 bg-gray-900/60 border border-gray-700/50 shrink-0';
+        }
+      }
+
+      // Snapshots tab toggle
+      const snapTabBtn = document.getElementById('tab-btn-snapshots');
+      if (snapTabBtn) {
+        snapTabBtn.classList.toggle('hidden', table.format !== 'iceberg');
+      }
+
       // Top action links
       const viewName = `${schIdent}.${tableIdent}`;
       const sqlPath = table.s3_path_pattern || '';
@@ -471,21 +489,147 @@ document.addEventListener('alpine:init', () => {
 
     switchTab(tab) {
       this.activeTab = tab;
-      ['columns', 'sample', 'details', 'vector'].forEach(t => {
+      ['columns', 'sample', 'details', 'vector', 'snapshots'].forEach(t => {
         const btn = document.getElementById('tab-btn-' + t);
         const content = document.getElementById('drawer-tab-' + t);
         if (!btn || !content) return;
         if (t === tab) {
-          btn.className = 'px-3.5 py-2 text-xs font-semibold border-b-2 border-blue-500 text-blue-400 transition-colors';
+          btn.className = 'px-3.5 py-2 text-xs font-semibold border-b-2 border-blue-500 text-blue-400 transition-colors flex items-center gap-1.5';
           content.classList.remove('hidden');
         } else {
-          btn.className = 'px-3.5 py-2 text-xs font-semibold border-b-2 border-transparent text-gray-400 hover:text-gray-200 transition-colors';
+          btn.className = 'px-3.5 py-2 text-xs font-semibold border-b-2 border-transparent text-gray-400 hover:text-gray-200 transition-colors flex items-center gap-1.5';
           content.classList.add('hidden');
         }
       });
 
       if (tab === 'sample') {
         this.loadSampleData();
+      } else if (tab === 'snapshots') {
+        this.loadSnapshotsHistory();
+      }
+    },
+
+    async loadSnapshotsHistory() {
+      const container = document.getElementById('drawer-tab-snapshots');
+      if (!container) return;
+      container.innerHTML = `
+        <div class="py-8 text-center text-gray-500 text-xs">
+          <div class="animate-spin inline-block w-4 h-4 border-2 border-cyan-500 border-t-transparent rounded-full mb-2"></div>
+          <div>Loading snapshot history...</div>
+        </div>
+      `;
+
+      try {
+        const catId = this.currentCatId || window.currentCatId;
+        const schId = this.currentSchId || window.currentSchId;
+        const tblId = this.currentTableId || window.currentTableId;
+        const resp = await fetch(`/api/catalogs/${catId}/schemas/${schId}/tables/${tblId}/snapshots`, { credentials: 'include' });
+        if (!resp.ok) {
+          throw new Error(`Failed to load snapshots (${resp.status})`);
+        }
+        const data = await resp.json();
+        this.renderSnapshotsTab(data);
+      } catch (err) {
+        container.innerHTML = `
+          <div class="p-4 rounded-lg bg-red-950/30 border border-red-800/40 text-red-300 text-xs">
+            Failed to load snapshots: ${err.message}
+          </div>
+        `;
+      }
+    },
+
+    renderSnapshotsTab(data) {
+      const container = document.getElementById('drawer-tab-snapshots');
+      if (!container) return;
+      const snapshots = data.snapshots || [];
+      if (!snapshots.length) {
+        container.innerHTML = '<div class="py-6 text-center text-gray-500 text-xs">No snapshot history found for this table.</div>';
+        return;
+      }
+
+      const rows = snapshots.map(s => {
+        const isCurrent = s.is_current;
+        const snapIdStr = String(s.snapshot_id);
+        const shortId = snapIdStr.length > 12 ? snapIdStr.slice(0, 8) + '…' + snapIdStr.slice(-4) : snapIdStr;
+        const op = (s.operation || 'commit').toUpperCase();
+        const opColor = op === 'APPEND' ? 'text-emerald-400 bg-emerald-950/40 border-emerald-800/40'
+                      : op === 'OVERWRITE' ? 'text-amber-400 bg-amber-950/40 border-amber-800/40'
+                      : 'text-cyan-400 bg-cyan-950/40 border-cyan-800/40';
+        const dateStr = s.committed_at ? new Date(s.committed_at).toLocaleString() : 'N/A';
+        const delta = s.record_delta !== undefined ? (s.record_delta > 0 ? `+${s.record_delta}` : `${s.record_delta}`) : '0';
+
+        return `
+          <tr class="hover:bg-white/[0.02] border-b border-white/[0.04] transition-colors">
+            <td class="py-2.5 px-3">
+              <div class="flex items-center gap-1.5 font-mono text-xs text-cyan-300">
+                <span title="${snapIdStr}">${shortId}</span>
+                ${isCurrent ? '<span class="text-[9px] px-1 py-0.2 rounded bg-cyan-900/40 text-cyan-300 border border-cyan-700/50 uppercase font-bold">Current</span>' : ''}
+              </div>
+            </td>
+            <td class="py-2.5 px-3 text-xs text-gray-400 whitespace-nowrap">${dateStr}</td>
+            <td class="py-2.5 px-3">
+              <span class="text-[10px] px-1.5 py-0.5 rounded font-mono uppercase border ${opColor}">${op}</span>
+            </td>
+            <td class="py-2.5 px-3 font-mono text-xs ${s.record_delta > 0 ? 'text-emerald-400' : 'text-gray-400'}">${delta} rows</td>
+            <td class="py-2.5 px-3 text-right">
+              ${isCurrent ? '<span class="text-[11px] text-gray-600 italic">Active</span>' : `
+                <button type="button" onclick="window._alpineTableDetailsDrawer.restoreSnapshot('${snapIdStr}')"
+                        class="px-2 py-0.5 rounded text-[11px] font-medium bg-cyan-950/40 text-cyan-300 border border-cyan-800/50 hover:bg-cyan-900/60 transition-colors">
+                  Restore
+                </button>
+              `}
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      container.innerHTML = `
+        <div class="space-y-3">
+          <div class="flex items-center justify-between text-xs text-gray-400">
+            <div>Total Snapshots: <span class="font-mono text-gray-200 font-semibold">${data.snapshot_count || snapshots.length}</span></div>
+            <div class="text-[11px] text-gray-500">Format: Iceberg v${data.format_version || 2}</div>
+          </div>
+          <div class="border border-white/[0.08] rounded-lg overflow-hidden bg-black/20">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="border-b border-white/[0.08] bg-white/[0.02] text-[11px] text-gray-500 uppercase tracking-wider font-semibold">
+                  <th class="py-2 px-3">Snapshot ID</th>
+                  <th class="py-2 px-3">Committed</th>
+                  <th class="py-2 px-3">Operation</th>
+                  <th class="py-2 px-3">Delta</th>
+                  <th class="py-2 px-3 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    },
+
+    async restoreSnapshot(snapId) {
+      if (!confirm(`Restore table "${this.currentTableIdent}" to snapshot ${snapId}? Readers will immediately see that committed state.`)) {
+        return;
+      }
+      try {
+        const catId = this.currentCatId || window.currentCatId;
+        const schId = this.currentSchId || window.currentSchId;
+        const tblId = this.currentTableId || window.currentTableId;
+        const resp = await fetch(`/api/catalogs/${catId}/schemas/${schId}/tables/${tblId}/restore`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ snapshot_id: snapId })
+        });
+        const res = await resp.json();
+        if (resp.ok && res.ok) {
+          if (window.showCatalogToast) showCatalogToast(res.message || 'Table restored successfully', 'success');
+          this.loadSnapshotsHistory();
+        } else {
+          alert('Restore failed: ' + (res.detail || res.error || 'Unknown error'));
+        }
+      } catch (err) {
+        alert('Restore network error: ' + err);
       }
     },
 

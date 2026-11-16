@@ -47,6 +47,12 @@ from sql_guardrails import (
 )
 from sqlalchemy.orm import Session
 from sqlglot import exp
+from table_scan import (
+    apply_time_travel_views,
+    is_iceberg,
+    rewrite_time_travel,
+    table_scan_for,
+)
 
 logger = logging.getLogger("lake.backend.sql.router")
 
@@ -81,6 +87,8 @@ class StoredStatement:
     created_ts: float = field(default_factory=time.monotonic)
     cancel_event: threading.Event = field(default_factory=threading.Event)
     connection: duckdb.DuckDBPyConnection | None = None
+    # Snapshot-pinned views backing Iceberg time-travel clauses in the statement
+    time_travel_views: list[str] = field(default_factory=list)
 
 
 class StatementStore:
@@ -283,6 +291,67 @@ def _extract_ddl_dml_target(
                 )
 
     return None, None, None
+
+
+def _find_catalog_table(
+    catalogs: list[dict[str, Any]] | None,
+    schema_slug: str,
+    table_slug: str,
+) -> dict[str, Any] | None:
+    """Find the registered catalog table (manifest dict) a DDL/DML statement targets."""
+    for cat in catalogs or []:
+        for sch in cat.get("schemas") or []:
+            s_slug = ai_service._safe_identifier(sch.get("slug") or sch.get("name") or "default")
+            if s_slug.lower() != schema_slug.lower() and schema_slug.lower() != "default":
+                continue
+            for tbl in sch.get("tables") or []:
+                t_slug = ai_service._safe_identifier(tbl.get("slug") or tbl.get("name") or "")
+                if (
+                    t_slug.lower() == table_slug.lower()
+                    and (tbl.get("s3_path_pattern") or "").strip()
+                ):
+                    return tbl
+    return None
+
+
+def _commit_dml_to_iceberg(
+    con: duckdb.DuckDBPyConnection,
+    db: Session,
+    workspace: Workspace,
+    target: dict[str, Any],
+    schema_slug: str,
+    table_slug: str,
+    operation: str,
+) -> bool:
+    """Commit the mutated in-memory copy of an Iceberg table as one atomic overwrite snapshot.
+
+    Returns False when the table is not an Iceberg table owned by the active workspace, in
+    which case the caller falls back to the legacy Parquet export.
+    """
+    if not is_iceberg(target) or not target.get("id"):
+        return False
+    try:
+        row = db.query(CatalogTable).filter_by(id=uuid.UUID(str(target["id"]))).first()
+    except (ValueError, TypeError):
+        row = None
+    if row is None or row.format != "iceberg" or not row.iceberg:
+        return False
+    if str(row.schema.catalog.owner_workspace_id) != str(workspace.id):
+        raise PermissionError(
+            f"Table '{schema_slug}.{table_slug}' belongs to a shared catalog and is read-only here"
+        )
+    import iceberg_writer
+
+    data = con.execute(f'SELECT * FROM "{schema_slug}"."{table_slug}"').to_arrow_table()
+    iceberg_writer.write_arrow(
+        db,
+        row,
+        data,
+        mode=iceberg_writer.MODE_OVERWRITE,
+        allow_column_drop=operation == "ALTER",
+        snapshot_properties={"lot.source": "sql-editor", "lot.statement": operation},
+    )
+    return True
 
 
 def _find_catalog_table_s3_path(
@@ -618,6 +687,7 @@ def _execute_statement_on_duckdb(
 
         # Register workspace catalog views
         ai_service.register_catalog_views(con, catalogs)
+        apply_time_travel_views(con, stored.time_travel_views)
 
         # Configure session schema context
         target_schema = ai_service._safe_identifier(req.schema_name or "default")
@@ -637,17 +707,17 @@ def _execute_statement_on_duckdb(
                 con.execute(f'CREATE SCHEMA IF NOT EXISTS "{ddl_schema}"')
             except Exception:
                 pass
+        target_table: dict[str, Any] | None = None
 
         if op in ("INSERT", "UPDATE", "DELETE", "ALTER", "DROP") and ddl_schema and ddl_table:
-            existing_s3 = _find_catalog_table_s3_path(catalogs, ddl_schema, ddl_table)
-            if existing_s3:
-                esc_s3 = existing_s3.replace("'", "''")
+            target_table = _find_catalog_table(catalogs, ddl_schema, ddl_table)
+            if target_table:
                 try:
                     con.execute(f'DROP VIEW IF EXISTS "{ddl_schema}"."{ddl_table}"')
                     if op != "DROP":
                         con.execute(
                             f'CREATE TABLE "{ddl_schema}"."{ddl_table}" AS '
-                            f"SELECT * FROM read_parquet('{esc_s3}')"
+                            f"SELECT * FROM {table_scan_for(target_table)}"
                         )
                 except Exception:
                     pass
@@ -690,8 +760,24 @@ def _execute_statement_on_duckdb(
         except Exception:
             pass
 
+        # Iceberg targets commit the mutation as one ACID snapshot; the catalog's commit hook
+        # then syncs column defs and TOON views, so the Parquet export below is skipped.
+        committed_to_iceberg = False
+        if (
+            op in ("INSERT", "UPDATE", "DELETE", "ALTER")
+            and ddl_schema
+            and ddl_table
+            and db is not None
+            and target_table
+        ):
+            committed_to_iceberg = _commit_dml_to_iceberg(
+                con, db, workspace, target_table, ddl_schema, ddl_table, op
+            )
+
         # If DDL/DML modified or created a managed table, export to workspace S3 & sync CatalogTable
-        if op in ("CREATE", "INSERT", "UPDATE", "DELETE", "ALTER") and ddl_schema and ddl_table:
+        if committed_to_iceberg:
+            pass
+        elif op in ("CREATE", "INSERT", "UPDATE", "DELETE", "ALTER") and ddl_schema and ddl_table:
             col_defs: list[dict[str, Any]] = []
             try:
                 desc_rows = con.execute(f'DESCRIBE "{ddl_schema}"."{ddl_table}"').fetchall()
@@ -837,18 +923,35 @@ def execute_statement(
             detail="Access Denied: Workspace viewer role is read-only. Write or admin role is required for DDL/DML statements.",
         )
 
-    # 1b. Intercept UNDROP TABLE / UNDROP SCHEMA statements before DuckDB engine
-    if cleaned_sql.lstrip().upper().startswith("UNDROP"):
-        import catalog_trash_service
+    # 1b. Intercept UNDROP TABLE / UNDROP SCHEMA and Iceberg RESTORE TABLE before DuckDB engine
+    statement_verb = cleaned_sql.lstrip().upper()
+    if statement_verb.startswith(("UNDROP", "RESTORE")):
+        if statement_verb.startswith("RESTORE"):
+            import iceberg_service
 
-        is_undrop, msg = catalog_trash_service.try_handle_undrop_statement(
-            sql=cleaned_sql,
-            workspace=ws,
-            user=user,
-            default_catalog=req.catalog,
-            default_schema=req.schema_name,
-            db=db,
-        )
+            if not is_superadmin and role not in ("write", "admin", "owner", "superadmin"):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access Denied: Write or admin role is required to RESTORE a table.",
+                )
+            is_undrop, msg = iceberg_service.try_handle_restore_statement(
+                sql=cleaned_sql,
+                workspace=ws,
+                user=user,
+                default_schema=req.schema_name,
+                db=db,
+            )
+        else:
+            import catalog_trash_service
+
+            is_undrop, msg = catalog_trash_service.try_handle_undrop_statement(
+                sql=cleaned_sql,
+                workspace=ws,
+                user=user,
+                default_catalog=req.catalog,
+                default_schema=req.schema_name,
+                db=db,
+            )
         if is_undrop:
             statement_id = str(uuid.uuid4())
             is_err = (msg or "").startswith("Error:") or (
@@ -869,7 +972,7 @@ def execute_statement(
                         state="FAILED",
                         error=StatementErrorInfo(
                             error_code="EXECUTION_ERROR",
-                            message=msg or "UNDROP failed",
+                            message=msg or "Statement failed",
                         ),
                     ),
                     execution_ms=5.0,
@@ -905,6 +1008,17 @@ def execute_statement(
 
     # 2. Enforce host filesystem & S3 workspace isolation guardrails
     catalogs = ai_service.get_workspace_catalogs_from_db(db, ws.id, user_id=user.id)
+
+    # 2b. Iceberg time travel: `tbl FOR SYSTEM_VERSION AS OF <id>` / `FOR SYSTEM_TIME AS OF '<ts>'`
+    # become references to snapshot-pinned views, so guardrails and DuckDB see plain tables.
+    original_sql = cleaned_sql
+    try:
+        cleaned_sql, time_travel_views = rewrite_time_travel(cleaned_sql, catalogs)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if time_travel_views:
+        req.statement = cleaned_sql
+
     allowed, reason = validate_statement_guardrails(
         sql=cleaned_sql,
         workspace_slug=ws.slug,
@@ -929,12 +1043,13 @@ def execute_statement(
         workspace_id=str(ws.id),
         workspace_slug=ws.slug,
         user_id=str(user.id),
-        statement=cleaned_sql,
+        statement=original_sql,
         catalog=req.catalog or "main",
         schema_name=req.schema_name or "default",
         warehouse_id=req.warehouse_id or "default",
         format=req.format,
         status=StatementStatus(state="RUNNING"),
+        time_travel_views=time_travel_views,
     )
     statement_store.put(stored)
 
