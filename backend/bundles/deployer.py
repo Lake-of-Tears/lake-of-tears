@@ -266,7 +266,7 @@ _BUNDLE_TASK_RUNNER_CODE = '''def _run_bundle_task(**kwargs):
                             rf.write(req_content)
                         pip_res = subprocess.run([venv_py, "-m", "pip", "install", "-q", "-r", req_tf], capture_output=True, text=True)
                         if pip_res.returncode != 0:
-                            logger.warning("pip install failed for %s:\n%s\n%s", bundle_name, pip_res.stdout, pip_res.stderr)
+                            logger.warning("pip install failed for %s: %s %s", bundle_name, pip_res.stdout, pip_res.stderr)
                             raise subprocess.CalledProcessError(pip_res.returncode, [venv_py, "pip install"])
                         with open(hash_file, "w") as hf:
                             hf.write(req_hash)
