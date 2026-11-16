@@ -524,13 +524,20 @@ class LotIcebergCatalog(MetastoreCatalog):
             row.description = description
         row.s3_path_pattern = metadata.location.rstrip("/") + "/"
         row.column_defs = column_defs_from_schema(metadata.schema(), row.column_defs)
-        row.iceberg = IcebergTable(
-            table_uuid=str(metadata.table_uuid),
-            location=metadata.location,
-            metadata_location=metadata_location,
-            current_schema_id=metadata.current_schema_id,
-            current_snapshot_id=metadata.current_snapshot_id,
-        )
+        if row.iceberg:
+            row.iceberg.table_uuid = str(metadata.table_uuid)
+            row.iceberg.location = metadata.location
+            row.iceberg.metadata_location = metadata_location
+            row.iceberg.current_schema_id = metadata.current_schema_id
+            row.iceberg.current_snapshot_id = metadata.current_snapshot_id
+        else:
+            row.iceberg = IcebergTable(
+                table_uuid=str(metadata.table_uuid),
+                location=metadata.location,
+                metadata_location=metadata_location,
+                current_schema_id=metadata.current_schema_id,
+                current_snapshot_id=metadata.current_snapshot_id,
+            )
         try:
             self.db.commit()
         except IntegrityError as exc:
@@ -543,15 +550,19 @@ class LotIcebergCatalog(MetastoreCatalog):
 
     @staticmethod
     def _pending_row(schema: CatalogSchema, name: str) -> CatalogTable | None:
-        """A declared Iceberg table (e.g. from a Lake Asset Bundle) awaiting its first commit."""
-        return next(
-            (
-                t
-                for t in schema.tables
-                if _matches(t.slug, name) and t.format == FORMAT_ICEBERG and not t.iceberg
-            ),
-            None,
-        )
+        """A declared Iceberg table (e.g. from a Lake Asset Bundle) awaiting its first commit,
+        or an existing row whose metadata files are missing or uninitialized."""
+        for t in schema.tables:
+            if not (_matches(t.slug, name) and t.format == FORMAT_ICEBERG):
+                continue
+            if not t.iceberg or not t.iceberg.metadata_location:
+                return t
+            try:
+                if not detect_iceberg_metadata(t.iceberg.location or ""):
+                    return t
+            except Exception:
+                return t
+        return None
 
     def _validate_new_table(
         self, identifier: str | Identifier
@@ -602,7 +613,8 @@ class LotIcebergCatalog(MetastoreCatalog):
             ),
         )
         location = self.resolve_new_table_location(catalog, schema_row, name, location)
-        if detect_iceberg_metadata(location):
+        pending = self._pending_row(schema_row, name)
+        if pending is None and detect_iceberg_metadata(location):
             raise TableAlreadyExistsError(
                 f"Location {location} already contains an Iceberg table "
                 "(a dropped table awaiting purge in Trash, or one to register instead)"

@@ -361,42 +361,50 @@ _BUNDLE_TASK_RUNNER_CODE = '''def _run_bundle_task(**kwargs):
 
             ice_ident = iceberg_targets.get((target_schema, target_table))
             if ice_ident:
-                from pyiceberg.catalog import load_catalog
-                from pyiceberg.exceptions import NoSuchTableError
-
-                rel = con.execute(select_clause)
-                arrow_tbl = rel.to_arrow_table() if hasattr(rel, "to_arrow_table") else rel.fetch_arrow_table()
-                backend_url = (
-                    os.getenv("LOT_BACKEND_URL")
-                    or os.getenv("BACKEND_URL")
-                    or "http://lake-of-tears-backend:8000"
-                )
-                ice_catalog = load_catalog(
-                    "lot",
-                    **{
-                        "type": "rest",
-                        "uri": backend_url.rstrip("/") + "/api/v1/iceberg",
-                        "warehouse": str(workspace_slug),
-                        "token": _mint_task_token(),
-                        "s3.endpoint": f"http://{minio_endpoint}",
-                        "s3.access-key-id": minio_access,
-                        "s3.secret-access-key": minio_secret,
-                        "s3.region": "us-east-1",
-                        "s3.path-style-access": "true",
-                    },
-                )
                 try:
-                    ice_tbl = ice_catalog.load_table(ice_ident)
-                    with ice_tbl.update_schema() as schema_update:
-                        schema_update.union_by_name(arrow_tbl.schema)
-                except NoSuchTableError:
-                    ice_tbl = ice_catalog.create_table(ice_ident, schema=arrow_tbl.schema)
-                ice_tbl.append(arrow_tbl, snapshot_properties={"lot.source": f"bundle:{bundle_name}/{task_name}"})
-                logger.info("Appended %d rows to Iceberg table %s", arrow_tbl.num_rows, ".".join(ice_ident))
-                if conn:
-                    conn.close()
-                con.close()
-                return {"status": "success", "task": task_name, "entrypoint": entrypoint, "format": "iceberg", "rows": arrow_tbl.num_rows}
+                    from pyiceberg.catalog import load_catalog
+                    from pyiceberg.exceptions import NoSuchTableError
+
+                    rel = con.execute(select_clause)
+                    arrow_tbl = rel.to_arrow_table() if hasattr(rel, "to_arrow_table") else rel.fetch_arrow_table()
+                    backend_url = (
+                        os.getenv("LOT_BACKEND_URL")
+                        or os.getenv("BACKEND_URL")
+                        or "http://lake-of-tears-backend:8000"
+                    )
+                    ice_catalog = load_catalog(
+                        "lot",
+                        **{
+                            "type": "rest",
+                            "uri": backend_url.rstrip("/") + "/api/v1/iceberg",
+                            "warehouse": str(workspace_slug),
+                            "token": _mint_task_token(),
+                            "s3.endpoint": f"http://{minio_endpoint}",
+                            "s3.access-key-id": minio_access,
+                            "s3.secret-access-key": minio_secret,
+                            "s3.region": "us-east-1",
+                            "s3.path-style-access": "true",
+                        },
+                    )
+                    try:
+                        ice_tbl = ice_catalog.load_table(ice_ident)
+                        with ice_tbl.update_schema() as schema_update:
+                            schema_update.union_by_name(arrow_tbl.schema)
+                    except NoSuchTableError:
+                        ice_tbl = ice_catalog.create_table(ice_ident, schema=arrow_tbl.schema)
+                    ice_tbl.append(arrow_tbl, snapshot_properties={"lot.source": f"bundle:{bundle_name}/{task_name}"})
+                    logger.info("Appended %d rows to Iceberg table %s", arrow_tbl.num_rows, ".".join(ice_ident))
+                    if conn:
+                        conn.close()
+                    con.close()
+                    return {"status": "success", "task": task_name, "entrypoint": entrypoint, "format": "iceberg", "rows": arrow_tbl.num_rows}
+                except Exception as exc:
+                    logger.warning(
+                        "Iceberg write failed for %s.%s (%s); falling back to direct Parquet export",
+                        target_schema,
+                        target_table,
+                        exc,
+                    )
 
             con.execute(f'DROP VIEW IF EXISTS "{target_schema}"."{target_table}";')
             info = table_map.get((target_schema, target_table))
