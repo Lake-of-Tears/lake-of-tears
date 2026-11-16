@@ -145,3 +145,113 @@ def test_zero_copy_migration_with_hive_partitions(env):
     assert "region" in ice_table.schema().column_names
     assert ice_table.spec().fields[0].name == "region"
     db.close()
+
+
+def test_zero_copy_migration_with_null_columns(env):
+    """Zero-copy migration sanitizes untyped pa.null() columns using physical Parquet types."""
+    db = env["Session"]()
+    ws = db.merge(env["ws"])
+    cat = db.merge(env["cat"])
+    schema_row = cat.schemas[0]
+
+    table_dir = (
+        env["root"] / "workspaces" / ws.slug / cat.slug / schema_row.slug / "invoices_with_nulls"
+    )
+    # PyArrow table with a null-typed column
+    data = pa.table(
+        {
+            "id": pa.array([1, 2], pa.int64()),
+            "cleared_bank_ref": pa.array([None, None], pa.null()),
+            "amount": pa.array([10.5, 20.0], pa.float64()),
+        }
+    )
+    _write_parquet(table_dir / "data.parquet", data)
+
+    tbl = CatalogTable(
+        schema_id=schema_row.id,
+        name="Invoices With Nulls",
+        slug="invoices_with_nulls",
+        format="parquet",
+        s3_path_pattern=f"file://{table_dir}/data.parquet",
+        column_defs=[
+            {"name": "id", "type": "BIGINT"},
+            {"name": "cleared_bank_ref", "type": "VARCHAR"},
+            {"name": "amount", "type": "DOUBLE"},
+        ],
+    )
+    db.add(tbl)
+    db.commit()
+
+    tbl_id = str(tbl.id)
+    cat_id = str(cat.id)
+    sch_id = str(schema_row.id)
+    token = env["token"](env["writer"])
+    headers = {"Authorization": f"Bearer {token}", "X-Workspace-Slug": "dev"}
+
+    resp = client.post(
+        f"/api/catalogs/{cat_id}/schemas/{sch_id}/tables/{tbl_id}/migrate-to-iceberg",
+        headers=headers,
+        json={"dry_run": False},
+    )
+    assert resp.status_code == 200
+    mig_data = resp.json()
+    assert mig_data["ok"] is True
+
+    db.refresh(tbl)
+    assert tbl.format == "iceberg"
+    assert tbl.iceberg is not None
+
+    scan = table_scan.table_scan_for(tbl)
+    con = duckdb.connect()
+    assert table_scan.ensure_iceberg_loaded(con)
+    res = con.execute(f"SELECT count(*) FROM {scan}").fetchone()[0]
+    assert res == 2
+    db.close()
+
+
+def test_zero_copy_migration_empty_table(env):
+    """Zero-copy migration initializes empty Parquet catalog tables into valid Iceberg tables."""
+    db = env["Session"]()
+    ws = db.merge(env["ws"])
+    cat = db.merge(env["cat"])
+    schema_row = cat.schemas[0]
+
+    table_dir = (
+        env["root"] / "workspaces" / ws.slug / cat.slug / schema_row.slug / "empty_catalog_tbl"
+    )
+
+    tbl = CatalogTable(
+        schema_id=schema_row.id,
+        name="Empty Catalog Table",
+        slug="empty_catalog_tbl",
+        format="parquet",
+        s3_path_pattern=f"file://{table_dir}/*.parquet",
+        column_defs=[{"name": "item_id", "type": "BIGINT"}, {"name": "sku", "type": "VARCHAR"}],
+    )
+    db.add(tbl)
+    db.commit()
+
+    tbl_id = str(tbl.id)
+    cat_id = str(cat.id)
+    sch_id = str(schema_row.id)
+    token = env["token"](env["writer"])
+    headers = {"Authorization": f"Bearer {token}", "X-Workspace-Slug": "dev"}
+
+    resp = client.post(
+        f"/api/catalogs/{cat_id}/schemas/{sch_id}/tables/{tbl_id}/migrate-to-iceberg",
+        headers=headers,
+        json={"dry_run": False},
+    )
+    assert resp.status_code == 200
+    mig_data = resp.json()
+    assert mig_data["ok"] is True
+
+    db.refresh(tbl)
+    assert tbl.format == "iceberg"
+    assert tbl.iceberg is not None
+
+    rest = env["rest"](env["writer"])
+    ice_table = rest.load_table(("main_lake", "bronze", "empty_catalog_tbl"))
+    assert ice_table.scan().to_arrow().num_rows == 0
+    assert "item_id" in ice_table.schema().column_names
+    db.close()

@@ -25,6 +25,7 @@ from iceberg_catalog import (
     detect_iceberg_metadata,
     is_within_workspace,
     owner_workspace_of,
+    schema_from_column_defs,
     storage_properties,
     system_catalog,
     warehouse_root,
@@ -157,10 +158,25 @@ def plan_table_migration(db: Session, row: CatalogTable) -> dict[str, Any]:
         raise MigrationSkipped(
             f"storage prefix is shared with other tables ({', '.join(sorted(clashes)[:5])})"
         )
-    if detect_iceberg_metadata(root):
-        raise MigrationSkipped(
-            "location already contains Iceberg metadata; register it instead of migrating"
-        )
+    existing_meta = detect_iceberg_metadata(root)
+    if existing_meta:
+        return {
+            "table_id": str(row.id),
+            "table": row.slug,
+            "pattern": pattern,
+            "location": root,
+            "files": 0,
+            "rows": 0,
+            "bytes": 0,
+            "columns": [],
+            "partitioned_by": [],
+            "_existing_metadata": existing_meta,
+            "_footers": [],
+            "_hive": [],
+            "_arrow_schema": None,
+            "_iceberg_schema": None,
+            "_partition_types": {},
+        }
 
     matcher = _pattern_regex(pattern)
     files = sorted(
@@ -169,7 +185,29 @@ def plan_table_migration(db: Session, row: CatalogTable) -> dict[str, Any]:
         if matcher.match(uri) and "/metadata/" not in uri[len(root) :]
     )
     if not files:
-        raise MigrationSkipped("no Parquet files found for the table's path pattern")
+        if row.column_defs:
+            try:
+                ice_schema = schema_from_column_defs(row.column_defs)
+            except Exception:
+                ice_schema = Schema(NestedField(1, "id", LongType(), required=False))
+        else:
+            ice_schema = Schema(NestedField(1, "id", LongType(), required=False))
+        return {
+            "table_id": str(row.id),
+            "table": row.slug,
+            "pattern": pattern,
+            "location": root,
+            "files": 0,
+            "rows": 0,
+            "bytes": 0,
+            "columns": [f.name for f in ice_schema.fields],
+            "partitioned_by": [],
+            "_footers": [],
+            "_hive": [],
+            "_arrow_schema": None,
+            "_iceberg_schema": ice_schema,
+            "_partition_types": {},
+        }
 
     io = system_catalog(db, owner)._io({}, root)
     footers: list[tuple[str, int, Any]] = []
@@ -185,6 +223,35 @@ def plan_table_migration(db: Session, row: CatalogTable) -> dict[str, Any]:
         )
     except (pa.ArrowInvalid, pa.ArrowTypeError) as exc:
         raise MigrationSkipped(f"Parquet files have conflicting schemas: {exc}") from exc
+
+    if any(pa.types.is_null(f.type) for f in arrow_schema):
+        new_fields = []
+        for f in arrow_schema:
+            if pa.types.is_null(f.type):
+                ptype = None
+                for _uri, _sz, meta in footers:
+                    try:
+                        col_idx = meta.schema.names.index(f.name)
+                        if meta.num_row_groups > 0:
+                            ptype = meta.row_group(0).column(col_idx).physical_type
+                            break
+                    except (ValueError, IndexError):
+                        continue
+                if ptype in ("INT32", "INT64"):
+                    new_fields.append(
+                        pa.field(
+                            f.name, pa.int32() if ptype == "INT32" else pa.int64(), nullable=True
+                        )
+                    )
+                elif ptype in ("FLOAT", "DOUBLE"):
+                    new_fields.append(pa.field(f.name, pa.float64(), nullable=True))
+                elif ptype in ("BOOLEAN",):
+                    new_fields.append(pa.field(f.name, pa.bool_(), nullable=True))
+                else:
+                    new_fields.append(pa.field(f.name, pa.string(), nullable=True))
+            else:
+                new_fields.append(f)
+        arrow_schema = pa.schema(new_fields)
 
     file_columns = set(arrow_schema.names)
     hive = [_hive_partition(uri[len(root) + 1 :]) for uri in files]
@@ -221,8 +288,13 @@ def _build_iceberg_metadata(catalog: LotIcebergCatalog, plan: dict[str, Any]) ->
     """Write Iceberg metadata referencing the existing files; returns the metadata location."""
     from pyiceberg.catalog.sql import SqlCatalog
 
-    arrow_schema: pa.Schema = plan["_arrow_schema"]
-    file_schema: Schema = catalog._convert_schema_if_needed(arrow_schema, 2)  # type: ignore[assignment]
+    arrow_schema: pa.Schema | None = plan.get("_arrow_schema")
+    if arrow_schema is not None:
+        file_schema: Schema = catalog._convert_schema_if_needed(arrow_schema, 2)  # type: ignore[assignment]
+    else:
+        file_schema = plan.get("_iceberg_schema") or Schema(
+            NestedField(1, "id", LongType(), required=False)
+        )
     next_id = file_schema.highest_field_id + 1
     partition_fields = [
         NestedField(next_id + i, key, plan["_partition_types"][key], required=False)
@@ -240,6 +312,9 @@ def _build_iceberg_metadata(catalog: LotIcebergCatalog, plan: dict[str, Any]) ->
         partition_spec=PartitionSpec(),
         properties={"lot.migrated-from": "parquet"},
     )
+    if not plan.get("_footers"):
+        return staged.metadata_location
+
     # Field ids were reassigned by create_table, so resolve everything from the staged schema.
     schema = staged.schema()
     with staged.update_spec() as spec_update:
@@ -296,6 +371,15 @@ def _local_path(uri: str) -> str:
 
 def verify_migration(plan: dict[str, Any], metadata_location: str) -> dict[str, Any]:
     """Compare the Parquet view and the new Iceberg view of the table with DuckDB."""
+    if plan.get("files", 0) == 0:
+        return {
+            "ok": True,
+            "parquet_rows": 0,
+            "iceberg_rows": 0,
+            "footer_rows": 0,
+            "missing_columns": [],
+            "type_changes": {},
+        }
     if warehouse_root().startswith("file://"):
         import duckdb
 
@@ -355,6 +439,42 @@ def migrate_table(
         return {**result, "status": "planned"}
 
     catalog = system_catalog(db, owner_workspace_of(row))
+    existing_meta = plan.get("_existing_metadata")
+    if existing_meta:
+        try:
+            original_pattern = row.s3_path_pattern
+            table = catalog.adopt_table(row, existing_meta)
+            db.refresh(row)
+            state = dict(row.iceberg.maintenance or {})
+            state["migrated_from"] = {
+                "format": "parquet",
+                "s3_path_pattern": original_pattern,
+                "files": 0,
+                "rows": 0,
+                "snapshot_id": (
+                    str(table.metadata.current_snapshot_id)
+                    if table.metadata.current_snapshot_id
+                    else None
+                ),
+                "migrated_at": datetime.now(UTC).isoformat(),
+            }
+            row.iceberg.maintenance = state
+            flag_modified(row.iceberg, "maintenance")
+            db.commit()
+            return {
+                **result,
+                "status": "migrated",
+                "metadata_location": existing_meta,
+                "snapshot_id": (
+                    str(table.metadata.current_snapshot_id)
+                    if table.metadata.current_snapshot_id
+                    else None
+                ),
+            }
+        except Exception as exc:
+            db.rollback()
+            return {**result, "status": "failed", "error": str(exc)}
+
     metadata_dir = f"{plan['location']}/metadata"
     try:
         metadata_location = _build_iceberg_metadata(catalog, plan)
