@@ -35,6 +35,7 @@ from superset_service import (
     mint_lakeset_guest_token,
     sync_workspace_to_lakeset,
 )
+from table_scan import ensure_iceberg_loaded, is_iceberg, table_scan_for
 
 logger = logging.getLogger("lake.backend.lakeset.router")
 
@@ -278,21 +279,17 @@ def _execute_live_duckdb_explore(
             tbl = ds.get("table_name")
             if not tbl:
                 continue
-            s3_path = (ds.get("s3_path_pattern") or "").replace("'", "''")
-            if not s3_path:
+            if not ds.get("s3_path_pattern"):
                 continue
 
             try:
+                if is_iceberg(ds):
+                    ensure_iceberg_loaded(con)
+                scan = table_scan_for(ds, union_by_name=True)
                 con.execute(f'CREATE SCHEMA IF NOT EXISTS "{sch}";')
-                con.execute(
-                    f'CREATE OR REPLACE VIEW "{sch}"."{tbl}" AS '
-                    f"SELECT * FROM read_parquet('{s3_path}', union_by_name=true);"
-                )
+                con.execute(f'CREATE OR REPLACE VIEW "{sch}"."{tbl}" AS SELECT * FROM {scan};')
                 try:
-                    con.execute(
-                        f'CREATE OR REPLACE VIEW "{tbl}" AS '
-                        f"SELECT * FROM read_parquet('{s3_path}', union_by_name=true);"
-                    )
+                    con.execute(f'CREATE OR REPLACE VIEW "{tbl}" AS SELECT * FROM {scan};')
                 except Exception:
                     pass
             except Exception as view_err:

@@ -20,6 +20,7 @@ from models import (
     CatalogSchema,
     CatalogTable,
     DeletedCatalogAsset,
+    IcebergTable,
     PipelineMetadata,
     SystemSetting,
     User,
@@ -220,7 +221,23 @@ def soft_delete_table(
     trash_prefix = None
     trash_embeddings_prefix = None
 
-    if is_managed and table.s3_path_pattern:
+    # Iceberg metadata references data files by absolute path, so an Iceberg table's storage
+    # stays in place while it sits in Trash; only the catalog entry is removed. Purge deletes it.
+    table_format = getattr(table, "format", None) or "parquet"
+    iceberg_state = None
+    ice = getattr(table, "iceberg", None)
+    if table_format == "iceberg" and ice is not None:
+        iceberg_state = {
+            "table_uuid": ice.table_uuid,
+            "location": ice.location,
+            "metadata_location": ice.metadata_location,
+            "previous_metadata_location": ice.previous_metadata_location,
+            "current_schema_id": ice.current_schema_id,
+            "current_snapshot_id": ice.current_snapshot_id,
+            "maintenance": ice.maintenance or {},
+        }
+
+    if is_managed and table.s3_path_pattern and iceberg_state is None:
         src_prefix = s3_prefix_for_pattern(table.s3_path_pattern)
         if src_prefix:
             dst_prefix = f"workspaces/{workspace.slug}/.trash/{table.id}/"
@@ -259,6 +276,8 @@ def soft_delete_table(
         is_managed=is_managed,
         trash_s3_prefix=trash_prefix,
         trash_embeddings_prefix=trash_embeddings_prefix,
+        format=table_format,
+        iceberg_state=iceberg_state,
         batch_id=batch_id,
         dropped_by=user_id,
         dropped_at=now,
@@ -569,6 +588,19 @@ def _restore_table_record(
         schema_drift=asset.schema_drift,
         vector_index=asset.vector_index or {},
     )
+    ice_state = getattr(asset, "iceberg_state", None)
+    if getattr(asset, "format", None) == "iceberg" and ice_state:
+        # Storage never moved, so the restored row points straight back at the same metadata.
+        table_obj.format = "iceberg"
+        table_obj.iceberg = IcebergTable(
+            table_uuid=ice_state.get("table_uuid"),
+            location=ice_state.get("location"),
+            metadata_location=ice_state.get("metadata_location"),
+            previous_metadata_location=ice_state.get("previous_metadata_location"),
+            current_schema_id=ice_state.get("current_schema_id"),
+            current_snapshot_id=ice_state.get("current_snapshot_id"),
+            maintenance=ice_state.get("maintenance") or {},
+        )
     db.add(table_obj)
     db.delete(asset)
     return table_obj
@@ -581,6 +613,17 @@ def purge_asset(db: Session, asset: DeletedCatalogAsset) -> None:
             delete_prefix(asset.trash_s3_prefix)
         except Exception as exc:
             logger.warning("Failed deleting trash prefix %s: %s", asset.trash_s3_prefix, exc)
+
+    ice_state = getattr(asset, "iceberg_state", None)
+    if getattr(asset, "format", None) == "iceberg" and ice_state and asset.is_managed:
+        location_prefix = s3_prefix_for_pattern(
+            str(ice_state.get("location") or "").rstrip("/") + "/"
+        )
+        if location_prefix:
+            try:
+                delete_prefix(location_prefix)
+            except Exception as exc:
+                logger.warning("Failed deleting Iceberg table storage %s: %s", location_prefix, exc)
 
     if asset.trash_embeddings_prefix:
         try:

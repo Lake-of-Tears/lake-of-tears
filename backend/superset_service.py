@@ -12,6 +12,7 @@ from typing import Any
 import httpx
 import jwt
 from sqlalchemy.orm import Session
+from table_scan import is_iceberg, table_scan_for
 
 try:
     from lakeset_security import get_proxy_secret, map_lot_role_to_superset
@@ -766,6 +767,10 @@ def get_authorized_workspace_tables(
                         "tier": sch.tier or "bronze",
                         "description": tbl.description or "",
                         "s3_path_pattern": s3_path,
+                        "format": getattr(tbl, "format", None) or "parquet",
+                        "iceberg_metadata_location": getattr(
+                            tbl, "iceberg_metadata_location", None
+                        ),
                         "columns": cols,
                         "column_count": len(cols),
                         "metrics": metrics,
@@ -790,16 +795,22 @@ def materialize_workspace_duckdb_views(
     """Generate and optionally materialize DuckDB views pointing to MinIO Parquet paths."""
     materialized_views: list[str] = []
     statements: list[str] = []
+    has_iceberg = False
 
     for ds in datasets:
         sch_slug = ds["schema_slug"]
         tbl_slug = ds["table_name"]
-        s3_path = ds["s3_path_pattern"]
         view_ident = f"{sch_slug}.{tbl_slug}"
         materialized_views.append(view_ident)
         statements.append(f'CREATE SCHEMA IF NOT EXISTS "{sch_slug}";')
+        if is_iceberg(ds) and not has_iceberg:
+            has_iceberg = True
+            statements.insert(0, "INSTALL iceberg; LOAD iceberg;")
+        # These views outlive the request, so Iceberg tables are left unpinned: they follow
+        # new commits through the table's version hint instead of one metadata file.
+        scan = table_scan_for(ds, pinned=False)
         statements.append(
-            f'CREATE OR REPLACE VIEW "{sch_slug}"."{tbl_slug}" AS SELECT * FROM read_parquet(\'{s3_path}\');'
+            f'CREATE OR REPLACE VIEW "{sch_slug}"."{tbl_slug}" AS SELECT * FROM {scan};'
         )
 
     target_path = duckdb_file_path or os.getenv("LAKESET_LOCAL_DUCKDB_PATH")
