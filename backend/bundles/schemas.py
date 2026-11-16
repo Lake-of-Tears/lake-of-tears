@@ -125,11 +125,16 @@ class TableResource(BaseModel):
     catalog: str | None = Field(None, description="Parent catalog name")
     schema_name: str | None = Field(None, alias="schema", description="Parent schema name")
     description: str | None = Field(None, description="Table description")
-    format: str = Field("parquet", description="Storage format: parquet, csv, delta")
+    format: str = Field("parquet", description="Storage format: parquet, iceberg, csv, delta")
     s3_path_pattern: str | None = Field(None, description="MinIO/S3 glob pattern or path")
     columns: list[ColumnDef] = Field(default_factory=list, description="Column definitions")
     partition_by: list[str] = Field(default_factory=list, description="Partition columns")
     primary_key: list[str] = Field(default_factory=list, description="Primary key columns")
+
+    @field_validator("format", mode="before")
+    @classmethod
+    def normalize_format(cls, v: Any) -> str:
+        return str(v or "parquet").strip().lower() or "parquet"
 
     @field_validator("partition_by", "primary_key", mode="before")
     @classmethod

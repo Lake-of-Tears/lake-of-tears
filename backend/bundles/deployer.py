@@ -303,11 +303,13 @@ _BUNDLE_TASK_RUNNER_CODE = '''def _run_bundle_task(**kwargs):
             conn = psycopg2.connect(db_url)
             cur = conn.cursor()
             cur.execute("""
-            SELECT c.name, c.slug, s.name, s.slug, t.name, t.slug, t.s3_path_pattern, t.id
+            SELECT c.name, c.slug, s.name, s.slug, t.name, t.slug, t.s3_path_pattern, t.id,
+                   t.format, i.metadata_location
             FROM catalog_tables t
             JOIN catalog_schemas s ON t.schema_id = s.id
             JOIN catalogs c ON s.catalog_id = c.id
             JOIN workspaces w ON c.owner_workspace_id = w.id
+            LEFT JOIN iceberg_tables i ON i.table_id = t.id
             WHERE w.slug = %s
             """, (workspace_slug,))
             catalog_rows = cur.fetchall()
@@ -316,11 +318,28 @@ _BUNDLE_TASK_RUNNER_CODE = '''def _run_bundle_task(**kwargs):
 
         catalogs_set = set()
         table_map = {}
-        for cat_name, cat_slug, s_name, s_slug, t_name, t_slug, s3_path, t_id in catalog_rows:
+        iceberg_targets = {}
+        if any(str(r[8] or "").lower() == "iceberg" for r in catalog_rows):
+            try:
+                con.execute("INSTALL iceberg; LOAD iceberg;")
+            except Exception as exc:
+                logger.warning("Could not load DuckDB iceberg extension: %s", exc)
+        for cat_name, cat_slug, s_name, s_slug, t_name, t_slug, s3_path, t_id, t_format, meta_loc in catalog_rows:
             catalogs_set.add(cat_name.lower())
             catalogs_set.add(cat_slug.lower())
             con.execute(f'CREATE SCHEMA IF NOT EXISTS "{s_slug}";')
             table_map[(s_slug.lower(), t_slug.lower())] = (s3_path, t_id)
+            if str(t_format or "").lower() == "iceberg":
+                # Iceberg tables are read at the catalog's committed metadata and written
+                # through the LoT REST catalog (ACID append), never as raw Parquet exports.
+                iceberg_targets[(s_slug.lower(), t_slug.lower())] = (cat_slug, s_slug, t_slug)
+                if meta_loc:
+                    try:
+                        meta_sql = str(meta_loc).replace("'", "''")
+                        con.execute(f'CREATE OR REPLACE VIEW "{s_slug}"."{t_slug}" AS SELECT * FROM iceberg_scan(' + "'" + meta_sql + "'" + ');')
+                    except Exception:
+                        pass
+                continue
             if s3_path:
                 try:
                     con.execute(f"CREATE OR REPLACE VIEW \\\"{s_slug}\\\".\\\"{t_slug}\\\" AS SELECT * FROM read_parquet('{s3_path}');")
@@ -339,6 +358,45 @@ _BUNDLE_TASK_RUNNER_CODE = '''def _run_bundle_task(**kwargs):
             target_schema = (insert_match.group(1) or 'default').lower()
             target_table = insert_match.group(2).lower()
             select_clause = insert_match.group(3).rstrip(';')
+
+            ice_ident = iceberg_targets.get((target_schema, target_table))
+            if ice_ident:
+                from pyiceberg.catalog import load_catalog
+                from pyiceberg.exceptions import NoSuchTableError
+
+                rel = con.execute(select_clause)
+                arrow_tbl = rel.to_arrow_table() if hasattr(rel, "to_arrow_table") else rel.fetch_arrow_table()
+                backend_url = (
+                    os.getenv("LOT_BACKEND_URL")
+                    or os.getenv("BACKEND_URL")
+                    or "http://lake-of-tears-backend:8000"
+                )
+                ice_catalog = load_catalog(
+                    "lot",
+                    **{
+                        "type": "rest",
+                        "uri": backend_url.rstrip("/") + "/api/v1/iceberg",
+                        "warehouse": str(workspace_slug),
+                        "token": _mint_task_token(),
+                        "s3.endpoint": f"http://{minio_endpoint}",
+                        "s3.access-key-id": minio_access,
+                        "s3.secret-access-key": minio_secret,
+                        "s3.region": "us-east-1",
+                        "s3.path-style-access": "true",
+                    },
+                )
+                try:
+                    ice_tbl = ice_catalog.load_table(ice_ident)
+                    with ice_tbl.update_schema() as schema_update:
+                        schema_update.union_by_name(arrow_tbl.schema)
+                except NoSuchTableError:
+                    ice_tbl = ice_catalog.create_table(ice_ident, schema=arrow_tbl.schema)
+                ice_tbl.append(arrow_tbl, snapshot_properties={"lot.source": f"bundle:{bundle_name}/{task_name}"})
+                logger.info("Appended %d rows to Iceberg table %s", arrow_tbl.num_rows, ".".join(ice_ident))
+                if conn:
+                    conn.close()
+                con.close()
+                return {"status": "success", "task": task_name, "entrypoint": entrypoint, "format": "iceberg", "rows": arrow_tbl.num_rows}
 
             con.execute(f'DROP VIEW IF EXISTS "{target_schema}"."{target_table}";')
             info = table_map.get((target_schema, target_table))
@@ -1109,6 +1167,7 @@ class BundleDeployer:
                     logger.debug("Could not infer Parquet schema for %s: %s", s3_pattern, exc)
                     return []
 
+            pending_iceberg: list[tuple[CatalogTable, list[str]]] = []
             for tbl_res in bundle_spec.resources.tables:
                 clean_tbl_name = tbl_res.name.strip()
                 parent_sch = _get_schema(tbl_res.catalog, tbl_res.schema_name)
@@ -1140,6 +1199,12 @@ class BundleDeployer:
                         s3_path_pattern=tbl_res.s3_path_pattern,
                         column_defs=col_defs,
                     )
+                    if tbl_res.format == "iceberg":
+                        # Declared now, materialized after the deploy transaction commits (or
+                        # by the first pipeline write when the manifest lists no columns).
+                        tbl.format = "iceberg"
+                        tbl.s3_path_pattern = None
+                        pending_iceberg.append((tbl, list(tbl_res.partition_by)))
                     db.add(tbl)
                     db.flush()
                 else:
@@ -1286,6 +1351,18 @@ class BundleDeployer:
             db.commit()
             db.refresh(bundle_record)
 
+            # Materialize declared Iceberg tables that list columns (empty table + v1 metadata)
+            for ice_tbl, partition_cols in pending_iceberg:
+                try:
+                    cls._materialize_iceberg_table(db, workspace, ice_tbl, partition_cols)
+                except Exception as ice_exc:
+                    db.rollback()
+                    logger.warning(
+                        "Iceberg table %s left pending until its first write: %s",
+                        ice_tbl.slug,
+                        ice_exc,
+                    )
+
             # 9. Non-blocking Lakeset BI Studio dataset synchronization
             try:
                 try:
@@ -1324,6 +1401,39 @@ class BundleDeployer:
             except Exception:
                 pass
             raise HTTPException(500, f"Bundle deployment failed: {exc}") from exc
+
+    @staticmethod
+    def _materialize_iceberg_table(
+        db: Session, workspace: Workspace, tbl: CatalogTable, partition_cols: list[str]
+    ) -> None:
+        """Create the Iceberg metadata for a declared `format: iceberg` bundle table."""
+        if not tbl.column_defs:
+            return
+        try:
+            import iceberg_catalog
+        except ImportError:
+            from backend import iceberg_catalog
+        from pyiceberg.partitioning import PartitionField, PartitionSpec
+        from pyiceberg.transforms import IdentityTransform
+
+        iceberg_schema = iceberg_catalog.schema_from_column_defs(tbl.column_defs)
+        spec = PartitionSpec(
+            *[
+                PartitionField(
+                    source_id=iceberg_schema.find_field(col).field_id,
+                    field_id=1000 + idx,
+                    transform=IdentityTransform(),
+                    name=col,
+                )
+                for idx, col in enumerate(partition_cols)
+            ]
+        )
+        schema_row = tbl.schema
+        iceberg_catalog.system_catalog(db, workspace).create_table(
+            (schema_row.catalog.slug, schema_row.slug, tbl.slug),
+            schema=iceberg_schema,
+            partition_spec=spec,
+        )
 
     @staticmethod
     def _teardown_pipeline(

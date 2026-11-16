@@ -62,15 +62,46 @@ def write_to_storage(
     catalog: str | None = None,
     schema: str | None = None,
     table: str | None = None,
+    format: str | None = None,
+    mode: str = "append",
+    partition_by: list[str] | None = None,
 ):
-    """Write a DataFrame to MinIO as Parquet scoped to a workspace prefix.
+    """Write a DataFrame to MinIO scoped to a workspace prefix (Parquet files or an Iceberg table).
 
     Workspace usage: write_to_storage(df, source="stripe_charges", date_str="2024-01-01", workspace="dev")
       → s3://datalake/workspaces/dev/raw/stripe_charges/year=.../
 
     Catalog usage: write_to_storage(df, date_str="2024-01-01", workspace="dev", catalog="production", schema="revenue", table="stripe_charges")
       → s3://datalake/workspaces/dev/production/revenue/stripe_charges/year=.../
+
+    Iceberg usage: write_to_storage(df, workspace="dev", catalog="production", schema="revenue", table="stripe_charges", format="iceberg", mode="append")
+      → ACID commit (append | overwrite, with schema evolution) through the LoT Iceberg REST
+        catalog; returns the table location. `format` defaults to $LOT_DEFAULT_TABLE_FORMAT
+        (parquet when unset).
     """
+    fmt = (format or os.environ.get("LOT_DEFAULT_TABLE_FORMAT") or "parquet").strip().lower()
+    if fmt not in ("parquet", "iceberg"):
+        raise ValueError("format must be 'parquet' or 'iceberg'")
+    if fmt == "iceberg":
+        if not (catalog and schema and table):
+            raise ValueError("Iceberg writes need 'catalog', 'schema' and 'table'")
+        try:
+            from pipeline.shared import iceberg_client
+        except ImportError:
+            import iceberg_client
+
+        result = iceberg_client.write_table(
+            df,
+            catalog=catalog,
+            schema=schema,
+            table=table,
+            workspace=resolve_workspace(workspace),
+            mode=mode,
+            partition_by=partition_by,
+            snapshot_properties={"lot.source": source or "storage-writer"},
+        )
+        return result["location"]
+
     if date_str is None:
         from datetime import date
 
