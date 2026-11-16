@@ -586,3 +586,165 @@ resources:
     by_name = {d["full_name"]: d for d in datasets}
     assert "commerce.gold.monthly_kpis" in by_name
     assert by_name["commerce.gold.monthly_kpis"]["synced"] is True
+
+
+# ── Bugfix #541: SQL Editor 'Open in Lakeset' & Custom DuckDB SQL Explorer ───
+
+
+def test_issue541_custom_sql_explore_duckdb_execution():
+    from backend.lakeset_router import _execute_live_duckdb_explore
+
+    # 1. Ad-hoc custom SQL query (SELECT without tables)
+    sql_adhoc = "SELECT 'Tier A' AS segment, 125.50 AS mrr UNION ALL SELECT 'Tier B', 80.25"
+    res_bar = _execute_live_duckdb_explore(
+        sql=sql_adhoc,
+        matched_ds=None,
+        authorized_datasets=[],
+        chart_type="bar",
+        metric_label="mrr",
+        is_custom_sql=True,
+    )
+    assert res_bar is not None
+    assert res_bar["categories"] == ["Tier A", "Tier B"]
+    assert res_bar["series"][0]["data"] == [125.50, 80.25]
+    assert res_bar["dimension"] == "segment"
+    assert res_bar["metric"] == "mrr"
+
+    # 2. Reverse column order: numeric first, string second -> dynamic type inspection
+    sql_reverse = "SELECT 99.9 AS val, 'West' AS region"
+    res_reverse = _execute_live_duckdb_explore(
+        sql=sql_reverse,
+        matched_ds=None,
+        authorized_datasets=[],
+        chart_type="bar",
+        metric_label="val",
+        is_custom_sql=True,
+    )
+    assert res_reverse is not None
+    assert res_reverse["categories"] == ["West"]
+    assert res_reverse["series"][0]["data"] == [99.9]
+    assert res_reverse["dimension"] == "region"
+    assert res_reverse["metric"] == "val"
+
+    # 3. KPI visualization type
+    res_kpi = _execute_live_duckdb_explore(
+        sql="SELECT 15420 AS total_revenue",
+        matched_ds=None,
+        authorized_datasets=[],
+        chart_type="kpi",
+        metric_label="total_revenue",
+        is_custom_sql=True,
+    )
+    assert res_kpi is not None
+    assert res_kpi["value"] == "15,420"
+    assert "Live DuckDB" in res_kpi["trend"]
+
+    # 4. Pie chart visualization type
+    res_pie = _execute_live_duckdb_explore(
+        sql=sql_adhoc,
+        matched_ds=None,
+        authorized_datasets=[],
+        chart_type="pie",
+        metric_label="mrr",
+        is_custom_sql=True,
+    )
+    assert res_pie is not None
+    assert len(res_pie["series"]) == 2
+    assert res_pie["series"][0] == {"name": "Tier A", "value": 125.5}
+    assert res_pie["series"][1] == {"name": "Tier B", "value": 80.25}
+
+    # 5. Empty query result (0 rows returned)
+    res_empty = _execute_live_duckdb_explore(
+        sql="SELECT 'A' AS dim, 10 AS val WHERE 1=0",
+        matched_ds=None,
+        authorized_datasets=[],
+        chart_type="bar",
+        metric_label="val",
+        is_custom_sql=True,
+    )
+    assert res_empty is not None
+    assert res_empty["empty"] is True
+    assert res_empty["categories"] == []
+    assert res_empty["series"][0]["data"] == []
+
+    # 6. Syntax error must raise exception when is_custom_sql=True (never swallow or return None)
+    with pytest.raises(Exception) as excinfo:
+        _execute_live_duckdb_explore(
+            sql="SELECT * FROM non_existent_table_xyz_123",
+            matched_ds=None,
+            authorized_datasets=[],
+            chart_type="bar",
+            metric_label="count",
+            is_custom_sql=True,
+        )
+    assert "Table with name non_existent_table_xyz_123 does not exist" in str(excinfo.value) or "Catalog Error" in str(excinfo.value)
+
+
+def test_issue541_api_explore_data_custom_sql_endpoint(lakeset_db_session):
+    seed = _seed_workspaces_and_catalogs(lakeset_db_session)
+    user_alpha = seed["user_alpha"]
+    ws_alpha = seed["ws_alpha"]
+
+    backend_main.app.dependency_overrides[database.get_db] = lambda: lakeset_db_session
+    backend_main.app.dependency_overrides[auth.get_current_user] = lambda: user_alpha
+    client = TestClient(backend_main.app)
+
+    try:
+        # 1. Custom SQL query via API returns real live DuckDB data, NOT hardcoded mock Stripe/Shopify
+        resp = client.post(
+            "/api/v1/lakeset/explore-data",
+            headers={"X-Workspace-Slug": ws_alpha.slug},
+            json={
+                "sql": "SELECT 'Direct' AS source, 1420 AS count UNION ALL SELECT 'Referral', 890",
+                "chart_type": "bar",
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["dimension"] == "source"
+        assert data["metric"] == "count"
+        assert data["data"]["categories"] == ["Direct", "Referral"]
+        assert data["data"]["series"][0]["data"] == [1420.0, 890.0]
+        # Ensure mock categories are NOT returned
+        assert "Stripe" not in data["data"]["categories"]
+        assert "Shopify" not in data["data"]["categories"]
+
+        # 2. Syntax error in Custom SQL returns 400 Bad Request with DuckDB error details
+        err_resp = client.post(
+            "/api/v1/lakeset/explore-data",
+            headers={"X-Workspace-Slug": ws_alpha.slug},
+            json={
+                "sql": "SELECT FROM INVALID SQL SYNTAX",
+                "chart_type": "bar",
+            },
+        )
+        assert err_resp.status_code == 400
+        err_data = err_resp.json()
+        assert "DuckDB query execution failed" in err_data["detail"]
+
+    finally:
+        backend_main.app.dependency_overrides.clear()
+
+
+def test_issue541_ui_controller_and_template_custom_sql_state():
+    lakeset_js = (repo_root / "ui" / "static" / "js" / "controllers" / "lakeset.js").read_text(
+        encoding="utf-8"
+    )
+    lakeset_html = (repo_root / "ui" / "templates" / "lakeset.html").read_text(encoding="utf-8")
+
+    # 1. lakeset.js state management assertions
+    assert "handleDatasetSelectChange" in lakeset_js
+    assert "clearCustomSql" in lakeset_js
+    assert "syncExploreUrl" in lakeset_js
+    assert "renderExploreChartError" in lakeset_js
+    assert "!this.chartConfig.sql" in lakeset_js
+    assert "history.replaceState" in lakeset_js
+
+    # 2. lakeset.html UI assertions
+    assert 'handleDatasetSelectChange(selectedDatasetName)' in lakeset_html
+    assert "clearCustomSql()" in lakeset_html
+    assert "Custom SQL" in lakeset_html
+    assert "exploreError" in lakeset_html
+    assert 'x-show="isExploring"' in lakeset_html
+    assert 'x-text="isExploring ? \'Executing Query...\' : \'Run & Update Chart\'"' in lakeset_html

@@ -240,7 +240,7 @@
         <label class="block text-xs font-medium text-gray-400 mb-1">Governed Dataset</label>
         <select id="explore-dataset-select"
                 x-model="selectedDatasetName"
-                @change="selectDatasetByName(selectedDatasetName); runExploreQuery()"
+                @change="handleDatasetSelectChange(selectedDatasetName)"
                 class="input-dark text-xs w-full">
           <option value="">-- Select Workspace Dataset --</option>
           <template x-for="ds in datasets" :key="ds.id">
@@ -315,7 +315,23 @@
 
       <!-- Custom DuckDB SQL Override -->
       <div>
-        <label class="block text-xs font-medium text-gray-400 mb-1">Custom DuckDB SQL (Optional)</label>
+        <div class="flex items-center justify-between mb-1">
+          <label class="block text-xs font-medium text-gray-400">Custom DuckDB SQL (Optional)</label>
+          <template x-if="chartConfig.sql && chartConfig.sql.trim()">
+            <div class="flex items-center gap-2">
+              <span class="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-amber-500/15 text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
+                Custom SQL
+              </span>
+              <button type="button"
+                      @click="clearCustomSql()"
+                      class="text-[11px] text-gray-400 hover:text-red-400 transition-colors"
+                      title="Clear custom SQL and switch back to dataset mode">
+                Clear
+              </button>
+            </div>
+          </template>
+        </div>
         <textarea id="explore-sql-input"
                   x-model="chartConfig.sql"
                   rows="3"
@@ -326,8 +342,10 @@
       <button type="button"
               id="btn-run-explore"
               @click="runExploreQuery()"
-              class="btn-primary text-xs py-2 w-full justify-center">
-        Run &amp; Update Chart
+              :disabled="isExploring"
+              class="btn-primary text-xs py-2 w-full justify-center flex items-center gap-1.5">
+        <svg x-show="isExploring" class="animate-spin -ml-1 mr-1.5 h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg>
+        <span x-text="isExploring ? 'Executing Query...' : 'Run & Update Chart'">Run &amp; Update Chart</span>
       </button>
 
       <!-- Selected Dataset Semantic Column Dictionary -->
@@ -356,8 +374,15 @@
       <div class="card p-5 flex-1 flex flex-col gap-4 min-h-[420px]">
         <div class="flex items-center justify-between border-b border-gray-800 pb-3">
           <div>
-            <h3 class="text-sm font-semibold text-gray-100" x-text="chartConfig.title">Chart Preview</h3>
-            <p class="text-[11px] font-mono text-blue-400" x-text="selectedDatasetName || 'DuckDB Query Exploration'"></p>
+            <div class="flex items-center gap-2">
+              <h3 class="text-sm font-semibold text-gray-100" x-text="chartConfig.title">Chart Preview</h3>
+              <template x-if="chartConfig.sql && chartConfig.sql.trim()">
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                  Custom SQL Query
+                </span>
+              </template>
+            </div>
+            <p class="text-[11px] font-mono text-blue-400" x-text="selectedDatasetName || (chartConfig.sql && chartConfig.sql.trim() ? 'DuckDB Custom SQL Mode' : 'DuckDB Query Exploration')"></p>
           </div>
           <div class="flex items-center gap-2">
             <a :href="iframeUrl" target="_blank" class="btn-ghost text-xs py-1 px-2.5 border border-gray-800">
@@ -365,6 +390,18 @@
             </a>
           </div>
         </div>
+
+        <!-- Query Error Alert Banner -->
+        <template x-if="exploreError">
+          <div class="p-3 rounded-lg bg-red-950/40 border border-red-900/60 text-xs text-red-300 flex items-start gap-2.5">
+            <svg class="w-4 h-4 text-red-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+            <div class="flex-1 min-w-0">
+              <span class="font-semibold text-red-200">Query Execution Error:</span>
+              <p class="font-mono text-[11px] text-red-400 mt-0.5 whitespace-pre-wrap break-all" x-text="exploreError"></p>
+            </div>
+            <button type="button" @click="exploreError = null" class="text-red-400 hover:text-red-200 text-xs shrink-0">&times;</button>
+          </div>
+        </template>
 
         <!-- ECharts Canvas -->
         <div id="lakeset-explore-chart" class="flex-1 w-full min-h-[320px]" style="min-height: 320px; width: 100%;"></div>

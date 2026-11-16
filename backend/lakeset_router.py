@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import ai_service
 from auth import get_current_user, get_dashboard_workspace_and_role
 from database import get_db
 from fastapi import (
@@ -230,6 +231,10 @@ def _execute_live_duckdb_explore(
     authorized_datasets: list[dict[str, Any]],
     chart_type: str,
     metric_label: str,
+    is_custom_sql: bool = False,
+    catalogs: list[dict[str, Any]] | None = None,
+    dimension: str | None = None,
+    metric: str | None = None,
 ) -> dict[str, Any] | None:
     """Attempt to execute the analytical SQL query directly against DuckDB + MinIO S3 Parquet."""
     import os
@@ -239,8 +244,8 @@ def _execute_live_duckdb_explore(
     except ImportError:
         return None
 
+    con = duckdb.connect(":memory:")
     try:
-        con = duckdb.connect(":memory:")
         try:
             con.execute("LOAD httpfs;")
         except Exception:
@@ -258,32 +263,106 @@ def _execute_live_duckdb_explore(
         con.execute(f"SET s3_use_ssl={'true' if use_ssl else 'false'};")
         con.execute("SET s3_url_style='path';")
 
-        datasets_to_mount = [matched_ds] if matched_ds else authorized_datasets[:15]
-        exec_sql = sql
+        # When custom SQL is provided, mount all authorized datasets; otherwise mount matched_ds or top 25
+        datasets_to_mount = authorized_datasets if is_custom_sql else ([matched_ds] if matched_ds else authorized_datasets[:25])
+        exec_sql = sql.strip()
+
         for ds in datasets_to_mount:
             if not ds:
                 continue
-            sch = ds["schema_slug"]
-            tbl = ds["table_name"]
-            s3_path = ds["s3_path_pattern"].replace("'", "''")
-            con.execute(f'CREATE SCHEMA IF NOT EXISTS "{sch}";')
-            con.execute(
-                f'CREATE OR REPLACE VIEW "{sch}"."{tbl}" AS '
-                f"SELECT * FROM read_parquet('{s3_path}', union_by_name=true);"
-            )
+            sch = ds.get("schema_slug") or "public"
+            tbl = ds.get("table_name")
+            if not tbl:
+                continue
+            s3_path = (ds.get("s3_path_pattern") or "").replace("'", "''")
+            if not s3_path:
+                continue
+
+            try:
+                con.execute(f'CREATE SCHEMA IF NOT EXISTS "{sch}";')
+                con.execute(
+                    f'CREATE OR REPLACE VIEW "{sch}"."{tbl}" AS '
+                    f"SELECT * FROM read_parquet('{s3_path}', union_by_name=true);"
+                )
+                try:
+                    con.execute(
+                        f'CREATE OR REPLACE VIEW "{tbl}" AS '
+                        f"SELECT * FROM read_parquet('{s3_path}', union_by_name=true);"
+                    )
+                except Exception:
+                    pass
+            except Exception as view_err:
+                logger.debug("Failed to create view for %s.%s: %s", sch, tbl, view_err)
+
             full_name = ds.get("full_name")
             if full_name and full_name in exec_sql:
-                exec_sql = exec_sql.replace(full_name, f"{sch}.{tbl}")
+                exec_sql = exec_sql.replace(full_name, f'"{sch}"."{tbl}"')
 
-        rows = con.execute(exec_sql).fetchall()
-        con.close()
+        # Strip catalog qualifiers using AST parser if catalogs are available
+        if catalogs:
+            exec_sql = ai_service.strip_catalog_qualifiers(exec_sql, catalogs)
+
+        rel = con.execute(exec_sql)
+        rows = rel.fetchall()
+        description = rel.description or []
+        col_names = [col[0] for col in description]
+        col_types = [str(col[1]).upper() for col in description]
+
+        # Dynamic series and dimension column mapping
+        dim_idx: int | None = None
+        metric_idx: int | None = None
+        col_name_to_idx = {name.lower(): i for i, name in enumerate(col_names)}
+
+        if dimension and dimension.lower() in col_name_to_idx:
+            dim_idx = col_name_to_idx[dimension.lower()]
+        if metric and metric.lower() in col_name_to_idx:
+            metric_idx = col_name_to_idx[metric.lower()]
+
+        numeric_type_keywords = ("INT", "FLOAT", "DOUBLE", "DEC", "NUM", "REAL", "HUGEINT")
+        categorical_type_keywords = ("VARCHAR", "TEXT", "CHAR", "DATE", "TIME", "BOOL", "UUID", "STRING")
+
+        numeric_indices = [
+            i for i, t in enumerate(col_types)
+            if any(k in t for k in numeric_type_keywords)
+        ]
+        categorical_indices = [
+            i for i, t in enumerate(col_types)
+            if any(k in t for k in categorical_type_keywords)
+        ]
+
+        if dim_idx is None:
+            if categorical_indices:
+                dim_idx = categorical_indices[0]
+            elif col_names:
+                dim_idx = 0
+
+        if metric_idx is None:
+            eligible_metrics = [i for i in numeric_indices if i != dim_idx]
+            if eligible_metrics:
+                metric_idx = eligible_metrics[0]
+            elif len(col_names) > 1 and dim_idx == 0:
+                metric_idx = 1
+            elif numeric_indices:
+                metric_idx = numeric_indices[0]
+
+        resolved_metric_label = col_names[metric_idx] if metric_idx is not None and metric_idx < len(col_names) else metric_label
+        resolved_dim_label = col_names[dim_idx] if dim_idx is not None and dim_idx < len(col_names) else (dimension or "category")
+
         if not rows:
-            return None
+            return {
+                "categories": [],
+                "series": [{"name": resolved_metric_label, "data": []}],
+                "columns": col_names,
+                "dimension": resolved_dim_label,
+                "metric": resolved_metric_label,
+                "empty": True,
+            }
 
         c_type = (chart_type or "bar").lower()
         if c_type == "kpi":
             first_row = rows[0]
-            raw_val = first_row[-1] if len(first_row) > 1 else first_row[0]
+            val_idx = metric_idx if metric_idx is not None and metric_idx < len(first_row) else -1
+            raw_val = first_row[val_idx]
             if isinstance(raw_val, int):
                 val_str = f"{raw_val:,}"
             elif isinstance(raw_val, float):
@@ -292,27 +371,35 @@ def _execute_live_duckdb_explore(
                 val_str = str(raw_val)
             return {
                 "value": val_str,
-                "trend": f"Live DuckDB Lakehouse ({len(rows)} group(s))",
+                "trend": f"Live DuckDB ({len(rows)} row(s))",
+                "columns": col_names,
+                "dimension": resolved_dim_label,
+                "metric": resolved_metric_label,
             }
 
         if c_type == "pie":
             series_data = []
-            for r in rows[:12]:
-                label = str(r[0] if r[0] is not None else "Unknown")[:42]
-                val = float(r[1]) if len(r) > 1 and r[1] is not None else 1.0
+            for r in rows[:15]:
+                label = str(r[dim_idx] if dim_idx is not None and dim_idx < len(r) and r[dim_idx] is not None else "Unknown")[:42]
+                val = float(r[metric_idx]) if metric_idx is not None and metric_idx < len(r) and r[metric_idx] is not None else 1.0
                 series_data.append({"name": label, "value": round(val, 2)})
-            return {"series": series_data}
+            return {
+                "series": series_data,
+                "columns": col_names,
+                "dimension": resolved_dim_label,
+                "metric": resolved_metric_label,
+            }
 
         categories: list[str] = []
         values: list[float] = []
-        for r in rows:
-            label = str(r[0] if r[0] is not None else "Unknown")
+        for r in rows[:100]:
+            label = str(r[dim_idx] if dim_idx is not None and dim_idx < len(r) and r[dim_idx] is not None else "Unknown")
             if len(label) > 38:
                 label = label[:35] + "..."
             categories.append(label)
-            if len(r) > 1 and r[1] is not None:
+            if metric_idx is not None and metric_idx < len(r) and r[metric_idx] is not None:
                 try:
-                    values.append(round(float(r[1]), 2))
+                    values.append(round(float(r[metric_idx]), 2))
                 except (ValueError, TypeError):
                     values.append(0.0)
             else:
@@ -322,14 +409,22 @@ def _execute_live_duckdb_explore(
             "categories": categories,
             "series": [
                 {
-                    "name": metric_label,
+                    "name": resolved_metric_label,
                     "data": values,
                 }
             ],
+            "columns": col_names,
+            "dimension": resolved_dim_label,
+            "metric": resolved_metric_label,
         }
     except Exception as exc:
+        if is_custom_sql:
+            logger.warning("Live DuckDB custom SQL explore execution failed: %s", exc)
+            raise
         logger.debug("Live DuckDB explore query fallback (%s): %s", sql, exc)
         return None
+    finally:
+        con.close()
 
 
 @router.post("/explore-data")
@@ -341,9 +436,11 @@ def explore_lakeset_dataset(
     """Generate analytical chart series and SQL preview for a governed dataset in Chart Builder."""
     ws, _, user = ctx
     authorized_datasets = get_authorized_workspace_tables(db=db, workspace=ws, user=user)
+    catalogs = ai_service.get_workspace_catalogs_from_db(db=db, workspace_id=ws.id, user_id=user.id)
 
+    is_custom_sql = bool(req.sql and req.sql.strip())
     matched_ds: dict[str, Any] | None = None
-    if req.dataset:
+    if req.dataset and req.dataset.strip().lower() not in ("", "null", "custom_sql"):
         target = req.dataset.strip().lower()
         for d in authorized_datasets:
             if (
@@ -354,12 +451,12 @@ def explore_lakeset_dataset(
             ):
                 matched_ds = d
                 break
-        if not matched_ds:
+        if not matched_ds and not is_custom_sql:
             raise HTTPException(
                 status_code=403,
                 detail=f"Dataset '{req.dataset}' is not authorized in workspace '{ws.slug}'.",
             )
-    elif authorized_datasets:
+    elif authorized_datasets and not is_custom_sql:
         matched_ds = authorized_datasets[0]
 
     cols = matched_ds.get("columns", []) if matched_ds else []
@@ -395,7 +492,7 @@ def explore_lakeset_dataset(
     agg = (req.metric_agg or "count").upper().strip()
     view_name = matched_ds["sql_view"] if matched_ds else "lakehouse.events"
 
-    if req.sql and req.sql.strip():
+    if is_custom_sql:
         generated_sql = req.sql.strip()
         exec_sql = generated_sql
         metric_label = metric_col
@@ -423,27 +520,48 @@ def explore_lakeset_dataset(
         )
         metric_label = f"{agg}({metric_col})"
 
-    live_data = _execute_live_duckdb_explore(
-        sql=exec_sql,
-        matched_ds=matched_ds,
-        authorized_datasets=authorized_datasets,
-        chart_type=req.chart_type or "bar",
-        metric_label=metric_label,
-    )
-    widget_data = live_data or headless_superset.execute_widget_query(
-        {
-            "type": req.chart_type or "bar",
-            "dimension": dim,
-            "metric": metric_col,
-        }
-    )
+    try:
+        live_data = _execute_live_duckdb_explore(
+            sql=exec_sql,
+            matched_ds=matched_ds,
+            authorized_datasets=authorized_datasets,
+            chart_type=req.chart_type or "bar",
+            metric_label=metric_label,
+            is_custom_sql=is_custom_sql,
+            catalogs=catalogs,
+            dimension=dim if not is_custom_sql or req.dimension else None,
+            metric=metric_col if not is_custom_sql or req.metric else None,
+        )
+    except Exception as exc:
+        if is_custom_sql:
+            raise HTTPException(
+                status_code=400,
+                detail=f"DuckDB query execution failed: {exc}",
+            )
+        live_data = None
+
+    if is_custom_sql:
+        widget_data = live_data
+    else:
+        widget_data = live_data or headless_superset.execute_widget_query(
+            {
+                "type": req.chart_type or "bar",
+                "dimension": dim,
+                "metric": metric_col,
+            }
+        )
+
+    resp_dim = (widget_data.get("dimension") if isinstance(widget_data, dict) else None) or dim
+    resp_metric = (widget_data.get("metric") if isinstance(widget_data, dict) else None) or metric_col
+    resp_cols = (widget_data.get("columns") if isinstance(widget_data, dict) else None) or cols
 
     return {
         "ok": True,
         "dataset": matched_ds["full_name"] if matched_ds else (req.dataset or "custom_sql"),
         "chart_type": req.chart_type,
-        "dimension": dim,
-        "metric": metric_col,
+        "dimension": resp_dim,
+        "metric": resp_metric,
+        "columns": resp_cols,
         "sql": generated_sql,
         "data": widget_data,
     }

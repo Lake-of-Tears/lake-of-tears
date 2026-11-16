@@ -28,6 +28,7 @@ document.addEventListener('alpine:init', () => {
     inspectedDataset: null,
     selectedDatasetName: '',
     selectedDataset: null,
+    exploreError: null,
     chartConfig: {
       title: 'Dataset Analytical Breakdown',
       chartType: 'bar',
@@ -71,12 +72,15 @@ document.addEventListener('alpine:init', () => {
       if (urlSql) {
         this.chartConfig.sql = urlSql;
         this.sqllabQuery = urlSql;
+        this.chartConfig.title = 'Custom Query Exploration';
       }
       if (urlDataset) {
         this.selectedDatasetName = urlDataset;
         this.activeMode = urlMode || 'explore';
-      } else if (urlSql && !urlMode) {
-        this.activeMode = 'explore';
+      } else if (urlSql) {
+        this.activeMode = urlMode || 'explore';
+        this.selectedDatasetName = '';
+        this.selectedDataset = null;
       } else if (urlMode && ['datasets', 'explore', 'dashboards', 'sqllab'].includes(urlMode)) {
         this.activeMode = urlMode;
       }
@@ -120,7 +124,7 @@ document.addEventListener('alpine:init', () => {
         await Promise.all([this.loadStatus(), this.loadDatasets(), this.loadDashboards()]);
         if (this.selectedDatasetName) {
           this.selectDatasetByName(this.selectedDatasetName);
-        } else if (this.datasets.length > 0 && !this.selectedDataset) {
+        } else if (!this.chartConfig.sql && this.datasets.length > 0 && !this.selectedDataset) {
           this.selectDataset(this.datasets[0]);
         }
         if (this.activeMode === 'explore') {
@@ -186,7 +190,7 @@ document.addEventListener('alpine:init', () => {
       window.history.replaceState({}, '', url.toString());
 
       if (mode === 'explore') {
-        if (!this.selectedDataset && this.datasets.length > 0) {
+        if (!this.selectedDataset && this.datasets.length > 0 && !this.chartConfig.sql) {
           this.selectDataset(this.datasets[0]);
         }
         this.runExploreQuery();
@@ -276,6 +280,66 @@ document.addEventListener('alpine:init', () => {
       this.iframeUrl = `/lakeset/proxy/superset/explore/?datasource_type=table&datasource_id=${ds.dataset_id || 1}&dataset=${encodeURIComponent(ds.full_name)}`;
     },
 
+    handleDatasetSelectChange(name) {
+      if (this.chartConfig.sql && this.chartConfig.sql.trim()) {
+        const proceed = confirm(
+          'You have an active Custom DuckDB SQL query. Switching to a governed dataset will clear your custom query. Do you want to proceed?'
+        );
+        if (!proceed) {
+          this.selectedDatasetName = this.selectedDataset ? this.selectedDataset.full_name : '';
+          return;
+        }
+        this.chartConfig.sql = '';
+      }
+      if (name) {
+        this.selectDatasetByName(name);
+      } else {
+        this.selectedDataset = null;
+        this.selectedDatasetName = '';
+        this.chartConfig.title = 'Chart Preview';
+      }
+      this.syncExploreUrl();
+      this.runExploreQuery();
+    },
+
+    clearCustomSql() {
+      this.chartConfig.sql = '';
+      this.exploreError = null;
+      if (this.datasets.length > 0) {
+        this.selectDataset(this.datasets[0]);
+      } else {
+        this.selectedDataset = null;
+        this.selectedDatasetName = '';
+        this.chartConfig.title = 'Chart Preview';
+      }
+      this.syncExploreUrl();
+      this.runExploreQuery();
+    },
+
+    syncExploreUrl() {
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set('mode', 'explore');
+        if (this.chartConfig.sql && this.chartConfig.sql.trim()) {
+          url.searchParams.set('sql', this.chartConfig.sql.trim());
+          url.searchParams.delete('dataset');
+        } else {
+          url.searchParams.delete('sql');
+          if (this.selectedDatasetName) {
+            url.searchParams.set('dataset', this.selectedDatasetName);
+          } else {
+            url.searchParams.delete('dataset');
+          }
+        }
+        if (this.chartConfig.chartType) {
+          url.searchParams.set('chart_type', this.chartConfig.chartType);
+        }
+        window.history.replaceState({}, '', url.toString());
+      } catch (e) {
+        console.debug('Failed to sync explore URL:', e);
+      }
+    },
+
     async openInExplore(dsOrName) {
       if (typeof dsOrName === 'string') {
         this.selectDatasetByName(dsOrName);
@@ -361,10 +425,12 @@ document.addEventListener('alpine:init', () => {
 
     async runExploreQuery() {
       this.isExploring = true;
+      this.exploreError = null;
       try {
+        const hasSql = Boolean(this.chartConfig.sql && this.chartConfig.sql.trim());
         const payload = {
-          dataset: this.selectedDatasetName || null,
-          sql: this.chartConfig.sql || null,
+          dataset: hasSql ? null : (this.selectedDatasetName || null),
+          sql: hasSql ? this.chartConfig.sql.trim() : null,
           chart_type: this.chartConfig.chartType || 'bar',
           dimension: this.chartConfig.dimension || null,
           metric: this.chartConfig.metric || 'count',
@@ -377,20 +443,70 @@ document.addEventListener('alpine:init', () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
-        if (resp.ok) {
-          this.exploreResult = await resp.json();
-          this.$nextTick(() => {
-            this.renderExploreChart();
-          });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data.ok) {
+          const errMsg = data.detail || data.error || `Query failed (${resp.status})`;
+          this.exploreError = errMsg;
+          this.showToast(errMsg, 'error');
+          this.renderExploreChartError(errMsg);
+          return;
         }
+
+        this.exploreResult = data;
+        if (hasSql) {
+          this.chartConfig.title = 'Custom Query Exploration';
+          if (data.dimension && !this.chartConfig.dimension) {
+            this.chartConfig.dimension = data.dimension;
+          }
+          if (data.metric && (!this.chartConfig.metric || this.chartConfig.metric === 'count')) {
+            this.chartConfig.metric = data.metric;
+          }
+          this.syncExploreUrl();
+        }
+
+        this.$nextTick(() => {
+          this.renderExploreChart();
+        });
       } catch (err) {
-        console.debug('Explore query error:', err);
+        console.error('Explore query error:', err);
+        const errMsg = err.message || 'Error executing explore query';
+        this.exploreError = errMsg;
+        this.showToast(errMsg, 'error');
+        this.renderExploreChartError(errMsg);
       } finally {
         this.isExploring = false;
       }
     },
 
+    renderExploreChartError(errMsg) {
+      const container = document.getElementById('lakeset-explore-chart');
+      if (!container) return;
+      if (typeof echarts !== 'undefined') {
+        const existing = echarts.getInstanceByDom(container);
+        if (existing) {
+          existing.dispose();
+        }
+        container.removeAttribute('_echarts_instance_');
+      }
+      const safeErr = String(errMsg || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+      container.innerHTML = `
+        <div class="h-full min-h-[300px] flex flex-col items-center justify-center text-center p-6 bg-red-950/20 border border-red-900/40 rounded-lg">
+          <div class="w-10 h-10 rounded-full bg-red-900/40 border border-red-700/60 flex items-center justify-center text-red-400 mb-3">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+          </div>
+          <h4 class="text-sm font-semibold text-red-300 mb-1">DuckDB Query Execution Error</h4>
+          <p class="text-xs text-red-400/90 font-mono max-w-lg overflow-x-auto whitespace-pre-wrap bg-red-950/40 p-2.5 rounded border border-red-900/50 mt-1">${safeErr}</p>
+          <p class="text-[11px] text-gray-500 mt-3">Check your SQL syntax, table/column names, or aggregations and click "Run &amp; Update Chart".</p>
+        </div>
+      `;
+    },
+
     renderExploreChart(retryCount = 0) {
+      if (this.exploreError) return;
       const container = document.getElementById('lakeset-explore-chart');
       if (!container || !this.exploreResult || !this.exploreResult.data) return;
 
@@ -410,6 +526,23 @@ document.addEventListener('alpine:init', () => {
           existing.dispose();
         }
         container.removeAttribute('_echarts_instance_');
+      }
+
+      if (
+        !d ||
+        d.empty === true ||
+        (Array.isArray(d.categories) &&
+          d.categories.length === 0 &&
+          Array.isArray(d.series) &&
+          (!d.series[0] || !d.series[0].data || d.series[0].data.length === 0))
+      ) {
+        container.innerHTML = `
+          <div class="h-full min-h-[260px] flex flex-col items-center justify-center text-center p-6 text-gray-400">
+            <svg class="w-8 h-8 text-gray-500 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+            <p class="text-xs">Query executed successfully, but returned 0 rows.</p>
+          </div>
+        `;
+        return;
       }
 
       if (cType === 'kpi') {
