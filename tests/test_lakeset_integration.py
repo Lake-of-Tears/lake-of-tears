@@ -677,7 +677,9 @@ def test_issue541_custom_sql_explore_duckdb_execution():
             metric_label="count",
             is_custom_sql=True,
         )
-    assert "Table with name non_existent_table_xyz_123 does not exist" in str(excinfo.value) or "Catalog Error" in str(excinfo.value)
+    assert "Table with name non_existent_table_xyz_123 does not exist" in str(
+        excinfo.value
+    ) or "Catalog Error" in str(excinfo.value)
 
 
 def test_issue541_api_explore_data_custom_sql_endpoint(lakeset_db_session):
@@ -742,9 +744,9 @@ def test_issue541_ui_controller_and_template_custom_sql_state():
     assert "history.replaceState" in lakeset_js
 
     # 2. lakeset.html UI assertions
-    assert 'handleDatasetSelectChange(selectedDatasetName)' in lakeset_html
+    assert "handleDatasetSelectChange(selectedDatasetName)" in lakeset_html
     assert "clearCustomSql()" in lakeset_html
     assert "Custom SQL" in lakeset_html
     assert "exploreError" in lakeset_html
     assert 'x-show="isExploring"' in lakeset_html
-    assert 'x-text="isExploring ? \'Executing Query...\' : \'Run & Update Chart\'"' in lakeset_html
+    assert "x-text=\"isExploring ? 'Executing Query...' : 'Run & Update Chart'\"" in lakeset_html

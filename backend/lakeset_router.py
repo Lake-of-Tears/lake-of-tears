@@ -264,7 +264,11 @@ def _execute_live_duckdb_explore(
         con.execute("SET s3_url_style='path';")
 
         # When custom SQL is provided, mount all authorized datasets; otherwise mount matched_ds or top 25
-        datasets_to_mount = authorized_datasets if is_custom_sql else ([matched_ds] if matched_ds else authorized_datasets[:25])
+        datasets_to_mount = (
+            authorized_datasets
+            if is_custom_sql
+            else ([matched_ds] if matched_ds else authorized_datasets[:25])
+        )
         exec_sql = sql.strip()
 
         for ds in datasets_to_mount:
@@ -319,15 +323,22 @@ def _execute_live_duckdb_explore(
             metric_idx = col_name_to_idx[metric.lower()]
 
         numeric_type_keywords = ("INT", "FLOAT", "DOUBLE", "DEC", "NUM", "REAL", "HUGEINT")
-        categorical_type_keywords = ("VARCHAR", "TEXT", "CHAR", "DATE", "TIME", "BOOL", "UUID", "STRING")
+        categorical_type_keywords = (
+            "VARCHAR",
+            "TEXT",
+            "CHAR",
+            "DATE",
+            "TIME",
+            "BOOL",
+            "UUID",
+            "STRING",
+        )
 
         numeric_indices = [
-            i for i, t in enumerate(col_types)
-            if any(k in t for k in numeric_type_keywords)
+            i for i, t in enumerate(col_types) if any(k in t for k in numeric_type_keywords)
         ]
         categorical_indices = [
-            i for i, t in enumerate(col_types)
-            if any(k in t for k in categorical_type_keywords)
+            i for i, t in enumerate(col_types) if any(k in t for k in categorical_type_keywords)
         ]
 
         if dim_idx is None:
@@ -345,8 +356,16 @@ def _execute_live_duckdb_explore(
             elif numeric_indices:
                 metric_idx = numeric_indices[0]
 
-        resolved_metric_label = col_names[metric_idx] if metric_idx is not None and metric_idx < len(col_names) else metric_label
-        resolved_dim_label = col_names[dim_idx] if dim_idx is not None and dim_idx < len(col_names) else (dimension or "category")
+        resolved_metric_label = (
+            col_names[metric_idx]
+            if metric_idx is not None and metric_idx < len(col_names)
+            else metric_label
+        )
+        resolved_dim_label = (
+            col_names[dim_idx]
+            if dim_idx is not None and dim_idx < len(col_names)
+            else (dimension or "category")
+        )
 
         if not rows:
             return {
@@ -380,8 +399,16 @@ def _execute_live_duckdb_explore(
         if c_type == "pie":
             series_data = []
             for r in rows[:15]:
-                label = str(r[dim_idx] if dim_idx is not None and dim_idx < len(r) and r[dim_idx] is not None else "Unknown")[:42]
-                val = float(r[metric_idx]) if metric_idx is not None and metric_idx < len(r) and r[metric_idx] is not None else 1.0
+                label = str(
+                    r[dim_idx]
+                    if dim_idx is not None and dim_idx < len(r) and r[dim_idx] is not None
+                    else "Unknown"
+                )[:42]
+                val = (
+                    float(r[metric_idx])
+                    if metric_idx is not None and metric_idx < len(r) and r[metric_idx] is not None
+                    else 1.0
+                )
                 series_data.append({"name": label, "value": round(val, 2)})
             return {
                 "series": series_data,
@@ -393,7 +420,11 @@ def _execute_live_duckdb_explore(
         categories: list[str] = []
         values: list[float] = []
         for r in rows[:100]:
-            label = str(r[dim_idx] if dim_idx is not None and dim_idx < len(r) and r[dim_idx] is not None else "Unknown")
+            label = str(
+                r[dim_idx]
+                if dim_idx is not None and dim_idx < len(r) and r[dim_idx] is not None
+                else "Unknown"
+            )
             if len(label) > 38:
                 label = label[:35] + "..."
             categories.append(label)
@@ -552,7 +583,9 @@ def explore_lakeset_dataset(
         )
 
     resp_dim = (widget_data.get("dimension") if isinstance(widget_data, dict) else None) or dim
-    resp_metric = (widget_data.get("metric") if isinstance(widget_data, dict) else None) or metric_col
+    resp_metric = (
+        widget_data.get("metric") if isinstance(widget_data, dict) else None
+    ) or metric_col
     resp_cols = (widget_data.get("columns") if isinstance(widget_data, dict) else None) or cols
 
     return {
