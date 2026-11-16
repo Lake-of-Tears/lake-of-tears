@@ -1,11 +1,27 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal, Self
 
 import email_validator
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
+
+
+def _format_utc_datetime(dt: datetime | None) -> str | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
 
 # Allow internal/private self-hosted domains (e.g. .local, .localhost) for Lake of Tears deployments
 for _domain in ("local", "localhost"):
@@ -274,6 +290,14 @@ class PersonalAccessTokenCreatedResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
+    @field_serializer("created_at")
+    def _serialize_created_at(self, dt: datetime) -> str:
+        return _format_utc_datetime(dt)
+
+    @field_serializer("expires_at")
+    def _serialize_expires_at(self, dt: datetime | None) -> str | None:
+        return _format_utc_datetime(dt)
+
 
 class PersonalAccessTokenResponse(BaseModel):
     id: uuid.UUID
@@ -293,6 +317,14 @@ class PersonalAccessTokenResponse(BaseModel):
     revoked_at: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+    @field_serializer("created_at")
+    def _serialize_created_at(self, dt: datetime) -> str:
+        return _format_utc_datetime(dt)
+
+    @field_serializer("expires_at")
+    def _serialize_expires_at(self, dt: datetime | None) -> str | None:
+        return _format_utc_datetime(dt)
 
 
 # ── Workspaces ────────────────────────────────────────────────────────────────
@@ -343,6 +375,10 @@ class WorkspaceResponse(BaseModel):
     my_role: str | None = None
     is_shared: bool = False
     has_shared_catalogs: bool = False
+
+    @field_serializer("created_at")
+    def _serialize_created_at(self, dt: datetime) -> str:
+        return _format_utc_datetime(dt)
 
     model_config = {"from_attributes": True}
 
@@ -540,6 +576,10 @@ class CatalogTableResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
+    @field_serializer("created_at")
+    def _serialize_created_at(self, dt: datetime) -> str:
+        return _format_utc_datetime(dt)
+
     @field_validator("format", mode="before")
     @classmethod
     def default_format(cls, v: Any) -> str:
@@ -573,6 +613,10 @@ class DeletedCatalogAssetResponse(BaseModel):
     days_remaining: float | None = None
 
     model_config = {"from_attributes": True}
+
+    @field_serializer("dropped_at", "purge_at", mode="plain", check_fields=False)
+    def serialize_datetime(self, dt: datetime | None) -> str | None:
+        return _format_utc_datetime(dt)
 
 
 class RestoreAssetRequest(BaseModel):
@@ -618,6 +662,10 @@ class CatalogSchemaResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
+    @field_serializer("created_at")
+    def _serialize_created_at(self, dt: datetime) -> str:
+        return _format_utc_datetime(dt)
+
 
 class CatalogResponse(BaseModel):
     id: uuid.UUID
@@ -634,6 +682,10 @@ class CatalogResponse(BaseModel):
     my_access: str | None = None  # 'owner' | 'write' | 'read' | None
 
     model_config = {"from_attributes": True}
+
+    @field_serializer("created_at")
+    def _serialize_created_at(self, dt: datetime) -> str:
+        return _format_utc_datetime(dt)
 
 
 class PurgeCatalogRequest(BaseModel):
