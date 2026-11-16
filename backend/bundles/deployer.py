@@ -264,7 +264,10 @@ _BUNDLE_TASK_RUNNER_CODE = '''def _run_bundle_task(**kwargs):
                         req_tf = os.path.join(venv_dir, "requirements.txt")
                         with open(req_tf, "w") as rf:
                             rf.write(req_content)
-                        subprocess.run([venv_py, "-m", "pip", "install", "-q", "-r", req_tf], check=True)
+                        pip_res = subprocess.run([venv_py, "-m", "pip", "install", "-q", "-r", req_tf], capture_output=True, text=True)
+                        if pip_res.returncode != 0:
+                            logger.warning("pip install failed for %s: %s %s", bundle_name, pip_res.stdout, pip_res.stderr)
+                            raise subprocess.CalledProcessError(pip_res.returncode, [venv_py, "pip install"])
                         with open(hash_file, "w") as hf:
                             hf.write(req_hash)
                     except Exception as venv_exc:
@@ -273,7 +276,20 @@ _BUNDLE_TASK_RUNNER_CODE = '''def _run_bundle_task(**kwargs):
                 if os.path.exists(venv_py):
                     py_executable = venv_py
 
-            subprocess.run([py_executable, tf_path], env=env, check=True)
+            proc = subprocess.Popen(
+                [py_executable, tf_path],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+            if proc.stdout:
+                for line in proc.stdout:
+                    logger.info("%s", line.rstrip())
+            proc.wait()
+            if proc.returncode != 0:
+                raise subprocess.CalledProcessError(proc.returncode, [py_executable, tf_path])
         finally:
             if os.path.exists(tf_path):
                 os.remove(tf_path)
