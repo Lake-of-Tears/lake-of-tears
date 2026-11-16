@@ -17,6 +17,7 @@ from chunking import (
 )
 from models import CatalogTable
 from sqlalchemy.orm import Session
+from table_scan import ensure_iceberg_loaded, is_iceberg, table_scan_for
 
 logger = logging.getLogger("lakehouse.vector_index")
 
@@ -107,9 +108,11 @@ def sync_table_vector_index(
     con = create_duckdb_connection(load_vss=True, register_ai=False)
 
     try:
-        escaped_path = s3_path.replace("'", "''")
+        if is_iceberg(table):
+            ensure_iceberg_loaded(con)
+        source_scan = table_scan_for(table)
         # Check column existence in source
-        desc_rows = con.execute(f"DESCRIBE SELECT * FROM read_parquet('{escaped_path}')").fetchall()
+        desc_rows = con.execute(f"DESCRIBE SELECT * FROM {source_scan}").fetchall()
         col_names = [d[0] for d in desc_rows]
         if source_col not in col_names:
             # Fall back to first varchar column if configured column not found
@@ -126,7 +129,7 @@ def sync_table_vector_index(
 
         # Query non-empty records
         query = f"""
-            SELECT * FROM read_parquet('{escaped_path}')
+            SELECT * FROM {source_scan}
             WHERE "{source_col}" IS NOT NULL AND trim("{source_col}") != ''
         """
         raw_rows = con.execute(query).fetchall()

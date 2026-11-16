@@ -5,6 +5,7 @@ RUN pip install --no-cache-dir \
     duckdb \
     boto3 \
     pyarrow \
+    "pyiceberg[pyarrow]" \
     google-genai \
     scikit-learn \
     papermill \

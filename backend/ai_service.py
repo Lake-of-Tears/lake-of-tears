@@ -22,6 +22,14 @@ from sql_guardrails import validate_sql_s3_paths
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from sqlglot import exp
+from table_scan import (
+    apply_time_travel_views,
+    catalogs_have_iceberg,
+    ensure_iceberg_loaded,
+    is_iceberg,
+    rewrite_time_travel,
+    table_scan_for,
+)
 
 logger = logging.getLogger("lake.backend.ai.service")
 
@@ -759,6 +767,9 @@ def register_catalog_views(
     if not catalogs:
         return registered
 
+    if catalogs_have_iceberg(catalogs):
+        ensure_iceberg_loaded(con)
+
     for cat in catalogs:
         for schema in cat.get("schemas") or []:
             schema_slug = _safe_identifier(schema.get("slug") or schema.get("name") or "default")
@@ -772,18 +783,17 @@ def register_catalog_views(
                 s3_path = (table.get("s3_path_pattern") or "").strip()
                 if not table_slug or not s3_path:
                     continue
-                # Escape single quotes in S3 path
-                escaped_path = s3_path.replace("'", "''")
                 try:
+                    # Iceberg tables route to iceberg_scan, legacy tables to read_parquet
+                    scan = table_scan_for(table)
                     con.execute(
                         f'CREATE OR REPLACE VIEW "{schema_slug}"."{table_slug}" AS '
-                        f"SELECT * FROM read_parquet('{escaped_path}')"
+                        f"SELECT * FROM {scan}"
                     )
                     registered.append(f"{schema_slug}.{table_slug}")
                     try:
                         con.execute(
-                            f'CREATE OR REPLACE VIEW "{table_slug}" AS '
-                            f"SELECT * FROM read_parquet('{escaped_path}')"
+                            f'CREATE OR REPLACE VIEW "{table_slug}" AS SELECT * FROM {scan}'
                         )
                     except Exception:
                         pass
@@ -860,6 +870,9 @@ def get_workspace_catalogs_from_db(
                         or f"s3://{MINIO_BUCKET}/raw/{t.slug}/**/*.parquet",
                         "column_defs": t.column_defs or [],
                         "vector_index": t.vector_index or {},
+                        "format": getattr(t, "format", None) or "parquet",
+                        "iceberg_metadata_location": getattr(t, "iceberg_metadata_location", None),
+                        "iceberg_snapshot_id": getattr(t, "iceberg_snapshot_id", None),
                     }
                 )
             schemas_list.append(
@@ -1058,6 +1071,13 @@ def build_schema_prompt_context(catalogs: list[dict[str, Any]] | None = None) ->
                     # The views are created with _safe_identifier names (a slug like
                     # "tmdb-trending" becomes tmdb_trending), so that is what queries must use.
                     view = f"{_safe_identifier(schema_slug)}.{_safe_identifier(t_slug or '')}"
+                    if is_iceberg(table):
+                        lines.append(
+                            f"- `{cat_slug}.{schema_slug}.{t_slug}` (Iceberg table; View: `{view}`, "
+                            f"time travel: `{view} FOR SYSTEM_VERSION AS OF <snapshot_id>`){desc}\n"
+                            f"  Columns: {col_str}"
+                        )
+                        continue
                     lines.append(
                         f"- `{cat_slug}.{schema_slug}.{t_slug}` (View: `{view}` or `read_parquet('{s3_path}')`){desc}\n"
                         f"  Columns: {col_str}"
@@ -1153,6 +1173,21 @@ def execute_sql_query(
     is_superadmin: bool = False,
 ) -> dict[str, Any]:
     """Execute a DuckDB SQL query with registered workspace Catalog views and SQL AI UDFs."""
+    try:
+        # Iceberg time travel clauses become references to snapshot-pinned views
+        sql, time_travel_views = rewrite_time_travel(sql, catalogs)
+    except ValueError as exc:
+        return {
+            "ok": False,
+            "columns": [],
+            "rows": [],
+            "row_count": 0,
+            "execution_ms": 0.0,
+            "ai_calls_made": 0,
+            "registered_views": [],
+            "error": str(exc),
+        }
+
     if read_only:
         allowed, reason = is_read_only_sql(sql)
         if not allowed:
@@ -1200,6 +1235,7 @@ def execute_sql_query(
             ai_state=ai_state,
         )
         registered_views = register_catalog_views(con, catalogs)
+        apply_time_travel_views(con, time_travel_views)
         rel = con.execute(sql)
         columns = [desc[0] for desc in (rel.description or [])]
         raw_rows = rel.fetchall()

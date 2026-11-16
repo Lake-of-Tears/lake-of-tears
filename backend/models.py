@@ -4,7 +4,17 @@ from datetime import UTC, datetime
 from typing import Any
 
 from database import Base
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, case
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    case,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -354,11 +364,69 @@ class CatalogTable(Base):
     column_defs: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=list)
     schema_drift: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     vector_index: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
+    # 'parquet' | 'iceberg'
+    format: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="parquet", server_default="parquet"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
 
     schema: Mapped["CatalogSchema"] = relationship(back_populates="tables")
+    iceberg: Mapped["IcebergTable | None"] = relationship(
+        back_populates="table", cascade="all, delete-orphan", uselist=False, lazy="selectin"
+    )
+
+    @property
+    def iceberg_metadata_location(self) -> str | None:
+        return self.iceberg.metadata_location if self.iceberg else None
+
+    @property
+    def iceberg_snapshot_id(self) -> int | None:
+        return self.iceberg.current_snapshot_id if self.iceberg else None
+
+
+class IcebergTable(Base):
+    """Pointer row of the native Iceberg REST catalog: one per Iceberg-format CatalogTable.
+
+    `metadata_location` is the catalog's atomic commit pointer; a commit succeeds only when it
+    swaps the value it read (optimistic concurrency), so it is never updated outside a commit.
+    """
+
+    __tablename__ = "iceberg_tables"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    table_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("catalog_tables.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    table_uuid: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    location: Mapped[str] = mapped_column(Text, nullable=False)
+    metadata_location: Mapped[str] = mapped_column(Text, nullable=False)
+    previous_metadata_location: Mapped[str | None] = mapped_column(Text, nullable=True)
+    current_schema_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    current_snapshot_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # Cached TOON metadata views (Tier 1 summary, Tier 2 file manifest), regenerated on commit
+    toon_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    toon_files: Mapped[str | None] = mapped_column(Text, nullable=True)
+    toon_generated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Per-table maintenance policy overrides and the outcome of the last maintenance run
+    maintenance: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    table: Mapped["CatalogTable"] = relationship(back_populates="iceberg")
 
 
 class CatalogAccess(Base):
@@ -649,6 +717,11 @@ class DeletedCatalogAsset(Base):
     is_managed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     trash_s3_prefix: Mapped[str | None] = mapped_column(Text, nullable=True)
     trash_embeddings_prefix: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 'parquet' | 'iceberg'; Iceberg tables keep their files in place (absolute paths in metadata)
+    format: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="parquet", server_default="parquet"
+    )
+    iceberg_state: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # Batch ID links cascaded schema drops to child tables
     batch_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True, index=True

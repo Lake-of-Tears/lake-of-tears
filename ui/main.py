@@ -49,6 +49,7 @@ try:
         ingest_service,
         notebook_proxy,
         sql_guardrails,
+        table_scan,
     )
 except ImportError:
     import ai_gateway_client
@@ -57,6 +58,7 @@ except ImportError:
     import ingest_service
     import notebook_proxy
     import sql_guardrails
+    import table_scan
 
 try:
     from pipeline.shared.connector_registry import registry as connector_registry
@@ -574,6 +576,19 @@ def _run_query(
     workspace_slug: str | None = None,
     is_superadmin: bool = False,
 ) -> dict[str, Any]:
+    try:
+        # Iceberg time travel clauses become references to snapshot-pinned views
+        sql, time_travel_views = table_scan.rewrite_time_travel(sql, catalogs)
+    except ValueError as tt_exc:
+        return {
+            "ok": False,
+            "error": str(tt_exc),
+            "columns": [],
+            "rows": [],
+            "row_count": 0,
+            "execution_ms": 0.0,
+        }
+
     if read_only:
         allowed, reason = duckdb_ai.is_read_only_sql(sql)
         if not allowed:
@@ -622,6 +637,7 @@ def _run_query(
                 cancel.attach(con)
                 cancel.check()
             registered_views = duckdb_ai.register_catalog_views(con, catalogs)
+            table_scan.apply_time_travel_views(con, time_travel_views)
             duckdb_ai.register_ai_functions(
                 con,
                 api_key=_get_ai_access,
@@ -2701,6 +2717,7 @@ async def api_ingest_create_table_from_file(
     schema_id: str = Form(...),
     schema_name: str | None = Form(None),
     table_name: str = Form(...),
+    format: str | None = Form(None),
     mode: str = Form("create_new"),
     description: str | None = Form(None),
     columns_json: str | None = Form(None),
@@ -2843,15 +2860,18 @@ async def api_ingest_create_table_from_file(
                 workspace_slug=ws_slug,
             )
         else:
+            table_payload = {
+                "name": clean_table_name,
+                "description": description or f"Managed table ingested from {filename}",
+                "s3_path_pattern": s3_path_pattern,
+                "column_defs": columns,
+            }
+            if format:
+                table_payload["format"] = format
             res_table = _backend_post(
                 f"/api/catalogs/{catalog_id}/schemas/{actual_schema_id}/tables",
                 token,
-                {
-                    "name": clean_table_name,
-                    "description": description or f"Managed table ingested from {filename}",
-                    "s3_path_pattern": s3_path_pattern,
-                    "column_defs": columns,
-                },
+                table_payload,
                 workspace_id=ws_id,
                 workspace_slug=ws_slug,
             )
