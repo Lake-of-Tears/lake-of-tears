@@ -9,6 +9,19 @@
     color: #4338ca !important;
     border-color: #c7d2fe !important;
   }
+  html[data-theme="light"] #lakeset-confirm-modal > div {
+    background-color: var(--surface-elevated, #ffffff) !important;
+    border-color: var(--border-default, #e5e7eb) !important;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1) !important;
+  }
+  html[data-theme="light"] #lakeset-confirm-modal strong {
+    color: var(--text-primary, #111827) !important;
+  }
+  html[data-theme="light"] #lakeset-confirm-modal .sql-preview-box {
+    background-color: var(--surface-muted, #f3f4f6) !important;
+    border-color: var(--border-subtle, #e5e7eb) !important;
+    color: var(--text-secondary, #374151) !important;
+  }
 </style>
 {% endblock %}
 
@@ -519,6 +532,58 @@
           </div>
         </div>
       </template>
+    </div>
+  </div>
+
+  <!-- ── CUSTOM SQL OVERWRITE CONFIRMATION MODAL ───────────────────────────── -->
+  <div x-show="confirmModalOpen"
+       x-cloak
+       id="lakeset-confirm-modal"
+       class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+       @keydown.escape.window="cancelDatasetSwitch()"
+       @click.self="cancelDatasetSwitch()">
+    <div class="bg-[#1a1a1a] border border-white/[0.08] rounded-xl shadow-2xl w-full max-w-md p-6 transform transition-all"
+         x-transition:enter="ease-out duration-200"
+         x-transition:enter-start="opacity-0 scale-95"
+         x-transition:enter-end="opacity-100 scale-100"
+         x-transition:leave="ease-in duration-150"
+         x-transition:leave-start="opacity-100 scale-100"
+         x-transition:leave-end="opacity-0 scale-95">
+      <div class="flex items-center gap-3 mb-4">
+        <div class="w-10 h-10 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
+          <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+          </svg>
+        </div>
+        <div>
+          <h3 class="text-base font-semibold text-gray-100" id="lakeset-confirm-title">Clear Custom SQL Query?</h3>
+          <p class="text-xs text-gray-400">Switching to governed dataset</p>
+        </div>
+      </div>
+
+      <p class="text-sm text-gray-300 mb-3">
+        You have an active Custom DuckDB SQL query. Switching to <strong class="text-white font-mono" x-text="pendingDatasetName"></strong> will clear your custom SQL and reset the chart configuration.
+      </p>
+
+      <template x-if="chartConfig.sql">
+        <div class="sql-preview-box mb-5 p-2.5 rounded bg-gray-950/70 border border-gray-800 font-mono text-[11px] text-gray-400 max-h-24 overflow-y-auto whitespace-pre-wrap break-all"
+             x-text="chartConfig.sql.trim()"></div>
+      </template>
+
+      <div class="flex justify-end gap-2.5">
+        <button @click="cancelDatasetSwitch()"
+                type="button"
+                id="btn-cancel-custom-sql-switch"
+                class="btn-ghost text-xs px-3.5 py-1.5 border border-gray-700 hover:border-gray-600 rounded-md">
+          Keep Custom SQL
+        </button>
+        <button @click="confirmDatasetSwitch()"
+                type="button"
+                id="btn-confirm-custom-sql-switch"
+                class="btn-primary text-xs px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-md shadow-sm">
+          Clear &amp; Switch Dataset
+        </button>
+      </div>
     </div>
   </div>
 

@@ -29,6 +29,8 @@ document.addEventListener('alpine:init', () => {
     selectedDatasetName: '',
     selectedDataset: null,
     exploreError: null,
+    confirmModalOpen: false,
+    pendingDatasetName: '',
     chartConfig: {
       title: 'Dataset Analytical Breakdown',
       chartType: 'bar',
@@ -281,25 +283,48 @@ document.addEventListener('alpine:init', () => {
     },
 
     handleDatasetSelectChange(name) {
-      if (this.chartConfig.sql && this.chartConfig.sql.trim()) {
-        const proceed = confirm(
-          'You have an active Custom DuckDB SQL query. Switching to a governed dataset will clear your custom query. Do you want to proceed?'
-        );
-        if (!proceed) {
-          this.selectedDatasetName = this.selectedDataset ? this.selectedDataset.full_name : '';
-          return;
-        }
-        this.chartConfig.sql = '';
+      if (!name) {
+        this.selectedDataset = null;
+        this.selectedDatasetName = '';
+        this.chartConfig.title = 'Chart Preview';
+        this.syncExploreUrl();
+        this.runExploreQuery();
+        return;
       }
-      if (name) {
-        this.selectDatasetByName(name);
+      if (this.chartConfig.sql && this.chartConfig.sql.trim()) {
+        this.pendingDatasetName = name;
+        this.confirmModalOpen = true;
+        this.$nextTick(() => {
+          this.selectedDatasetName = this.selectedDataset ? this.selectedDataset.full_name : '';
+        });
+        return;
+      }
+      this.selectDatasetByName(name);
+      this.syncExploreUrl();
+      this.runExploreQuery();
+    },
+
+    confirmDatasetSwitch() {
+      const targetName = this.pendingDatasetName;
+      this.confirmModalOpen = false;
+      this.chartConfig.sql = '';
+      this.exploreError = null;
+      if (targetName) {
+        this.selectDatasetByName(targetName);
       } else {
         this.selectedDataset = null;
         this.selectedDatasetName = '';
         this.chartConfig.title = 'Chart Preview';
       }
+      this.pendingDatasetName = '';
       this.syncExploreUrl();
       this.runExploreQuery();
+    },
+
+    cancelDatasetSwitch() {
+      this.confirmModalOpen = false;
+      this.pendingDatasetName = '';
+      this.selectedDatasetName = this.selectedDataset ? this.selectedDataset.full_name : '';
     },
 
     clearCustomSql() {

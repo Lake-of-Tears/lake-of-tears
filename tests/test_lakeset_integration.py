@@ -737,6 +737,9 @@ def test_issue541_ui_controller_and_template_custom_sql_state():
 
     # 1. lakeset.js state management assertions
     assert "handleDatasetSelectChange" in lakeset_js
+    assert "confirmDatasetSwitch" in lakeset_js
+    assert "cancelDatasetSwitch" in lakeset_js
+    assert "confirmModalOpen" in lakeset_js
     assert "clearCustomSql" in lakeset_js
     assert "syncExploreUrl" in lakeset_js
     assert "renderExploreChartError" in lakeset_js
@@ -748,5 +751,8 @@ def test_issue541_ui_controller_and_template_custom_sql_state():
     assert "clearCustomSql()" in lakeset_html
     assert "Custom SQL" in lakeset_html
     assert "exploreError" in lakeset_html
+    assert "lakeset-confirm-modal" in lakeset_html
+    assert "btn-confirm-custom-sql-switch" in lakeset_html
+    assert "btn-cancel-custom-sql-switch" in lakeset_html
     assert 'x-show="isExploring"' in lakeset_html
     assert "x-text=\"isExploring ? 'Executing Query...' : 'Run & Update Chart'\"" in lakeset_html
