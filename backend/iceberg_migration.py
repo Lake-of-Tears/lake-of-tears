@@ -14,7 +14,9 @@ failed or aborted run leaves the table untouched.
 from __future__ import annotations
 
 import logging
+import os
 import re
+import shutil
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -526,37 +528,169 @@ class _IoHolder:
         self.io = io
 
 
-def rollback_migration(db: Session, row: CatalogTable) -> dict[str, Any]:
-    """Undo a zero-copy migration while the table is still at its migration snapshot.
+def rollback_migration(
+    db: Session,
+    row: CatalogTable,
+    *,
+    dry_run: bool = False,
+    materialize: bool = False,
+) -> dict[str, Any]:
+    """Undo a zero-copy migration or convert an Iceberg table to plain Parquet format.
 
-    Only the catalog row changes back; the original Parquet files were never modified. Once
-    the table has received Iceberg commits, rolling back would silently lose them, so it is
-    refused.
+    - Zero-copy: If untouched since zero-copy migration, restores original Parquet pattern,
+      removes Iceberg metadata, and flips format to 'parquet'.
+    - Materialized: If table has new commits or is native Iceberg, materialize=True exports
+      the current Iceberg snapshot to Parquet via DuckDB.
     """
     if row.format != "iceberg" or not row.iceberg:
         raise ValueError("Table is not an Iceberg table")
     origin = (row.iceberg.maintenance or {}).get("migrated_from")
-    if not origin or not origin.get("s3_path_pattern"):
-        raise ValueError("Table was not created by a Parquet-to-Iceberg migration")
-    if str(row.iceberg.current_snapshot_id) != str(origin.get("snapshot_id")):
-        raise ValueError(
-            "Table has new commits since it was migrated; rolling back would discard them"
-        )
     location = row.iceberg.location
-    io_holder = _IoHolder(system_catalog(db, owner_workspace_of(row))._io({}, location))
-    row.format = "parquet"
-    row.s3_path_pattern = origin["s3_path_pattern"]
-    db.delete(row.iceberg)
-    db.commit()
-    db.refresh(row)
-    removed = _delete_files(
-        io_holder, [uri for uri, _modified in _list_files(f"{location.rstrip('/')}/metadata")]
+    metadata_location = row.iceberg.metadata_location
+    untouched = bool(
+        origin
+        and origin.get("s3_path_pattern")
+        and str(row.iceberg.current_snapshot_id) == str(origin.get("snapshot_id"))
     )
+
+    if not untouched and not materialize:
+        raise ValueError(
+            "Table has new commits since migration (or is native Iceberg); "
+            "rolling back would discard data. Pass materialize=True to export the dataset to Parquet."
+        )
+
+    mode = "zero_copy" if untouched else "materialized"
+    target_pattern = (
+        origin.get("s3_path_pattern")
+        if untouched
+        else f"{location.rstrip('/')}/parquet_export/*.parquet"
+    )
+
+    if dry_run:
+        return {
+            "table": row.slug,
+            "status": "planned",
+            "type": mode,
+            "target_format": "parquet",
+            "s3_path_pattern": target_pattern,
+        }
+
+    catalog = system_catalog(db, owner_workspace_of(row))
+    io_holder = _IoHolder(catalog._io({}, location))
+
+    meta_dir = f"{location.rstrip('/')}/metadata"
+
+    if untouched:
+        row.format = "parquet"
+        row.s3_path_pattern = origin["s3_path_pattern"]
+        db.delete(row.iceberg)
+        db.commit()
+        db.refresh(row)
+        removed = _delete_files(io_holder, [uri for uri, _modified in _list_files(meta_dir)])
+        if location.startswith("file://"):
+            local_meta = _local_path(meta_dir)
+            if os.path.exists(local_meta):
+                shutil.rmtree(local_meta, ignore_errors=True)
+        return {
+            "table": row.slug,
+            "status": "rolled_back",
+            "type": "zero_copy",
+            "s3_path_pattern": row.s3_path_pattern,
+            "metadata_files_removed": removed,
+        }
+    else:
+        # Materialize snapshot to Parquet via DuckDB
+        if warehouse_root().startswith("file://"):
+            import duckdb
+
+            con = duckdb.connect()
+        else:
+            import ai_service
+
+            con = ai_service.create_duckdb_connection(load_vss=False, register_ai=False)
+        export_dir = f"{location.rstrip('/')}/export"
+        export_file = f"{export_dir}/data.parquet"
+        local_file = _local_path(export_file)
+        if location.startswith("file://"):
+            os.makedirs(os.path.dirname(local_file), exist_ok=True)
+        try:
+            ensure_iceberg_loaded(con)
+            iceberg_scan = table_read_scan(
+                None, table_format="iceberg", metadata_location=_local_path(metadata_location)
+            )
+            con.execute(f"COPY (SELECT * FROM {iceberg_scan}) TO '{local_file}' (FORMAT PARQUET)")
+        finally:
+            con.close()
+
+        row.format = "parquet"
+        row.s3_path_pattern = f"{export_dir}/**/*.parquet"
+        db.delete(row.iceberg)
+        db.commit()
+        db.refresh(row)
+        removed = _delete_files(io_holder, [uri for uri, _modified in _list_files(meta_dir)])
+        if location.startswith("file://"):
+            local_meta = _local_path(meta_dir)
+            if os.path.exists(local_meta):
+                shutil.rmtree(local_meta, ignore_errors=True)
+        return {
+            "table": row.slug,
+            "status": "converted",
+            "type": "materialized",
+            "s3_path_pattern": row.s3_path_pattern,
+            "metadata_files_removed": removed,
+        }
+
+
+def rollback_catalog(
+    db: Session,
+    catalog: Catalog,
+    *,
+    table: str | None = None,
+    dry_run: bool = False,
+    materialize: bool = False,
+) -> dict[str, Any]:
+    """Roll back / convert Iceberg tables of a catalog to Parquet."""
+    rows: list[CatalogTable] = []
+    wanted = (table or "").strip().lower()
+    for schema in catalog.schemas:
+        for row in schema.tables:
+            if wanted and wanted not in (
+                row.slug.lower(),
+                row.name.lower(),
+                str(row.id),
+                f"{schema.slug}.{row.slug}".lower(),
+            ):
+                continue
+            if row.format == "iceberg":
+                rows.append(row)
+    if wanted and not rows:
+        raise ValueError(f"Iceberg table '{table}' was not found in catalog '{catalog.slug}'")
+
+    results = []
+    for row in rows:
+        try:
+            outcome = rollback_migration(db, row, dry_run=dry_run, materialize=materialize)
+            outcome["schema"] = row.schema.slug
+            results.append(outcome)
+        except Exception as exc:
+            results.append(
+                {
+                    "table": row.slug,
+                    "schema": row.schema.slug,
+                    "status": "failed",
+                    "error": str(exc),
+                }
+            )
+    summary: dict[str, int] = {}
+    for outcome in results:
+        summary[outcome["status"]] = summary.get(outcome["status"], 0) + 1
     return {
-        "table": row.slug,
-        "status": "rolled_back",
-        "s3_path_pattern": row.s3_path_pattern,
-        "metadata_files_removed": removed,
+        "catalog": catalog.slug,
+        "catalog_id": str(catalog.id),
+        "dry_run": dry_run,
+        "materialize": materialize,
+        "summary": summary,
+        "tables": results,
     }
 
 

@@ -255,3 +255,215 @@ def test_zero_copy_migration_empty_table(env):
     assert ice_table.scan().to_arrow().num_rows == 0
     assert "item_id" in ice_table.schema().column_names
     db.close()
+
+
+def test_rollback_migration_zero_copy(env):
+    """Untouched Iceberg tables rollback zero-copy to plain Parquet format."""
+    db = env["Session"]()
+    ws = db.merge(env["ws"])
+    cat = db.merge(env["cat"])
+    schema_row = cat.schemas[0]
+
+    table_dir = (
+        env["root"] / "workspaces" / ws.slug / cat.slug / schema_row.slug / "rollback_test_tbl"
+    )
+    data = pa.table({"id": pa.array([10, 20], pa.int64()), "val": ["a", "b"]})
+    _write_parquet(table_dir / "data.parquet", data)
+
+    original_pattern = f"file://{table_dir}/data.parquet"
+    tbl = CatalogTable(
+        schema_id=schema_row.id,
+        name="Rollback Test Table",
+        slug="rollback_test_tbl",
+        format="parquet",
+        s3_path_pattern=original_pattern,
+        column_defs=[{"name": "id", "type": "BIGINT"}, {"name": "val", "type": "VARCHAR"}],
+    )
+    db.add(tbl)
+    db.commit()
+
+    tbl_id = str(tbl.id)
+    cat_id = str(cat.id)
+    sch_id = str(schema_row.id)
+    token = env["token"](env["writer"])
+    headers = {"Authorization": f"Bearer {token}", "X-Workspace-Slug": "dev"}
+
+    # 1. Migrate to Iceberg
+    resp_mig = client.post(
+        f"/api/catalogs/{cat_id}/schemas/{sch_id}/tables/{tbl_id}/migrate-to-iceberg",
+        headers=headers,
+        json={"dry_run": False},
+    )
+    assert resp_mig.status_code == 200
+    db.refresh(tbl)
+    assert tbl.format == "iceberg"
+
+    # 2. Dry run rollback
+    resp_dry = client.post(
+        f"/api/catalogs/{cat_id}/schemas/{sch_id}/tables/{tbl_id}/migrate-to-parquet",
+        headers=headers,
+        json={"dry_run": True},
+    )
+    assert resp_dry.status_code == 200
+    dry_data = resp_dry.json()
+    assert dry_data["status"] == "planned"
+    assert dry_data["type"] == "zero_copy"
+    assert dry_data["target_format"] == "parquet"
+
+    # 3. Real zero-copy rollback
+    resp_rb = client.post(
+        f"/api/catalogs/{cat_id}/schemas/{sch_id}/tables/{tbl_id}/migrate-to-parquet",
+        headers=headers,
+        json={"dry_run": False},
+    )
+    assert resp_rb.status_code == 200
+    rb_data = resp_rb.json()
+    assert rb_data["status"] == "rolled_back"
+    assert rb_data["type"] == "zero_copy"
+
+    db.refresh(tbl)
+    assert tbl.format == "parquet"
+    assert tbl.iceberg is None
+    assert tbl.s3_path_pattern == original_pattern
+
+    # Verify metadata folder is purged and underlying Parquet file exists
+    assert not (table_dir / "metadata").exists()
+    assert (table_dir / "data.parquet").exists()
+
+    # DuckDB query on restored Parquet table
+    scan = table_scan.table_scan_for(tbl)
+    assert not scan.startswith("iceberg_scan")
+    con = duckdb.connect()
+    res = con.execute(f"SELECT count(*) FROM {scan}").fetchone()[0]
+    assert res == 2
+    db.close()
+
+
+def test_rollback_migration_mutated_requires_materialize(env):
+    """Mutated Iceberg tables require materialize=True to export back to Parquet."""
+    db = env["Session"]()
+    ws = db.merge(env["ws"])
+    cat = db.merge(env["cat"])
+    schema_row = cat.schemas[0]
+
+    table_dir = (
+        env["root"] / "workspaces" / ws.slug / cat.slug / schema_row.slug / "mutated_rollback_tbl"
+    )
+    data = pa.table({"id": pa.array([1], pa.int64()), "val": ["initial"]})
+    _write_parquet(table_dir / "data.parquet", data)
+
+    tbl = CatalogTable(
+        schema_id=schema_row.id,
+        name="Mutated Rollback Table",
+        slug="mutated_rollback_tbl",
+        format="parquet",
+        s3_path_pattern=f"file://{table_dir}/data.parquet",
+        column_defs=[{"name": "id", "type": "BIGINT"}, {"name": "val", "type": "VARCHAR"}],
+    )
+    db.add(tbl)
+    db.commit()
+
+    tbl_id = str(tbl.id)
+    cat_id = str(cat.id)
+    sch_id = str(schema_row.id)
+    token = env["token"](env["writer"])
+    headers = {"Authorization": f"Bearer {token}", "X-Workspace-Slug": "dev"}
+
+    # Migrate to Iceberg
+    resp_mig = client.post(
+        f"/api/catalogs/{cat_id}/schemas/{sch_id}/tables/{tbl_id}/migrate-to-iceberg",
+        headers=headers,
+        json={"dry_run": False},
+    )
+    assert resp_mig.status_code == 200
+
+    # Mutate table with an additional append commit
+    rest = env["rest"](env["writer"])
+    ice_table = rest.load_table(("main_lake", "bronze", "mutated_rollback_tbl"))
+    new_data = pa.table({"id": pa.array([2], pa.int64()), "val": ["appended"]})
+    ice_table.append(new_data)
+    db.refresh(tbl)
+
+    # Rollback without materialize fails / is rejected
+    resp_fail = client.post(
+        f"/api/catalogs/{cat_id}/schemas/{sch_id}/tables/{tbl_id}/migrate-to-parquet",
+        headers=headers,
+        json={"dry_run": False, "materialize": False},
+    )
+    assert resp_fail.status_code == 400 or resp_fail.json().get("ok") is False
+
+    # Rollback with materialize=True succeeds and exports all rows to Parquet
+    resp_mat = client.post(
+        f"/api/catalogs/{cat_id}/schemas/{sch_id}/tables/{tbl_id}/migrate-to-parquet",
+        headers=headers,
+        json={"dry_run": False, "materialize": True},
+    )
+    assert resp_mat.status_code == 200
+    mat_data = resp_mat.json()
+    assert mat_data["status"] == "converted"
+    assert mat_data["type"] == "materialized"
+
+    db.refresh(tbl)
+    assert tbl.format == "parquet"
+    assert tbl.iceberg is None
+
+    scan = table_scan.table_scan_for(tbl)
+    con = duckdb.connect()
+    res = con.execute(f"SELECT count(*) FROM {scan}").fetchone()[0]
+    assert res == 2
+    db.close()
+
+
+def test_rollback_catalog_all(env):
+    """Batch rollback converts an entire catalog's Iceberg tables back to Parquet."""
+    db = env["Session"]()
+    ws = db.merge(env["ws"])
+    cat = db.merge(env["cat"])
+    schema_row = cat.schemas[0]
+
+    table_dir = env["root"] / "workspaces" / ws.slug / cat.slug / schema_row.slug / "cat_rb_tbl"
+    data = pa.table({"id": pa.array([1, 2], pa.int64())})
+    _write_parquet(table_dir / "data.parquet", data)
+
+    tbl = CatalogTable(
+        schema_id=schema_row.id,
+        name="Cat RB Table",
+        slug="cat_rb_tbl",
+        format="parquet",
+        s3_path_pattern=f"file://{table_dir}/data.parquet",
+        column_defs=[{"name": "id", "type": "BIGINT"}],
+    )
+    db.add(tbl)
+    db.commit()
+
+    tbl_id = str(tbl.id)
+    cat_id = str(cat.id)
+    sch_id = str(schema_row.id)
+    token = env["token"](env["writer"])
+    headers = {"Authorization": f"Bearer {token}", "X-Workspace-Slug": "dev"}
+
+    # Migrate to Iceberg
+    resp_mig = client.post(
+        f"/api/catalogs/{cat_id}/schemas/{sch_id}/tables/{tbl_id}/migrate-to-iceberg",
+        headers=headers,
+        json={"dry_run": False},
+    )
+    assert resp_mig.status_code == 200
+    db.refresh(tbl)
+    assert tbl.format == "iceberg"
+
+    # Batch rollback catalog
+    resp_batch = client.post(
+        f"/api/catalogs/{cat_id}/migrate-to-parquet",
+        headers=headers,
+        json={"dry_run": False},
+    )
+    assert resp_batch.status_code == 200
+    batch_data = resp_batch.json()
+    assert batch_data["ok"] is True
+    assert batch_data["summary"]["rolled_back"] >= 1
+
+    db.refresh(tbl)
+    assert tbl.format == "parquet"
+    assert tbl.iceberg is None
+    db.close()

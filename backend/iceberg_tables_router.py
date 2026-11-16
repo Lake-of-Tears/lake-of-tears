@@ -74,6 +74,12 @@ class MigrateRequest(BaseModel):
     verify: bool = True
 
 
+class RollbackRequest(BaseModel):
+    table: str | None = None
+    dry_run: bool = False
+    materialize: bool = False
+
+
 def _uuid(value: str) -> uuid.UUID | None:
     try:
         return uuid.UUID(str(value))
@@ -401,9 +407,7 @@ def migrate_catalog(
     writing anything; `verify` checks row counts and columns before each table is switched.
     """
     req = req or MigrateRequest()
-    catalog = _resolve_catalog(
-        db, user, ws_ctx, catalog_id, require="write" if req.dry_run else "owner"
-    )
+    catalog = _resolve_catalog(db, user, ws_ctx, catalog_id, require="write")
     result = _run(
         iceberg_migration.migrate_catalog,
         db,
@@ -442,17 +446,52 @@ def migrate_table(
     return {"ok": result["status"] in ("migrated", "planned"), **result}
 
 
-@router.post(_TABLE + "/iceberg/rollback-migration")
-def rollback_migration(
+@router.post("/catalogs/{catalog_id}/migrate-to-parquet")
+@router.post("/catalogs/{catalog_id}/rollback-to-parquet")
+def rollback_catalog(
     catalog_id: str,
-    schema_id: str,
-    table_id: str,
+    req: RollbackRequest | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
     ws_ctx: tuple[Workspace, str] | None = Depends(get_catalog_workspace_and_role),
 ):
+    """Roll back or convert an entire catalog's Iceberg tables to Parquet."""
+    req = req or RollbackRequest()
+    catalog = _resolve_catalog(db, user, ws_ctx, catalog_id, require="write")
+    result = _run(
+        iceberg_migration.rollback_catalog,
+        db,
+        catalog,
+        table=req.table,
+        dry_run=req.dry_run,
+        materialize=req.materialize,
+    )
+    return {"ok": "failed" not in result.get("summary", {}), **result}
+
+
+@router.post(_TABLE + "/migrate-to-parquet")
+@router.post(_TABLE + "/rollback-to-parquet")
+@router.post(_TABLE + "/iceberg/rollback-migration")
+def rollback_table(
+    catalog_id: str,
+    schema_id: str,
+    table_id: str,
+    req: RollbackRequest | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    ws_ctx: tuple[Workspace, str] | None = Depends(get_catalog_workspace_and_role),
+):
+    """Undo a zero-copy migration (or convert a mutated Iceberg table to Parquet via materialize)."""
+    req = req or RollbackRequest()
     table = _resolve_table(db, user, ws_ctx, catalog_id, schema_id, table_id, require="write")
-    return {"ok": True, **_run(iceberg_migration.rollback_migration, db, table)}
+    result = _run(
+        iceberg_migration.rollback_migration,
+        db,
+        table,
+        dry_run=req.dry_run,
+        materialize=req.materialize,
+    )
+    return {"ok": result.get("status") in ("rolled_back", "converted", "planned"), **result}
 
 
 # ── Internal endpoints for the nightly maintenance DAG ────────────────────────
