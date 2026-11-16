@@ -690,10 +690,41 @@ def get_upload_url(
     return url
 
 
+def compute_storage_format(
+    iceberg_count: int = 0,
+    parquet_count: int = 0,
+    has_iceberg_metadata: bool = False,
+) -> tuple[str, str, str]:
+    """Compute primary format title, descriptor, and styling class based on catalog and S3 signals."""
+    if iceberg_count > 0 and parquet_count == 0:
+        return (
+            "Apache Iceberg",
+            f"{iceberg_count} Table{'s' if iceberg_count != 1 else ''} · v2 REST",
+            "text-cyan-400",
+        )
+    elif iceberg_count > 0 and parquet_count > 0:
+        return (
+            "Hybrid Lakehouse",
+            f"{iceberg_count} Iceberg · {parquet_count} Parquet",
+            "text-cyan-400",
+        )
+    elif parquet_count > 0:
+        return (
+            "Apache Parquet",
+            f"{parquet_count} Table{'s' if parquet_count != 1 else ''} · Hive Partitioned",
+            "text-emerald-400",
+        )
+    elif has_iceberg_metadata:
+        return "Apache Iceberg", "v2 Table Metadata Detected", "text-cyan-400"
+    return "Apache Parquet", "Hive Partitioned", "text-emerald-400"
+
+
 def get_bucket_summary(
     bucket: str = MINIO_BUCKET,
     s3_client: Any | None = None,
     workspace_slug: str | None = None,
+    db: Any | None = None,
+    workspace_id: Any | None = None,
 ) -> dict[str, Any]:
     """Compute bucket stats and top-level prefix breakdown, strictly scoped to workspace if provided."""
     try:
@@ -702,6 +733,7 @@ def get_bucket_summary(
         total_objects = total_size = 0
         prefix_stats: dict[str, dict] = {}
         source_last_modified: dict[str, datetime | None] = {s: None for s in SOURCES}
+        has_iceberg_metadata = False
 
         clean_slug = (workspace_slug or "").strip("/")
         ws_root = f"workspaces/{clean_slug}/" if clean_slug else ""
@@ -717,6 +749,13 @@ def get_bucket_summary(
                     continue
                 size: int = obj["Size"]
                 last_mod: datetime = obj["LastModified"]
+
+                if "/metadata/" in key and (
+                    key.endswith(".metadata.json")
+                    or ".avro" in key
+                    or key.endswith("version-hint.text")
+                ):
+                    has_iceberg_metadata = True
 
                 total_objects += 1
                 total_size += size
@@ -763,6 +802,32 @@ def get_bucket_summary(
         raw = prefix_stats.get("raw", {"objects": 0, "size": 0})
         embeddings = prefix_stats.get("embeddings", {"objects": 0, "size": 0})
 
+        # Calculate table format breakdown from CatalogTable if db session is provided
+        iceberg_count = 0
+        parquet_count = 0
+        if db is not None:
+            try:
+                from models import Catalog, CatalogSchema, CatalogTable
+
+                query = (
+                    db.query(CatalogTable.format)
+                    .join(CatalogSchema, CatalogTable.schema_id == CatalogSchema.id)
+                    .join(Catalog, CatalogSchema.catalog_id == Catalog.id)
+                )
+                if workspace_id is not None:
+                    query = query.filter(Catalog.owner_workspace_id == workspace_id)
+                formats = [r[0] or "parquet" for r in query.all()]
+                iceberg_count = sum(1 for f in formats if (f or "").lower() == "iceberg")
+                parquet_count = sum(1 for f in formats if (f or "").lower() != "iceberg")
+            except Exception:
+                pass
+
+        format_name, format_desc, format_class = compute_storage_format(
+            iceberg_count=iceberg_count,
+            parquet_count=parquet_count,
+            has_iceberg_metadata=has_iceberg_metadata,
+        )
+
         return {
             "ok": True,
             "bucket": bucket,
@@ -773,6 +838,11 @@ def get_bucket_summary(
             "raw_size": _human_size(raw["size"]),
             "embeddings_objects": embeddings["objects"],
             "embeddings_size": _human_size(embeddings["size"]),
+            "format_name": format_name,
+            "format_desc": format_desc,
+            "format_class": format_class,
+            "iceberg_tables_count": iceberg_count,
+            "parquet_tables_count": parquet_count,
             "prefix_stats": {
                 k: {
                     "objects": v["objects"],

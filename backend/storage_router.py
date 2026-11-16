@@ -77,10 +77,15 @@ def _storage_write_context(
 @router.get("/stats")
 def get_storage_stats(
     ctx: tuple[Any, str] = Depends(_resolve_storage_context),
+    db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Get aggregated bucket storage metrics and top-level prefix breakdown for active workspace."""
     ws, _ = ctx
-    return storage_service.get_bucket_summary(workspace_slug=getattr(ws, "slug", None))
+    return storage_service.get_bucket_summary(
+        workspace_slug=getattr(ws, "slug", None),
+        db=db,
+        workspace_id=getattr(ws, "id", None),
+    )
 
 
 @router.get("/browse")

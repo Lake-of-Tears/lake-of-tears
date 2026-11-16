@@ -374,13 +374,57 @@ def _source_status(last_modified: datetime | None) -> str:
     return "red"
 
 
-def _get_bucket_stats(workspace_slug: str | None = None) -> dict[str, Any]:
+def _compute_storage_format(
+    catalogs: list[dict[str, Any]] | None = None,
+    has_iceberg_metadata: bool = False,
+) -> tuple[str, str, str, int, int]:
+    """Compute primary format title, descriptor, and styling class based on catalog and S3 signals."""
+    iceberg_count = 0
+    parquet_count = 0
+    for cat in catalogs or []:
+        for sch in cat.get("schemas", []) or []:
+            for tbl in sch.get("tables", []) or []:
+                fmt = (tbl.get("format") or "").strip().lower()
+                if fmt == "iceberg":
+                    iceberg_count += 1
+                else:
+                    parquet_count += 1
+
+    if iceberg_count > 0 and parquet_count == 0:
+        format_name = "Apache Iceberg"
+        format_desc = f"{iceberg_count} Table{'s' if iceberg_count != 1 else ''} · v2 REST"
+        format_class = "text-cyan-400"
+    elif iceberg_count > 0 and parquet_count > 0:
+        format_name = "Hybrid Lakehouse"
+        format_desc = f"{iceberg_count} Iceberg · {parquet_count} Parquet"
+        format_class = "text-cyan-400"
+    elif parquet_count > 0:
+        format_name = "Apache Parquet"
+        format_desc = f"{parquet_count} Table{'s' if parquet_count != 1 else ''} · Hive Partitioned"
+        format_class = "text-emerald-400"
+    elif has_iceberg_metadata:
+        format_name = "Apache Iceberg"
+        format_desc = "v2 Table Metadata Detected"
+        format_class = "text-cyan-400"
+    else:
+        format_name = "Apache Parquet"
+        format_desc = "Hive Partitioned"
+        format_class = "text-emerald-400"
+
+    return format_name, format_desc, format_class, iceberg_count, parquet_count
+
+
+def _get_bucket_stats(
+    workspace_slug: str | None = None,
+    catalogs: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     try:
         s3 = _s3_client()
         paginator = s3.get_paginator("list_objects_v2")
         total_objects = total_size = 0
         prefix_stats: dict[str, dict] = {}
         source_last_modified: dict[str, datetime | None] = {s: None for s in SOURCES}
+        has_iceberg_metadata = False
 
         clean_slug = (workspace_slug or "").strip("/")
         ws_root = f"workspaces/{clean_slug}/" if clean_slug else ""
@@ -396,6 +440,13 @@ def _get_bucket_stats(workspace_slug: str | None = None) -> dict[str, Any]:
                     continue
                 size: int = obj["Size"]
                 last_mod: datetime = obj["LastModified"]
+
+                if "/metadata/" in key and (
+                    key.endswith(".metadata.json")
+                    or ".avro" in key
+                    or key.endswith("version-hint.text")
+                ):
+                    has_iceberg_metadata = True
 
                 total_objects += 1
                 total_size += size
@@ -461,6 +512,11 @@ def _get_bucket_stats(workspace_slug: str | None = None) -> dict[str, Any]:
         raw = prefix_stats.get("raw", {"objects": 0, "size": 0})
         embeddings = prefix_stats.get("embeddings", {"objects": 0, "size": 0})
 
+        fmt_name, fmt_desc, fmt_class, ice_cnt, parq_cnt = _compute_storage_format(
+            catalogs=catalogs,
+            has_iceberg_metadata=has_iceberg_metadata,
+        )
+
         return {
             "ok": True,
             "workspace": clean_slug or None,
@@ -470,6 +526,11 @@ def _get_bucket_stats(workspace_slug: str | None = None) -> dict[str, Any]:
             "raw_size": _human_size(raw["size"]),
             "embeddings_objects": embeddings["objects"],
             "embeddings_size": _human_size(embeddings["size"]),
+            "format_name": fmt_name,
+            "format_desc": fmt_desc,
+            "format_class": fmt_class,
+            "iceberg_tables_count": ice_cnt,
+            "parquet_tables_count": parq_cnt,
             "prefix_stats": {
                 k: {
                     "objects": v["objects"],
@@ -489,7 +550,19 @@ def _get_bucket_stats(workspace_slug: str | None = None) -> dict[str, Any]:
         botocore.exceptions.ConnectionError,
         Exception,
     ) as exc:
-        return {"ok": False, "error": str(exc)}
+        fmt_name, fmt_desc, fmt_class, ice_cnt, parq_cnt = _compute_storage_format(
+            catalogs=catalogs,
+            has_iceberg_metadata=False,
+        )
+        return {
+            "ok": False,
+            "error": str(exc),
+            "format_name": fmt_name,
+            "format_desc": fmt_desc,
+            "format_class": fmt_class,
+            "iceberg_tables_count": ice_cnt,
+            "parquet_tables_count": parq_cnt,
+        }
 
 
 def _get_catalog_data() -> dict[str, Any]:
@@ -1798,7 +1871,8 @@ async def storage(request: Request):
     user = getattr(request.state, "user", None) or {}
     ws = getattr(request.state, "workspace", None) or {}
     slug = ws.get("slug")
-    stats = _get_bucket_stats(workspace_slug=slug)
+    catalogs = _resolve_ui_catalogs(request)
+    stats = _get_bucket_stats(workspace_slug=slug, catalogs=catalogs)
     is_superadmin = user.get("role") in ("superadmin", "admin")
     user_role = (
         user.get("role") if is_superadmin else (ws.get("my_role") or ws.get("role") or "read")
@@ -2648,7 +2722,8 @@ async def ingest(request: Request):
     user = getattr(request.state, "user", None) or {}
     ws = getattr(request.state, "workspace", None) or {}
     slug = ws.get("slug")
-    stats = _get_bucket_stats(workspace_slug=slug)
+    catalogs = _resolve_ui_catalogs(request)
+    stats = _get_bucket_stats(workspace_slug=slug, catalogs=catalogs)
     catalogs = _resolve_ui_catalogs(request)
     feeds_data = _get_workspace_connectors(workspace_slug=slug, stats=stats)
     active_feeds = feeds_data["active_feeds"]
