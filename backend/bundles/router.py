@@ -153,6 +153,7 @@ def deploy_bundle(
 @router.get("", response_model=BundleListResponse)
 @router.get("/", response_model=BundleListResponse)
 def list_bundles(
+    target: str | None = Query(None, description="Only list deployments of this target"),
     status_filter: str | None = Query(None, alias="status"),
     workspace_slug: str | None = Query(None),
     workspace_id: str | None = Query(None),
@@ -172,7 +173,7 @@ def list_bundles(
         require_write=False,
     )
 
-    bundles = BundleStateService.list_bundles(db, ws.id, status=status_filter)
+    bundles = BundleStateService.list_bundles(db, ws.id, target=target, status=status_filter)
     items = []
     for b in bundles:
         res_map = b.resources_map or {}
