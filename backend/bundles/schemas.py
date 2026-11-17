@@ -462,4 +462,9 @@ class BundleDestroyResponse(BaseModel):
     target: str
     status: str = "destroyed"
     purged_resources: dict[str, list[str]] = Field(default_factory=dict)
+    skipped_shared: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="Resources kept because another active record also references them",
+    )
+    dry_run: bool = False
     message: str

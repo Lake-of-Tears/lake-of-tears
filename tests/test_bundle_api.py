@@ -873,6 +873,105 @@ def test_destroy_bundle_preserves_shared_catalog_schemas_and_other_bundle_tables
     assert drift_a["in_sync"] is True
 
 
+def _shared_stale_record(client_admin, test_setup, db_session):
+    """Deploy to `dev`, then add a stale `default` record referencing the same resources."""
+    ws = test_setup["workspace"]
+    live = client_admin.post(
+        f"/api/bundles/deploy?workspace_slug={ws.slug}",
+        json={
+            "manifest_content": SAMPLE_CUSTOMER360_TOON,
+            "manifest_format": "toon",
+            "target": "dev",
+        },
+    ).json()
+    live_row = db_session.query(WorkspaceBundle).filter_by(id=uuid.UUID(live["id"])).first()
+    stale = WorkspaceBundle(
+        workspace_id=ws.id,
+        bundle_name=live_row.bundle_name,
+        target="default",
+        version="1.0.0",
+        status="active",
+        manifest_snapshot=live_row.manifest_snapshot,
+        resources_map=dict(live_row.resources_map),
+    )
+    db_session.add(stale)
+    db_session.commit()
+    return live, stale
+
+
+def test_destroy_stale_record_keeps_resources_shared_with_live_record(
+    client_admin: TestClient,
+    test_setup: dict,
+    db_session: Session,
+    mock_dags_dir: Path,
+):
+    ws = test_setup["workspace"]
+    live, stale = _shared_stale_record(client_admin, test_setup, db_session)
+
+    resp = client_admin.delete(f"/api/bundles/{stale.id}?workspace_slug={ws.slug}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["purged_resources"]["tables"] == []
+    assert data["purged_resources"]["pipelines"] == []
+    assert data["purged_resources"]["dashboards"] == []
+    assert len(data["skipped_shared"]["tables"]) == 2
+    assert len(data["skipped_shared"]["pipelines"]) == 1
+
+    db_session.expire_all()
+    assert db_session.query(WorkspaceBundle).filter_by(id=stale.id).first().status == "destroyed"
+    assert db_session.query(CatalogTable).count() == 2
+    assert len(list((mock_dags_dir / "workspaces" / ws.slug).glob("*.py"))) == 1
+    assert db_session.query(WorkspaceDashboard).filter_by(workspace_id=ws.id).count() == 1
+
+
+def test_destroy_dry_run_changes_nothing_and_flags_shared(
+    client_admin: TestClient, test_setup: dict, db_session: Session
+):
+    ws = test_setup["workspace"]
+    live, stale = _shared_stale_record(client_admin, test_setup, db_session)
+
+    resp = client_admin.delete(f"/api/bundles/{stale.id}?workspace_slug={ws.slug}&dry_run=true")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["dry_run"] is True
+    assert len(data["skipped_shared"]["tables"]) == 2
+
+    db_session.expire_all()
+    assert db_session.query(WorkspaceBundle).filter_by(id=stale.id).first().status == "active"
+
+    # Dry run of the unshared live record would list its own resources... but they are shared
+    # both ways, so nothing is purgeable from either side.
+    assert data["purged_resources"]["tables"] == []
+
+
+def test_destroy_record_only_keeps_all_resources(
+    client_admin: TestClient, test_setup: dict, db_session: Session
+):
+    ws = test_setup["workspace"]
+    resp = client_admin.post(
+        f"/api/bundles/deploy?workspace_slug={ws.slug}",
+        json={
+            "manifest_content": SAMPLE_CUSTOMER360_TOON,
+            "manifest_format": "toon",
+            "target": "dev",
+        },
+    )
+    bundle_id = resp.json()["id"]
+
+    del_resp = client_admin.delete(
+        f"/api/bundles/{bundle_id}?workspace_slug={ws.slug}&record_only=true"
+    )
+    assert del_resp.status_code == 200
+    assert del_resp.json()["purged_resources"]["tables"] == []
+
+    db_session.expire_all()
+    assert (
+        db_session.query(WorkspaceBundle).filter_by(id=uuid.UUID(bundle_id)).first().status
+        == "destroyed"
+    )
+    assert db_session.query(CatalogTable).count() == 2
+
+
 # ── RBAC & Isolation Tests ───────────────────────────────────────────────────
 
 
