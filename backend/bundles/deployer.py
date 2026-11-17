@@ -792,9 +792,9 @@ class BundleDeployer:
         for other in others:
             if new_dags & set((other.resources_map or {}).get("pipelines", [])):
                 return other
-            old_tables = (
-                ((other.manifest_snapshot or {}).get("resources") or {}).get("tables") or []
-            )
+            old_tables = ((other.manifest_snapshot or {}).get("resources") or {}).get(
+                "tables"
+            ) or []
             for t in old_tables:
                 if not isinstance(t, dict):
                     continue

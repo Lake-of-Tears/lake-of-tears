@@ -918,7 +918,9 @@ def test_cross_workspace_isolation(client_admin: TestClient, test_setup: dict):
     assert resp_b.status_code in (403, 404)
 
 
-def test_deploy_same_bundle_to_second_target_is_rejected(client_admin: TestClient, test_setup: dict):
+def test_deploy_same_bundle_to_second_target_is_rejected(
+    client_admin: TestClient, test_setup: dict
+):
     """A second target must not adopt/overwrite the first target's DAG and tables."""
     ws = test_setup["workspace"]
     url = f"/api/bundles/deploy?workspace_slug={ws.slug}"
