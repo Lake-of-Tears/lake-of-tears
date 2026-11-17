@@ -323,3 +323,21 @@ def test_bundles_controller_open_query_deep_link():
     assert "urlParams.get('open')" in js_content or 'urlParams.get("open")' in js_content
     assert "openDrawer" in js_content
     assert "targetBundle" in js_content
+
+
+def test_bundles_template_full_width_container():
+    html = (repo_root / "ui/templates/bundles.html").read_text()
+    container = html.split('id="bundles-container"')[0].rsplit("<div", 1)[1]
+    assert "max-w-7xl" not in container
+    assert "mx-auto" not in container
+    assert "w-full" in container
+
+
+def test_bundles_list_view_toggle_and_persistence():
+    html = (repo_root / "ui/templates/bundles.html").read_text()
+    js = (repo_root / "ui/static/js/controllers/bundles.js").read_text()
+    assert 'id="bundles-view-toggle"' in html
+    assert 'id="bundles-list-view"' in html
+    assert "viewMode === 'list'" in html and "viewMode === 'grid'" in html
+    assert "setViewMode" in js
+    assert "lot.bundles.viewMode" in js
