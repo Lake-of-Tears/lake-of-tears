@@ -1548,43 +1548,23 @@ class BundleDeployer:
         workspace: Workspace,
         bundle_id: uuid.UUID,
         purge_storage: bool = False,
+        dry_run: bool = False,
+        record_only: bool = False,
     ) -> BundleDestroyResponse:
-        """Safely destroy and teardown all resources provisioned by a bundle."""
+        """Safely destroy and teardown the resources provisioned by a bundle.
+
+        Resources also referenced by another active record are skipped and reported under
+        ``skipped_shared``. ``record_only`` removes just the record; ``dry_run`` reports the plan
+        without changing anything.
+        """
         bundle = BundleStateService.get_bundle_by_id(db, bundle_id)
         if not bundle or bundle.workspace_id != workspace.id:
             raise HTTPException(404, "Bundle not found in this workspace")
 
         res_map = bundle.resources_map or {}
-        purged: dict[str, list[str]] = {
-            "pipelines": [],
-            "dashboards": [],
-            "vector_indexes": [],
-            "tables": [],
-            "schemas": [],
-            "catalogs": [],
-            "artifacts": [],
-        }
+        kinds = ("pipelines", "dashboards", "tables", "artifacts")
 
-        # 1. Teardown Pipelines
-        dags_dir = pipeline_service.get_airflow_dags_dir()
-        ws_dags_dir = dags_dir / "workspaces" / workspace.slug
-        for dag_id in res_map.get("pipelines", []):
-            cls._teardown_pipeline(db, workspace, ws_dags_dir, dag_id)
-            purged["pipelines"].append(dag_id)
-
-        # 2. Teardown Dashboards
-        for dash_id_str in res_map.get("dashboards", []):
-            try:
-                d_uuid = uuid.UUID(dash_id_str)
-                db.query(WorkspaceDashboard).filter(
-                    WorkspaceDashboard.id == d_uuid,
-                    WorkspaceDashboard.workspace_id == workspace.id,
-                ).delete()
-                purged["dashboards"].append(dash_id_str)
-            except Exception:
-                pass
-
-        # Collect table IDs still claimed by any other active bundle in this workspace
+        # Resources still claimed by any other active bundle record in this workspace
         other_active_bundles = (
             db.query(WorkspaceBundle)
             .filter(
@@ -1594,54 +1574,101 @@ class BundleDeployer:
             )
             .all()
         )
-        shared_table_ids: set[str] = set()
+        claimed: dict[str, set[str]] = {k: set() for k in kinds}
         for ob in other_active_bundles:
             ob_map = ob.resources_map or {}
-            for tid in ob_map.get("tables", []):
-                shared_table_ids.add(str(tid))
+            for kind in kinds:
+                claimed[kind].update(str(r) for r in ob_map.get(kind, []))
 
-        # 3. Teardown Vector Indexes & Tables (only tables not shared with another active bundle)
-        for tbl_id_str in res_map.get("tables", []):
-            if str(tbl_id_str) in shared_table_ids:
+        purged: dict[str, list[str]] = {
+            "pipelines": [],
+            "dashboards": [],
+            "vector_indexes": [],
+            "tables": [],
+            "schemas": [],
+            "catalogs": [],
+            "artifacts": [],
+        }
+        skipped_shared: dict[str, list[str]] = {k: [] for k in kinds}
+
+        for kind in kinds:
+            if kind == "artifacts" and not purge_storage:
                 continue
-            try:
-                t_uuid = uuid.UUID(tbl_id_str)
-                tbl = db.query(CatalogTable).filter(CatalogTable.id == t_uuid).first()
-                if tbl:
-                    db.delete(tbl)
-                    purged["tables"].append(tbl_id_str)
-            except Exception:
-                pass
+            for res in res_map.get(kind, []):
+                res = str(res)
+                if res in claimed[kind]:
+                    skipped_shared[kind].append(res)
+                elif not record_only:
+                    purged[kind].append(res)
 
-        # 4 & 5. Shared Unity-Catalog style containers (Catalogs and CatalogSchemas) are
-        # never deleted by `bundle destroy`. Multiple bundles deploy into the same catalog
-        # (e.g., TMD-291-dev) and schemas (Bronze, Silver, Gold), so destroying a bundle
-        # must never cascade-delete shared schemas or catalogs (#527).
+        if not dry_run:
+            dags_dir = pipeline_service.get_airflow_dags_dir()
+            ws_dags_dir = dags_dir / "workspaces" / workspace.slug
+            for dag_id in list(purged["pipelines"]):
+                cls._teardown_pipeline(db, workspace, ws_dags_dir, dag_id)
 
-        # 6. Teardown Artifacts
-        if purge_storage:
-            for artifact_key in res_map.get("artifacts", []):
+            for dash_id_str in list(purged["dashboards"]):
+                try:
+                    db.query(WorkspaceDashboard).filter(
+                        WorkspaceDashboard.id == uuid.UUID(dash_id_str),
+                        WorkspaceDashboard.workspace_id == workspace.id,
+                    ).delete()
+                except Exception:
+                    purged["dashboards"].remove(dash_id_str)
+
+            for tbl_id_str in list(purged["tables"]):
+                try:
+                    tbl = (
+                        db.query(CatalogTable)
+                        .filter(CatalogTable.id == uuid.UUID(tbl_id_str))
+                        .first()
+                    )
+                    if tbl:
+                        db.delete(tbl)
+                    else:
+                        purged["tables"].remove(tbl_id_str)
+                except Exception:
+                    purged["tables"].remove(tbl_id_str)
+
+            # Shared Unity-Catalog style containers (Catalogs and CatalogSchemas) are never
+            # deleted by `bundle destroy`: multiple bundles deploy into the same catalog and
+            # schemas (Bronze, Silver, Gold) (#527).
+
+            for artifact_key in list(purged["artifacts"]):
                 try:
                     storage_service.delete_object(
                         bucket=storage_service.MINIO_BUCKET,
                         key=artifact_key,
                         workspace_slug=workspace.slug,
                     )
-                    purged["artifacts"].append(artifact_key)
                 except Exception as exc:
                     logger.warning("Failed to purge artifact %s: %s", artifact_key, exc)
+                    purged["artifacts"].remove(artifact_key)
 
-        # Update bundle state to destroyed
-        BundleStateService.update_bundle_status(db, bundle.id, "destroyed")
-        db.commit()
+            BundleStateService.update_bundle_status(db, bundle.id, "destroyed")
+            db.commit()
+
+        skipped_count = sum(len(v) for v in skipped_shared.values())
+        if dry_run:
+            message = f"Dry run: bundle '{bundle.bundle_name}' ({bundle.target}) not changed."
+        elif record_only:
+            message = (
+                f"Bundle record '{bundle.bundle_name}' ({bundle.target}) removed; resources kept."
+            )
+        else:
+            message = f"Bundle '{bundle.bundle_name}' destroyed."
+        if skipped_count:
+            message += f" {skipped_count} resource(s) shared with another active record were kept."
 
         return BundleDestroyResponse(
             id=bundle.id,
             bundle_name=bundle.bundle_name,
             target=bundle.target,
-            status="destroyed",
+            status=bundle.status if dry_run else "destroyed",
             purged_resources=purged,
-            message=f"Bundle '{bundle.bundle_name}' destroyed. All provisioned resources purged.",
+            skipped_shared={k: v for k, v in skipped_shared.items() if v},
+            dry_run=dry_run,
+            message=message,
         )
 
     @classmethod

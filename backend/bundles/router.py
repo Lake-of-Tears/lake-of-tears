@@ -313,6 +313,10 @@ async def run_bundle_pipeline(
 def destroy_bundle(
     bundle_id: uuid.UUID,
     purge_storage: bool = Query(False, description="Purge uploaded artifact files from storage"),
+    dry_run: bool = Query(
+        False, description="List what would be deleted without changing anything"
+    ),
+    record_only: bool = Query(False, description="Remove only the record and keep all resources"),
     workspace_slug: str | None = Query(None),
     workspace_id: str | None = Query(None),
     x_workspace_slug: str | None = Header(None, alias="X-Workspace-Slug"),
@@ -336,4 +340,6 @@ def destroy_bundle(
         workspace=ws,
         bundle_id=bundle_id,
         purge_storage=purge_storage,
+        dry_run=dry_run,
+        record_only=record_only,
     )
