@@ -972,6 +972,19 @@ def test_destroy_record_only_keeps_all_resources(
     assert db_session.query(CatalogTable).count() == 2
 
 
+def test_list_bundles_filters_by_target(
+    client_admin: TestClient, test_setup: dict, db_session: Session
+):
+    ws = test_setup["workspace"]
+    live, stale = _shared_stale_record(client_admin, test_setup, db_session)
+
+    everything = client_admin.get(f"/api/bundles?workspace_slug={ws.slug}").json()
+    assert {b["target"] for b in everything["bundles"]} == {"dev", "default"}
+
+    dev_only = client_admin.get(f"/api/bundles?workspace_slug={ws.slug}&target=dev").json()
+    assert [b["target"] for b in dev_only["bundles"]] == ["dev"]
+
+
 # ── RBAC & Isolation Tests ───────────────────────────────────────────────────
 
 
