@@ -734,6 +734,14 @@ class BundleDeployer:
         except Exception as exc:
             warnings.append(f"DuckDB SQL parser check skipped: {exc}")
 
+        conflict = cls.find_target_conflict(db, workspace, bundle_spec, target)
+        if conflict:
+            errors.append(
+                f"Bundle '{bundle_name}' is already deployed to target '{conflict.target}' "
+                f"(v{conflict.version}) and owns the same pipelines/tables; deploying target "
+                f"'{target}' would overwrite it."
+            )
+
         # 4. Calculate dry-run reconciliation diff against current DB state
         diff = cls.calculate_diff(db, workspace, bundle_spec, target)
 
@@ -749,6 +757,54 @@ class BundleDeployer:
             diff=diff,
             resolved_bundle=resolved_dict if is_valid else None,
         )
+
+    @classmethod
+    def find_target_conflict(
+        cls,
+        db: Session,
+        workspace: Workspace,
+        bundle_spec: BundleSpec,
+        target_name: str,
+    ) -> WorkspaceBundle | None:
+        """Return another active target of this bundle that owns a DAG or table the spec would adopt.
+
+        DAG names, task storage paths and catalog tables are keyed by bundle name only, so a second
+        target would silently overwrite the first target's resources.
+        """
+        bundle_name = bundle_spec.bundle.name
+        new_dags = {
+            f"ws_{slugify(workspace.slug)}_{slugify(bundle_name)}_{slugify(p.name)}"
+            for p in bundle_spec.resources.pipelines
+        }
+        new_tables = {
+            (t.schema_name or "", t.name.strip().lower()) for t in bundle_spec.resources.tables
+        }
+        others = (
+            db.query(WorkspaceBundle)
+            .filter(
+                WorkspaceBundle.workspace_id == workspace.id,
+                WorkspaceBundle.bundle_name == bundle_name,
+                WorkspaceBundle.target != target_name,
+                WorkspaceBundle.status == "active",
+            )
+            .all()
+        )
+        for other in others:
+            if new_dags & set((other.resources_map or {}).get("pipelines", [])):
+                return other
+            old_tables = (
+                ((other.manifest_snapshot or {}).get("resources") or {}).get("tables") or []
+            )
+            for t in old_tables:
+                if not isinstance(t, dict):
+                    continue
+                key = (
+                    t.get("schema_name") or t.get("schema") or "",
+                    str(t.get("name", "")).strip().lower(),
+                )
+                if key in new_tables:
+                    return other
+        return None
 
     @classmethod
     def calculate_diff(
@@ -955,6 +1011,16 @@ class BundleDeployer:
         )
 
         bundle_name = bundle_spec.bundle.name
+
+        conflict = cls.find_target_conflict(db, workspace, bundle_spec, target)
+        if conflict:
+            raise HTTPException(
+                409,
+                f"Bundle '{bundle_name}' is already deployed to target '{conflict.target}' "
+                f"(v{conflict.version}) and owns the same pipelines/tables. Deploying target "
+                f"'{target}' would overwrite it. Destroy the '{conflict.target}' deployment first "
+                f"or redeploy with the same target.",
+            )
 
         # Initial state registration
         bundle_record = BundleStateService.register_or_update_bundle(
