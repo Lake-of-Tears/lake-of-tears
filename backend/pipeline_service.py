@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import hashlib
 import json
 import logging
@@ -345,8 +346,17 @@ async def list_workspace_dags(
             meta_map = get_pipeline_metadata_map(workspace_id, db) if workspace_id and db else {}
             bundle_map = get_bundle_pipeline_map(workspace_id, db) if workspace_id and db else {}
 
+            # Latest-run lookups are independent Airflow calls: run them concurrently
+            # instead of one round-trip per DAG.
+            latest_runs = await asyncio.gather(
+                *(
+                    _fetch_latest_dag_run(client, api_base, auth, d.get("dag_id", ""))
+                    for d in matching_dags
+                )
+            )
+
             results = []
-            for dag in matching_dags:
+            for dag, last_run in zip(matching_dags, latest_runs, strict=True):
                 dag_id = dag.get("dag_id", "")
                 tags_raw = dag.get("tags", [])
                 tags = [t.get("name", t) if isinstance(t, dict) else str(t) for t in tags_raw]
@@ -359,8 +369,6 @@ async def list_workspace_dags(
 
                 # Prioritize cron expression for machine scheduling & projection; fallback to timetable_description
                 schedule = cron_val or dag.get("timetable_description") or "None (Manual)"
-
-                last_run = await _fetch_latest_dag_run(client, api_base, auth, dag_id)
 
                 nb_path = None
                 for t in tags:

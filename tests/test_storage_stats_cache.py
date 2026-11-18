@@ -142,7 +142,7 @@ def test_storage_page_render_does_not_scan_bucket():
     workspaces = [{"id": "ws-1", "name": "Analytics", "slug": "analytics", "my_role": "member"}]
     with (
         patch.object(main, "_fetch_workspaces", return_value=workspaces),
-        patch.object(main, "_get_bucket_stats") as scan,
+        patch.object(main, "_fetch_bucket_stats") as scan,
         patch.object(main, "_s3_client") as s3,
     ):
         resp = ui_client.get(

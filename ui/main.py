@@ -6,12 +6,10 @@ import os
 import re
 import time
 import urllib.parse
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import boto3
-import botocore.exceptions
 import duckdb
 import httpx
 import jwt
@@ -103,35 +101,6 @@ MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "datalake")
 SUPERSET_URL = os.getenv("SUPERSET_URL", "http://localhost:8088")
 JUPYTER_TOKEN = os.getenv("JUPYTER_TOKEN", "")
-
-SOURCES = [
-    "postgres",
-    "mysql",
-    "snowflake",
-    "kafka",
-    "s3",
-    "stripe",
-    "shopify",
-    "hubspot",
-    "salesforce",
-    "google_analytics",
-    "github",
-    "webhook",
-]
-SOURCE_LABELS = {
-    "postgres": "PostgreSQL",
-    "mysql": "MySQL",
-    "snowflake": "Snowflake",
-    "kafka": "Apache Kafka",
-    "s3": "Amazon S3 / Storage",
-    "stripe": "Stripe",
-    "shopify": "Shopify",
-    "hubspot": "HubSpot",
-    "salesforce": "Salesforce",
-    "google_analytics": "Google Analytics 4",
-    "github": "GitHub",
-    "webhook": "REST Webhook",
-}
 
 app = FastAPI(title="Lake of Tears")
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
@@ -363,206 +332,19 @@ def _human_size(num_bytes: int) -> str:
     return f"{num_bytes / (1024**exp):.1f} {units[exp]}"
 
 
-def _source_status(last_modified: datetime | None) -> str:
-    if last_modified is None:
-        return "red"
-    age = datetime.now(UTC) - last_modified
-    if age <= timedelta(hours=25):
-        return "green"
-    if age <= timedelta(hours=48):
-        return "yellow"
-    return "red"
-
-
-def _compute_storage_format(
-    catalogs: list[dict[str, Any]] | None = None,
-    has_iceberg_metadata: bool = False,
-) -> tuple[str, str, str, int, int]:
-    """Compute primary format title, descriptor, and styling class based on catalog and S3 signals."""
-    iceberg_count = 0
-    parquet_count = 0
-    for cat in catalogs or []:
-        for sch in cat.get("schemas", []) or []:
-            for tbl in sch.get("tables", []) or []:
-                fmt = (tbl.get("format") or "").strip().lower()
-                if fmt == "iceberg":
-                    iceberg_count += 1
-                else:
-                    parquet_count += 1
-
-    if iceberg_count > 0 and parquet_count == 0:
-        format_name = "Apache Iceberg"
-        format_desc = f"{iceberg_count} Table{'s' if iceberg_count != 1 else ''} · v2 REST"
-        format_class = "text-cyan-400"
-    elif iceberg_count > 0 and parquet_count > 0:
-        format_name = "Hybrid Lakehouse"
-        format_desc = f"{iceberg_count} Iceberg · {parquet_count} Parquet"
-        format_class = "text-cyan-400"
-    elif parquet_count > 0:
-        format_name = "Apache Parquet"
-        format_desc = f"{parquet_count} Table{'s' if parquet_count != 1 else ''} · Hive Partitioned"
-        format_class = "text-emerald-400"
-    elif has_iceberg_metadata:
-        format_name = "Apache Iceberg"
-        format_desc = "v2 Table Metadata Detected"
-        format_class = "text-cyan-400"
-    else:
-        format_name = "Apache Parquet"
-        format_desc = "Hive Partitioned"
-        format_class = "text-emerald-400"
-
-    return format_name, format_desc, format_class, iceberg_count, parquet_count
-
-
-def _get_bucket_stats(
-    workspace_slug: str | None = None,
-    catalogs: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    try:
-        s3 = _s3_client()
-        paginator = s3.get_paginator("list_objects_v2")
-        total_objects = total_size = 0
-        prefix_stats: dict[str, dict] = {}
-        source_last_modified: dict[str, datetime | None] = {s: None for s in SOURCES}
-        has_iceberg_metadata = False
-
-        clean_slug = (workspace_slug or "").strip("/")
-        ws_root = f"workspaces/{clean_slug}/" if clean_slug else ""
-
-        paginate_kwargs: dict[str, Any] = {"Bucket": MINIO_BUCKET}
-        if ws_root:
-            paginate_kwargs["Prefix"] = ws_root
-
-        for page in paginator.paginate(**paginate_kwargs):
-            for obj in page.get("Contents", []):
-                key: str = obj["Key"]
-                if key == ws_root or key.endswith("/"):
-                    continue
-                size: int = obj["Size"]
-                last_mod: datetime = obj["LastModified"]
-
-                if "/metadata/" in key and (
-                    key.endswith(".metadata.json")
-                    or ".avro" in key
-                    or key.endswith("version-hint.text")
-                ):
-                    has_iceberg_metadata = True
-
-                total_objects += 1
-                total_size += size
-
-                rel_key = key[len(ws_root) :] if (ws_root and key.startswith(ws_root)) else key
-                top = rel_key.split("/")[0] if "/" in rel_key else "root"
-                if top not in prefix_stats:
-                    prefix_stats[top] = {"objects": 0, "size": 0, "last_modified": None}
-                prefix_stats[top]["objects"] += 1
-                prefix_stats[top]["size"] += size
-                if (
-                    prefix_stats[top]["last_modified"] is None
-                    or last_mod > prefix_stats[top]["last_modified"]
-                ):
-                    prefix_stats[top]["last_modified"] = last_mod
-
-                for src in SOURCES:
-                    if (
-                        rel_key.startswith(f"raw/{src}/")
-                        or rel_key.startswith(f"{src}/")
-                        or f"/raw/{src}/" in rel_key
-                        or f"/{src}/" in rel_key
-                    ):
-                        if (
-                            source_last_modified[src] is None
-                            or last_mod > source_last_modified[src]
-                        ):
-                            source_last_modified[src] = last_mod
-
-                # Also detect any dynamic or existing source folders under raw/
-                if rel_key.startswith("raw/"):
-                    parts = rel_key.split("/")
-                    if len(parts) > 1 and parts[1]:
-                        detected_src = parts[1]
-                        if detected_src not in source_last_modified:
-                            source_last_modified[detected_src] = last_mod
-                        elif (
-                            source_last_modified[detected_src] is None
-                            or last_mod > source_last_modified[detected_src]
-                        ):
-                            source_last_modified[detected_src] = last_mod
-
-        # Collect all sources (configured SOURCES plus dynamically detected sources with data)
-        all_source_keys = list(SOURCES)
-        for src in source_last_modified:
-            if src not in all_source_keys:
-                all_source_keys.append(src)
-
-        sources = []
-        for src in all_source_keys:
-            lm = source_last_modified[src]
-            label = SOURCE_LABELS.get(src, src.replace("_", " ").title())
-            sources.append(
-                {
-                    "key": src,
-                    "label": label,
-                    "last_modified": lm,
-                    "last_modified_str": lm.strftime("%Y-%m-%d %H:%M UTC") if lm else "Never",
-                    "status": _source_status(lm),
-                }
-            )
-
-        raw = prefix_stats.get("raw", {"objects": 0, "size": 0})
-        embeddings = prefix_stats.get("embeddings", {"objects": 0, "size": 0})
-
-        fmt_name, fmt_desc, fmt_class, ice_cnt, parq_cnt = _compute_storage_format(
-            catalogs=catalogs,
-            has_iceberg_metadata=has_iceberg_metadata,
-        )
-
-        return {
-            "ok": True,
-            "workspace": clean_slug or None,
-            "total_objects": total_objects,
-            "total_size": _human_size(total_size),
-            "raw_objects": raw["objects"],
-            "raw_size": _human_size(raw["size"]),
-            "embeddings_objects": embeddings["objects"],
-            "embeddings_size": _human_size(embeddings["size"]),
-            "format_name": fmt_name,
-            "format_desc": fmt_desc,
-            "format_class": fmt_class,
-            "iceberg_tables_count": ice_cnt,
-            "parquet_tables_count": parq_cnt,
-            "prefix_stats": {
-                k: {
-                    "objects": v["objects"],
-                    "size": _human_size(v["size"]),
-                    "last_modified_str": (
-                        v["last_modified"].strftime("%Y-%m-%d %H:%M UTC")
-                        if v["last_modified"]
-                        else "—"
-                    ),
-                }
-                for k, v in prefix_stats.items()
-            },
-            "sources": sources,
-        }
-    except (
-        botocore.exceptions.EndpointConnectionError,
-        botocore.exceptions.ConnectionError,
-        Exception,
-    ) as exc:
-        fmt_name, fmt_desc, fmt_class, ice_cnt, parq_cnt = _compute_storage_format(
-            catalogs=catalogs,
-            has_iceberg_metadata=False,
-        )
-        return {
-            "ok": False,
-            "error": str(exc),
-            "format_name": fmt_name,
-            "format_desc": fmt_desc,
-            "format_class": fmt_class,
-            "iceberg_tables_count": ice_cnt,
-            "parquet_tables_count": parq_cnt,
-        }
+def _fetch_bucket_stats(request: Request, workspace_slug: str | None) -> dict[str, Any]:
+    """Workspace storage stats from the backend's cached summary (never scans S3 here)."""
+    token = _get_request_token(request)
+    ws = getattr(request.state, "workspace", None) or {}
+    data = _backend_get(
+        "/api/v1/storage/stats",
+        token or "",
+        workspace_id=str(ws["id"]) if ws.get("id") else None,
+        workspace_slug=workspace_slug,
+    )
+    if isinstance(data, dict):
+        return data
+    return {"ok": False, "error": "Storage stats unavailable", "sources": []}
 
 
 def _get_catalog_data() -> dict[str, Any]:
@@ -1194,13 +976,11 @@ async def ui_api_auth_refresh(request: Request):
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
-    ws = getattr(request.state, "workspace", None) or {}
-    slug = ws.get("slug")
-    stats = _get_bucket_stats(workspace_slug=slug)
+    # Stats and pipeline health load asynchronously (/api/v1/storage/stats, /api/pipelines).
     return templates.TemplateResponse(
         request=request,
         name="home.html",
-        context={"request": request, "stats": stats, "page": "home"},
+        context={"request": request, "page": "home"},
     )
 
 
@@ -2721,7 +2501,7 @@ async def ingest(request: Request):
     ws = getattr(request.state, "workspace", None) or {}
     slug = ws.get("slug")
     catalogs = _resolve_ui_catalogs(request)
-    stats = _get_bucket_stats(workspace_slug=slug, catalogs=catalogs)
+    stats = _fetch_bucket_stats(request, slug)
     catalogs = _resolve_ui_catalogs(request)
     feeds_data = _get_workspace_connectors(workspace_slug=slug, stats=stats)
     active_feeds = feeds_data["active_feeds"]
@@ -3416,7 +3196,7 @@ async def api_ingest_connectors(request: Request):
         return JSONResponse({"ok": False, "error": "Not authenticated"}, status_code=401)
     ws = getattr(request.state, "workspace", None) or {}
     slug = ws.get("slug")
-    stats = _get_bucket_stats(workspace_slug=slug)
+    stats = _fetch_bucket_stats(request, slug)
     feeds_data = _get_workspace_connectors(workspace_slug=slug, stats=stats)
     return JSONResponse(
         {
@@ -5640,21 +5420,6 @@ async def api_workspace_manifest(request: Request):
             }
         )
 
-    # 5. Storage Sources
-    for src in SOURCES:
-        src_label = SOURCE_LABELS.get(src, src.title())
-        src_desc = f"Lake storage prefix: raw/{src}/"
-        items.append(
-            {
-                "category": "Storage",
-                "title": f"{src_label} Storage",
-                "subtitle": src_desc,
-                "url": "/storage",
-                "type": "storage",
-                "path": f"raw/{src}",
-            }
-        )
-
     # 6. Application Navigation Pages
     nav_pages = [
         {"title": "Dashboard", "subtitle": "System overview & metrics", "url": "/"},
@@ -6154,22 +5919,6 @@ async def api_workspace_search(request: Request, q: str = ""):
                     )
     except Exception as exc:
         logger.warning("Error searching bundles in workspace search: %s", exc)
-
-    # 5. Storage Sources (S3 / MinIO)
-    for src in SOURCES:
-        src_label = SOURCE_LABELS.get(src, src.title())
-        src_desc = f"Lake storage prefix: raw/{src}/"
-        if not query or query in src.lower() or query in src_label.lower():
-            results.append(
-                {
-                    "category": "Storage",
-                    "title": f"{src_label} Storage",
-                    "subtitle": src_desc,
-                    "url": "/storage",
-                    "type": "storage",
-                    "path": f"raw/{src}",
-                }
-            )
 
     # 6. Application Pages
     nav_pages = [
@@ -8458,7 +8207,7 @@ resources:
 
   dashboards:
     {pipeline_name}_overview:
-      title: "{bundle_name.replace('-', ' ').title()} Overview"
+      title: "{bundle_name.replace("-", " ").title()} Overview"
       widgets:
         kpi_count:
           type: metric

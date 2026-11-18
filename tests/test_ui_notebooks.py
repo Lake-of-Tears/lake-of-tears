@@ -823,10 +823,10 @@ def test_workspace_search_empty_query():
         assert resp.status_code == 200
         data = resp.json()
         assert data["count"] > 0
-        # Should include pipelines, storage sources, and nav pages
+        # Should include pipelines and nav pages, but no fixed list of fake storage sources (#571)
         types = {r["type"] for r in data["results"]}
         assert "pipeline" in types
-        assert "storage" in types
+        assert "storage" not in types
         assert "page" in types
 
 

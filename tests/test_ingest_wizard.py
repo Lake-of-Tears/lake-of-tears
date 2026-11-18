@@ -440,7 +440,7 @@ def test_api_connectors_endpoint(test_tokens):
         ],
     }
 
-    with mock.patch("ui.main._get_bucket_stats", return_value=mock_stats):
+    with mock.patch("ui.main._fetch_bucket_stats", return_value=mock_stats):
         resp = client.get(
             "/api/ingest/connectors",
             cookies={"lake_token": test_tokens["admin"]},
@@ -470,7 +470,7 @@ def test_ui_ingest_page_layout_and_navigation(test_tokens):
 
     with (
         mock.patch("ui.main._fetch_workspaces", return_value=mock_ws),
-        mock.patch("ui.main._get_bucket_stats", return_value=mock_stats),
+        mock.patch("ui.main._fetch_bucket_stats", return_value=mock_stats),
         mock.patch("ui.main._resolve_ui_catalogs", return_value=mock_catalogs),
     ):
         resp = client.get(
