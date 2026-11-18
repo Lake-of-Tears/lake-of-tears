@@ -1109,6 +1109,7 @@ class BundleDeployer:
                         )
                     db.flush()
                 else:
+                    cls._reactivate_catalog(db, cat)
                     if cat_res.description:
                         cat.description = cat_res.description
                 catalog_lookup[clean_name.lower()] = cat
@@ -1128,6 +1129,7 @@ class BundleDeployer:
                         .first()
                     )
                     if c:
+                        cls._reactivate_catalog(db, c)
                         catalog_lookup[cat_name.lower()] = c
                         return c
                 # Fallback to default catalog in workspace
@@ -1575,6 +1577,18 @@ class BundleDeployer:
             PipelineMetadata.workspace_id == workspace.id,
             PipelineMetadata.dag_id == dag_id,
         ).delete()
+
+    @staticmethod
+    def _reactivate_catalog(db: Session, catalog: Catalog) -> None:
+        """Bring back a catalog a previous destroy soft-deleted, so redeployed tables are visible."""
+        if catalog.deleted_at is None:
+            return
+        catalog.deleted_at = None
+        catalog.scheduled_purge_at = None
+        db.query(CatalogAccess).filter(
+            CatalogAccess.catalog_id == catalog.id, CatalogAccess.suspended.is_(True)
+        ).update({"suspended": False})
+        db.flush()
 
     @staticmethod
     def _plan_table_and_container_removal(

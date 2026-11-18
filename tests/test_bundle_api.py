@@ -1010,6 +1010,22 @@ def test_destroy_moves_tables_to_trash_and_removes_bundle_created_catalog(
     assert cat.scheduled_purge_at is not None
 
 
+def test_redeploy_after_destroy_reactivates_soft_deleted_catalog(
+    client_admin: TestClient, test_setup: dict, db_session: Session
+):
+    ws = test_setup["workspace"]
+    first = _deploy_sample(client_admin, ws)
+    client_admin.delete(f"/api/bundles/{first['id']}?workspace_slug={ws.slug}")
+    db_session.expire_all()
+    cat = db_session.query(Catalog).filter_by(owner_workspace_id=ws.id, name="main_lake").first()
+    assert cat.deleted_at is not None
+
+    _deploy_sample(client_admin, ws)
+    db_session.expire_all()
+    cat = db_session.query(Catalog).filter_by(owner_workspace_id=ws.id, name="main_lake").first()
+    assert cat.deleted_at is None and cat.scheduled_purge_at is None
+
+
 def test_destroy_keep_catalogs_leaves_containers_but_trashes_tables(
     client_admin: TestClient, test_setup: dict, db_session: Session
 ):
