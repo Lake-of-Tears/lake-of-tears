@@ -76,15 +76,17 @@ def _storage_write_context(
 
 @router.get("/stats")
 def get_storage_stats(
+    refresh: bool = Query(False, description="Bypass the stats cache and recompute"),
     ctx: tuple[Any, str] = Depends(_resolve_storage_context),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Get aggregated bucket storage metrics and top-level prefix breakdown for active workspace."""
     ws, _ = ctx
-    return storage_service.get_bucket_summary(
+    return storage_service.get_bucket_summary_cached(
         workspace_slug=getattr(ws, "slug", None),
         db=db,
         workspace_id=getattr(ws, "id", None),
+        refresh=refresh,
     )
 
 
@@ -203,7 +205,11 @@ def delete_object(
     ws, _ = ctx
     slug = getattr(ws, "slug", "default")
     try:
-        return storage_service.delete_object(key=key, workspace_slug=slug)
+        result = storage_service.delete_object(key=key, workspace_slug=slug)
+        storage_service.invalidate_bucket_summary(
+            workspace_slug=slug, workspace_id=getattr(ws, "id", None)
+        )
+        return result
     except (storage_service.StorageAccessDeniedError, PermissionError) as exc:
         logger.warning("Access denied deleting object '%s' in workspace '%s': %s", key, slug, exc)
         raise HTTPException(status_code=403, detail=str(exc))
@@ -227,12 +233,16 @@ async def upload_file(
     target_key = f"{prefix.strip('/')}/{filename}" if prefix.strip("/") else filename
     try:
         content = await file.read()
-        return storage_service.upload_object(
+        result = storage_service.upload_object(
             key=target_key,
             data=content,
             content_type=file.content_type or "application/octet-stream",
             workspace_slug=slug,
         )
+        storage_service.invalidate_bucket_summary(
+            workspace_slug=slug, workspace_id=getattr(ws, "id", None)
+        )
+        return result
     except (storage_service.StorageAccessDeniedError, PermissionError) as exc:
         logger.warning(
             "Access denied uploading to '%s' in workspace '%s': %s", target_key, slug, exc

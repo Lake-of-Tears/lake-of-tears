@@ -56,31 +56,41 @@
     </div>
   </div>
 
-  <!-- Summary Stats Overview -->
-  {% if stats and stats.ok %}
-  <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-    <div class="stat-card">
-      <span class="text-xs text-gray-400 uppercase tracking-wide">Total Objects</span>
-      <span class="text-2xl font-bold text-gray-100">{{ stats.total_objects }}</span>
-      <span class="text-xs text-gray-500">{{ stats.total_size }} stored</span>
+  <!-- Summary Stats Overview (filled asynchronously from /api/v1/storage/stats) -->
+  <div class="space-y-2">
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4" id="storage-stats-grid">
+      <div class="stat-card">
+        <span class="text-xs text-gray-400 uppercase tracking-wide">Total Objects</span>
+        <span class="text-2xl font-bold text-gray-100 stat-skeleton" id="stat-total-objects">&nbsp;</span>
+        <span class="text-xs text-gray-500" id="stat-total-size">Calculating…</span>
+      </div>
+      <div class="stat-card">
+        <span class="text-xs text-gray-400 uppercase tracking-wide">Raw Ingested Data</span>
+        <span class="text-2xl font-bold text-gray-100 stat-skeleton" id="stat-raw-objects">&nbsp;</span>
+        <span class="text-xs text-gray-500" id="stat-raw-size">Calculating…</span>
+      </div>
+      <div class="stat-card">
+        <span class="text-xs text-gray-400 uppercase tracking-wide">Embeddings</span>
+        <span class="text-2xl font-bold text-gray-100 stat-skeleton" id="stat-embeddings-objects">&nbsp;</span>
+        <span class="text-xs text-gray-500" id="stat-embeddings-size">Calculating…</span>
+      </div>
+      <div class="stat-card">
+        <span class="text-xs text-gray-400 uppercase tracking-wide">Primary Format</span>
+        <span class="text-2xl font-bold text-emerald-400 stat-skeleton" id="storage-primary-format">&nbsp;</span>
+        <span class="text-xs text-gray-500" id="storage-primary-format-desc">Calculating…</span>
+      </div>
     </div>
-    <div class="stat-card">
-      <span class="text-xs text-gray-400 uppercase tracking-wide">Raw Ingested Data</span>
-      <span class="text-2xl font-bold text-gray-100">{{ stats.raw_objects }}</span>
-      <span class="text-xs text-gray-500">{{ stats.raw_size }}</span>
-    </div>
-    <div class="stat-card">
-      <span class="text-xs text-gray-400 uppercase tracking-wide">Embeddings</span>
-      <span class="text-2xl font-bold text-gray-100">{{ stats.embeddings_objects }}</span>
-      <span class="text-xs text-gray-500">{{ stats.embeddings_size }}</span>
-    </div>
-    <div class="stat-card">
-      <span class="text-xs text-gray-400 uppercase tracking-wide">Primary Format</span>
-      <span class="text-2xl font-bold {{ stats.format_class or 'text-emerald-400' }}" id="storage-primary-format">{{ stats.format_name or 'Apache Parquet' }}</span>
-      <span class="text-xs text-gray-500" id="storage-primary-format-desc">{{ stats.format_desc or 'Hive Partitioned' }}</span>
+    <div class="flex items-center justify-end gap-2 text-[11px] text-gray-500">
+      <span id="stats-as-of"></span>
+      <a id="stats-retry" href="#" onclick="loadStorageStats(false); return false;" class="hidden text-blue-400 hover:text-blue-300 underline">Retry</a>
+      <button id="btn-refresh-stats" onclick="loadStorageStats(true)" class="btn-ghost text-[11px] px-1.5 py-0.5 gap-1" title="Recalculate storage totals">
+        <svg id="stats-refresh-icon" class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+        Recalculate
+      </button>
     </div>
   </div>
-  {% endif %}
 
   <!-- Storage File Explorer Card -->
   <div class="card overflow-hidden">
@@ -457,6 +467,10 @@
 </div>
 
 <!-- ── Client-Side Storage Explorer Script ────────────────────────────────── -->
+<style>
+  .stat-skeleton { display: block; min-width: 4rem; border-radius: 0.25rem; background: rgba(148,163,184,0.15); animation: stat-pulse 1.4s ease-in-out infinite; }
+  @keyframes stat-pulse { 50% { opacity: 0.4; } }
+</style>
 <script>
   const BUCKET_NAME = "{{ minio_bucket|default('datalake') }}";
   const CAN_DELETE = {{ 'true' if can_delete else 'false' }};
@@ -476,7 +490,79 @@
     const urlParams = new URLSearchParams(window.location.search);
     const initialPrefix = urlParams.get('prefix') || "";
     loadPrefix(initialPrefix);
+    loadStorageStats(false);
   });
+
+  const STATS_CACHE_KEY = 'lake:storage-stats:' + BUCKET_NAME;
+
+  function relativeTime(iso) {
+    const secs = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+    if (secs < 60) return 'just now';
+    if (secs < 3600) return Math.round(secs / 60) + ' min ago';
+    return Math.round(secs / 3600) + ' h ago';
+  }
+
+  function paintStorageStats(d) {
+    const set = (id, v) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.classList.remove('stat-skeleton');
+      el.textContent = v;
+    };
+    set('stat-total-objects', d.total_objects ?? '—');
+    set('stat-total-size', (d.total_size || '—') + ' stored');
+    set('stat-raw-objects', d.raw_objects ?? '—');
+    set('stat-raw-size', d.raw_size || '—');
+    set('stat-embeddings-objects', d.embeddings_objects ?? '—');
+    set('stat-embeddings-size', d.embeddings_size || '—');
+    set('storage-primary-format', d.format_name || 'Apache Parquet');
+    set('storage-primary-format-desc', d.format_desc || 'Hive Partitioned');
+    const fmt = document.getElementById('storage-primary-format');
+    if (fmt) fmt.className = 'text-2xl font-bold ' + (d.format_class || 'text-emerald-400');
+    const asOf = document.getElementById('stats-as-of');
+    if (asOf) asOf.textContent = d.as_of ? 'as of ' + relativeTime(d.as_of) : '';
+  }
+
+  async function loadStorageStats(refresh) {
+    const icon = document.getElementById('stats-refresh-icon');
+    const btn = document.getElementById('btn-refresh-stats');
+    const retry = document.getElementById('stats-retry');
+    if (retry) retry.classList.add('hidden');
+    if (icon) icon.classList.add('animate-spin');
+    if (btn) btn.disabled = true;
+
+    // Paint last-seen stats instantly (per-viewer convenience only).
+    if (!refresh) {
+      try {
+        const saved = JSON.parse(localStorage.getItem(STATS_CACHE_KEY) || 'null');
+        if (saved && saved.ok) paintStorageStats(saved);
+      } catch (e) { /* storage unavailable */ }
+    }
+
+    try {
+      const res = await fetch('/api/v1/storage/stats' + (refresh ? '?refresh=true' : ''));
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to load stats');
+      paintStorageStats(data);
+      try { localStorage.setItem(STATS_CACHE_KEY, JSON.stringify(data)); } catch (e) { /* ignore */ }
+    } catch (err) {
+      const stillLoading = document.querySelector('#storage-stats-grid .stat-skeleton');
+      if (stillLoading) {
+        ['stat-total-objects', 'stat-raw-objects', 'stat-embeddings-objects', 'storage-primary-format'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) { el.classList.remove('stat-skeleton'); el.textContent = '—'; }
+        });
+        ['stat-total-size', 'stat-raw-size', 'stat-embeddings-size', 'storage-primary-format-desc'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.textContent = 'Unavailable';
+        });
+      }
+      if (retry) retry.classList.remove('hidden');
+    } finally {
+      if (icon) icon.classList.remove('animate-spin');
+      if (btn) btn.disabled = false;
+    }
+  }
 
   async function loadPrefix(prefix, continuationToken = null, pushHistory = false) {
     const tableBody = document.getElementById('objects-table-body');
@@ -1117,6 +1203,7 @@
       setTimeout(() => {
         closeUploadModal();
         refreshCurrentPrefix();
+        loadStorageStats(false);
       }, 700);
     } catch (err) {
       if (statusDiv) {
@@ -1156,6 +1243,7 @@
       }
       closeDeleteModal();
       refreshCurrentPrefix();
+      loadStorageStats(false);
     } catch (err) {
       alert(`Delete failed: ${err.message}`);
     } finally {

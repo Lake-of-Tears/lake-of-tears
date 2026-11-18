@@ -430,30 +430,18 @@ def test_compute_storage_format_s3_metadata_detected():
     assert "cyan" in css_class
 
 
-def test_storage_page_renders_dynamic_iceberg_format():
+def test_storage_page_loads_format_card_from_stats_api():
+    # Stats are filled client-side from /api/v1/storage/stats (see #568), so the
+    # page ships the format card placeholders plus the loader, not server-rendered values.
     token, mock_workspaces = _create_auth_cookie(role="member")
-    mock_stats = {
-        "ok": True,
-        "total_objects": 15,
-        "total_size": "25.0 MB",
-        "raw_objects": 10,
-        "raw_size": "20.0 MB",
-        "embeddings_objects": 5,
-        "embeddings_size": "5.0 MB",
-        "format_name": "Apache Iceberg",
-        "format_desc": "3 Tables · v2 REST",
-        "format_class": "text-cyan-400",
-    }
 
-    with (
-        patch.object(main, "_fetch_workspaces", return_value=mock_workspaces),
-        patch.object(main, "_get_bucket_stats", return_value=mock_stats),
-    ):
+    with patch.object(main, "_fetch_workspaces", return_value=mock_workspaces):
         response = client.get(
             "/storage",
             cookies={"lake_token": token, main._WORKSPACE_COOKIE: "ws-1"},
         )
-        assert response.status_code == 200
-        assert "Apache Iceberg" in response.text
-        assert "3 Tables · v2 REST" in response.text
-        assert "text-cyan-400" in response.text
+    assert response.status_code == 200
+    assert 'id="storage-primary-format"' in response.text
+    assert 'id="storage-primary-format-desc"' in response.text
+    assert "d.format_class" in response.text
+    assert "/api/v1/storage/stats" in response.text
