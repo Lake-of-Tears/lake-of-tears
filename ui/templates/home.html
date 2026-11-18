@@ -2,6 +2,8 @@
 {% block title %}Dashboard — Lake of Tears{% endblock %}
 {% block head %}
 <style>
+  .stat-skeleton { display: block; min-width: 4rem; border-radius: 0.25rem; background: rgba(148,163,184,0.15); animation: stat-pulse 1.4s ease-in-out infinite; }
+  @keyframes stat-pulse { 50% { opacity: 0.4; } }
   html[data-theme="light"] .stat-card {
     background-color: var(--surface-card) !important;
     border-color: var(--border-default) !important;
@@ -18,72 +20,52 @@
     <p class="text-sm text-gray-500 mt-1">Lake of Tears datalakehouse — your open source Databricks alternative.</p>
   </div>
 
-  {% if stats.ok %}
-
-  <!-- Stats row -->
-  <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-    <div class="stat-card">
-      <span class="text-xs text-gray-500 uppercase tracking-wide">Total Objects</span>
-      <span class="text-2xl font-bold text-gray-100">{{ stats.total_objects | default(0) }}</span>
-      <span class="text-xs text-gray-600">{{ stats.total_size }}</span>
-    </div>
-    <div class="stat-card">
-      <span class="text-xs text-gray-500 uppercase tracking-wide">Raw Records</span>
-      <span class="text-2xl font-bold text-gray-100">{{ stats.raw_objects | default(0) }}</span>
-      <span class="text-xs text-gray-600">{{ stats.raw_size }}</span>
-    </div>
-    <div class="stat-card">
-      <span class="text-xs text-gray-500 uppercase tracking-wide">Embeddings</span>
-      <span class="text-2xl font-bold text-gray-100">{{ stats.embeddings_objects | default(0) }}</span>
-      <span class="text-xs text-gray-600">{{ stats.embeddings_size }}</span>
-    </div>
-    <div class="stat-card">
-      <span class="text-xs text-gray-500 uppercase tracking-wide">Sources</span>
-      <span class="text-2xl font-bold text-gray-100">
-        {{ stats.sources | selectattr('status', 'equalto', 'green') | list | length }}
-        <span class="text-base font-normal text-gray-500">/ {{ stats.sources | length }}</span>
-      </span>
-      <span class="text-xs text-gray-600">active</span>
-    </div>
-  </div>
-
-  <!-- Source health -->
-  <div class="card">
-    <div class="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
-      <h2 class="text-sm font-semibold text-gray-200">Data Source Health</h2>
-      <a href="/ingest" class="text-xs text-blue-400 hover:text-blue-300 transition-colors">Manage sources →</a>
-    </div>
-    <div class="divide-y divide-gray-800">
-      {% for src in stats.sources %}
-      <div class="px-5 py-3 flex items-center justify-between">
-        <div class="flex items-center gap-3">
-          <span class="w-2 h-2 rounded-full
-            {% if src.status == 'green' %}bg-emerald-400
-            {% elif src.status == 'yellow' %}bg-yellow-400
-            {% else %}bg-red-500{% endif %}"></span>
-          <span class="text-sm text-gray-300 font-medium">{{ src.label }}</span>
-        </div>
-        <div class="flex items-center gap-4">
-          <span class="text-xs text-gray-600">{{ src.last_modified_str }}</span>
-          {% if src.status == 'green' %}
-            <span class="badge-green">Synced</span>
-          {% elif src.status == 'yellow' %}
-            <span class="badge-yellow">Stale</span>
-          {% else %}
-            <span class="badge-red">No data</span>
-          {% endif %}
-        </div>
+  <!-- Stats row (filled asynchronously from /api/v1/storage/stats and /api/pipelines) -->
+  <div class="space-y-2">
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4" id="home-stats-grid">
+      <div class="stat-card">
+        <span class="text-xs text-gray-500 uppercase tracking-wide">Total Objects</span>
+        <span class="text-2xl font-bold text-gray-100 stat-skeleton" id="stat-total-objects">&nbsp;</span>
+        <span class="text-xs text-gray-600" id="stat-total-size">Calculating…</span>
       </div>
-      {% endfor %}
+      <div class="stat-card">
+        <span class="text-xs text-gray-500 uppercase tracking-wide">Raw Records</span>
+        <span class="text-2xl font-bold text-gray-100 stat-skeleton" id="stat-raw-objects">&nbsp;</span>
+        <span class="text-xs text-gray-600" id="stat-raw-size">Calculating…</span>
+      </div>
+      <div class="stat-card">
+        <span class="text-xs text-gray-500 uppercase tracking-wide">Embeddings</span>
+        <span class="text-2xl font-bold text-gray-100 stat-skeleton" id="stat-embeddings-objects">&nbsp;</span>
+        <span class="text-xs text-gray-600" id="stat-embeddings-size">Calculating…</span>
+      </div>
+      <div class="stat-card">
+        <span class="text-xs text-gray-500 uppercase tracking-wide">Pipelines</span>
+        <span class="text-2xl font-bold text-gray-100 stat-skeleton" id="stat-pipelines">&nbsp;</span>
+        <span class="text-xs text-gray-600" id="stat-pipelines-sub">Loading…</span>
+      </div>
+    </div>
+    <div class="flex items-center justify-end gap-2 text-[11px] text-gray-500">
+      <span id="stats-as-of"></span>
+      <a id="stats-retry" href="#" onclick="loadHomeStats(false); return false;" class="hidden text-blue-400 hover:text-blue-300 underline">Retry</a>
+      <button id="btn-refresh-stats" onclick="loadHomeStats(true)" class="btn-ghost text-[11px] px-1.5 py-0.5 gap-1" title="Recalculate storage totals">
+        <svg id="stats-refresh-icon" class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+        Recalculate
+      </button>
     </div>
   </div>
 
-  {% else %}
-  <div class="card p-8 text-center">
-    <p class="text-gray-500 text-sm">Could not connect to MinIO.</p>
-    <p class="text-gray-600 text-xs mt-1 font-mono">{{ stats.error }}</p>
+  <!-- Pipeline health -->
+  <div class="card" id="pipeline-health-card">
+    <div class="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
+      <h2 class="text-sm font-semibold text-gray-200">Pipeline Health</h2>
+      <a href="/pipelines" class="text-xs text-blue-400 hover:text-blue-300 transition-colors">View all pipelines →</a>
+    </div>
+    <div class="divide-y divide-gray-800" id="pipeline-health-list">
+      <div class="px-5 py-3 text-xs text-gray-500">Loading pipelines…</div>
+    </div>
   </div>
-  {% endif %}
 
   <!-- Quick actions -->
   <div>
@@ -121,4 +103,159 @@
   </div>
 
 </div>
+
+<script>
+  const HOME_STATS_CACHE_KEY = 'lake:home-stats:' + (window.location.host || 'app');
+  const PIPELINE_ROWS_MAX = 8;
+
+  function homeEscape(str) {
+    const d = document.createElement('div');
+    d.textContent = str == null ? '' : String(str);
+    return d.innerHTML;
+  }
+
+  function relativeTime(iso) {
+    const secs = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+    if (secs < 60) return 'just now';
+    if (secs < 3600) return Math.round(secs / 60) + ' min ago';
+    if (secs < 86400) return Math.round(secs / 3600) + ' h ago';
+    return Math.round(secs / 86400) + ' d ago';
+  }
+
+  function setStat(id, value) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.remove('stat-skeleton');
+    el.textContent = value;
+  }
+
+  function paintHomeStats(d) {
+    setStat('stat-total-objects', d.total_objects ?? '—');
+    setStat('stat-total-size', d.total_size || '—');
+    setStat('stat-raw-objects', d.raw_objects ?? '—');
+    setStat('stat-raw-size', d.raw_size || '—');
+    setStat('stat-embeddings-objects', d.embeddings_objects ?? '—');
+    setStat('stat-embeddings-size', d.embeddings_size || '—');
+    const asOf = document.getElementById('stats-as-of');
+    if (asOf) asOf.textContent = d.as_of ? 'as of ' + relativeTime(d.as_of) : '';
+  }
+
+  async function loadHomeStats(refresh) {
+    const icon = document.getElementById('stats-refresh-icon');
+    const btn = document.getElementById('btn-refresh-stats');
+    const retry = document.getElementById('stats-retry');
+    if (retry) retry.classList.add('hidden');
+    if (icon) icon.classList.add('animate-spin');
+    if (btn) btn.disabled = true;
+
+    // Paint last-seen stats instantly (per-viewer convenience only).
+    if (!refresh) {
+      try {
+        const saved = JSON.parse(localStorage.getItem(HOME_STATS_CACHE_KEY) || 'null');
+        if (saved && saved.ok) paintHomeStats(saved);
+      } catch (e) { /* storage unavailable */ }
+    }
+
+    try {
+      const res = await fetch('/api/v1/storage/stats' + (refresh ? '?refresh=true' : ''));
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to load stats');
+      paintHomeStats(data);
+      try { localStorage.setItem(HOME_STATS_CACHE_KEY, JSON.stringify(data)); } catch (e) { /* ignore */ }
+    } catch (err) {
+      if (document.querySelector('#home-stats-grid .stat-skeleton:not(#stat-pipelines)')) {
+        ['stat-total-objects', 'stat-raw-objects', 'stat-embeddings-objects'].forEach(id => setStat(id, '—'));
+        ['stat-total-size', 'stat-raw-size', 'stat-embeddings-size'].forEach(id => setStat(id, 'Unavailable'));
+      }
+      if (retry) retry.classList.remove('hidden');
+    } finally {
+      if (icon) icon.classList.remove('animate-spin');
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  function pipelineHealth(p) {
+    const state = (p.last_run && p.last_run.state) || null;
+    if (state === 'failed') return { rank: 0, key: 'failed', dot: 'bg-red-500', badge: 'badge-red', label: 'Failed' };
+    if (state === 'running' || state === 'queued') return { rank: 1, key: 'running', dot: 'bg-blue-400', badge: 'badge-yellow', label: 'Running' };
+    if (!state) return { rank: 2, key: 'never', dot: 'bg-gray-500', badge: 'badge-yellow', label: 'Never run' };
+    return { rank: 3, key: 'ok', dot: 'bg-emerald-400', badge: 'badge-green', label: 'Success' };
+  }
+
+  function pipelineKind(p) {
+    if (p.is_bundle_pipeline) return 'Bundle';
+    if (p.is_notebook_job) return 'Notebook';
+    if (p.webhook_enabled) return 'Webhook';
+    return 'Pipeline';
+  }
+
+  function renderPipelineHealth(pipelines) {
+    const list = document.getElementById('pipeline-health-list');
+    const rows = pipelines.map(p => ({ p, h: pipelineHealth(p) }));
+    const failing = rows.filter(r => r.h.key === 'failed').length;
+    setStat('stat-pipelines', rows.length ? (rows.length - failing) + ' / ' + rows.length : '0');
+    const sub = document.getElementById('stat-pipelines-sub');
+    if (sub) sub.textContent = !rows.length ? 'none yet' : (failing ? failing + ' failing' : 'healthy');
+
+    if (!rows.length) {
+      list.innerHTML = `
+        <div class="px-5 py-8 text-center">
+          <p class="text-sm text-gray-500">No pipelines yet.</p>
+          <p class="text-xs text-gray-600 mt-1">
+            <a href="/ingest" class="text-blue-400 hover:text-blue-300">Add a data source</a> or
+            <a href="/pipelines" class="text-blue-400 hover:text-blue-300">create a pipeline</a> to see its health here.
+          </p>
+        </div>`;
+      return;
+    }
+
+    // Failed first, then running / never run, then healthy; newest run first within a group.
+    rows.sort((a, b) => a.h.rank - b.h.rank ||
+      (new Date((b.p.last_run && b.p.last_run.start_date) || 0)) - (new Date((a.p.last_run && a.p.last_run.start_date) || 0)));
+
+    list.innerHTML = rows.slice(0, PIPELINE_ROWS_MAX).map(({ p, h }) => {
+      const name = p.display_label || p.pipeline_name || p.dag_id;
+      const last = p.last_run && (p.last_run.start_date || p.last_run.execution_date);
+      return `
+        <a href="/pipelines?open=${encodeURIComponent(p.dag_id)}" class="px-5 py-3 flex items-center justify-between hover:bg-white/[0.03] transition-colors">
+          <div class="flex items-center gap-3 min-w-0">
+            <span class="w-2 h-2 rounded-full flex-shrink-0 ${h.dot}"></span>
+            <span class="text-sm text-gray-300 font-medium truncate">${homeEscape(name)}</span>
+            <span class="text-[10px] text-gray-500 font-mono uppercase">${homeEscape(pipelineKind(p))}</span>
+            ${p.is_paused ? '<span class="badge-yellow">Paused</span>' : ''}
+          </div>
+          <div class="flex items-center gap-4 flex-shrink-0">
+            <span class="text-xs text-gray-600 hidden sm:inline">${homeEscape(p.schedule_interval || '')}</span>
+            <span class="text-xs text-gray-600">${last ? homeEscape(relativeTime(last)) : '—'}</span>
+            <span class="${h.badge}">${h.label}</span>
+          </div>
+        </a>`;
+    }).join('') + (rows.length > PIPELINE_ROWS_MAX
+      ? `<a href="/pipelines" class="block px-5 py-2.5 text-xs text-center text-blue-400 hover:text-blue-300">+ ${rows.length - PIPELINE_ROWS_MAX} more</a>`
+      : '');
+  }
+
+  async function loadPipelineHealth() {
+    try {
+      const res = await fetch('/api/pipelines');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || data.error || 'Failed to load pipelines');
+      renderPipelineHealth(data.pipelines || []);
+    } catch (err) {
+      setStat('stat-pipelines', '—');
+      const sub = document.getElementById('stat-pipelines-sub');
+      if (sub) sub.textContent = 'Unavailable';
+      document.getElementById('pipeline-health-list').innerHTML = `
+        <div class="px-5 py-6 text-center text-xs text-gray-500">
+          Could not load pipelines.
+          <a href="#" onclick="loadPipelineHealth(); return false;" class="text-blue-400 hover:text-blue-300 underline ml-1">Retry</a>
+        </div>`;
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    loadHomeStats(false);
+    loadPipelineHealth();
+  });
+</script>
 {% endblock %}

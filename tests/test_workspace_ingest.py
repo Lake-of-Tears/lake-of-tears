@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import unittest.mock as mock
 from datetime import UTC, datetime
 from pathlib import Path
@@ -11,7 +12,10 @@ from starlette.testclient import TestClient
 
 # Import pipeline and backend modules
 import pipeline.shared.storage_writer as storage_writer
-from ui.main import _WORKSPACE_COOKIE, AUTH_SECRET_KEY, _get_bucket_stats, app
+from ui.main import _WORKSPACE_COOKIE, AUTH_SECRET_KEY, app
+
+sys.path.insert(0, str(Path(__file__).parents[1] / "backend"))
+import storage_service  # noqa: E402
 
 # ── 1. StorageWriter & write_to_storage Tests ─────────────────────────────────
 
@@ -198,27 +202,22 @@ def test_get_bucket_stats_isolated_to_active_workspace():
 
     mock_paginator.paginate.side_effect = paginate
 
-    with mock.patch("ui.main._s3_client", return_value=mock_s3):
-        # Stats for dev workspace
-        dev_stats = _get_bucket_stats(workspace_slug="dev")
-        assert dev_stats["workspace"] == "dev"
-        assert dev_stats["total_objects"] == 1
-        assert dev_stats["total_size"] == "1.0 KB"
-        # Find postgres source in dev
-        postgres_dev = next(s for s in dev_stats["sources"] if s["key"] == "postgres")
-        assert postgres_dev["status"] == "green"
-        stripe_dev = next(s for s in dev_stats["sources"] if s["key"] == "stripe")
-        assert stripe_dev["status"] == "red"  # No data in dev
+    # Stats for dev workspace
+    dev_stats = storage_service.get_bucket_summary(s3_client=mock_s3, workspace_slug="dev")
+    assert dev_stats["workspace"] == "dev"
+    assert dev_stats["total_objects"] == 1
+    assert dev_stats["total_size"] == "1.0 KB"
+    # Sources are only what actually landed under raw/<source>/ (no fixed connector list)
+    assert [s["key"] for s in dev_stats["sources"]] == ["postgres"]
+    assert dev_stats["sources"][0]["status"] == "green"
 
-        # Stats for prod workspace
-        prod_stats = _get_bucket_stats(workspace_slug="prod")
-        assert prod_stats["workspace"] == "prod"
-        assert prod_stats["total_objects"] == 1
-        assert prod_stats["total_size"] == "2.0 KB"
-        postgres_prod = next(s for s in prod_stats["sources"] if s["key"] == "postgres")
-        assert postgres_prod["status"] == "red"  # No data in prod
-        stripe_prod = next(s for s in prod_stats["sources"] if s["key"] == "stripe")
-        assert stripe_prod["status"] == "green"
+    # Stats for prod workspace
+    prod_stats = storage_service.get_bucket_summary(s3_client=mock_s3, workspace_slug="prod")
+    assert prod_stats["workspace"] == "prod"
+    assert prod_stats["total_objects"] == 1
+    assert prod_stats["total_size"] == "2.0 KB"
+    assert [s["key"] for s in prod_stats["sources"]] == ["stripe"]
+    assert prod_stats["sources"][0]["status"] == "green"
 
 
 # ── 4. UI Ingestion Route & Template Rendering ─────────────────────────────────
@@ -249,8 +248,11 @@ def test_ui_ingest_page_workspace_context():
     mock_s3.get_paginator.return_value = mock_paginator
     mock_paginator.paginate.return_value = [{"Contents": mock_objects}]
 
+    stats = storage_service.get_bucket_summary(s3_client=mock_s3, workspace_slug="analytics")
+
     with (
-        mock.patch("ui.main._s3_client", return_value=mock_s3),
+        mock.patch("ui.main._backend_get", return_value=stats),
+        mock.patch("ui.main._s3_client", return_value=mock_s3) as s3,
         mock.patch("ui.main._fetch_workspaces", return_value=mock_ws),
     ):
         resp = client.get(
@@ -259,6 +261,7 @@ def test_ui_ingest_page_workspace_context():
         )
         assert resp.status_code == 200
         html = resp.text
+        s3.assert_not_called()  # /ingest reads the backend's cached stats, never scans S3
 
         # Check workspace badge
         assert "Workspace: analytics" in html

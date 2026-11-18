@@ -43,18 +43,6 @@ MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "datalake")
 MINIO_SECURE = os.getenv("MINIO_SECURE", "false").lower() in ("true", "1")
 
-SOURCES = [
-    "weather",
-    "truenas",
-    "truenas_logs",
-    "jellyfin",
-    "tmdb",
-    "alexa",
-    "stripe",
-    "shopify",
-    "hubspot",
-    "postgres",
-]
 SOURCE_LABELS = {
     "weather": "Open-Meteo Weather",
     "truenas": "TrueNAS Storage",
@@ -734,7 +722,7 @@ def get_bucket_summary(
         paginator = s3.get_paginator("list_objects_v2")
         total_objects = total_size = 0
         prefix_stats: dict[str, dict] = {}
-        source_last_modified: dict[str, datetime | None] = {s: None for s in SOURCES}
+        source_last_modified: dict[str, datetime | None] = {}
         has_iceberg_metadata = False
 
         clean_slug = (workspace_slug or "").strip("/")
@@ -775,26 +763,22 @@ def get_bucket_summary(
                 ):
                     prefix_stats[top]["last_modified"] = last_mod
 
-                for src in SOURCES:
-                    if (
-                        rel_key.startswith(f"raw/{src}/")
-                        or rel_key.startswith(f"{src}/")
-                        or f"/raw/{src}/" in rel_key
-                        or f"/{src}/" in rel_key
-                    ):
-                        if (
-                            source_last_modified[src] is None
-                            or last_mod > source_last_modified[src]
-                        ):
+                # Sources are whatever has actually landed under raw/<source>/ (no fixed list).
+                if rel_key.startswith("raw/"):
+                    parts = rel_key.split("/")
+                    if len(parts) > 2 and parts[1]:
+                        src = parts[1]
+                        prev = source_last_modified.get(src)
+                        if prev is None or last_mod > prev:
                             source_last_modified[src] = last_mod
 
         sources = []
-        for src in SOURCES:
+        for src in sorted(source_last_modified):
             lm = source_last_modified[src]
             sources.append(
                 {
                     "key": src,
-                    "label": SOURCE_LABELS.get(src, src.title()),
+                    "label": SOURCE_LABELS.get(src, src.replace("_", " ").title()),
                     "last_modified": lm.isoformat() if lm else None,
                     "last_modified_str": (lm.strftime("%Y-%m-%d %H:%M UTC") if lm else "Never"),
                     "status": _source_status(lm),
