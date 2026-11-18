@@ -16,7 +16,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="max-w-7xl mx-auto space-y-6" id="bundles-container" x-data="bundlesManager()" x-cloak>
+<div class="w-full space-y-6" id="bundles-container" x-data="bundlesManager()" x-cloak>
 
   <!-- Page Header -->
   <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-white/[0.07]">
@@ -119,9 +119,41 @@
       </select>
     </div>
 
-    <!-- Count Summary -->
-    <div class="text-xs text-gray-400 font-mono self-center">
-      Showing <span class="text-purple-300 font-semibold" x-text="filteredBundles.length"></span> of <span x-text="bundles.length"></span> bundles
+    <div class="flex items-center gap-3 self-center">
+      <!-- Count Summary -->
+      <div class="text-xs text-gray-400 font-mono">
+        Showing <span class="text-purple-300 font-semibold" x-text="filteredBundles.length"></span> of <span x-text="bundles.length"></span> bundles
+      </div>
+
+      <!-- View Mode Toggle -->
+      <div class="inline-flex rounded-md border border-white/[0.08] overflow-hidden" role="group" aria-label="View mode" id="bundles-view-toggle">
+        <button
+          type="button"
+          @click="setViewMode('grid')"
+          :class="viewMode === 'grid' ? 'bg-purple-500/20 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/[0.06]'"
+          class="px-2 py-1.5 transition-colors"
+          title="Card view"
+          aria-label="Card view"
+          :aria-pressed="viewMode === 'grid'"
+        >
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 5h6v6H4V5zm10 0h6v6h-6V5zM4 15h6v6H4v-6zm10 0h6v6h-6v-6z"/>
+          </svg>
+        </button>
+        <button
+          type="button"
+          @click="setViewMode('list')"
+          :class="viewMode === 'list' ? 'bg-purple-500/20 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/[0.06]'"
+          class="px-2 py-1.5 border-l border-white/[0.08] transition-colors"
+          title="List view"
+          aria-label="List view"
+          :aria-pressed="viewMode === 'list'"
+        >
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/>
+          </svg>
+        </button>
+      </div>
     </div>
   </div>
 
@@ -161,7 +193,7 @@
   </div>
 
   <!-- Bundles Gallery Cards Grid -->
-  <div x-show="filteredBundles.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+  <div x-show="filteredBundles.length > 0 && viewMode === 'grid'" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
     <template x-for="b in filteredBundles" :key="b.id">
       <div class="bg-gray-900/50 hover:bg-gray-900/80 border border-white/[0.08] hover:border-purple-500/40 rounded-xl p-5 flex flex-col justify-between transition-all duration-150 shadow-sm group">
         
@@ -262,8 +294,73 @@
     </template>
   </div>
 
+  <!-- Bundles List (Table) View -->
+  <div x-show="filteredBundles.length > 0 && viewMode === 'list'" id="bundles-list-view" class="bg-gray-900/50 border border-white/[0.08] rounded-xl overflow-x-auto">
+    <table class="w-full text-xs text-left">
+      <thead class="text-[10px] uppercase tracking-wider text-gray-500 border-b border-white/[0.08]">
+        <tr>
+          <th class="px-4 py-2.5 font-medium">Bundle</th>
+          <th class="px-3 py-2.5 font-medium">Target</th>
+          <th class="px-3 py-2.5 font-medium">Status</th>
+          <th class="px-3 py-2.5 font-medium text-right">Catalogs</th>
+          <th class="px-3 py-2.5 font-medium text-right">Tables</th>
+          <th class="px-3 py-2.5 font-medium text-right">Pipelines</th>
+          <th class="px-3 py-2.5 font-medium text-right">Dashboards</th>
+          <th class="px-3 py-2.5 font-medium">Deployed</th>
+          <th class="px-4 py-2.5 font-medium text-right">Actions</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-white/[0.05]">
+        <template x-for="b in filteredBundles" :key="b.id">
+          <tr class="hover:bg-white/[0.04] cursor-pointer transition-colors" @click="openDrawer(b.id)">
+            <td class="px-4 py-2.5 min-w-[16rem]">
+              <div class="flex items-center gap-2">
+                <span class="font-semibold text-gray-100 truncate" x-text="b.bundle_name"></span>
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-white/[0.06] text-gray-300 border border-white/[0.08]" x-text="'v' + (b.version || '0.1.0')"></span>
+                <span x-show="b.git_commit_sha" class="text-[10px] font-mono text-gray-500" x-text="(b.git_commit_sha || '').slice(0, 7)"></span>
+              </div>
+              <div class="text-gray-500 truncate max-w-xl mt-0.5" x-text="b.description || 'Declarative bundle asset specification'"></div>
+            </td>
+            <td class="px-3 py-2.5">
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-mono font-medium uppercase tracking-wider" :class="getTargetBadgeClass(b.target)" x-text="b.target || 'dev'"></span>
+            </td>
+            <td class="px-3 py-2.5">
+              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium whitespace-nowrap" :class="getStatusBadgeClass(b.status)">
+                <span class="w-1.5 h-1.5 rounded-full" :class="{
+                  'bg-emerald-400': b.status === 'active',
+                  'bg-blue-400': b.status === 'deploying',
+                  'bg-red-400': b.status === 'failed',
+                  'bg-amber-400': b.status === 'pending_drift_sync',
+                  'bg-gray-400': b.status === 'destroyed'
+                }"></span>
+                <span x-text="(b.status || 'active').replace('_', ' ').toUpperCase()"></span>
+              </span>
+            </td>
+            <td class="px-3 py-2.5 text-right text-gray-200" x-text="b.catalogs_count || (b.resources_map?.catalogs?.length || 0)"></td>
+            <td class="px-3 py-2.5 text-right text-gray-200" x-text="b.tables_count || (b.resources_map?.tables?.length || 0)"></td>
+            <td class="px-3 py-2.5 text-right text-purple-300" x-text="b.pipelines_count || (b.resources_map?.pipelines?.length || 0)"></td>
+            <td class="px-3 py-2.5 text-right text-indigo-300" x-text="b.dashboards_count || (b.resources_map?.dashboards?.length || 0)"></td>
+            <td class="px-3 py-2.5 text-gray-400 whitespace-nowrap" x-text="formatDate(b.last_deployed_at || b.created_at)"></td>
+            <td class="px-4 py-2.5">
+              <div class="flex items-center justify-end gap-1.5">
+                <button @click.stop="openDrawer(b.id)" class="px-2.5 py-1 text-xs font-medium rounded bg-white/[0.06] hover:bg-white/[0.12] text-gray-200 transition-colors">Inspect</button>
+                {% if my_role != 'viewer' %}
+                <button @click.stop="openDestroyModal(b)" title="Teardown bundle" class="p-1 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                  </svg>
+                </button>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+
   <!-- ══════════════════════════════════════════════════════════════════════════ -->
-  <!-- SLIDE-OVER DETAILS & TOPOLOGY DRAWER                                      -->
+  <!-- SLIDE-OVER DETAILS & TOPOLOGY DRAWER                                     -->
   <!-- ══════════════════════════════════════════════════════════════════════════ -->
   <div
     id="bundle-drawer"

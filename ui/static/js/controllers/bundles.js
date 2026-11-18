@@ -22,6 +22,7 @@ document.addEventListener('alpine:init', () => {
     searchQuery: '',
     statusFilter: 'all',
     targetFilter: 'all',
+    viewMode: 'grid', // 'grid' | 'list' (persisted in localStorage)
 
     // Slide-over Drawer State
     drawerOpen: false,
@@ -59,7 +60,16 @@ document.addEventListener('alpine:init', () => {
     isDestroying: false,
     destroyError: null,
 
+    setViewMode(mode) {
+      this.viewMode = mode === 'list' ? 'list' : 'grid';
+      try { localStorage.setItem('lot.bundles.viewMode', this.viewMode); } catch (e) { /* storage unavailable */ }
+    },
+
     init() {
+      try {
+        if (localStorage.getItem('lot.bundles.viewMode') === 'list') this.viewMode = 'list';
+      } catch (e) { /* storage unavailable */ }
+
       // Expose globally for legacy bridges, external inline handlers, and test assertions
       window.bundlesManagerInstance = this;
       window.openBundleDrawer = (id) => this.openDrawer(id);
