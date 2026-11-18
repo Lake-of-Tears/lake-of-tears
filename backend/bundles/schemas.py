@@ -485,5 +485,9 @@ class BundleDestroyResponse(BaseModel):
         default_factory=dict,
         description="Resources kept because another active record also references them",
     )
+    skipped_dependencies: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="Tables kept because another pipeline still references them (id -> names)",
+    )
     dry_run: bool = False
     message: str

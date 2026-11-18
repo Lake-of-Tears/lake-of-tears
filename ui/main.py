@@ -5400,7 +5400,9 @@ async def api_workspace_manifest(request: Request):
         b_target = b.get("target") or "dev"
         b_version = b.get("version") or "0.1.0"
         res_map = b.get("resources_map") or {}
-        res_count = b.get("resources_count") or sum(len(v) for v in res_map.values())
+        res_count = b.get("resources_count") or sum(
+            len(v) for k, v in res_map.items() if not k.startswith("created_")
+        )
         b_desc = b.get("description")
         sub = f"Asset Bundle ({b_target}) • v{b_version} • {res_count} resources"
         if b_desc:
@@ -5872,7 +5874,9 @@ async def api_workspace_search(request: Request, q: str = ""):
                 b_status = b.get("status") or "active"
                 b_desc = b.get("description") or ""
                 res_map = b.get("resources_map") or {}
-                res_count = b.get("resources_count") or sum(len(v) for v in res_map.values())
+                res_count = b.get("resources_count") or sum(
+                    len(v) for k, v in res_map.items() if not k.startswith("created_")
+                )
 
                 direct_match = (
                     not query
@@ -8079,7 +8083,11 @@ async def api_bundles_delete(request: Request, bundle_id: str):
 
     cascade = request.query_params.get("cascade", "true")
     purge_storage = request.query_params.get("purge_storage", "false")
-    url = f"{BACKEND_URL}/api/bundles/{bundle_id}?cascade={cascade}&purge_storage={purge_storage}"
+    keep_catalogs = request.query_params.get("keep_catalogs", "false")
+    url = (
+        f"{BACKEND_URL}/api/bundles/{bundle_id}"
+        f"?cascade={cascade}&purge_storage={purge_storage}&keep_catalogs={keep_catalogs}"
+    )
 
     try:
         with httpx.Client(timeout=20.0) as client:

@@ -7,7 +7,7 @@ import json
 import logging
 import re
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -18,8 +18,10 @@ from sqlalchemy.orm import Session
 try:
     from models import (
         Catalog,
+        CatalogAccess,
         CatalogSchema,
         CatalogTable,
+        DeletedCatalogAsset,
         PipelineMetadata,
         User,
         Workspace,
@@ -29,8 +31,10 @@ try:
 except ImportError:
     from backend.models import (
         Catalog,
+        CatalogAccess,
         CatalogSchema,
         CatalogTable,
+        DeletedCatalogAsset,
         PipelineMetadata,
         User,
         Workspace,
@@ -47,6 +51,11 @@ try:
     import storage_service
 except ImportError:
     from backend import storage_service
+
+try:
+    import catalog_trash_service
+except ImportError:
+    from backend import catalog_trash_service
 
 from .parser import (
     parse_bundle_str,
@@ -1053,6 +1062,9 @@ class BundleDeployer:
             "pipelines": [],
             "dashboards": [],
             "artifacts": [],
+            # Containers this bundle created itself (vs. found existing); destroy may remove them
+            "created_catalogs": [],
+            "created_schemas": [],
         }
 
         try:
@@ -1084,6 +1096,7 @@ class BundleDeployer:
                     )
                     db.add(cat)
                     db.flush()
+                    resources_map["created_catalogs"].append(str(cat.id))
                     # Seed medallion schemas
                     for tier in _MEDALLION_TIERS:
                         db.add(
@@ -1167,6 +1180,7 @@ class BundleDeployer:
                     )
                     db.add(sch)
                     db.flush()
+                    resources_map["created_schemas"].append(str(sch.id))
                 else:
                     if sch_res.description:
                         sch.description = sch_res.description
@@ -1444,6 +1458,18 @@ class BundleDeployer:
                     except ValueError:
                         logger.warning("Skipping malformed dashboard id %s", old_dash_id)
 
+            # A container this bundle created on an earlier deploy stays bundle-owned
+            for owned_key, listed_key in (
+                ("created_catalogs", "catalogs"),
+                ("created_schemas", "schemas"),
+            ):
+                for old_id in previous_map.get(owned_key, []):
+                    if (
+                        old_id in resources_map[listed_key]
+                        and old_id not in resources_map[owned_key]
+                    ):
+                        resources_map[owned_key].append(old_id)
+
             # Finalize State
             BundleStateService.update_resources_map(db, bundle_record.id, resources_map)
             BundleStateService.update_bundle_status(db, bundle_record.id, "active")
@@ -1550,6 +1576,151 @@ class BundleDeployer:
             PipelineMetadata.dag_id == dag_id,
         ).delete()
 
+    @staticmethod
+    def _plan_table_and_container_removal(
+        db: Session,
+        workspace: Workspace,
+        res_map: dict[str, Any],
+        claimed: dict[str, set[str]],
+        purged: dict[str, list[str]],
+        skipped_dependencies: dict[str, list[str]],
+        keep_catalogs: bool,
+    ) -> dict[str, list[Any]]:
+        """Decide which tables go to Trash and which bundle-created containers can be removed.
+
+        Tables that other pipelines still reference are dropped from ``purged["tables"]`` and
+        listed in ``skipped_dependencies``. A schema or catalog qualifies only when the bundle
+        created it, no other active record claims it, and nothing live or already in Trash
+        remains in it (#527 keeps shared containers; #574).
+        """
+        own_dag_ids = set(purged["pipelines"])
+        own_pipeline_rows = {
+            str(p.id)
+            for p in db.query(PipelineMetadata).filter(
+                PipelineMetadata.workspace_id == workspace.id,
+                PipelineMetadata.dag_id.in_(own_dag_ids or {""}),
+            )
+        }
+
+        tables: list[CatalogTable] = []
+        for tbl_id_str in list(purged["tables"]):
+            try:
+                tbl = (
+                    db.query(CatalogTable).filter(CatalogTable.id == uuid.UUID(tbl_id_str)).first()
+                )
+            except ValueError:
+                tbl = None
+            if not tbl or not tbl.schema or tbl.schema.catalog.owner_workspace_id != workspace.id:
+                purged["tables"].remove(tbl_id_str)
+                continue
+            deps = catalog_trash_service.check_table_dependencies(
+                tbl, tbl.schema, tbl.schema.catalog, workspace, db
+            ).dependencies
+            blocking = [
+                d.name for d in deps if d.id not in own_dag_ids and d.id not in own_pipeline_rows
+            ]
+            if blocking:
+                purged["tables"].remove(tbl_id_str)
+                skipped_dependencies[tbl_id_str] = blocking
+                continue
+            tables.append(tbl)
+
+        plan: dict[str, list[Any]] = {"tables": tables, "schemas": [], "catalogs": []}
+        if keep_catalogs:
+            return plan
+
+        trashing = {t.id for t in tables}
+
+        def _is_empty(schema: CatalogSchema) -> bool:
+            return all(t.id in trashing for t in schema.tables) and not (
+                db.query(DeletedCatalogAsset).filter_by(schema_id=schema.id).first()
+            )
+
+        created_schemas = set(res_map.get("created_schemas", []))
+        created_catalogs = set(res_map.get("created_catalogs", []))
+
+        for sch_id in res_map.get("schemas", []):
+            sch_id = str(sch_id)
+            if sch_id not in created_schemas or sch_id in claimed["schemas"]:
+                continue
+            sch = db.query(CatalogSchema).filter(CatalogSchema.id == uuid.UUID(sch_id)).first()
+            if sch and sch.tier not in catalog_trash_service._MEDALLION_TIERS and _is_empty(sch):
+                plan["schemas"].append(sch)
+
+        removing_schemas = {s.id for s in plan["schemas"]}
+        for cat_id in res_map.get("catalogs", []):
+            cat_id = str(cat_id)
+            if cat_id not in created_catalogs or cat_id in claimed["catalogs"]:
+                continue
+            cat = db.query(Catalog).filter(Catalog.id == uuid.UUID(cat_id)).first()
+            if (
+                not cat
+                or cat.deleted_at is not None
+                or cat.is_default
+                or cat.owner_workspace_id != workspace.id
+            ):
+                continue
+            foreign_trash = any(
+                a.schema_id not in removing_schemas
+                for a in db.query(DeletedCatalogAsset).filter_by(catalog_id=cat.id)
+            )
+            if foreign_trash:
+                continue
+            ok = True
+            for sch in cat.schemas:
+                if str(sch.id) in claimed["schemas"]:
+                    ok = False
+                elif sch.id in removing_schemas:
+                    continue
+                elif sch.tier in catalog_trash_service._MEDALLION_TIERS:
+                    ok = ok and all(t.id in trashing for t in sch.tables)
+                else:
+                    ok = False
+            if ok:
+                plan["catalogs"].append(cat)
+        return plan
+
+    @staticmethod
+    def _trash_tables_and_containers(
+        db: Session,
+        workspace: Workspace,
+        plan: dict[str, list[Any]],
+        purged: dict[str, list[str]],
+        skipped_dependencies: dict[str, list[str]],
+        user_id: uuid.UUID | None,
+    ) -> None:
+        """Move planned tables to Trash, then soft-delete the empty containers."""
+        removing_schemas = {s.id for s in plan["schemas"]}
+        batch_id = uuid.uuid4()
+        trashed: list[str] = []
+        for tbl in plan["tables"]:
+            if tbl.schema_id in removing_schemas:
+                continue  # trashed together with its schema so a restore brings them back
+            catalog_trash_service.soft_delete_table(
+                db, tbl, tbl.schema, tbl.schema.catalog, workspace, user_id, batch_id=batch_id
+            )
+            trashed.append(str(tbl.id))
+        for sch in plan["schemas"]:
+            cat = sch.catalog
+            for tbl in list(sch.tables):
+                trashed.append(str(tbl.id))
+            catalog_trash_service.soft_delete_schema(db, sch, cat, workspace, user_id, cascade=True)
+        purged["tables"] = trashed
+        purged["schemas"] = [str(s.id) for s in plan["schemas"]]
+        db.flush()
+
+        grace_days = catalog_trash_service.get_soft_delete_days(db)
+        now = datetime.now(UTC)
+        for cat in plan["catalogs"]:
+            if grace_days == 0:
+                continue  # soft delete disabled: never hard-delete a catalog from destroy
+            cat.deleted_at = now
+            cat.scheduled_purge_at = now + timedelta(days=grace_days)
+            db.query(CatalogAccess).filter(
+                CatalogAccess.catalog_id == cat.id, CatalogAccess.status == "approved"
+            ).update({"suspended": True})
+            purged["catalogs"].append(str(cat.id))
+
     @classmethod
     def destroy(
         cls,
@@ -1559,9 +1730,14 @@ class BundleDeployer:
         purge_storage: bool = False,
         dry_run: bool = False,
         record_only: bool = False,
+        keep_catalogs: bool = False,
+        user_id: uuid.UUID | None = None,
     ) -> BundleDestroyResponse:
         """Safely destroy and teardown the resources provisioned by a bundle.
 
+        Tables go to Trash (7-day UNDROP) rather than being hard-deleted, and a table another
+        pipeline still references is kept (``skipped_dependencies``). Catalogs and schemas the
+        bundle created itself are soft-deleted once empty, unless ``keep_catalogs`` is set.
         Resources also referenced by another active record are skipped and reported under
         ``skipped_shared``. ``record_only`` removes just the record; ``dry_run`` reports the plan
         without changing anything.
@@ -1583,10 +1759,10 @@ class BundleDeployer:
             )
             .all()
         )
-        claimed: dict[str, set[str]] = {k: set() for k in kinds}
+        claimed: dict[str, set[str]] = {k: set() for k in (*kinds, "catalogs", "schemas")}
         for ob in other_active_bundles:
             ob_map = ob.resources_map or {}
-            for kind in kinds:
+            for kind in claimed:
                 claimed[kind].update(str(r) for r in ob_map.get(kind, []))
 
         purged: dict[str, list[str]] = {
@@ -1599,6 +1775,7 @@ class BundleDeployer:
             "artifacts": [],
         }
         skipped_shared: dict[str, list[str]] = {k: [] for k in kinds}
+        skipped_dependencies: dict[str, list[str]] = {}
 
         for kind in kinds:
             if kind == "artifacts" and not purge_storage:
@@ -1609,6 +1786,20 @@ class BundleDeployer:
                     skipped_shared[kind].append(res)
                 elif not record_only:
                     purged[kind].append(res)
+
+        plan = cls._plan_table_and_container_removal(
+            db,
+            workspace,
+            res_map,
+            claimed,
+            purged,
+            skipped_dependencies,
+            keep_catalogs=keep_catalogs or record_only,
+        )
+        if dry_run:
+            purged["schemas"] = [str(s.id) for s in plan["schemas"]]
+            purged["catalogs"] = [str(c.id) for c in plan["catalogs"]]
+            purged["tables"] = [str(t.id) for t in plan["tables"]]
 
         if not dry_run:
             dags_dir = pipeline_service.get_airflow_dags_dir()
@@ -1625,23 +1816,9 @@ class BundleDeployer:
                 except Exception:
                     purged["dashboards"].remove(dash_id_str)
 
-            for tbl_id_str in list(purged["tables"]):
-                try:
-                    tbl = (
-                        db.query(CatalogTable)
-                        .filter(CatalogTable.id == uuid.UUID(tbl_id_str))
-                        .first()
-                    )
-                    if tbl:
-                        db.delete(tbl)
-                    else:
-                        purged["tables"].remove(tbl_id_str)
-                except Exception:
-                    purged["tables"].remove(tbl_id_str)
-
-            # Shared Unity-Catalog style containers (Catalogs and CatalogSchemas) are never
-            # deleted by `bundle destroy`: multiple bundles deploy into the same catalog and
-            # schemas (Bronze, Silver, Gold) (#527).
+            cls._trash_tables_and_containers(
+                db, workspace, plan, purged, skipped_dependencies, user_id
+            )
 
             for artifact_key in list(purged["artifacts"]):
                 try:
@@ -1666,6 +1843,15 @@ class BundleDeployer:
             )
         else:
             message = f"Bundle '{bundle.bundle_name}' destroyed."
+            if purged["tables"]:
+                message += (
+                    f" {len(purged['tables'])} table(s) moved to Trash and can be restored"
+                    " until it is purged."
+                )
+        if skipped_dependencies:
+            message += (
+                f" {len(skipped_dependencies)} table(s) kept because another pipeline uses them."
+            )
         if skipped_count:
             message += f" {skipped_count} resource(s) shared with another active record were kept."
 
@@ -1676,6 +1862,7 @@ class BundleDeployer:
             status=bundle.status if dry_run else "destroyed",
             purged_resources=purged,
             skipped_shared={k: v for k, v in skipped_shared.items() if v},
+            skipped_dependencies=skipped_dependencies,
             dry_run=dry_run,
             message=message,
         )

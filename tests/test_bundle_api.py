@@ -37,6 +37,7 @@ from database import Base  # noqa: E402
 from models import (  # noqa: E402
     Catalog,
     CatalogTable,
+    DeletedCatalogAsset,
     PipelineMetadata,
     User,
     Workspace,
@@ -970,6 +971,119 @@ def test_destroy_record_only_keeps_all_resources(
         == "destroyed"
     )
     assert db_session.query(CatalogTable).count() == 2
+
+
+def _deploy_sample(client_admin, ws):
+    resp = client_admin.post(
+        f"/api/bundles/deploy?workspace_slug={ws.slug}",
+        json={
+            "manifest_content": SAMPLE_CUSTOMER360_TOON,
+            "manifest_format": "toon",
+            "target": "dev",
+        },
+    )
+    assert resp.status_code == 201
+    return resp.json()
+
+
+def test_destroy_moves_tables_to_trash_and_removes_bundle_created_catalog(
+    client_admin: TestClient, test_setup: dict, db_session: Session
+):
+    """Tables go to Trash (#574) and the catalog the bundle created is soft-deleted."""
+    ws = test_setup["workspace"]
+    deployed = _deploy_sample(client_admin, ws)
+    assert len(deployed["resources_map"]["created_catalogs"]) == 1
+
+    resp = client_admin.delete(f"/api/bundles/{deployed['id']}?workspace_slug={ws.slug}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["purged_resources"]["tables"]) == 2
+    assert data["purged_resources"]["catalogs"] == deployed["resources_map"]["created_catalogs"]
+
+    db_session.expire_all()
+    assert db_session.query(CatalogTable).count() == 0
+    trashed = db_session.query(DeletedCatalogAsset).filter_by(asset_type="table").all()
+    assert len(trashed) == 2
+    assert len({t.batch_id for t in trashed}) == 1 and trashed[0].batch_id is not None
+    cat = db_session.query(Catalog).filter_by(owner_workspace_id=ws.id, name="main_lake").first()
+    assert cat is not None and cat.deleted_at is not None
+    assert cat.scheduled_purge_at is not None
+
+
+def test_destroy_keep_catalogs_leaves_containers_but_trashes_tables(
+    client_admin: TestClient, test_setup: dict, db_session: Session
+):
+    ws = test_setup["workspace"]
+    deployed = _deploy_sample(client_admin, ws)
+
+    resp = client_admin.delete(
+        f"/api/bundles/{deployed['id']}?workspace_slug={ws.slug}&keep_catalogs=true"
+    )
+    assert resp.status_code == 200
+    assert resp.json()["purged_resources"]["catalogs"] == []
+
+    db_session.expire_all()
+    cat = db_session.query(Catalog).filter_by(owner_workspace_id=ws.id, name="main_lake").first()
+    assert cat.deleted_at is None
+    assert db_session.query(DeletedCatalogAsset).filter_by(asset_type="table").count() == 2
+
+
+def test_destroy_never_removes_preexisting_catalog(
+    client_admin: TestClient, test_setup: dict, db_session: Session
+):
+    ws = test_setup["workspace"]
+    db_session.add(
+        Catalog(
+            name="main_lake",
+            slug="main-lake",
+            owner_workspace_id=ws.id,
+            created_by=test_setup["admin_user"].id,
+        )
+    )
+    db_session.commit()
+    deployed = _deploy_sample(client_admin, ws)
+    assert deployed["resources_map"]["created_catalogs"] == []
+
+    resp = client_admin.delete(f"/api/bundles/{deployed['id']}?workspace_slug={ws.slug}")
+    assert resp.status_code == 200
+    assert resp.json()["purged_resources"]["catalogs"] == []
+    db_session.expire_all()
+    cat = db_session.query(Catalog).filter_by(owner_workspace_id=ws.id, name="main_lake").first()
+    assert cat.deleted_at is None
+
+
+def test_destroy_keeps_catalog_with_foreign_table(
+    client_admin: TestClient, test_setup: dict, db_session: Session
+):
+    ws = test_setup["workspace"]
+    deployed = _deploy_sample(client_admin, ws)
+    cat = db_session.query(Catalog).filter_by(owner_workspace_id=ws.id, name="main_lake").first()
+    gold = next(s for s in cat.schemas if s.tier == "gold")
+    db_session.add(CatalogTable(schema_id=gold.id, name="hand_made", slug="hand-made"))
+    db_session.commit()
+
+    resp = client_admin.delete(f"/api/bundles/{deployed['id']}?workspace_slug={ws.slug}")
+    assert resp.status_code == 200
+    assert resp.json()["purged_resources"]["catalogs"] == []
+    db_session.expire_all()
+    assert db_session.query(CatalogTable).filter_by(slug="hand-made").count() == 1
+
+
+def test_destroy_dry_run_lists_tables_and_catalogs(
+    client_admin: TestClient, test_setup: dict, db_session: Session
+):
+    ws = test_setup["workspace"]
+    deployed = _deploy_sample(client_admin, ws)
+
+    resp = client_admin.delete(
+        f"/api/bundles/{deployed['id']}?workspace_slug={ws.slug}&dry_run=true"
+    )
+    data = resp.json()
+    assert len(data["purged_resources"]["tables"]) == 2
+    assert len(data["purged_resources"]["catalogs"]) == 1
+    db_session.expire_all()
+    assert db_session.query(CatalogTable).count() == 2
+    assert db_session.query(DeletedCatalogAsset).count() == 0
 
 
 def test_list_bundles_filters_by_target(
