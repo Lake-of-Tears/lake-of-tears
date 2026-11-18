@@ -564,6 +564,32 @@ class LotIcebergCatalog(MetastoreCatalog):
                 return t
         return None
 
+    def _migrate_parquet_row(self, catalog: CatalogRow, schema: CatalogSchema, name: str) -> bool:
+        """A table registered as plain parquet (e.g. declared by a bundle) is converted in place
+        so a create through the catalog succeeds instead of failing with 'already exists'."""
+        row = next(
+            (t for t in schema.tables if _matches(t.slug, name) and t.format != FORMAT_ICEBERG),
+            None,
+        )
+        if row is None:
+            return False
+        self._require_write(catalog, "convert tables to Iceberg")
+        try:
+            from iceberg_migration import migrate_table
+        except ImportError:
+            from backend.iceberg_migration import migrate_table
+        result = migrate_table(self.db, row)
+        if result.get("status") != "migrated":
+            logger.warning(
+                "Could not migrate parquet table %s to Iceberg: %s",
+                row.slug,
+                result.get("reason") or result.get("error") or result.get("status"),
+            )
+            return False
+        self.db.refresh(row)
+        self.db.refresh(schema)
+        return True
+
     def _validate_new_table(
         self, identifier: str | Identifier
     ) -> tuple[CatalogRow, CatalogSchema, str]:
@@ -603,6 +629,11 @@ class LotIcebergCatalog(MetastoreCatalog):
         properties: Properties = EMPTY_DICT,
         description: str | None = None,
     ) -> Table:
+        parts = Catalog.identifier_to_tuple(identifier)
+        if len(parts) == 3:
+            cat_row, sch_row = self._schema_row(parts[:2])
+            if self._migrate_parquet_row(cat_row, sch_row, parts[2].strip()):
+                return self.load_table(identifier)
         catalog, schema_row, name = self._validate_new_table(identifier)
         iceberg_schema: Schema = self._convert_schema_if_needed(  # type: ignore[assignment]
             schema,

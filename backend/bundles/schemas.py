@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class BundleMetadata(BaseModel):
@@ -125,16 +125,35 @@ class TableResource(BaseModel):
     catalog: str | None = Field(None, description="Parent catalog name")
     schema_name: str | None = Field(None, alias="schema", description="Parent schema name")
     description: str | None = Field(None, description="Table description")
-    format: str = Field("parquet", description="Storage format: parquet, iceberg, csv, delta")
+    format: str = Field(
+        "iceberg",
+        description=(
+            "Storage format: iceberg (default), parquet, csv, delta. An omitted format is "
+            "iceberg, unless the table points at existing files via s3_path_pattern (parquet)."
+        ),
+    )
     s3_path_pattern: str | None = Field(None, description="MinIO/S3 glob pattern or path")
     columns: list[ColumnDef] = Field(default_factory=list, description="Column definitions")
     partition_by: list[str] = Field(default_factory=list, description="Partition columns")
     primary_key: list[str] = Field(default_factory=list, description="Primary key columns")
 
+    @model_validator(mode="before")
+    @classmethod
+    def default_format(cls, data: Any) -> Any:
+        """An omitted/blank `format` means Iceberg, except for tables that point at existing
+        files through `s3_path_pattern` (external data stays plain parquet)."""
+        if not isinstance(data, dict) or str(data.get("format") or "").strip():
+            return data
+        data = {k: v for k, v in data.items() if k != "format"}
+        if str(data.get("s3_path_pattern") or "").strip():
+            data["format"] = "parquet"
+            return data
+        return data
+
     @field_validator("format", mode="before")
     @classmethod
     def normalize_format(cls, v: Any) -> str:
-        return str(v or "parquet").strip().lower() or "parquet"
+        return str(v or "iceberg").strip().lower() or "iceberg"
 
     @field_validator("partition_by", "primary_key", mode="before")
     @classmethod
