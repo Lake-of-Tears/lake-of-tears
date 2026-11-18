@@ -992,13 +992,16 @@ def test_destroy_moves_tables_to_trash_and_removes_bundle_created_catalog(
     """Tables go to Trash (#574) and the catalog the bundle created is soft-deleted."""
     ws = test_setup["workspace"]
     deployed = _deploy_sample(client_admin, ws)
-    assert len(deployed["resources_map"]["created_catalogs"]) == 1
+    assert "created_catalogs" not in deployed["resources_map"]
+    row = db_session.query(WorkspaceBundle).filter_by(id=uuid.UUID(deployed["id"])).first()
+    created_catalogs = row.resources_map["created_catalogs"]
+    assert len(created_catalogs) == 1
 
     resp = client_admin.delete(f"/api/bundles/{deployed['id']}?workspace_slug={ws.slug}")
     assert resp.status_code == 200
     data = resp.json()
     assert len(data["purged_resources"]["tables"]) == 2
-    assert data["purged_resources"]["catalogs"] == deployed["resources_map"]["created_catalogs"]
+    assert data["purged_resources"]["catalogs"] == created_catalogs
 
     db_session.expire_all()
     assert db_session.query(CatalogTable).count() == 0
@@ -1024,6 +1027,20 @@ def test_redeploy_after_destroy_reactivates_soft_deleted_catalog(
     db_session.expire_all()
     cat = db_session.query(Catalog).filter_by(owner_workspace_id=ws.id, name="main_lake").first()
     assert cat.deleted_at is None and cat.scheduled_purge_at is None
+
+
+def test_destroying_an_already_destroyed_bundle_is_a_noop(
+    client_admin: TestClient, test_setup: dict, db_session: Session
+):
+    ws = test_setup["workspace"]
+    deployed = _deploy_sample(client_admin, ws)
+    client_admin.delete(f"/api/bundles/{deployed['id']}?workspace_slug={ws.slug}")
+
+    again = client_admin.delete(f"/api/bundles/{deployed['id']}?workspace_slug={ws.slug}")
+    assert again.status_code == 200
+    data = again.json()
+    assert data["purged_resources"] == {}
+    assert "already destroyed" in data["message"]
 
 
 def test_destroy_keep_catalogs_leaves_containers_but_trashes_tables(
@@ -1058,7 +1075,8 @@ def test_destroy_never_removes_preexisting_catalog(
     )
     db_session.commit()
     deployed = _deploy_sample(client_admin, ws)
-    assert deployed["resources_map"]["created_catalogs"] == []
+    row = db_session.query(WorkspaceBundle).filter_by(id=uuid.UUID(deployed["id"])).first()
+    assert row.resources_map["created_catalogs"] == []
 
     resp = client_admin.delete(f"/api/bundles/{deployed['id']}?workspace_slug={ws.slug}")
     assert resp.status_code == 200

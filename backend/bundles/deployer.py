@@ -70,6 +70,7 @@ from .schemas import (
     BundleSpec,
     BundleValidationResponse,
     PipelineResource,
+    public_resources_map,
 )
 from .state_service import BundleStateService
 
@@ -1512,7 +1513,7 @@ class BundleDeployer:
                 bundle_name=bundle_name,
                 target=target,
                 status="active",
-                resources_map=resources_map,
+                resources_map=public_resources_map(resources_map),
                 message=msg,
                 deployed_at=bundle_record.last_deployed_at,
                 error_message=None,
@@ -1759,6 +1760,17 @@ class BundleDeployer:
         bundle = BundleStateService.get_bundle_by_id(db, bundle_id)
         if not bundle or bundle.workspace_id != workspace.id:
             raise HTTPException(404, "Bundle not found in this workspace")
+
+        if bundle.status == "destroyed":
+            return BundleDestroyResponse(
+                id=bundle.id,
+                bundle_name=bundle.bundle_name,
+                target=bundle.target,
+                status="destroyed",
+                purged_resources={},
+                dry_run=dry_run,
+                message=f"Bundle '{bundle.bundle_name}' ({bundle.target}) is already destroyed.",
+            )
 
         res_map = bundle.resources_map or {}
         kinds = ("pipelines", "dashboards", "tables", "artifacts")

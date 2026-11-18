@@ -491,3 +491,8 @@ class BundleDestroyResponse(BaseModel):
     )
     dry_run: bool = False
     message: str
+
+
+def public_resources_map(resources_map: dict[str, Any] | None) -> dict[str, Any]:
+    """Drop internal bookkeeping keys (``created_*``) from a resources map before returning it."""
+    return {k: v for k, v in (resources_map or {}).items() if not k.startswith("created_")}

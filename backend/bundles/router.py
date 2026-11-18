@@ -38,6 +38,7 @@ from .schemas import (
     BundleRunResponse,
     BundleValidateRequest,
     BundleValidationResponse,
+    public_resources_map,
 )
 from .state_service import BundleStateService
 
@@ -193,7 +194,7 @@ def list_bundles(
                 manifest_format="toon",
                 commit_hash=b.git_commit_sha,
                 resources_count=total_res,
-                resources_map=res_map,
+                resources_map=public_resources_map(res_map),
                 catalogs_count=cat_count,
                 tables_count=tbl_count,
                 pipelines_count=pip_count,
@@ -260,7 +261,7 @@ def get_bundle(
         if bundle.manifest_snapshot
         else "",
         commit_hash=bundle.git_commit_sha,
-        resources_map=res_map,
+        resources_map=public_resources_map(res_map),
         resources_count=total_res,
         catalogs_count=cat_count,
         tables_count=tbl_count,
