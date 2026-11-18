@@ -11,6 +11,7 @@ import pytest
 import table_scan
 from iceberg_testkit import _REPO_ROOT, client, iceberg_env  # noqa: F401
 from models import CatalogTable
+from pyiceberg.exceptions import NoSuchTableError
 
 
 def _write_parquet(path: Path, table: pa.Table) -> None:
@@ -466,4 +467,41 @@ def test_rollback_catalog_all(env):
     db.refresh(tbl)
     assert tbl.format == "parquet"
     assert tbl.iceberg is None
+    db.close()
+
+
+def test_create_table_migrates_table_registered_as_parquet(env):
+    """A parquet-registered table (declared by a bundle) must not hit load 404 then create 409 (#570)."""
+    db = env["Session"]()
+    ws = db.merge(env["ws"])
+    cat = db.merge(env["cat"])
+    schema_row = cat.schemas[0]
+    table_dir = env["root"] / "workspaces" / ws.slug / cat.slug / schema_row.slug / "declared_pq"
+    _write_parquet(
+        table_dir / "run_1.parquet",
+        pa.table({"id": pa.array([1, 2], pa.int64()), "name": ["a", "b"]}),
+    )
+    db.add(
+        CatalogTable(
+            schema_id=schema_row.id,
+            name="declared_pq",
+            slug="declared_pq",
+            format="parquet",
+            s3_path_pattern=f"file://{table_dir}/*.parquet",
+        )
+    )
+    db.commit()
+
+    rest = env["rest"](env["writer"])
+    ident = ("main_lake", "bronze", "declared_pq")
+    with pytest.raises(NoSuchTableError):
+        rest.load_table(ident)
+
+    arrow = pa.table({"id": pa.array([3], pa.int64()), "name": ["c"]})
+    ice = rest.create_table(ident, schema=arrow.schema)
+    ice.append(arrow)
+
+    assert sorted(rest.load_table(ident).scan().to_arrow()["id"].to_pylist()) == [1, 2, 3]
+    db.expire_all()
+    assert db.query(CatalogTable).filter_by(slug="declared_pq").one().format == "iceberg"
     db.close()

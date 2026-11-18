@@ -483,3 +483,14 @@ def test_malformed_json_raises():
     """Test that invalid JSON raises BundleParseError."""
     with pytest.raises(BundleParseError, match="Failed to parse JSON"):
         parse_bundle_str("{ invalid: json }", format="json")
+
+
+def test_table_format_defaults_to_iceberg():
+    """An omitted format is Iceberg; external data and explicit parquet stay as declared (#570)."""
+    from backend.bundles.schemas import TableResource
+
+    assert TableResource(name="t").format == "iceberg"
+    assert TableResource(name="t", format="").format == "iceberg"
+    assert TableResource(name="t", format="Parquet").format == "parquet"
+    assert TableResource(name="t", s3_path_pattern="s3://b/x/*.parquet").format == "parquet"
+    assert TableResource(name="t", format="iceberg", s3_path_pattern="s3://b/x").format == "iceberg"

@@ -404,10 +404,11 @@ _BUNDLE_TASK_RUNNER_CODE = '''def _run_bundle_task(**kwargs):
                     )
                     try:
                         ice_tbl = ice_catalog.load_table(ice_ident)
-                        with ice_tbl.update_schema() as schema_update:
-                            schema_update.union_by_name(arrow_tbl.schema)
                     except NoSuchTableError:
+                        # Also migrates a table that was registered as plain parquet.
                         ice_tbl = ice_catalog.create_table(ice_ident, schema=arrow_tbl.schema)
+                    with ice_tbl.update_schema() as schema_update:
+                        schema_update.union_by_name(arrow_tbl.schema)
                     ice_tbl.append(arrow_tbl, snapshot_properties={"lot.source": f"bundle:{bundle_name}/{task_name}"})
                     logger.info("Appended %d rows to Iceberg table %s", arrow_tbl.num_rows, ".".join(ice_ident))
                     if conn:
@@ -700,6 +701,14 @@ class BundleDeployer:
                 validate_pipeline_dependencies(pipe)
             except Exception as exc:
                 errors.append(f"Pipeline '{pipe.name}' DAG validation error: {exc}")
+
+        for tbl_res in bundle_spec.resources.tables:
+            if tbl_res.format == "parquet" and not tbl_res.s3_path_pattern:
+                warnings.append(
+                    f"Table '{tbl_res.name}' declares format 'parquet'. Iceberg is the "
+                    "default; drop `format` (or use `iceberg`) so tasks can write to it "
+                    "through the catalog."
+                )
 
         # 3. DuckDB SQL syntax validation for inline SQL tasks and dashboard widgets
         try:
