@@ -181,7 +181,7 @@ def list_bundles(
         tbl_count = len(res_map.get("tables", []))
         pip_count = len(res_map.get("pipelines", []))
         dash_count = len(res_map.get("dashboards", []))
-        total_res = sum(len(v) for v in res_map.values())
+        total_res = sum(len(v) for k, v in res_map.items() if not k.startswith("created_"))
         items.append(
             BundleItemResponse(
                 id=b.id,
@@ -242,7 +242,7 @@ def get_bundle(
             logger.warning("Drift detection error for bundle %s: %s", bundle.id, exc)
 
     res_map = bundle.resources_map or {}
-    total_res = sum(len(v) for v in res_map.values())
+    total_res = sum(len(v) for k, v in res_map.items() if not k.startswith("created_"))
     cat_count = len(res_map.get("catalogs", []))
     tbl_count = len(res_map.get("tables", []))
     pip_count = len(res_map.get("pipelines", []))
@@ -318,6 +318,9 @@ def destroy_bundle(
         False, description="List what would be deleted without changing anything"
     ),
     record_only: bool = Query(False, description="Remove only the record and keep all resources"),
+    keep_catalogs: bool = Query(
+        False, description="Keep catalogs and schemas the bundle created, even when empty"
+    ),
     workspace_slug: str | None = Query(None),
     workspace_id: str | None = Query(None),
     x_workspace_slug: str | None = Header(None, alias="X-Workspace-Slug"),
@@ -343,4 +346,6 @@ def destroy_bundle(
         purge_storage=purge_storage,
         dry_run=dry_run,
         record_only=record_only,
+        keep_catalogs=keep_catalogs,
+        user_id=current_user.id,
     )
