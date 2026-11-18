@@ -167,7 +167,31 @@ The deployment engine (`backend/bundles/deployer.py`) automates end-to-end lakeh
 4. **Table & Vector Index Provisioning:** Registers managed/external DuckDB Parquet tables with column definitions and applies vector embedding search configurations.
 5. **Airflow Multi-Task DAG Compilation:** Generates isolated, syntactically verified Python Airflow DAG code with multi-task dependencies (`task_extract >> task_clean >> task_mart`) and writes DAG files into Airflow workspace directories.
 6. **Dashboard Provisioning:** Creates or updates native workspace dashboards with configured metrics, line charts, and SQL queries.
-7. **Clean Teardown:** Safely unlinks and purges bundle resources on destroy operations while safeguarding core medallion schemas.
+7. **Clean Teardown:** Destroys bundle resources recoverably (see [Section 6.1](#61-destroy-semantics-trash-and-bundle-created-containers)) while safeguarding core medallion schemas.
+
+### 6.1. Destroy Semantics: Trash and Bundle-Created Containers
+
+`angler bundle destroy` (or `DELETE /api/bundles/{bundle_id}`) works as follows:
+
+| Resource | What destroy does |
+| :--- | :--- |
+| **Tables** | Moved to Trash through the catalog trash service (same as deleting a table in the Catalog page). Managed tables' files move to `workspaces/{ws}/.trash/{asset_id}/`; external tables drop metadata only; Iceberg tables keep their storage in place. All tables from one destroy share a `batch_id`. They can be restored with **Restore** in the Trash drawer, `angler catalog undrop <asset_id>`, or `UNDROP TABLE` until the retention period (default 7 days) ends. |
+| **Tables still in use** | A table that another pipeline still references is **kept** and reported under `skipped_dependencies`. The bundle's own pipelines never block it. |
+| **Pipelines, dashboards** | Deleted outright (not recoverable through Trash). |
+| **Schemas / catalogs the bundle created** | Soft-deleted once empty (see below). Recoverable. |
+| **Schemas / catalogs that already existed** | **Never removed.** A catalog or schema counts as created by the bundle only if the deploy that provisioned it created it; the deployer records this (`created_catalogs`, `created_schemas`) and keeps it across redeploys. Bundles deployed before this tracking existed are treated as having created nothing. |
+| **Resources shared with another active bundle record** | Kept and reported under `skipped_shared`. |
+
+A bundle-created **schema** is removed only when it is not claimed by another active record, is not a medallion schema (`bronze`/`silver`/`gold`), and has no live tables or older Trash entries. A bundle-created **catalog** is removed only when it is not the default catalog, is not claimed by another active record, nothing live or in Trash from before this destroy remains in it, and every non-medallion schema in it is also being removed. Medallion schemas go with a bundle-created catalog but are never dropped on their own. A catalog removal is the same soft delete as the UI Delete button (`deleted_at`, scheduled purge after the retention period); it is skipped when soft delete is disabled.
+
+**Restoring.** Restore tables from Trash. A soft-deleted catalog does not currently appear in the Trash drawer or `angler catalog trash list`; restore it with **Reactivate** in Settings > Workspace, or redeploy the bundle: deploy reactivates a soft-deleted catalog it finds by name.
+
+**Options.**
+- `--dry-run` (`dry_run=true`): lists the tables, schemas and catalogs that would be removed and changes nothing.
+- `--keep-catalogs` (`keep_catalogs=true`): keeps catalogs *and* schemas the bundle created, even if empty. Tables still go to Trash.
+- `--record-only`: removes only the bundle record and keeps every resource.
+- `--purge-storage`: also deletes uploaded bundle artifacts.
+- Interactive destroy prints the plan first and asks you to type `yes`; `-y` skips the prompt. Destroying an already-destroyed record is a no-op.
 
 ---
 
@@ -182,7 +206,7 @@ Mounted under `/api/bundles` and `/api/v1/bundles`:
 | `GET` | `/api/bundles` | Lists all deployed bundles in the active workspace | Viewer / Member |
 | `GET` | `/api/bundles/{bundle_id}` | Retrieves deployment detail, resource map, snapshot, and drift | Viewer / Member |
 | `POST` | `/api/bundles/{bundle_id}/run` | Triggers ad-hoc execution of a bundle pipeline | Write / Admin |
-| `DELETE` | `/api/bundles/{bundle_id}` | Safely destroys and unlinks provisioned bundle resources | Write / Admin |
+| `DELETE` | `/api/bundles/{bundle_id}` | Destroys a bundle: tables to Trash, bundle-created empty catalogs/schemas soft-deleted. Query: `dry_run`, `keep_catalogs`, `record_only`, `purge_storage` ([Section 6.1](#61-destroy-semantics-trash-and-bundle-created-containers)) | Write / Admin |
 
 ---
 
@@ -215,4 +239,5 @@ Mounted at `/bundles` within the primary navigation sidebar (under *Data Enginee
 - Typed confirmation (`DESTROY`) required before resource destruction.
 - Optional storage purge toggle for raw Parquet and vector embeddings.
 - Automatic preservation of core medallion schemas (`bronze`, `silver`, `gold`).
+- Tables go to Trash and can be restored; see [Section 6.1](#61-destroy-semantics-trash-and-bundle-created-containers).
 

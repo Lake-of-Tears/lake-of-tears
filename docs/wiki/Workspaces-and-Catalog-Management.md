@@ -373,6 +373,9 @@ flowchart TD
   - Run `UNDROP TABLE <catalog>.<schema>.<table_name>` or `UNDROP SCHEMA <catalog>.<schema>` directly in the Lake SQL Editor (`/sql`).
   - Lake of Tears intercepts and executes the restore pipeline before the DuckDB engine, returning formatted execution success manifests.
 
+#### 4. Deletions Made by `bundle destroy`
+Destroying a Lake Asset Bundle deletes its tables through this same Trash (shared `batch_id`, same restore options), and soft-deletes catalogs and schemas the bundle itself created once they are empty. Catalogs and schemas that existed before the bundle are never removed. A soft-deleted catalog is restored with **Reactivate** in Settings > Workspace (it does not show in the Trash drawer). Details: [Lake Asset Bundles, Section 6.1](Lake-Asset-Bundles.md#61-destroy-semantics-trash-and-bundle-created-containers).
+
 ### Inline Description Editing & Drag-and-Drop Reordering
 
 Lake of Tears enables users to personalize their Catalog Explorer (`/catalog`) directly in-place:
