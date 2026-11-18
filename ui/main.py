@@ -1870,9 +1870,8 @@ async def catalog_refresh_schema(request: Request, table_id: str):
 async def storage(request: Request):
     user = getattr(request.state, "user", None) or {}
     ws = getattr(request.state, "workspace", None) or {}
-    slug = ws.get("slug")
-    catalogs = _resolve_ui_catalogs(request)
-    stats = _get_bucket_stats(workspace_slug=slug, catalogs=catalogs)
+    # Stats are loaded asynchronously by the page via /api/v1/storage/stats (cached
+    # server-side) so the render never waits on a full bucket scan.
     is_superadmin = user.get("role") in ("superadmin", "admin")
     user_role = (
         user.get("role") if is_superadmin else (ws.get("my_role") or ws.get("role") or "read")
@@ -1888,7 +1887,6 @@ async def storage(request: Request):
         name="storage.html",
         context={
             "request": request,
-            "stats": stats,
             "page": "storage",
             "minio_bucket": MINIO_BUCKET,
             "is_superadmin": is_superadmin,
@@ -6900,16 +6898,19 @@ async def ui_cancel_pipeline_run(request: Request, dag_id: str, run_id: str):
 
 @app.get("/api/storage/stats")
 @app.get("/api/v1/storage/stats")
-async def ui_get_storage_stats(request: Request):
+async def ui_get_storage_stats(request: Request, refresh: bool = False):
     token = _get_request_token(request)
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     ws = getattr(request.state, "workspace", None)
-    params = {}
+    params: dict[str, Any] = {}
     if ws and ws.get("slug"):
         params["workspace_slug"] = ws["slug"]
+    if refresh:
+        params["refresh"] = "true"
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        # A cold or forced refresh scans the whole bucket, so allow more than the default.
+        async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.get(
                 f"{BACKEND_URL}/api/v1/storage/stats",
                 headers=headers,

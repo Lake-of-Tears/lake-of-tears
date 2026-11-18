@@ -6,6 +6,8 @@ import logging
 import math
 import os
 import re
+import threading
+import time
 from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -860,3 +862,106 @@ def get_bucket_summary(
     except Exception as exc:
         logger.warning("Error fetching bucket stats: %s", exc)
         return {"ok": False, "bucket": bucket, "error": str(exc)}
+
+
+# ── Bucket summary cache (stale-while-revalidate) ─────────────────────────────
+# A full bucket scan is O(objects), so serve repeat requests from an in-process
+# cache. Entries are fresh for STORAGE_STATS_TTL_SECONDS, served stale (with a
+# single background refresh) until STORAGE_STATS_MAX_AGE_SECONDS, and recomputed
+# synchronously after that. Each replica keeps its own cache.
+
+STORAGE_STATS_TTL_SECONDS = int(os.getenv("STORAGE_STATS_TTL_SECONDS", "300"))
+STORAGE_STATS_MAX_AGE_SECONDS = int(os.getenv("STORAGE_STATS_MAX_AGE_SECONDS", "3600"))
+
+_summary_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_summary_refreshing: set[str] = set()
+_summary_lock = threading.Lock()
+
+
+def _summary_cache_key(workspace_slug: str | None, workspace_id: Any | None) -> str:
+    return f"{workspace_id or ''}:{(workspace_slug or '').strip('/')}"
+
+
+def invalidate_bucket_summary(
+    workspace_slug: str | None = None, workspace_id: Any | None = None
+) -> None:
+    """Drop cached stats for a workspace (call after writes). No args clears everything."""
+    with _summary_lock:
+        if workspace_slug is None and workspace_id is None:
+            _summary_cache.clear()
+            return
+        slug = (workspace_slug or "").strip("/")
+        for key in [
+            k
+            for k in _summary_cache
+            if (workspace_id is not None and k.split(":", 1)[0] == str(workspace_id))
+            or (slug and k.split(":", 1)[1] == slug)
+        ]:
+            _summary_cache.pop(key, None)
+
+
+def _stamp(result: dict[str, Any], computed_at: float, cached: bool) -> dict[str, Any]:
+    out = dict(result)
+    out["cached"] = cached
+    out["as_of"] = datetime.fromtimestamp(computed_at, UTC).isoformat()
+    return out
+
+
+def _compute_and_store(key: str, **kwargs: Any) -> tuple[float, dict[str, Any]]:
+    result = get_bucket_summary(**kwargs)
+    now = time.time()
+    if result.get("ok"):
+        with _summary_lock:
+            _summary_cache[key] = (now, result)
+    return now, result
+
+
+def _background_refresh(key: str, workspace_slug: str | None, workspace_id: Any | None) -> None:
+    db = None
+    try:
+        from database import SessionLocal
+
+        db = SessionLocal()
+        _compute_and_store(key, workspace_slug=workspace_slug, db=db, workspace_id=workspace_id)
+    except Exception as exc:
+        logger.warning("Background storage stats refresh failed for %s: %s", key, exc)
+    finally:
+        if db is not None:
+            db.close()
+        with _summary_lock:
+            _summary_refreshing.discard(key)
+
+
+def get_bucket_summary_cached(
+    workspace_slug: str | None = None,
+    db: Any | None = None,
+    workspace_id: Any | None = None,
+    refresh: bool = False,
+) -> dict[str, Any]:
+    """Cached, stale-while-revalidate wrapper around get_bucket_summary()."""
+    key = _summary_cache_key(workspace_slug, workspace_id)
+    now = time.time()
+    with _summary_lock:
+        entry = _summary_cache.get(key)
+
+    if entry and not refresh:
+        age = now - entry[0]
+        if age < STORAGE_STATS_TTL_SECONDS:
+            return _stamp(entry[1], entry[0], cached=True)
+        if age < STORAGE_STATS_MAX_AGE_SECONDS:
+            with _summary_lock:
+                start = key not in _summary_refreshing
+                if start:
+                    _summary_refreshing.add(key)
+            if start:
+                threading.Thread(
+                    target=_background_refresh,
+                    args=(key, workspace_slug, workspace_id),
+                    daemon=True,
+                ).start()
+            return _stamp(entry[1], entry[0], cached=True)
+
+    computed_at, result = _compute_and_store(
+        key, workspace_slug=workspace_slug, db=db, workspace_id=workspace_id
+    )
+    return _stamp(result, computed_at, cached=False)
