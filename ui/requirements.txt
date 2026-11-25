@@ -1,16 +1,16 @@
-fastapi==0.162.2
+fastapi==0.165.0
 uvicorn[standard]==0.54.0
 jinja2==3.1.6
-python-multipart==0.0.33
-boto3==1.43.127
-duckdb==2.0.0
+python-multipart==0.0.34
+boto3==1.44.9
+duckdb==2.0.1
 python-dotenv==1.2.4
 httpx==0.28.1
 PyJWT==2.15.1
 aiofiles==25.1.0
 websockets==17.4
-numpy>=2.5.4
+numpy>=2.5.5
 pyarrow>=26.0.1
-sqlglot>=30.30.0
+sqlglot>=30.33.0
 pytz>=2026.6
 
